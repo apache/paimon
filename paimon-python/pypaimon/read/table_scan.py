@@ -216,14 +216,15 @@ class TableScan:
         for entry in file_entries:
             partitioned_split[(tuple(entry.partition.values), entry.bucket)].append(entry)
         splits = []
+
+        def weight_func(f: DataFileMeta) -> int:
+            return max(f.file_size, self.open_file_cost)
+
         for key, file_entries in partitioned_split.items():
             if not file_entries:
                 return []
 
             data_files: List[DataFileMeta] = [e.file for e in file_entries]
-
-            def weight_func(f: DataFileMeta) -> int:
-                return max(f.file_size, self.open_file_cost)
 
             packed_files: List[List[DataFileMeta]] = self._pack_for_ordered(data_files, weight_func,
                                                                             self.target_split_size)
@@ -238,6 +239,10 @@ class TableScan:
             partitioned_split[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
         splits = []
+
+        def weight_func(fl: List[DataFileMeta]) -> int:
+            return max(sum(f.file_size for f in fl), self.open_file_cost)
+
         for key, file_entries in partitioned_split.items():
             if not file_entries:
                 return []
@@ -248,9 +253,6 @@ class TableScan:
                 [file for s in sl for file in s.files]
                 for sl in partition_sort_runs
             ]
-
-            def weight_func(fl: List[DataFileMeta]) -> int:
-                return max(sum(f.file_size for f in fl), self.open_file_cost)
 
             packed_files: List[List[List[DataFileMeta]]] = self._pack_for_ordered(sections, weight_func,
                                                                                   self.target_split_size)
