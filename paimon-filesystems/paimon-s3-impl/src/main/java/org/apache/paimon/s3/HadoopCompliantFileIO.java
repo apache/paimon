@@ -18,6 +18,8 @@
 
 package org.apache.paimon.s3;
 
+import org.apache.hadoop.fs.s3a.S3AFileSystem;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -55,6 +57,18 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         return new HadoopPositionOutputStream(
                 getFileSystem(hadoopPath).create(hadoopPath, overwrite));
+    }
+
+    @Override
+    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        S3AFileSystem fs = (S3AFileSystem) getFileSystem(hadoopPath);
+        if (!overwrite && this.exists(path)) {
+            throw new IOException("File " + path + " already exists.");
+        }
+        return new S3TwoPhaseOutputStream(
+                new S3MultiPartUpload(fs, fs.getConf()), hadoopPath);
     }
 
     @Override
