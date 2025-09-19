@@ -47,7 +47,6 @@ import java.util.List;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-// 添加测试用例
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
@@ -103,7 +102,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
             view.writeBoolean(false);
         }
 
-        // files increment
+        // data increment
         dataFileSerializer.serializeList(message.newFilesIncrement().newFiles(), view);
         dataFileSerializer.serializeList(message.newFilesIncrement().deletedFiles(), view);
         dataFileSerializer.serializeList(message.newFilesIncrement().changelogFiles(), view);
