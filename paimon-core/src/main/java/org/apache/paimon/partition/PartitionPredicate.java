@@ -26,6 +26,7 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.statistics.FullSimpleColStatsCollector;
@@ -138,6 +139,11 @@ public interface PartitionPredicate extends Serializable {
         };
     }
 
+    default Map<String, String> extractLeadingEqualityPartitionSpecWhenOnlyAnd(
+            List<String> partitionKeys) {
+        return null;
+    }
+
     /** A {@link PartitionPredicate} using {@link Predicate}. */
     class DefaultPartitionPredicate implements PartitionPredicate {
 
@@ -161,6 +167,29 @@ public interface PartitionPredicate extends Serializable {
                 InternalRow maxValues,
                 InternalArray nullCounts) {
             return predicate.test(rowCount, minValues, maxValues, nullCounts);
+        }
+
+        @Override
+        @Nullable
+        public Map<String, String> extractLeadingEqualityPartitionSpecWhenOnlyAnd(
+                List<String> partitionKeys) {
+            OnlyPartitionKeyEqualVisitor visitor = new OnlyPartitionKeyEqualVisitor(partitionKeys);
+            boolean onlyEqual = predicate.visit(visitor);
+            if (visitor.hasOrCondition()) {
+                return null;
+            }
+            if (onlyEqual) {
+                return visitor.partitions();
+            }
+            Map<String, String> equalPartitions = new HashMap<>(partitionKeys.size());
+            for (String partitionKey : partitionKeys) {
+                if (visitor.partitions().containsKey(partitionKey)) {
+                    equalPartitions.put(partitionKey, visitor.partitions().get(partitionKey));
+                } else {
+                    break;
+                }
+            }
+            return equalPartitions;
         }
     }
 

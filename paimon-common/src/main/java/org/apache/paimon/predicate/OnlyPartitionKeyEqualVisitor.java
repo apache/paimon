@@ -33,6 +33,8 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
 
     private final Map<String, String> partitions;
 
+    private boolean hasOrCondition = false;
+
     public OnlyPartitionKeyEqualVisitor(List<String> partitionKeys) {
         this.partitionKeys = partitionKeys;
         partitions = new HashMap<>();
@@ -40,6 +42,10 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
 
     public Map<String, String> partitions() {
         return partitions;
+    }
+
+    public boolean hasOrCondition() {
+        return hasOrCondition;
     }
 
     @Override
@@ -119,6 +125,7 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
 
     @Override
     public Boolean visitOr(List<Boolean> children) {
+        hasOrCondition = true;
         return false;
     }
 }

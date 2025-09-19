@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** {@link TableScan} for {@link FormatTable}. */
 public class FormatTableScan implements InnerTableScan {
@@ -133,11 +134,17 @@ public class FormatTableScan implements InnerTableScan {
             try {
                 FileIO fileIO = table.fileIO();
                 if (!table.partitionKeys().isEmpty()) {
+                    Pair<Path, PartitionPredicate> scanPath2PartitionFilter =
+                            getScanPathAndPartitionFilter(
+                                    new Path(table.location()),
+                                    table.partitionKeys(),
+                                    partitionFilter,
+                                    table.partitionType());
+                    Path scanPath = scanPath2PartitionFilter.getLeft();
+                    PartitionPredicate partitionFilter = scanPath2PartitionFilter.getRight();
                     List<Pair<LinkedHashMap<String, String>, Path>> partition2Paths =
                             PartitionPathUtils.searchPartSpecAndPaths(
-                                    fileIO,
-                                    new Path(table.location()),
-                                    table.partitionKeys().size());
+                                    fileIO, scanPath, table.partitionKeys().size());
                     for (Pair<LinkedHashMap<String, String>, Path> partition2Path :
                             partition2Paths) {
                         LinkedHashMap<String, String> partitionSpec = partition2Path.getKey();
@@ -163,6 +170,36 @@ public class FormatTableScan implements InnerTableScan {
             }
             return splits;
         }
+    }
+
+    protected static Pair<Path, PartitionPredicate> getScanPathAndPartitionFilter(
+            Path tableLocation,
+            List<String> partitionKeys,
+            PartitionPredicate partitionFilter,
+            RowType partitionType) {
+        Path scanPath = tableLocation;
+        PartitionPredicate pf = partitionFilter;
+        if (!partitionKeys.isEmpty()) {
+            // Try to optimize for equality partition filters
+            if (partitionFilter != null) {
+                Map<String, String> equalityPartitionSpec =
+                        partitionFilter.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
+                                partitionKeys);
+                if (equalityPartitionSpec != null && !equalityPartitionSpec.isEmpty()) {
+                    // Use optimized scan for specific partition path
+                    String partitionPath =
+                            PartitionPathUtils.generatePartitionPath(
+                                    equalityPartitionSpec, partitionType);
+                    scanPath = new Path(tableLocation, partitionPath);
+
+                    // If equality spec covers all partition keys, no need for further filtering
+                    if (equalityPartitionSpec.size() == partitionKeys.size()) {
+                        pf = null;
+                    }
+                }
+            }
+        }
+        return Pair.of(scanPath, pf);
     }
 
     private List<Split> getSplits(FileIO fileIO, Path path, BinaryRow partition)
