@@ -217,8 +217,7 @@ class ReaderBasicTest(unittest.TestCase):
         # to test GenericRow ability
         latest_snapshot = table_scan.snapshot_manager.get_latest_snapshot()
         manifest_files = table_scan.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.manifest_file_manager.read(manifest_files[0].file_name,
-                                                                 lambda row: table_scan._bucket_filter(row))
+        manifest_entries = table_scan.manifest_file_manager.read(manifest_files[0].file_name)
         min_value_stats = manifest_entries[0].file.value_stats.min_values.values
         max_value_stats = manifest_entries[0].file.value_stats.max_values.values
         expected_min_values = [col[0].as_py() for col in expect_data]

@@ -26,13 +26,9 @@ from pypaimon.read.split import Split
 @dataclass
 class Plan:
     """Implementation of Plan for native Python reading."""
-    _files: List[ManifestEntry]
     _splits: List[Split]
-    _plan_start_row: int
-    _plan_end_row: int
-
-    def files(self) -> List[ManifestEntry]:
-        return self._files
+    _plan_start_row: int = -1
+    _plan_end_row: int = -1
 
     def splits(self) -> List[Split]:
         return self._splits
@@ -42,3 +38,21 @@ class Plan:
 
     def plan_end_row(self) -> int:
         return self._plan_end_row
+
+    def extract_entries(self) -> List[ManifestEntry]:
+        """Extract ManifestEntry list from _splits variable."""
+        manifest_entries = []
+
+        for split in self._splits:
+            # For each file in the split, create a ManifestEntry
+            for data_file in split.files:
+                manifest_entry = ManifestEntry(
+                    kind=0,  # 0 indicates ADD operation
+                    partition=split.partition,
+                    bucket=split.bucket,
+                    total_buckets=-1,  # Default value, may need to be set based on table configuration
+                    file=data_file
+                )
+                manifest_entries.append(manifest_entry)
+
+        return manifest_entries
