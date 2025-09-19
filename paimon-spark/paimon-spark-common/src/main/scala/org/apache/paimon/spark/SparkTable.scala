@@ -108,6 +108,7 @@ case class SparkTable(table: Table)
     )
 
     if (useV2Write) {
+      capabilities.add(TableCapability.ACCEPT_ANY_SCHEMA)
       capabilities.add(TableCapability.BATCH_WRITE)
       capabilities.add(TableCapability.OVERWRITE_DYNAMIC)
     } else {
@@ -152,7 +153,7 @@ case class SparkTable(table: Table)
       case fileStoreTable: FileStoreTable =>
         val options = Options.fromMap(info.options)
         if (useV2Write) {
-          new PaimonV2WriteBuilder(fileStoreTable, info.schema())
+          new PaimonV2WriteBuilder(fileStoreTable, info.schema(), options)
         } else {
           new PaimonWriteBuilder(fileStoreTable, options)
         }
