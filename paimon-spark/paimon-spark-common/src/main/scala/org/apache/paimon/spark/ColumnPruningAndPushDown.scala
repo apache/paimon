@@ -21,7 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder, TopN}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.{InnerTable, SpecialFields}
+import org.apache.paimon.table.{InnerTable, SpecialFields, Table}
 import org.apache.paimon.table.source.ReadBuilder
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.Preconditions.checkState
@@ -31,7 +31,7 @@ import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.types.StructType
 
 trait ColumnPruningAndPushDown extends Scan with Logging {
-  def table: InnerTable
+  def table: Table
   def requiredSchema: StructType
   def filters: Seq[Predicate]
   def pushDownLimit: Option[Int] = None

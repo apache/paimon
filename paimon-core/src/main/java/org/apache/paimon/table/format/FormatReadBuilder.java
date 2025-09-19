@@ -44,11 +44,13 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
+import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAndByPartition;
 
 /** {@link ReadBuilder} for {@link FormatTable}. */
@@ -157,11 +159,14 @@ public class FormatReadBuilder implements ReadBuilder {
         Path filePath = dataSplit.dataPath();
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
+        // Skip pushing down partition filters to reader.
+        List<Predicate> readFilters =
+                excludePredicateWithFields(
+                        PredicateBuilder.splitAnd(filter), new HashSet<>(table.partitionKeys()));
         FormatReaderFactory readerFactory =
                 FileFormatDiscover.of(options)
                         .discover(options.formatType())
-                        .createReaderFactory(
-                                table.rowType(), readType(), PredicateBuilder.splitAnd(filter));
+                        .createReaderFactory(table.rowType(), readType(), readFilters);
 
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(

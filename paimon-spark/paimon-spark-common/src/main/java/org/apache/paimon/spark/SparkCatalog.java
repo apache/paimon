@@ -67,6 +67,7 @@ import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.execution.PaimonFormatTable;
 import org.apache.spark.sql.execution.PartitionedCSVTable;
 import org.apache.spark.sql.execution.PartitionedJsonTable;
 import org.apache.spark.sql.execution.PartitionedOrcTable;
@@ -660,6 +661,32 @@ public class SparkCatalog extends SparkBaseCatalog
         List<String> pathList = new ArrayList<>();
         pathList.add(formatTable.location());
         Options options = Options.fromMap(formatTable.options());
+        CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(options.toMap());
+        FileTable sparkFileTable =
+                getSparkFileTable(
+                        formatTable, ident, pathList, options, spark, schema, partitionSchema);
+        if (Options.fromMap(formatTable.options())
+                .get(SparkConnectorOptions.READ_FORMAT_TABLE_USE_PAIMON)) {
+            return new PaimonFormatTable(
+                    spark,
+                    dsOptions,
+                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
+                    scala.Option.apply(schema),
+                    partitionSchema,
+                    formatTable,
+                    sparkFileTable);
+        }
+        return sparkFileTable;
+    }
+
+    private static FileTable getSparkFileTable(
+            FormatTable formatTable,
+            Identifier ident,
+            List<String> pathList,
+            Options options,
+            SparkSession spark,
+            StructType schema,
+            StructType partitionSchema) {
         CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(options.toMap());
         if (formatTable.format() == FormatTable.Format.CSV) {
             options.set("sep", options.get(CsvOptions.FIELD_DELIMITER));

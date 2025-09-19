@@ -91,4 +91,10 @@ public class SparkConnectorOptions {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to read row in the form of changelog (add rowkind column in row to represent its change type).");
+
+    public static final ConfigOption<Boolean> READ_FORMAT_TABLE_USE_PAIMON =
+            key("read.format-table.usePaimon")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to read format table use paimon).");
 }

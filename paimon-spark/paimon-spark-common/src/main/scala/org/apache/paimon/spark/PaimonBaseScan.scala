@@ -24,7 +24,7 @@ import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.statistics.StatisticsHelper
-import org.apache.paimon.table.{DataTable, InnerTable}
+import org.apache.paimon.table.{DataTable, InnerTable, Table}
 import org.apache.paimon.table.source.{InnerTableScan, Split}
 
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
@@ -38,7 +38,7 @@ import java.util.Optional
 import scala.collection.JavaConverters._
 
 abstract class PaimonBaseScan(
-    table: InnerTable,
+    table: Table,
     requiredSchema: StructType,
     filters: Seq[Predicate],
     reservedFilters: Seq[Filter],

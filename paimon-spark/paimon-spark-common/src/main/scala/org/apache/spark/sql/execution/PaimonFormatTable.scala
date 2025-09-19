@@ -18,12 +18,18 @@
 
 package org.apache.spark.sql.execution
 
-import org.apache.hadoop.fs.Path
+import org.apache.paimon.spark.PaimonFormatTableScanBuilder
+import org.apache.paimon.table.{FormatTable, Table}
+
+import org.apache.hadoop.fs.{FileStatus, Path}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
-import org.apache.spark.sql.connector.catalog.SupportsPartitionManagement
+import org.apache.spark.sql.connector.catalog.{SupportsPartitionManagement, TableCapability}
+import org.apache.spark.sql.connector.read.ScanBuilder
+import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
 import org.apache.spark.sql.execution.datasources._
+import org.apache.spark.sql.execution.datasources.v2.FileTable
 import org.apache.spark.sql.execution.datasources.v2.csv.{CSVScanBuilder, CSVTable}
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
@@ -150,6 +156,49 @@ trait PartitionedFormatTable extends SupportsPartitionManagement {
 
   override def loadPartitionMetadata(ident: InternalRow): util.Map[String, String] = {
     Map.empty[String, String].asJava
+  }
+}
+
+case class PaimonFormatTable(
+    sparkSession: SparkSession,
+    options: CaseInsensitiveStringMap,
+    paths: Seq[String],
+    userSpecifiedSchema: Option[StructType],
+    override val partitionSchema_ : StructType,
+    table: FormatTable,
+    sparkFileTable: FileTable)
+  extends FileTable(sparkSession, options, paths, userSpecifiedSchema)
+  with PartitionedFormatTable {
+  override lazy val fileIndex: PartitioningAwareFileIndex = {
+    sparkFileTable.fileIndex
+  }
+
+  override def name(): String = {
+    sparkFileTable.name()
+  }
+
+  override def capabilities(): util.Set[TableCapability] = {
+    sparkFileTable.capabilities()
+  }
+
+  override def inferSchema(files: Seq[FileStatus]): Option[StructType] = {
+    sparkFileTable.inferSchema(files)
+  }
+
+  override def formatName: String = {
+    sparkFileTable.formatName
+  }
+
+  override def fallbackFileFormat: Class[_ <: FileFormat] = {
+    sparkFileTable.fallbackFileFormat
+  }
+
+  override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
+    new PaimonFormatTableScanBuilder(table.copy(caseInsensitiveStringMap))
+  }
+
+  override def newWriteBuilder(logicalWriteInfo: LogicalWriteInfo): WriteBuilder = {
+    sparkFileTable.newWriteBuilder(logicalWriteInfo)
   }
 }
 
