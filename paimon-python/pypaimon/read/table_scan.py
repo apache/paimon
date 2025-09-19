@@ -82,7 +82,7 @@ class TableScan:
         # TODO: filter manifest files by predicate
         for manifest_file in manifest_files:
             manifest_entries = self.manifest_file_manager.read(manifest_file.file_name,
-                                                               lambda entry: self._bucket_filter(entry))
+                                                               lambda row: self._bucket_filter(row))
             for entry in manifest_entries:
                 if entry.kind == 0:
                     added_entries.append(entry)

@@ -27,8 +27,8 @@ from pypaimon.read.split import Split
 class Plan:
     """Implementation of Plan for native Python reading."""
     _splits: List[Split]
-    _plan_start_row: int = -1
-    _plan_end_row: int = -1
+    _plan_start_row: int = None
+    _plan_end_row: int = None
 
     def splits(self) -> List[Split]:
         return self._splits
