@@ -49,6 +49,7 @@ import java.util.Map;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
+import static org.apache.paimon.predicate.PredicateBuilder.fieldIdxToPartitionIdx;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAndByPartition;
 
 /** {@link ReadBuilder} for {@link FormatTable}. */
@@ -133,11 +134,8 @@ public class FormatReadBuilder implements ReadBuilder {
     public TableScan newScan() {
         PartitionPredicate partitionFilter = this.partitionFilter;
         if (partitionFilter == null && this.filter != null && !table.partitionKeys().isEmpty()) {
-            int[] fieldIdxToPartitionIdx =
-                    PredicateBuilder.fieldIdxToPartitionIdx(table.rowType(), table.partitionKeys());
-            Pair<List<Predicate>, List<Predicate>> partitionAndNonPartitionFilter =
-                    splitAndByPartition(filter, fieldIdxToPartitionIdx);
-            List<Predicate> partitionFilters = partitionAndNonPartitionFilter.getLeft();
+            int[] partitionIdx = fieldIdxToPartitionIdx(table.rowType(), table.partitionKeys());
+            List<Predicate> partitionFilters = splitAndByPartition(filter, partitionIdx).getLeft();
             if (!partitionFilters.isEmpty()) {
                 RowType partitionType = table.rowType().project(table.partitionKeys());
                 partitionFilter =
