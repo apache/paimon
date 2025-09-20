@@ -40,7 +40,7 @@ class ManifestFileManager:
         self.primary_key_fields = self.table.table_schema.get_primary_key_fields()
         self.trimmed_primary_key_fields = self.table.table_schema.get_trimmed_primary_key_fields()
 
-    def read(self, manifest_file_name: str, shard_filter=None) -> List[ManifestEntry]:
+    def read(self, manifest_file_name: str, bucket_filter=None) -> List[ManifestEntry]:
         manifest_file_path = self.manifest_path / manifest_file_name
 
         entries = []
@@ -97,7 +97,7 @@ class ManifestFileManager:
                 total_buckets=record['_TOTAL_BUCKETS'],
                 file=file_meta
             )
-            if shard_filter is not None and not shard_filter(entry):
+            if bucket_filter is not None and not bucket_filter(entry):
                 continue
             entries.append(entry)
         return entries
