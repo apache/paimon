@@ -163,6 +163,15 @@ public class CatalogUtils {
         }
     }
 
+    public static void validateTableType(Catalog catalog, String tableType) {
+        if (Objects.nonNull(tableType) && !catalog.supportsListTableByType()) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Current catalog %s does not support table type filter.",
+                            catalog.getClass().getSimpleName()));
+        }
+    }
+
     public static List<Partition> listPartitionsFromFileSystem(Table table) {
         Options options = Options.fromMap(table.options());
         InternalRowPartitionComputer computer =

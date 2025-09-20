@@ -251,10 +251,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 false));
         assertThrows(
                 Catalog.DatabaseNotExistException.class,
-                () -> catalog.listTablesPaged(database, 100, null, null));
+                () -> catalog.listTablesPaged(database, 100, null, null, null));
         assertThrows(
                 Catalog.DatabaseNotExistException.class,
-                () -> catalog.listTableDetailsPaged(database, 100, null, null));
+                () -> catalog.listTableDetailsPaged(database, 100, null, null, null));
     }
 
     @Test
@@ -362,7 +362,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         // List tables paged returns an empty list when there are no tables in the database
         String databaseName = "tables_paged_db";
         catalog.createDatabase(databaseName, false);
-        PagedList<String> pagedTables = catalog.listTablesPaged(databaseName, null, null, null);
+        PagedList<String> pagedTables =
+                catalog.listTablesPaged(databaseName, null, null, null, null);
         assertThat(pagedTables.getElements()).isEmpty();
         assertNull(pagedTables.getNextPageToken());
 
@@ -374,7 +375,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         // when maxResults is null or 0, the page length is set to a server configured value
         String[] sortedTableNames = Arrays.stream(tableNames).sorted().toArray(String[]::new);
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, null, null);
         List<String> tables = pagedTables.getElements();
         assertThat(tables).containsExactly(sortedTableNames);
         assertNull(pagedTables.getNextPageToken());
@@ -383,7 +384,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         // server configured value
         // when pageToken is null, will list tables from the beginning
         int maxResults = 2;
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null, null);
         tables = pagedTables.getElements();
         assertEquals(maxResults, tables.size());
         assertThat(tables).containsExactly("abd", "def");
@@ -392,7 +393,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         // when pageToken is not null, will list tables from the pageToken (exclusive)
         pagedTables =
                 catalog.listTablesPaged(
-                        databaseName, maxResults, pagedTables.getNextPageToken(), null);
+                        databaseName, maxResults, pagedTables.getNextPageToken(), null, null);
         tables = pagedTables.getElements();
         assertEquals(maxResults, tables.size());
         assertThat(tables).containsExactly("opr", "table1");
@@ -400,7 +401,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         pagedTables =
                 catalog.listTablesPaged(
-                        databaseName, maxResults, pagedTables.getNextPageToken(), null);
+                        databaseName, maxResults, pagedTables.getNextPageToken(), null, null);
         tables = pagedTables.getElements();
         assertEquals(maxResults, tables.size());
         assertThat(tables).containsExactly("table2", "table3");
@@ -408,18 +409,18 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         pagedTables =
                 catalog.listTablesPaged(
-                        databaseName, maxResults, pagedTables.getNextPageToken(), null);
+                        databaseName, maxResults, pagedTables.getNextPageToken(), null, null);
         tables = pagedTables.getElements();
         assertEquals(1, tables.size());
         assertNull(pagedTables.getNextPageToken());
 
         maxResults = 8;
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null, null);
         tables = pagedTables.getElements();
         assertThat(tables).containsExactly(sortedTableNames);
         assertNull(pagedTables.getNextPageToken());
 
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, "table1", null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, "table1", null, null);
         tables = pagedTables.getElements();
         assertEquals(3, tables.size());
         assertThat(tables).containsExactly("table2", "table3", "table_name");
@@ -429,24 +430,24 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
                 .isThrownBy(() -> catalog.listTables("non_existing_db"));
 
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table%");
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table%", null);
         tables = pagedTables.getElements();
         assertEquals(4, tables.size());
         assertThat(tables).containsExactly("table1", "table2", "table3", "table_name");
         assertNull(pagedTables.getNextPageToken());
 
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_");
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_", null);
         tables = pagedTables.getElements();
         assertTrue(tables.isEmpty());
         assertNull(pagedTables.getNextPageToken());
 
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_%");
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_%", null);
         tables = pagedTables.getElements();
         assertEquals(1, tables.size());
         assertThat(tables).containsExactly("table_name");
         assertNull(pagedTables.getNextPageToken());
 
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_name");
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_name", null);
         tables = pagedTables.getElements();
         assertEquals(1, tables.size());
         assertThat(tables).containsExactly("table_name");
@@ -454,11 +455,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         Assertions.assertThrows(
                 BadRequestException.class,
-                () -> catalog.listTablesPaged(databaseName, null, null, "%table"));
+                () -> catalog.listTablesPaged(databaseName, null, null, "%table", null));
 
         Assertions.assertThrows(
                 BadRequestException.class,
-                () -> catalog.listTablesPaged(databaseName, null, null, "ta%le"));
+                () -> catalog.listTablesPaged(databaseName, null, null, "ta%le", null));
     }
 
     @Test
@@ -467,7 +468,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         String databaseName = "table_details_paged_db";
         catalog.createDatabase(databaseName, false);
         PagedList<Table> pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, null, null, null);
+                catalog.listTableDetailsPaged(databaseName, null, null, null, null);
         assertThat(pagedTableDetails.getElements()).isEmpty();
         assertNull(pagedTableDetails.getNextPageToken());
 
@@ -478,42 +479,44 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                     Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
         }
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, null);
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, expectedTableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         int maxResults = 2;
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null, null);
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, maxResults, null, null, null);
         assertPagedTableDetails(pagedTableDetails, maxResults, "abd", "def");
         assertEquals("def", pagedTableDetails.getNextPageToken());
 
         pagedTableDetails =
                 catalog.listTableDetailsPaged(
-                        databaseName, maxResults, pagedTableDetails.getNextPageToken(), null);
+                        databaseName, maxResults, pagedTableDetails.getNextPageToken(), null, null);
         assertPagedTableDetails(pagedTableDetails, maxResults, "opr", "table1");
         assertEquals("table1", pagedTableDetails.getNextPageToken());
 
         pagedTableDetails =
                 catalog.listTableDetailsPaged(
-                        databaseName, maxResults, pagedTableDetails.getNextPageToken(), null);
+                        databaseName, maxResults, pagedTableDetails.getNextPageToken(), null, null);
         assertPagedTableDetails(pagedTableDetails, maxResults, "table2", "table3");
         assertEquals("table3", pagedTableDetails.getNextPageToken());
 
         pagedTableDetails =
                 catalog.listTableDetailsPaged(
-                        databaseName, maxResults, pagedTableDetails.getNextPageToken(), null);
+                        databaseName, maxResults, pagedTableDetails.getNextPageToken(), null, null);
         assertEquals(1, pagedTableDetails.getElements().size());
         assertNull(pagedTableDetails.getNextPageToken());
 
         maxResults = 8;
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null, null);
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, maxResults, null, null, null);
         assertPagedTableDetails(
                 pagedTableDetails, Math.min(maxResults, tableNames.length), expectedTableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         String pageToken = "table1";
         pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null);
+                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTableDetails(pagedTableDetails, 3, "table2", "table3", "table_name");
         assertNull(pagedTableDetails.getNextPageToken());
 
@@ -523,31 +526,178 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.listTableDetailsPaged(
-                                        "non_existing_db", finalMaxResults, pageToken, null));
+                                        "non_existing_db", finalMaxResults, pageToken, null, null));
 
         // List tables throws DatabaseNotExistException when the database does not exist
         assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
                 .isThrownBy(() -> catalog.listTables("non_existing_db"));
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table%");
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table%", null);
         assertPagedTableDetails(pagedTableDetails, 4, "table1", "table2", "table3", "table_name");
         assertNull(pagedTableDetails.getNextPageToken());
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table_");
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table_", null);
         Assertions.assertTrue(pagedTableDetails.getElements().isEmpty());
         assertNull(pagedTableDetails.getNextPageToken());
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table_%");
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, null, null, "table_%", null);
         assertPagedTableDetails(pagedTableDetails, 1, "table_name");
         assertNull(pagedTableDetails.getNextPageToken());
 
         Assertions.assertThrows(
                 BadRequestException.class,
-                () -> catalog.listTableDetailsPaged(databaseName, null, null, "ta%le"));
+                () -> catalog.listTableDetailsPaged(databaseName, null, null, "ta%le", null));
 
         Assertions.assertThrows(
                 BadRequestException.class,
-                () -> catalog.listTableDetailsPaged(databaseName, null, null, "%tale"));
+                () -> catalog.listTableDetailsPaged(databaseName, null, null, "%tale", null));
+    }
+
+    @Test
+    public void testListTableDetailsPagedWithTableType() throws Exception {
+        String databaseName = "table_type_filter_db";
+        catalog.createDatabase(databaseName, false);
+
+        // Create tables with different types
+        Schema normalTableSchema = DEFAULT_TABLE_SCHEMA;
+        catalog.createTable(
+                Identifier.create(databaseName, "normal_table"), normalTableSchema, false);
+
+        Schema formatTableSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .option("type", TableType.FORMAT_TABLE.toString())
+                        .build();
+        catalog.createTable(
+                Identifier.create(databaseName, "format_table"), formatTableSchema, false);
+
+        Schema objectTableSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .option("type", TableType.OBJECT_TABLE.toString())
+                        .build();
+        catalog.createTable(
+                Identifier.create(databaseName, "object_table"), objectTableSchema, false);
+
+        // Test filtering by table type
+        PagedList<Table> allTables =
+                catalog.listTableDetailsPaged(databaseName, null, null, null, null);
+        assertThat(allTables.getElements()).hasSize(3);
+
+        PagedList<Table> normalTables =
+                catalog.listTableDetailsPaged(
+                        databaseName, null, null, null, TableType.TABLE.toString());
+        assertThat(normalTables.getElements()).hasSize(1);
+        assertThat(normalTables.getElements().get(0).name()).isEqualTo("normal_table");
+
+        PagedList<Table> formatTables =
+                catalog.listTableDetailsPaged(
+                        databaseName, null, null, null, TableType.FORMAT_TABLE.toString());
+        assertThat(formatTables.getElements()).hasSize(1);
+        assertThat(formatTables.getElements().get(0).name()).isEqualTo("format_table");
+
+        PagedList<Table> objectTables =
+                catalog.listTableDetailsPaged(
+                        databaseName, null, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(objectTables.getElements()).hasSize(1);
+        assertThat(objectTables.getElements().get(0).name()).isEqualTo("object_table");
+
+        // Test with non-existent table type
+        PagedList<Table> nonExistentType =
+                catalog.listTableDetailsPaged(databaseName, null, null, null, "non-existent-type");
+        assertThat(nonExistentType.getElements()).isEmpty();
+
+        // Test with table name pattern and table type filter combined
+        PagedList<Table> filteredTables =
+                catalog.listTableDetailsPaged(
+                        databaseName, null, null, "format_%", TableType.FORMAT_TABLE.toString());
+        assertThat(filteredTables.getElements()).hasSize(1);
+        assertThat(filteredTables.getElements().get(0).name()).isEqualTo("format_table");
+
+        // Test with table name pattern and non-existent table type filter combined
+        PagedList<Table> filteredNonExistentType =
+                catalog.listTableDetailsPaged(
+                        databaseName, null, null, "format_%", "non-existent-type");
+        assertThat(filteredNonExistentType.getElements()).isEmpty();
+    }
+
+    @Test
+    public void testListTablesPagedWithTableType() throws Exception {
+        String databaseName = "tables_paged_table_type_db";
+        catalog.createDatabase(databaseName, false);
+
+        // Create tables with different types
+        Schema normalTableSchema = DEFAULT_TABLE_SCHEMA;
+        catalog.createTable(
+                Identifier.create(databaseName, "normal_table"), normalTableSchema, false);
+
+        Schema formatTableSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .option("type", TableType.FORMAT_TABLE.toString())
+                        .build();
+        catalog.createTable(
+                Identifier.create(databaseName, "format_table"), formatTableSchema, false);
+
+        Schema objectTableSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .option("type", TableType.OBJECT_TABLE.toString())
+                        .build();
+        catalog.createTable(
+                Identifier.create(databaseName, "object_table"), objectTableSchema, false);
+
+        // Test filtering by table type
+        PagedList<String> allTables = catalog.listTablesPaged(databaseName, null, null, null, null);
+        assertThat(allTables.getElements()).hasSize(3);
+
+        PagedList<String> normalTables =
+                catalog.listTablesPaged(databaseName, null, null, null, TableType.TABLE.toString());
+        assertThat(normalTables.getElements()).hasSize(1);
+        assertThat(normalTables.getElements().get(0)).isEqualTo("normal_table");
+
+        PagedList<String> formatTables =
+                catalog.listTablesPaged(
+                        databaseName, null, null, null, TableType.FORMAT_TABLE.toString());
+        assertThat(formatTables.getElements()).hasSize(1);
+        assertThat(formatTables.getElements().get(0)).isEqualTo("format_table");
+
+        PagedList<String> objectTables =
+                catalog.listTablesPaged(
+                        databaseName, null, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(objectTables.getElements()).hasSize(1);
+        assertThat(objectTables.getElements().get(0)).isEqualTo("object_table");
+
+        // Test with non-existent table type
+        PagedList<String> nonExistentType =
+                catalog.listTablesPaged(databaseName, null, null, null, "non-existent-type");
+        assertThat(nonExistentType.getElements()).isEmpty();
+
+        // Test with table name pattern and table type filter combined
+        PagedList<String> filteredTables =
+                catalog.listTablesPaged(
+                        databaseName, null, null, "format_%", TableType.FORMAT_TABLE.toString());
+        assertThat(filteredTables.getElements()).hasSize(1);
+        assertThat(filteredTables.getElements().get(0)).isEqualTo("format_table");
+
+        // Test with table name pattern and non-existent table type filter combined
+        PagedList<String> filteredNonExistentType =
+                catalog.listTablesPaged(databaseName, null, null, "format_%", "non-existent-type");
+        assertThat(filteredNonExistentType.getElements()).isEmpty();
+
+        // Test paging with table type filter
+        int maxResults = 10;
+        PagedList<String> pagedNormalTables =
+                catalog.listTablesPaged(
+                        databaseName, maxResults, null, null, TableType.TABLE.toString());
+        assertThat(pagedNormalTables.getElements()).hasSize(1);
+        assertThat(pagedNormalTables.getElements().get(0)).isEqualTo("normal_table");
+        assertNull(pagedNormalTables.getNextPageToken());
     }
 
     @Test
