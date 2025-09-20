@@ -176,6 +176,11 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsListTableByType() {
+        return wrapped.supportsListTableByType();
+    }
+
+    @Override
     public boolean supportsVersionManagement() {
         return wrapped.supportsVersionManagement();
     }

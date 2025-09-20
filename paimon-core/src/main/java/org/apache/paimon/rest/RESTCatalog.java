@@ -335,6 +335,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsListTableByType() {
+        return true;
+    }
+
+    @Override
     public boolean supportsVersionManagement() {
         return true;
     }
