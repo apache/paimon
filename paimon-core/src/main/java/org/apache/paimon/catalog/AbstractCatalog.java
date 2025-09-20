@@ -250,17 +250,27 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public PagedList<String> listTablesPaged(
-            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
+            String databaseName,
+            Integer maxResults,
+            String pageToken,
+            String tableNamePattern,
+            String tableType)
             throws DatabaseNotExistException {
         CatalogUtils.validateNamePattern(this, tableNamePattern);
+        CatalogUtils.validateTableType(this, tableType);
         return new PagedList<>(listTables(databaseName), null);
     }
 
     @Override
     public PagedList<Table> listTableDetailsPaged(
-            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException {
         CatalogUtils.validateNamePattern(this, tableNamePattern);
+        CatalogUtils.validateTableType(this, tableType);
         if (isSystemDatabase(databaseName)) {
             List<Table> systemTables =
                     SystemTableLoader.loadGlobalTableNames().stream()
@@ -285,16 +295,21 @@ public abstract class AbstractCatalog implements Catalog {
         // check db exists
         getDatabase(databaseName);
 
-        return listTableDetailsPagedImpl(databaseName, maxResults, pageToken);
+        return listTableDetailsPagedImpl(
+                databaseName, maxResults, pageToken, tableNamePattern, tableType);
     }
 
     protected abstract List<String> listTablesImpl(String databaseName);
 
     protected PagedList<Table> listTableDetailsPagedImpl(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException {
         PagedList<String> pagedTableNames =
-                listTablesPaged(databaseName, maxResults, pageToken, null);
+                listTablesPaged(databaseName, maxResults, pageToken, tableNamePattern, tableType);
         return new PagedList<>(
                 pagedTableNames.getElements().stream()
                         .map(
