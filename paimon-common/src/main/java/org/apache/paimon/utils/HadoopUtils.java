@@ -221,13 +221,19 @@ public class HadoopUtils {
         }
         for (int i = 0; i < propertyNodes.getLength(); i++) {
             Node propertyNode = propertyNodes.item(i);
-            if (propertyNode.getNodeType() == 1) {
+            if (1 == propertyNode.getNodeType()) {
                 Element propertyElement = (Element) propertyNode;
-                String key = propertyElement.getElementsByTagName("name").item(0).getTextContent();
-                String value =
-                        propertyElement.getElementsByTagName("value").item(0).getTextContent();
-                if (!StringUtils.isNullOrWhitespaceOnly(value)) {
-                    conf.set(key, value);
+                if (null != propertyElement.getElementsByTagName("name")
+                        && null != propertyElement.getElementsByTagName("name").item(0)
+                        && null != propertyElement.getElementsByTagName("value")
+                        && null != propertyElement.getElementsByTagName("value").item(0)) {
+                    String key =
+                            propertyElement.getElementsByTagName("name").item(0).getTextContent();
+                    String value =
+                            propertyElement.getElementsByTagName("value").item(0).getTextContent();
+                    if (!StringUtils.isNullOrWhitespaceOnly(value)) {
+                        conf.set(key, value);
+                    }
                 }
             }
         }
