@@ -622,6 +622,63 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 catalog.listTableDetailsPaged(
                         databaseName, null, null, "format_%", "non-existent-type");
         assertThat(filteredNonExistentType.getElements()).isEmpty();
+
+        // Test maxResults parameter variations with table type filtering
+        // Test maxResults=1 with different table types
+        PagedList<Table> singleNormalTable =
+                catalog.listTableDetailsPaged(
+                        databaseName, 1, null, null, TableType.TABLE.toString());
+        assertThat(singleNormalTable.getElements()).hasSize(1);
+        assertEquals("normal_table", singleNormalTable.getElements().get(0).name());
+        assertEquals("normal_table", singleNormalTable.getNextPageToken());
+
+        PagedList<Table> singleFormatTable =
+                catalog.listTableDetailsPaged(
+                        databaseName, 1, null, null, TableType.FORMAT_TABLE.toString());
+        assertThat(singleFormatTable.getElements()).hasSize(1);
+        assertEquals("format_table", singleFormatTable.getElements().get(0).name());
+        assertEquals("format_table", singleFormatTable.getNextPageToken());
+
+        PagedList<Table> singleObjectTable =
+                catalog.listTableDetailsPaged(
+                        databaseName, 1, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(singleObjectTable.getElements()).hasSize(1);
+        assertEquals("object_table", singleObjectTable.getElements().get(0).name());
+        assertEquals("object_table", singleObjectTable.getNextPageToken());
+
+        // Test maxResults=2 with all table types
+        PagedList<Table> allTablesWithMaxResults =
+                catalog.listTableDetailsPaged(databaseName, 2, null, null, null);
+        assertThat(allTablesWithMaxResults.getElements()).hasSize(2);
+        assertThat(allTablesWithMaxResults.getNextPageToken()).isNotNull();
+
+        // Test maxResults=2 with table name pattern and table type filter combined
+        PagedList<Table> filteredTablesWithMaxResults =
+                catalog.listTableDetailsPaged(
+                        databaseName, 2, null, "format_%", TableType.FORMAT_TABLE.toString());
+        assertThat(filteredTablesWithMaxResults.getElements()).hasSize(1);
+        assertEquals("format_table", filteredTablesWithMaxResults.getElements().get(0).name());
+        assertThat(filteredTablesWithMaxResults.getNextPageToken()).isNull();
+
+        // Test maxResults=0 (should return all tables)
+        PagedList<Table> allTablesWithZeroMaxResults =
+                catalog.listTableDetailsPaged(databaseName, 0, null, null, null);
+        assertThat(allTablesWithZeroMaxResults.getElements()).hasSize(3);
+        assertThat(allTablesWithZeroMaxResults.getNextPageToken()).isNull();
+
+        // Test maxResults larger than total tables with table type filter
+        PagedList<Table> largeMaxResultsWithType =
+                catalog.listTableDetailsPaged(
+                        databaseName, 10, null, null, TableType.TABLE.toString());
+        assertThat(largeMaxResultsWithType.getElements()).hasSize(1);
+        assertEquals("normal_table", largeMaxResultsWithType.getElements().get(0).name());
+        assertThat(largeMaxResultsWithType.getNextPageToken()).isNull();
+
+        // Test maxResults with non-existent table type
+        PagedList<Table> nonExistentTypeWithMaxResults =
+                catalog.listTableDetailsPaged(databaseName, 5, null, null, "non-existent-type");
+        assertThat(nonExistentTypeWithMaxResults.getElements()).isEmpty();
+        assertThat(nonExistentTypeWithMaxResults.getNextPageToken()).isNull();
     }
 
     @Test
@@ -698,6 +755,63 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(pagedNormalTables.getElements()).hasSize(1);
         assertThat(pagedNormalTables.getElements().get(0)).isEqualTo("normal_table");
         assertNull(pagedNormalTables.getNextPageToken());
+
+        // Test maxResults parameter variations with table type filtering
+        // Test maxResults=0 (should return all tables)
+        PagedList<String> allTablesWithZeroMaxResults =
+                catalog.listTablesPaged(databaseName, 0, null, null, null);
+        assertThat(allTablesWithZeroMaxResults.getElements()).hasSize(3);
+        assertNull(allTablesWithZeroMaxResults.getNextPageToken());
+
+        // Test maxResults=1 with different table types
+        PagedList<String> singleNormalTable =
+                catalog.listTablesPaged(databaseName, 1, null, null, TableType.TABLE.toString());
+        assertThat(singleNormalTable.getElements()).hasSize(1);
+        assertEquals("normal_table", singleNormalTable.getElements().get(0));
+        assertEquals("normal_table", singleNormalTable.getNextPageToken());
+
+        PagedList<String> singleFormatTable =
+                catalog.listTablesPaged(
+                        databaseName, 1, null, null, TableType.FORMAT_TABLE.toString());
+        assertThat(singleFormatTable.getElements()).hasSize(1);
+        assertEquals("format_table", singleFormatTable.getElements().get(0));
+        assertEquals("format_table", singleFormatTable.getNextPageToken());
+
+        PagedList<String> singleObjectTable =
+                catalog.listTablesPaged(
+                        databaseName, 1, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(singleObjectTable.getElements()).hasSize(1);
+        assertEquals("object_table", singleObjectTable.getElements().get(0));
+        assertEquals("object_table", singleObjectTable.getNextPageToken());
+
+        // Test maxResults=2 with all table types
+        PagedList<String> allTablesWithMaxResults =
+                catalog.listTablesPaged(databaseName, 2, null, null, null);
+        assertThat(allTablesWithMaxResults.getElements()).hasSize(2);
+        assertThat(allTablesWithMaxResults.getNextPageToken()).isNotNull();
+
+        // Test maxResults=2 with table name pattern and table type filter combined
+        PagedList<String> filteredTablesWithMaxResults =
+                catalog.listTablesPaged(
+                        databaseName, 2, null, "format_%", TableType.FORMAT_TABLE.toString());
+        assertThat(filteredTablesWithMaxResults.getElements()).hasSize(1);
+        assertThat(filteredTablesWithMaxResults.getElements().get(0)).isEqualTo("format_table");
+        assertNull(filteredTablesWithMaxResults.getNextPageToken());
+        assertEquals("format_table", filteredTablesWithMaxResults.getElements().get(0));
+        assertNull(filteredTablesWithMaxResults.getNextPageToken());
+
+        // Test maxResults larger than total tables with table type filter
+        PagedList<String> largeMaxResultsWithType =
+                catalog.listTablesPaged(databaseName, 10, null, null, TableType.TABLE.toString());
+        assertThat(largeMaxResultsWithType.getElements()).hasSize(1);
+        assertEquals("normal_table", largeMaxResultsWithType.getElements().get(0));
+        assertNull(largeMaxResultsWithType.getNextPageToken());
+
+        // Test maxResults with non-existent table type
+        PagedList<String> nonExistentTypeWithMaxResults =
+                catalog.listTablesPaged(databaseName, 5, null, null, "non-existent-type");
+        assertThat(nonExistentTypeWithMaxResults.getElements()).isEmpty();
+        assertNull(nonExistentTypeWithMaxResults.getNextPageToken());
     }
 
     @Test
