@@ -52,32 +52,32 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
     private transient org.apache.spark.sql.catalyst.InternalRow internalRow;
     private final int length;
     private final int rowKindIdx;
-    private final StructType structType;
+    private final StructType tableSchema;
     private int[] fieldIndexMap = null;
 
     public SparkInternalRowWrapper(
             org.apache.spark.sql.catalyst.InternalRow internalRow,
             int rowKindIdx,
-            StructType structType,
+            StructType tableSchema,
             int length) {
         this.internalRow = internalRow;
         this.rowKindIdx = rowKindIdx;
         this.length = length;
-        this.structType = structType;
+        this.tableSchema = tableSchema;
     }
 
-    public SparkInternalRowWrapper(int rowKindIdx, StructType structType, int length) {
+    public SparkInternalRowWrapper(int rowKindIdx, StructType tableSchema, int length) {
         this.rowKindIdx = rowKindIdx;
         this.length = length;
-        this.structType = structType;
+        this.tableSchema = tableSchema;
     }
 
     public SparkInternalRowWrapper(
-            int rowKindIdx, StructType structType, StructType rowSchema, int length) {
+            int rowKindIdx, StructType tableSchema, StructType dataSchema, int length) {
         this.rowKindIdx = rowKindIdx;
         this.length = length;
-        this.structType = structType;
-        this.fieldIndexMap = buildFieldIndexMap(structType, rowSchema);
+        this.tableSchema = tableSchema;
+        this.fieldIndexMap = buildFieldIndexMap(tableSchema, dataSchema);
     }
 
     public SparkInternalRowWrapper replace(org.apache.spark.sql.catalyst.InternalRow internalRow) {
@@ -85,12 +85,12 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         return this;
     }
 
-    private int[] buildFieldIndexMap(StructType schemaStruct, StructType rowSchema) {
+    private int[] buildFieldIndexMap(StructType schemaStruct, StructType dataSchema) {
         int[] mapping = new int[schemaStruct.size()];
 
         Map<String, Integer> rowFieldIndexMap = new HashMap<>();
-        for (int i = 0; i < rowSchema.size(); i++) {
-            rowFieldIndexMap.put(rowSchema.fields()[i].name(), i);
+        for (int i = 0; i < dataSchema.size(); i++) {
+            rowFieldIndexMap.put(dataSchema.fields()[i].name(), i);
         }
 
         for (int i = 0; i < schemaStruct.size(); i++) {
@@ -221,7 +221,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
             return null;
         }
         return convertToTimestamp(
-                structType.fields()[pos].dataType(), internalRow.getLong(actualPos));
+                tableSchema.fields()[pos].dataType(), internalRow.getLong(actualPos));
     }
 
     @Override
@@ -255,7 +255,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         }
         return new SparkInternalArray(
                 internalRow.getArray(actualPos),
-                ((ArrayType) (structType.fields()[pos].dataType())).elementType());
+                ((ArrayType) (tableSchema.fields()[pos].dataType())).elementType());
     }
 
     @Override
@@ -264,7 +264,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
             return null;
         }
-        MapType mapType = (MapType) structType.fields()[pos].dataType();
+        MapType mapType = (MapType) tableSchema.fields()[pos].dataType();
         return new SparkInternalMap(
                 internalRow.getMap(actualPos), mapType.keyType(), mapType.valueType());
     }
@@ -278,7 +278,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         return new SparkInternalRowWrapper(
                 internalRow.getStruct(actualPos, numFields),
                 -1,
-                (StructType) structType.fields()[actualPos].dataType(),
+                (StructType) tableSchema.fields()[actualPos].dataType(),
                 numFields);
     }
 

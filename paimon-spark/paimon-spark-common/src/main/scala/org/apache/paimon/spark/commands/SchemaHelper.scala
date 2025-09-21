@@ -57,24 +57,24 @@ private[spark] trait SchemaHelper extends WithFileStoreTable {
     }
   }
 
-  def mergeSchema(rowSchema: StructType, options: Options): StructType = {
+  def mergeSchema(dataSchema: StructType, options: Options): StructType = {
     val mergeSchemaEnabled =
       options.get(SparkConnectorOptions.MERGE_SCHEMA) || OptionUtils.writeMergeSchemaEnabled()
     if (!mergeSchemaEnabled) {
-      return rowSchema
+      return dataSchema
     }
 
-    val dataSchema = SparkSystemColumns.filterSparkSystemColumns(rowSchema)
+    val filteredDataSchema = SparkSystemColumns.filterSparkSystemColumns(dataSchema)
     val allowExplicitCast = options.get(SparkConnectorOptions.EXPLICIT_CAST) || OptionUtils
       .writeMergeSchemaExplicitCastEnabled()
-    mergeAndCommitSchema(dataSchema, allowExplicitCast)
+    mergeAndCommitSchema(filteredDataSchema, allowExplicitCast)
 
     val writeSchema = SparkTypeUtils.fromPaimonRowType(table.schema().logicalRowType())
 
-    if (!PaimonUtils.sameType(writeSchema, dataSchema)) {
+    if (!PaimonUtils.sameType(writeSchema, filteredDataSchema)) {
       writeSchema
     } else {
-      rowSchema
+      filteredDataSchema
     }
   }
 

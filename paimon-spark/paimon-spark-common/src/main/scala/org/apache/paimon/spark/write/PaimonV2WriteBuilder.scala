@@ -25,7 +25,7 @@ import org.apache.spark.sql.connector.write.{SupportsDynamicOverwrite, SupportsO
 import org.apache.spark.sql.sources.{And, Filter}
 import org.apache.spark.sql.types.StructType
 
-class PaimonV2WriteBuilder(table: FileStoreTable, rowSchema: StructType, options: Options)
+class PaimonV2WriteBuilder(table: FileStoreTable, dataSchema: StructType, options: Options)
   extends BaseWriteBuilder(table)
   with SupportsOverwrite
   with SupportsDynamicOverwrite {
@@ -34,7 +34,7 @@ class PaimonV2WriteBuilder(table: FileStoreTable, rowSchema: StructType, options
   private var overwritePartitions: Option[Map[String, String]] = None
 
   override def build =
-    new PaimonV2Write(table, overwriteDynamic, overwritePartitions, rowSchema, options)
+    new PaimonV2Write(table, overwriteDynamic, overwritePartitions, dataSchema, options)
 
   override def overwrite(filters: Array[Filter]): WriteBuilder = {
     if (overwriteDynamic) {
