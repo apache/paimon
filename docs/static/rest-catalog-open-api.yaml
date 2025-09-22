@@ -355,7 +355,6 @@ paths:
           in: query
           schema:
             type: string
-            enum: ["table", "format-table", "materialized-table", "object-table", "lance-table", "iceberg-table"]
       responses:
         "200":
           description: OK
