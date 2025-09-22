@@ -29,6 +29,8 @@ import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.TtlDB;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -38,6 +40,8 @@ import java.time.Duration;
 
 /** Factory to create state. */
 public class RocksDBStateFactory implements StateFactory {
+
+    private static final Logger LOG = LoggerFactory.getLogger(RocksDBStateFactory.class);
 
     public static final String MERGE_OPERATOR_NAME = "stringappendtest";
 
@@ -50,6 +54,13 @@ public class RocksDBStateFactory implements StateFactory {
     public RocksDBStateFactory(
             String path, org.apache.paimon.options.Options conf, @Nullable Duration ttlSecs)
             throws IOException {
+        try {
+            RocksDB.loadLibrary();
+        } catch (Throwable e) {
+            LOG.error("Fail to load RocksDB library.", e);
+            throw new IOException("Fail to load RocksDB library.", e);
+        }
+
         DBOptions dbOptions =
                 RocksDBOptions.createDBOptions(
                         new DBOptions()
