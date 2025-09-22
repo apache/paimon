@@ -419,8 +419,31 @@ USE sys;
 SHOW TABLES;
 ```
 
+### All Tables Table
+
+Shows all the tables in all database.
+
+```sql
+SELECT * FROM sys.tables;
+
+/*
++---------------+--------------------------------+--------------------------------+------------------+------------------+
+| database_name |                     table_name |                     table_type |      partitioned |      primary_key |
++---------------+--------------------------------+--------------------------------+------------------+------------------+
+|         my_db |                    Orders_orc  |                         table  |            false |            false |
+|         my_db |                        Orders2 |                         table  |             true |             true |
+|         my_db |                        Orders2 |                         table  |             true |             true |
+|         my_db2|                      OrdersSum |                         table  |            false |            false |
++---------------+--------------------------------+--------------------------------+------------------+
+7 rows in set
+*/
+```
+
+This table also displays various information from REST Server, such as owner, created_at, updated_at.
+
 ### ALL Options Table
-This table is similar to [Options Table]({{< ref "#options-table" >}}), but it shows all the table options is all database.
+
+This table is similar to [Options Table]({{< ref "#options-table" >}}), but it shows all the table options in all database.
 
 ```sql
 SELECT * FROM sys.all_table_options;
@@ -439,6 +462,7 @@ SELECT * FROM sys.all_table_options;
 ```
 
 ### Catalog Options Table
+
 You can query the catalog's option information through catalog options table. The options not shown will be the default value. You can take reference to [Configuration]({{< ref "maintenance/configurations#coreoptions" >}}).
 
 ```sql
