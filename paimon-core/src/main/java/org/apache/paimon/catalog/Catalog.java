@@ -186,7 +186,8 @@ public interface Catalog extends AutoCloseable {
             String databaseName,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String tableNamePattern)
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException;
 
     /**
@@ -203,6 +204,8 @@ public interface Catalog extends AutoCloseable {
      *     from a specific point.
      * @param tableNamePattern A sql LIKE pattern (%) for table names. All table details will be
      *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param tableType Optional parameter to filter tables by table type. All table types will be
+     *     returned if not set or empty.
      * @return a list of the table details with provided page size in this database and next page
      *     token, or a list of the details of all tables in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
@@ -213,7 +216,8 @@ public interface Catalog extends AutoCloseable {
             String databaseName,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String tableNamePattern)
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException;
 
     /**
@@ -603,6 +607,10 @@ public interface Catalog extends AutoCloseable {
      * </ul>
      */
     default boolean supportsListByPattern() {
+        return false;
+    }
+
+    default boolean supportsListTableByType() {
         return false;
     }
 
