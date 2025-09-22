@@ -25,7 +25,6 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
@@ -73,7 +72,10 @@ public class AppendCompactTask {
         Preconditions.checkArgument(
                 dvEnabled || compactBefore.size() > 1,
                 "AppendOnlyCompactionTask need more than one file input.");
-        IndexIncrement indexIncrement;
+        // If compact task didn't compact all files, the remain deletion files will be written into
+        // new deletion files.
+        List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+        List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
         if (dvEnabled) {
             AppendDeleteFileMaintainer dvIndexFileMaintainer =
                     BaseAppendDeleteFileMaintainer.forUnawareAppend(
@@ -90,10 +92,6 @@ public class AppendCompactTask {
             compactBefore.forEach(
                     f -> dvIndexFileMaintainer.notifyRemovedDeletionVector(f.fileName()));
             List<IndexManifestEntry> indexEntries = dvIndexFileMaintainer.persist();
-            // If compact task didn't compact all files, the remain deletion files will be written
-            // into new deletion files.
-            List<IndexFileMeta> newIndexFiles = new ArrayList<>();
-            List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
             for (IndexManifestEntry entry : indexEntries) {
                 if (entry.kind() == FileKind.ADD) {
                     newIndexFiles.add(entry.indexFile());
@@ -101,15 +99,18 @@ public class AppendCompactTask {
                     deletedIndexFiles.add(entry.indexFile());
                 }
             }
-            indexIncrement = new IndexIncrement(newIndexFiles, deletedIndexFiles);
         } else {
             compactAfter.addAll(
                     write.compactRewrite(partition, UNAWARE_BUCKET, null, compactBefore));
-            indexIncrement = new IndexIncrement(Collections.emptyList());
         }
 
         CompactIncrement compactIncrement =
-                new CompactIncrement(compactBefore, compactAfter, Collections.emptyList());
+                new CompactIncrement(
+                        compactBefore,
+                        compactAfter,
+                        Collections.emptyList(),
+                        newIndexFiles,
+                        deletedIndexFiles);
         return new CommitMessageImpl(
                 partition,
                 // bucket 0 is bucket for unaware-bucket table
@@ -117,8 +118,7 @@ public class AppendCompactTask {
                 0,
                 table.coreOptions().bucket(),
                 DataIncrement.emptyIncrement(),
-                compactIncrement,
-                indexIncrement);
+                compactIncrement);
     }
 
     public int hashCode() {

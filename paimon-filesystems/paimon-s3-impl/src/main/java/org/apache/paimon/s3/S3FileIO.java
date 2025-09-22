@@ -20,6 +20,8 @@ package org.apache.paimon.s3;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
@@ -69,6 +71,17 @@ public class S3FileIO extends HadoopCompliantFileIO {
     @Override
     public void configure(CatalogContext context) {
         this.hadoopOptions = mirrorCertainHadoopConfig(loadHadoopConfigFromContext(context));
+    }
+
+    @Override
+    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        S3AFileSystem fs = (S3AFileSystem) getFileSystem(hadoopPath);
+        if (!overwrite && this.exists(path)) {
+            throw new IOException("File " + path + " already exists.");
+        }
+        return new S3TwoPhaseOutputStream(new S3MultiPartUpload(fs, fs.getConf()), hadoopPath);
     }
 
     // add additional config entries from the IO config to the Hadoop config

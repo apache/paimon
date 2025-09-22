@@ -123,11 +123,11 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         return getFileSystem(hadoopSrc).rename(hadoopSrc, hadoopDst);
     }
 
-    private org.apache.hadoop.fs.Path path(Path path) {
+    protected org.apache.hadoop.fs.Path path(Path path) {
         return new org.apache.hadoop.fs.Path(path.toUri());
     }
 
-    private FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
+    protected FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
         if (fsMap == null) {
             synchronized (this) {
                 if (fsMap == null) {

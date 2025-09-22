@@ -147,9 +147,7 @@ public class PartitionMarkDoneListener implements CommitListener {
         for (ManifestCommittable committable : committables) {
             for (CommitMessage commitMessage : committable.fileCommittables()) {
                 CommitMessageImpl message = (CommitMessageImpl) commitMessage;
-                if (waitCompaction
-                        || !message.indexIncrement().isEmpty()
-                        || !message.newFilesIncrement().isEmpty()) {
+                if (waitCompaction || !message.newFilesIncrement().isEmpty()) {
                     partitions.add(message.partition());
                 }
             }
@@ -199,9 +197,7 @@ public class PartitionMarkDoneListener implements CommitListener {
             if (watermark != null) {
                 for (CommitMessage commitMessage : committable.fileCommittables()) {
                     CommitMessageImpl message = (CommitMessageImpl) commitMessage;
-                    if (waitCompaction
-                            || !message.indexIncrement().isEmpty()
-                            || !message.newFilesIncrement().isEmpty()) {
+                    if (waitCompaction || !message.newFilesIncrement().isEmpty()) {
                         partitionWatermarks.compute(
                                 message.partition(),
                                 (partition, old) ->

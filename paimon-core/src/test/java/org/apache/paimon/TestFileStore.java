@@ -26,7 +26,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
@@ -263,7 +263,7 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 Collections.emptyList(),
                 (commit, committable) ->
-                        commit.overwrite(partition, committable, Collections.emptyMap()));
+                        commit.overwritePartition(partition, committable, Collections.emptyMap()));
     }
 
     public Snapshot dropPartitions(List<Map<String, String>> partitions) {
@@ -346,14 +346,15 @@ public class TestFileStore extends KeyValueFileStore {
                     entryWithPartition.getValue().entrySet()) {
                 CommitIncrement increment =
                         entryWithBucket.getValue().prepareCommit(ignorePreviousFiles);
+                DataIncrement dataIncrement = increment.newFilesIncrement();
+                dataIncrement.newIndexFiles().addAll(indexFiles);
                 committable.addFileCommittable(
                         new CommitMessageImpl(
                                 entryWithPartition.getKey(),
                                 entryWithBucket.getKey(),
                                 options().bucket(),
-                                increment.newFilesIncrement(),
-                                increment.compactIncrement(),
-                                new IndexIncrement(indexFiles)));
+                                dataIncrement,
+                                increment.compactIncrement()));
             }
         }
 

@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.OffsetSeekableInputStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
@@ -30,7 +31,6 @@ import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.utils.CompactedChangelogPathResolver;
 import org.apache.paimon.utils.RoaringBitmap32;
 
-import java.io.EOFException;
 import java.io.IOException;
 
 /**
@@ -164,50 +164,6 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
         @Override
         public boolean rename(Path src, Path dst) throws IOException {
             throw new UnsupportedOperationException();
-        }
-    }
-
-    private static class OffsetSeekableInputStream extends SeekableInputStream {
-
-        private final SeekableInputStream wrapped;
-        private final long offset;
-        private final long length;
-
-        private OffsetSeekableInputStream(SeekableInputStream wrapped, long offset, long length)
-                throws IOException {
-            this.wrapped = wrapped;
-            this.offset = offset;
-            this.length = length;
-            wrapped.seek(offset);
-        }
-
-        @Override
-        public void seek(long desired) throws IOException {
-            wrapped.seek(offset + desired);
-        }
-
-        @Override
-        public long getPos() throws IOException {
-            return wrapped.getPos() - offset;
-        }
-
-        @Override
-        public int read() throws IOException {
-            if (getPos() >= length) {
-                throw new EOFException();
-            }
-            return wrapped.read();
-        }
-
-        @Override
-        public int read(byte[] b, int off, int len) throws IOException {
-            long realLen = Math.min(len, length - getPos());
-            return wrapped.read(b, off, (int) realLen);
-        }
-
-        @Override
-        public void close() throws IOException {
-            wrapped.close();
         }
     }
 }

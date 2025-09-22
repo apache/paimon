@@ -27,7 +27,6 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -137,8 +136,8 @@ public class PostponeBucketCommittableRewriter {
             changelogFiles.addAll(message.newFilesIncrement().changelogFiles());
             changelogFiles.addAll(message.compactIncrement().changelogFiles());
 
-            newIndexFiles.addAll(message.indexIncrement().newIndexFiles());
-            deletedIndexFiles.addAll(message.indexIncrement().deletedIndexFiles());
+            newIndexFiles.addAll(message.compactIncrement().newIndexFiles());
+            deletedIndexFiles.addAll(message.compactIncrement().deletedIndexFiles());
 
             toDelete.forEach((fileName, path) -> fileIO.deleteQuietly(path));
         }
@@ -151,8 +150,12 @@ public class PostponeBucketCommittableRewriter {
                     bucket,
                     totalBuckets,
                     DataIncrement.emptyIncrement(),
-                    new CompactIncrement(compactBefore, realCompactAfter, changelogFiles),
-                    new IndexIncrement(newIndexFiles, deletedIndexFiles));
+                    new CompactIncrement(
+                            compactBefore,
+                            realCompactAfter,
+                            changelogFiles,
+                            newIndexFiles,
+                            deletedIndexFiles));
         }
     }
 }
