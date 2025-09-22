@@ -88,7 +88,7 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
         // Create partitioned format table
         sql(
           s"CREATE TABLE $tableName (id INT, name STRING, value DOUBLE, dept STRING) USING $format " +
-            s"PARTITIONED BY (dept) TBLPROPERTIES ('type'='format-table', 'read.format-table.usePaimon'='true', 'file.compression'='$compression')")
+            s"PARTITIONED BY (dept, value) TBLPROPERTIES ('type'='format-table', 'read.format-table.usePaimon'='true', 'file.compression'='$compression')")
         val paimonTable = paimonCatalog.getTable(Identifier.create("test_db", tableName))
         val path =
           paimonCatalog.getTable(Identifier.create("test_db", tableName)).options().get("path")
@@ -123,8 +123,6 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
         )
 
         // Test column projection with partition filtering
-        val result =
-          sql(s"SELECT  name, value  FROM $tableName WHERE dept = 'Sales' ORDER BY id").collect()
         checkAnswer(
           sql(s"SELECT name, value FROM $tableName WHERE dept = 'Sales' ORDER BY id"),
           Seq(
