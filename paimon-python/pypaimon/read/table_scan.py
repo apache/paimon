@@ -65,16 +65,26 @@ class TableScan:
 
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
-        self.plan_start_row = None
-        self.plan_end_row = None
 
         self.only_read_real_buckets = True if int(
             self.table.options.get('bucket', -1)) == BucketMode.POSTPONE_BUCKET.value else False
 
     def plan(self) -> Plan:
+        file_entries = self.plan_files()
+        if not file_entries:
+            return Plan([])
+        if self.table.is_primary_key_table:
+            splits = self._create_primary_key_splits(file_entries)
+        else:
+            splits = self._create_append_only_splits(file_entries)
+
+        splits = self._apply_push_down_limit(splits)
+        return Plan(splits)
+
+    def plan_files(self) -> List[ManifestEntry]:
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         if not latest_snapshot:
-            return Plan([], [])
+            return []
         manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
 
         deleted_entries = set()
@@ -93,17 +103,9 @@ class TableScan:
             entry for entry in added_entries
             if (tuple(entry.partition.values), entry.bucket, entry.file.file_name) not in deleted_entries
         ]
-
         if self.predicate:
             file_entries = self._filter_by_predicate(file_entries)
-
-        if self.table.is_primary_key_table:
-            splits = self._create_primary_key_splits(file_entries)
-        else:
-            splits = self._create_append_only_splits(file_entries)
-
-        splits = self._apply_push_down_limit(splits)
-        return Plan(splits, self.plan_start_row, self.plan_end_row)
+        return file_entries
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
         if self.table.is_primary_key_table:
@@ -114,7 +116,7 @@ class TableScan:
         self.number_of_para_subtasks = number_of_para_subtasks
         return self
 
-    def _filter_by_shard(self, file_entries: List[ManifestEntry]) -> List[ManifestEntry]:
+    def _filter_by_shard(self, splits: List[Split]) -> List[Split]:
         """
         Filter file entries based on shard configuration for distributed data reading.
         Args:
@@ -122,13 +124,10 @@ class TableScan:
         Returns:
             Filtered list of file entries that the current shard needs to process
         """
-        # Sort by file creation time to ensure consistent sharding
-        file_entries.sort(key=lambda x: x.file.creation_time)
-
         # Calculate total row count across all files
         total_row = 0
-        for entry in file_entries:
-            total_row += entry.file.row_count
+        for split in splits:
+            total_row += split.row_count
 
         # Calculate number of rows this shard should process
         # Last shard handles all remaining rows (handles non-divisible cases)
@@ -140,35 +139,51 @@ class TableScan:
         # Calculate start row and end row position for current shard in all data
         start_row = self.idx_of_this_subtask * (total_row // self.number_of_para_subtasks)
         end_row = start_row + num_row
-        splits_start_row = 0  # starting row position of all the split in all data
+        file_end_row = 0  # end row position of current file in all data
+        filtered_splits = []
+        for split in splits:
+            files = split.files
 
-        entry_end_row = 0  # end row position of current file in all data
-        filtered_entries = []
-        # Iterate through all file entries to find files that overlap with current shard range
-        for entry in file_entries:
-            entry_begin_row = entry_end_row  # Starting row position of current file in all data
-            entry_end_row += entry.file.row_count  # Update to row position after current file
+            filtered_files = []
+            filtered_file_path = []
+            split_row_num = 0
+            split_file_size = 0
+            split_start_row = file_end_row
+            # Iterate through all file entries to find files that overlap with current shard range
+            for file in files:
+                file_begin_row = file_end_row  # Starting row position of current file in all data
+                file_end_row += file.row_count  # Update to row position after current file
 
-            # If current file is completely after shard range, stop iteration
-            if entry_begin_row >= end_row:
-                break
-            # If current file is completely before shard range, skip it
-            if entry_end_row <= start_row:
-                continue
+                # If current file is completely after shard range, stop iteration
+                if file_begin_row >= end_row:
+                    break
+                # If current file is completely before shard range, skip it
+                if file_end_row <= start_row:
+                    continue
 
-            # If shard start position is within current file, record actual start position and relative offset
-            if entry_begin_row <= start_row < entry_end_row:
-                splits_start_row = entry_begin_row
-                self.plan_start_row = start_row - entry_begin_row
+                # If shard start position is within current file, record actual start position and relative offset
+                if file_begin_row <= start_row < file_end_row:
+                    split.split_start_row = start_row - file_begin_row
 
-            # If shard end position is within current file, record relative end position
-            if entry_begin_row < end_row <= entry_end_row:
-                self.plan_end_row = end_row - splits_start_row
-
-            # Add files that overlap with shard range to result
-            filtered_entries.append(entry)
-
-        return filtered_entries
+                # If shard end position is within current file, record relative end position
+                if file_begin_row < end_row <= file_end_row:
+                    split.split_end_row = end_row - split_start_row
+                filtered_files.append(file)
+                filtered_file_path.append(file.file_path)
+                split_row_num = split_row_num + file.row_count
+                split_file_size = split_file_size + file.file_size
+            # If current split is within shard range, add it to filtered splits
+            if filtered_files:
+                split.files = filtered_files
+                split.file_paths = filtered_file_path
+                split.row_count = split_row_num
+                split.file_size = split_file_size
+                if split.split_start_row is None:
+                    split.split_start_row = 0
+                if split.split_end_row is None:
+                    split.split_end_row = split.row_count
+                filtered_splits.append(split)
+        return filtered_splits
 
     def _bucket_filter(self, entry: Optional[ManifestEntry]) -> bool:
         bucket = entry.bucket
@@ -179,7 +194,6 @@ class TableScan:
     def _apply_push_down_limit(self, splits: List[Split]) -> List[Split]:
         if self.limit is None:
             return splits
-
         scanned_row_count = 0
         limited_splits = []
 
@@ -235,7 +249,9 @@ class TableScan:
 
     def _create_append_only_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
         if self.idx_of_this_subtask is not None:
-            file_entries = self._filter_by_shard(file_entries)
+            # Sort by file creation time to ensure consistent sharding
+            file_entries.sort(key=lambda x: x.file.creation_time)
+
         partitioned_split = defaultdict(list)
         for entry in file_entries:
             partitioned_split[(tuple(entry.partition.values), entry.bucket)].append(entry)
@@ -253,11 +269,11 @@ class TableScan:
             packed_files: List[List[DataFileMeta]] = self._pack_for_ordered(data_files, weight_func,
                                                                             self.target_split_size)
             splits += self._build_split_from_pack(packed_files, file_entries, False)
+        if self.idx_of_this_subtask is not None:
+            splits = self._filter_by_shard(splits)
         return splits
 
     def _create_primary_key_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
-        if self.idx_of_this_subtask is not None:
-            file_entries = self._filter_by_shard(file_entries)
         partitioned_split = defaultdict(list)
         for entry in file_entries:
             partitioned_split[(tuple(entry.partition.values), entry.bucket)].append(entry)

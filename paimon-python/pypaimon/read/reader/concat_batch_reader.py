@@ -49,3 +49,29 @@ class ConcatBatchReader(RecordBatchReader):
             self.current_reader.close()
             self.current_reader = None
         self.queue.clear()
+
+
+class ShardBatchReader(ConcatBatchReader):
+
+    def __init__(self, readers, split_start_row, split_end_row):
+        super().__init__(readers)
+        self.split_start_row = split_start_row
+        self.split_end_row = split_end_row
+        self.cur_end = 0
+
+    def read_arrow_batch(self) -> Optional[RecordBatch]:
+        for batch in iter(super().read_arrow_batch, None):
+            if self.split_start_row is not None or self.split_end_row is not None:
+                cur_begin = self.cur_end  # begin idx of current batch based on the split
+                self.cur_end += batch.num_rows
+                # shard the first batch and the last batch
+                if cur_begin <= self.split_start_row < self.cur_end:
+                    return batch.slice(self.split_start_row - cur_begin,
+                                       min(self.split_end_row, self.cur_end) - self.split_start_row)
+                elif cur_begin < self.split_end_row <= self.cur_end:
+                    return batch.slice(0, self.split_end_row - cur_begin)
+                elif self.split_start_row <= cur_begin < self.cur_end <= self.split_end_row:
+                    return batch
+            else:
+                return batch
+        return None

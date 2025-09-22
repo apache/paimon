@@ -32,16 +32,30 @@ class Split:
     _file_paths: List[str]
     _row_count: int
     _file_size: int
+    split_start_row: int = None
+    split_end_row: int = None
     raw_convertible: bool = False
 
     @property
     def row_count(self) -> int:
         return self._row_count
 
+    @row_count.setter
+    def row_count(self, value: int) -> None:
+        self._row_count = value
+
     @property
     def file_size(self) -> int:
         return self._file_size
 
+    @file_size.setter
+    def file_size(self, value: int) -> None:
+        self._file_size = value
+
     @property
     def file_paths(self) -> List[str]:
         return self._file_paths
+
+    @file_paths.setter
+    def file_paths(self, value: List[str]) -> None:
+        self._file_paths = value

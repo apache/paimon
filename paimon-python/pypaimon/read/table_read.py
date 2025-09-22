@@ -22,7 +22,6 @@ import pyarrow
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.plan import Plan
 from pypaimon.read.push_down_utils import extract_predicate_to_list
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
@@ -64,9 +63,6 @@ class TableRead:
         batch_reader = self.to_arrow_batch_reader(splits)
         arrow_table = batch_reader.read_all()
         return arrow_table
-
-    def to_arrow_slice(self, plan: Plan) -> Optional[pyarrow.Table]:
-        return self.to_arrow(plan.splits()).slice(plan.plan_start_row(), plan.plan_end_row() - plan.plan_start_row())
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema) -> Iterator[pyarrow.RecordBatch]:
         chunk_size = 65536
