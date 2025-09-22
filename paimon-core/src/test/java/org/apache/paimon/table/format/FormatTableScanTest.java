@@ -93,7 +93,7 @@ class FormatTableScanTest {
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType);
+                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
 
         assertThat(result.getLeft()).isEqualTo(tableLocation);
         assertThat(result.getRight()).isEqualTo(0);
@@ -161,7 +161,7 @@ class FormatTableScanTest {
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, null, partitionType);
+                        tableLocation, partitionKeys, null, partitionType, false);
 
         assertThat(result.getLeft()).isEqualTo(tableLocation);
         assertThat(result.getRight()).isEqualTo(2);
@@ -186,7 +186,7 @@ class FormatTableScanTest {
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType);
+                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
 
         // Should optimize to specific partition path
         assertThat(result.getLeft().toString()).isEqualTo(tableLocation + "year=2023/month=12");
@@ -217,7 +217,7 @@ class FormatTableScanTest {
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType);
+                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
 
         // Should optimize to specific partition path for first key
         assertThat(result.getLeft().toString()).isEqualTo(tableLocation + "year=2023");
@@ -249,7 +249,7 @@ class FormatTableScanTest {
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType);
+                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
 
         // Should not optimize, keep original path and level
         assertThat(result.getLeft()).isEqualTo(tableLocation);
@@ -274,7 +274,7 @@ class FormatTableScanTest {
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType);
+                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
 
         // Should not optimize, keep original path and level
         assertThat(result.getLeft()).isEqualTo(tableLocation);
@@ -303,7 +303,7 @@ class FormatTableScanTest {
         Path tableLocation = new Path("/test/table");
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType);
+                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
 
         // Should optimize to year and month path (leading consecutive equality)
         assertThat(result.getLeft().toString()).isEqualTo("/test/table/year=2023/month=12");
@@ -332,7 +332,7 @@ class FormatTableScanTest {
         Path tableLocation = new Path("/test/table");
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType);
+                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
 
         // Should optimize only to year path (first equality, then stop at non-equality)
         assertThat(result.getLeft().toString()).isEqualTo("/test/table/year=2023");
@@ -361,7 +361,7 @@ class FormatTableScanTest {
         Path tableLocation = new Path("/test/table");
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType);
+                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
 
         // Should not optimize because first partition key is not equality
         assertThat(result.getLeft()).isEqualTo(tableLocation);
@@ -390,7 +390,7 @@ class FormatTableScanTest {
         Path tableLocation = new Path("/test/table");
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType);
+                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
 
         // Should optimize to full partition path and no further filtering needed
         assertThat(result.getLeft().toString()).isEqualTo("/test/table/year=2023/month=12/day=25");

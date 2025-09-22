@@ -21,8 +21,8 @@ package org.apache.paimon.options;
 /** Options for format table. */
 public class FormatTableOptions {
 
-    public static final ConfigOption<Boolean> PARTITION_ONLY_VALUE_IN_PATH =
-            ConfigOptions.key("format-table.partition-only-value-in-path")
+    public static final ConfigOption<Boolean> READ_ENABLE_PARTITION_ONLY_VALUE_IN_PATH =
+            ConfigOptions.key("format-table.read.enable.partition-only-value-in-path")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Format table file path only contain partition value.");

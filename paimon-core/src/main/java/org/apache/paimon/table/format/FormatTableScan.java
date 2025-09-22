@@ -88,7 +88,11 @@ public class FormatTableScan implements InnerTableScan {
     public List<PartitionEntry> listPartitionEntries() {
         List<Pair<LinkedHashMap<String, String>, Path>> partition2Paths =
                 searchPartSpecAndPaths(
-                        table.fileIO(), new Path(table.location()), table.partitionKeys().size());
+                        table.fileIO(),
+                        new Path(table.location()),
+                        table.partitionKeys().size(),
+                        table.partitionKeys(),
+                        isOnlyPartitionValueInPath(table.options()));
         List<PartitionEntry> partitionEntries = new ArrayList<>();
         for (Pair<LinkedHashMap<String, String>, Path> partition2Path : partition2Paths) {
             BinaryRow row = toPartitionRow(partition2Path.getKey());
@@ -111,6 +115,11 @@ public class FormatTableScan implements InnerTableScan {
         GenericRow row =
                 convertSpecToInternalRow(partitionSpec, partitionType, table.defaultPartName());
         return new InternalRowSerializer(partitionType).toBinaryRow(row);
+    }
+
+    public static boolean isOnlyPartitionValueInPath(Map<String, String> options) {
+        return (new Options(options))
+                .get(FormatTableOptions.READ_ENABLE_PARTITION_ONLY_VALUE_IN_PATH);
     }
 
     private class FormatTableScanPlan implements Plan {
@@ -146,17 +155,17 @@ public class FormatTableScan implements InnerTableScan {
     }
 
     private List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
+        boolean isOnlyPartitionValueInPath = isOnlyPartitionValueInPath(table.options());
         if (partitionFilter instanceof MultiplePartitionPredicate) {
             // generate partitions directly
             Set<BinaryRow> partitions = ((MultiplePartitionPredicate) partitionFilter).partitions();
-            Options options = new Options(table.options());
             return generatePartitions(
                     table.partitionKeys(),
                     table.partitionType(),
                     table.defaultPartName(),
                     new Path(table.location()),
                     partitions,
-                    options.get(FormatTableOptions.PARTITION_ONLY_VALUE_IN_PATH));
+                    isOnlyPartitionValueInPath);
         } else {
             // search paths
             Pair<Path, Integer> scanPathAndLevel =
@@ -164,10 +173,16 @@ public class FormatTableScan implements InnerTableScan {
                             new Path(table.location()),
                             table.partitionKeys(),
                             partitionFilter,
-                            table.partitionType());
+                            table.partitionType(),
+                            isOnlyPartitionValueInPath);
             Path scanPath = scanPathAndLevel.getLeft();
             int level = scanPathAndLevel.getRight();
-            return searchPartSpecAndPaths(table.fileIO(), scanPath, level);
+            return searchPartSpecAndPaths(
+                    table.fileIO(),
+                    scanPath,
+                    level,
+                    table.partitionKeys(),
+                    isOnlyPartitionValueInPath);
         }
     }
 
@@ -201,7 +216,8 @@ public class FormatTableScan implements InnerTableScan {
             Path tableLocation,
             List<String> partitionKeys,
             PartitionPredicate partitionFilter,
-            RowType partitionType) {
+            RowType partitionType,
+            boolean onlyValueInPath) {
         Path scanPath = tableLocation;
         int level = partitionKeys.size();
         if (!partitionKeys.isEmpty()) {
@@ -214,7 +230,8 @@ public class FormatTableScan implements InnerTableScan {
                 if (!equalityPrefix.isEmpty()) {
                     // Use optimized scan for specific partition path
                     String partitionPath =
-                            PartitionPathUtils.generatePartitionPath(equalityPrefix, partitionType);
+                            PartitionPathUtils.generatePartitionPath(
+                                    equalityPrefix, partitionType, onlyValueInPath);
                     scanPath = new Path(tableLocation, partitionPath);
                     level = partitionKeys.size() - equalityPrefix.size();
                 }

@@ -581,6 +581,61 @@ public abstract class CatalogTestBase {
                 .isInstanceOf(RuntimeException.class);
     }
 
+    @Test
+    public void testFormatTableOnlyPartitionValueRead() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        Random random = new Random();
+        String dbName = "test_db";
+        catalog.createDatabase(dbName, true);
+        int partitionValue = 10;
+        HadoopCompressionType compressionType = HadoopCompressionType.GZIP;
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.column("f2", DataTypes.INT());
+        schemaBuilder.column("dt", DataTypes.INT());
+        schemaBuilder.partitionKeys("dt");
+        schemaBuilder.option("type", "format-table");
+        schemaBuilder.option("file.compression", compressionType.value());
+        schemaBuilder.option("format-table.read.enable.partition-only-value-in-path", "true");
+        String[] formats = {"csv", "parquet", "json"};
+        for (String format : formats) {
+            Identifier identifier = Identifier.create(dbName, "partition_table_" + format);
+            schemaBuilder.option("file.format", format);
+            catalog.createTable(identifier, schemaBuilder.build(), true);
+            FormatTable table = (FormatTable) catalog.getTable(identifier);
+            int size = 5;
+            InternalRow[] datas = new InternalRow[size];
+            for (int j = 0; j < size; j++) {
+                datas[j] = GenericRow.of(random.nextInt(), random.nextInt(), partitionValue);
+            }
+            FormatWriterFactory factory =
+                    (buildFileFormatFactory(format)
+                                    .create(
+                                            new FileFormatFactory.FormatContext(
+                                                    new Options(), 1024, 1024)))
+                            .createWriterFactory(table.rowType());
+            Map<String, String> partitionSpec = null;
+            Path partitionPath = new Path(String.format("%s/%s", table.location(), partitionValue));
+            DataFilePathFactory dataFilePathFactory =
+                    new DataFilePathFactory(
+                            partitionPath,
+                            format,
+                            "data",
+                            "change",
+                            true,
+                            compressionType.value(),
+                            null);
+            write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
+            partitionSpec = new HashMap<>();
+            partitionSpec.put("dt", "" + partitionValue);
+            List<InternalRow> readFilterData = read(table, null, null, partitionSpec, null);
+            assertThat(readFilterData).containsExactlyInAnyOrder(datas);
+            catalog.dropTable(Identifier.create(dbName, format), true);
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testFormatTableRead(boolean partitioned) throws Exception {

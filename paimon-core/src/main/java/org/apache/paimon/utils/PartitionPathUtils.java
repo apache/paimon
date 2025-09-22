@@ -110,12 +110,13 @@ public class PartitionPathUtils {
         return partitions.stream()
                 .map(
                         partition ->
-                                PartitionPathUtils.generatePartitionPath(partition, partitionType))
+                                PartitionPathUtils.generatePartitionPath(
+                                        partition, partitionType, false))
                 .collect(Collectors.toList());
     }
 
     public static String generatePartitionPath(
-            Map<String, String> partitionSpec, RowType partitionType) {
+            Map<String, String> partitionSpec, RowType partitionType, boolean onlyValue) {
         LinkedHashMap<String, String> linkedPartitionSpec = new LinkedHashMap<>();
         List<DataField> fields = partitionType.getFields();
 
@@ -127,7 +128,9 @@ public class PartitionPathUtils {
             }
         }
 
-        return generatePartitionPath(linkedPartitionSpec);
+        return onlyValue
+                ? generatePartitionPathOnlyValue(linkedPartitionSpec)
+                : generatePartitionPath(linkedPartitionSpec);
     }
 
     /**
@@ -251,6 +254,16 @@ public class PartitionPathUtils {
         return fullPartSpec;
     }
 
+    public static LinkedHashMap<String, String> extractPartitionSpecFromPathOnlyValue(
+            Path currPath, List<String> partitionKeys, int partitionNumber) {
+        LinkedHashMap<String, String> fullPartSpec = new LinkedHashMap<>();
+        String[] split = currPath.toString().split(Path.SEPARATOR);
+        for (int i = 0; i < partitionNumber + 1; i++) {
+            fullPartSpec.put(partitionKeys.get(i), split[split.length - 1 - partitionNumber + i]);
+        }
+        return fullPartSpec;
+    }
+
     /**
      * Search all partitions in this path.
      *
@@ -259,7 +272,11 @@ public class PartitionPathUtils {
      * @return all partition specs to its path.
      */
     public static List<Pair<LinkedHashMap<String, String>, Path>> searchPartSpecAndPaths(
-            FileIO fileIO, Path path, int partitionNumber) {
+            FileIO fileIO,
+            Path path,
+            int partitionNumber,
+            List<String> partitionKeys,
+            boolean enablePartitionOnlyValueInPath) {
         FileStatus[] generatedParts = getFileStatusRecurse(path, partitionNumber, fileIO);
         List<Pair<LinkedHashMap<String, String>, Path>> ret = new ArrayList<>();
         for (FileStatus part : generatedParts) {
@@ -267,7 +284,15 @@ public class PartitionPathUtils {
             if (isHiddenFile(part)) {
                 continue;
             }
-            ret.add(Pair.of(extractPartitionSpecFromPath(part.getPath()), part.getPath()));
+            if (enablePartitionOnlyValueInPath) {
+                ret.add(
+                        Pair.of(
+                                extractPartitionSpecFromPathOnlyValue(
+                                        part.getPath(), partitionKeys, partitionNumber),
+                                part.getPath()));
+            } else {
+                ret.add(Pair.of(extractPartitionSpecFromPath(part.getPath()), part.getPath()));
+            }
         }
         return ret;
     }

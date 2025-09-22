@@ -116,7 +116,8 @@ public class PartitionStatisticsReporterTest {
                                     partitionParams.put(
                                             PartitionPathUtils.generatePartitionPath(
                                                     partition.spec(),
-                                                    table.rowType().project(table.partitionKeys())),
+                                                    table.rowType().project(table.partitionKeys()),
+                                                    false),
                                             partition);
                                 });
                     }
