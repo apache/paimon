@@ -432,7 +432,6 @@ SELECT * FROM sys.tables;
 +---------------+--------------------------------+--------------------------------+------------------+------------------+
 |         my_db |                    Orders_orc  |                         table  |            false |            false |
 |         my_db |                        Orders2 |                         table  |             true |             true |
-|         my_db |                        Orders2 |                         table  |             true |             true |
 |         my_db2|                      OrdersSum |                         table  |            false |            false |
 +---------------+--------------------------------+--------------------------------+------------------+
 7 rows in set
@@ -440,6 +439,28 @@ SELECT * FROM sys.tables;
 ```
 
 This table also displays various information from REST Server, such as owner, created_at, updated_at.
+
+### All Partitions Table
+
+Shows all the partitions in all database.
+
+```sql
+SELECT * FROM sys.partitions;
+
+/*
++---------------+--------------------------------+--------------------------------+------------------+
+| database_name |                     table_name |                 partition_name |      recordCount |
++---------------+--------------------------------+--------------------------------+------------------+
+|         my_db |                    Orders_orc  |                          dt=1  |                2 |
+|         my_db |                        Orders2 |                          dt=1  |               51 |
+|         my_db |                        Orders2 |                          dt=1  |              123 |
+|         my_db2|                      OrdersSum |                          dt=1  |           123 23 |
++---------------+--------------------------------+--------------------------------+------------------+
+7 rows in set
+*/
+```
+
+This table also displays various statistics information of partition.
 
 ### ALL Options Table
 

@@ -37,6 +37,7 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.iceberg.IcebergTable;
 import org.apache.paimon.table.lance.LanceTable;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.table.system.AllPartitionsTable;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.AllTablesTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
@@ -64,6 +65,7 @@ import static org.apache.paimon.CoreOptions.PRIMARY_KEY;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.table.system.AllPartitionsTable.ALL_PARTITIONS;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.AllTablesTable.ALL_TABLES;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
@@ -272,6 +274,9 @@ public class CatalogUtils {
             case ALL_TABLES:
                 return AllTablesTable.fromTables(
                         toTableAndSnapshots(catalog, listAllTables(catalog)));
+            case ALL_PARTITIONS:
+                return AllPartitionsTable.fromPartitions(
+                        toAllPartitions(catalog, listAllTables(catalog)));
             case CATALOG_OPTIONS:
                 return new CatalogOptionsTable(Options.fromMap(catalog.options()));
             default:
@@ -311,6 +316,24 @@ public class CatalogUtils {
             tableAndSnapshots.add(Pair.of(table, snapshot));
         }
         return tableAndSnapshots;
+    }
+
+    private static Map<Identifier, List<Partition>> toAllPartitions(
+            Catalog catalog, List<Table> tables) {
+        Map<Identifier, List<Partition>> allPartitions = new HashMap<>();
+        for (Table table : tables) {
+            if (table.partitionKeys().isEmpty()) {
+                continue;
+            }
+
+            Identifier identifier = Identifier.fromString(table.fullName());
+            try {
+                List<Partition> partitions = catalog.listPartitions(identifier);
+                allPartitions.put(identifier, partitions);
+            } catch (Catalog.TableNotExistException ignored) {
+            }
+        }
+        return allPartitions;
     }
 
     private static Table createSystemTable(Identifier identifier, Table originTable)

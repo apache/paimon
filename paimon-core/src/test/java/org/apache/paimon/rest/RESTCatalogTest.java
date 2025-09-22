@@ -2150,7 +2150,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testAllTablesTable() throws Exception {
+    void testAllTablesAndAllPartitionsTable() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "all_tables");
 
         // create table
@@ -2179,18 +2179,21 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         write.close();
         commit.close();
 
-        // query table
+        // query tables
         Table tables = catalog.getTable(Identifier.create("sys", "tables"));
-        ReadBuilder readBuilder = tables.newReadBuilder();
-        List<Split> splits = readBuilder.newScan().plan().splits();
-        TableRead read = readBuilder.newRead();
-        RecordReader<InternalRow> reader = read.createReader(splits);
-        List<InternalRow> result = new ArrayList<>();
-        reader.forEachRemaining(result::add);
-        assertThat(result).hasSize(1);
-        InternalRow row = result.get(0);
+        InternalRow row;
+        {
+            ReadBuilder readBuilder = tables.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            TableRead read = readBuilder.newRead();
+            RecordReader<InternalRow> reader = read.createReader(splits);
+            List<InternalRow> result = new ArrayList<>();
+            reader.forEachRemaining(result::add);
+            assertThat(result).hasSize(1);
+            row = result.get(0);
+        }
 
-        Consumer<InternalRow> check =
+        Consumer<InternalRow> tablesCheck =
                 r -> {
                     assertThat(r.getString(0).toString()).isEqualTo("test_table_db");
                     assertThat(r.getString(1).toString()).isEqualTo("all_tables");
@@ -2206,10 +2209,38 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                     assertThat(r.getLong(11)).isEqualTo(2584);
                     assertThat(r.getLong(12)).isEqualTo(2);
                 };
+        tablesCheck.accept(row);
+
+        // check tables types
+        tablesCheck.accept(new InternalRowSerializer(tables.rowType()).toBinaryRow(row));
+
+        // query partitions
+        Table partitions = catalog.getTable(Identifier.create("sys", "partitions"));
+        List<InternalRow> result = new ArrayList<>();
+        {
+            ReadBuilder readBuilder = partitions.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            TableRead read = readBuilder.newRead();
+            RecordReader<InternalRow> reader = read.createReader(splits);
+            reader.forEachRemaining(result::add);
+            assertThat(result).hasSize(2);
+        }
+
+        Consumer<InternalRow> partitionsCheck =
+                r -> {
+                    assertThat(r.getString(0).toString()).isEqualTo("test_table_db");
+                    assertThat(r.getString(1).toString()).isEqualTo("all_tables");
+                    assertThat(r.getString(2).toString()).isEqualTo("f1=2");
+                    assertThat(r.getLong(3)).isEqualTo(1);
+                    assertThat(r.getLong(4)).isEqualTo(1292);
+                    assertThat(r.getLong(5)).isEqualTo(1);
+                    assertThat(r.getBoolean(7)).isEqualTo(false);
+                };
+        partitionsCheck.accept(result.get(0));
 
         // check types
-        InternalRowSerializer serializer = new InternalRowSerializer(tables.rowType());
-        check.accept(serializer.toBinaryRow(row));
+        partitionsCheck.accept(
+                new InternalRowSerializer(partitions.rowType()).toBinaryRow(result.get(0)));
     }
 
     private TestPagedResponse generateTestPagedResponse(

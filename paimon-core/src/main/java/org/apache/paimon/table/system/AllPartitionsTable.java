@@ -25,11 +25,12 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
@@ -40,7 +41,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProjectedRow;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
@@ -53,81 +53,58 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.paimon.CoreOptions.TYPE;
-import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_CREATED_AT;
-import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_CREATED_BY;
-import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_OWNER;
-import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_UPDATED_AT;
-import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_UPDATED_BY;
+/** This is a system table to display all the database-table-partitions. */
+public class AllPartitionsTable implements ReadonlyTable {
 
-/** This is a system table to display all the database-tables. */
-public class AllTablesTable implements ReadonlyTable {
-
-    public static final String ALL_TABLES = "tables";
+    public static final String ALL_PARTITIONS = "partitions";
 
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
                             new DataField(0, "database_name", DataTypes.STRING()),
                             new DataField(1, "table_name", DataTypes.STRING()),
-                            new DataField(2, "table_type", DataTypes.STRING()),
-                            new DataField(3, "partitioned", DataTypes.BOOLEAN()),
-                            new DataField(4, "primary_key", DataTypes.BOOLEAN()),
-                            new DataField(5, "owner", DataTypes.STRING()),
-                            new DataField(6, "created_at", DataTypes.BIGINT()),
-                            new DataField(7, "created_by", DataTypes.STRING()),
-                            new DataField(8, "updated_at", DataTypes.BIGINT()),
-                            new DataField(9, "updated_by", DataTypes.STRING()),
-                            new DataField(10, "recordCount", DataTypes.BIGINT()),
-                            new DataField(11, "fileSizeInBytes", DataTypes.BIGINT()),
-                            new DataField(12, "fileCount", DataTypes.BIGINT()),
-                            new DataField(13, "lastFileCreationTime", DataTypes.BIGINT())));
+                            new DataField(2, "partition_name", DataTypes.STRING()),
+                            new DataField(3, "recordCount", DataTypes.BIGINT()),
+                            new DataField(4, "fileSizeInBytes", DataTypes.BIGINT()),
+                            new DataField(5, "fileCount", DataTypes.BIGINT()),
+                            new DataField(6, "lastFileCreationTime", DataTypes.BIGINT()),
+                            new DataField(7, "done", DataTypes.BOOLEAN())));
 
     private final List<GenericRow> rows;
 
-    public AllTablesTable(List<GenericRow> rows) {
+    public AllPartitionsTable(List<GenericRow> rows) {
         this.rows = rows;
     }
 
-    public static AllTablesTable fromTables(List<Pair<Table, TableSnapshot>> tables) {
+    public static AllPartitionsTable fromPartitions(
+            Map<Identifier, List<Partition>> allPartitions) {
         List<GenericRow> rows = new ArrayList<>();
-        for (Pair<Table, TableSnapshot> pair : tables) {
-            Table table = pair.getKey();
-            TableSnapshot snapshot = pair.getValue();
-            Identifier identifier = Identifier.fromString(table.fullName());
-            Map<String, String> options = table.options();
-            rows.add(
-                    GenericRow.of(
-                            BinaryString.fromString(identifier.getDatabaseName()),
-                            BinaryString.fromString(identifier.getObjectName()),
-                            BinaryString.fromString(
-                                    options.getOrDefault(
-                                            TYPE.key(), TYPE.defaultValue().toString())),
-                            !table.partitionKeys().isEmpty(),
-                            !table.primaryKeys().isEmpty(),
-                            BinaryString.fromString(options.get(FIELD_OWNER)),
-                            parseLong(options.get(FIELD_CREATED_AT)),
-                            BinaryString.fromString(options.get(FIELD_CREATED_BY)),
-                            parseLong(options.get(FIELD_UPDATED_AT)),
-                            BinaryString.fromString(options.get(FIELD_UPDATED_BY)),
-                            snapshot == null ? null : snapshot.recordCount(),
-                            snapshot == null ? null : snapshot.fileSizeInBytes(),
-                            snapshot == null ? null : snapshot.fileCount(),
-                            snapshot == null ? null : snapshot.lastFileCreationTime()));
-        }
-        return new AllTablesTable(rows);
-    }
-
-    private static Long parseLong(String s) {
-        if (s == null) {
-            return null;
-        }
-        return Long.parseLong(s);
+        allPartitions.forEach(
+                (identifier, partitions) ->
+                        partitions.forEach(
+                                partition -> {
+                                    Map<String, String> spec = partition.spec();
+                                    String partitionName = PartitionUtils.buildPartitionName(spec);
+                                    GenericRow row =
+                                            GenericRow.of(
+                                                    BinaryString.fromString(
+                                                            identifier.getDatabaseName()),
+                                                    BinaryString.fromString(
+                                                            identifier.getObjectName()),
+                                                    BinaryString.fromString(partitionName),
+                                                    partition.recordCount(),
+                                                    partition.fileSizeInBytes(),
+                                                    partition.fileCount(),
+                                                    partition.lastFileCreationTime(),
+                                                    partition.done());
+                                    rows.add(row);
+                                }));
+        return new AllPartitionsTable(rows);
     }
 
     @Override
     public String name() {
-        return ALL_TABLES;
+        return ALL_PARTITIONS;
     }
 
     @Override
@@ -137,7 +114,10 @@ public class AllTablesTable implements ReadonlyTable {
 
     @Override
     public List<String> primaryKeys() {
-        return Arrays.asList(TABLE_TYPE.getField(0).name(), TABLE_TYPE.getField(1).name());
+        return Arrays.asList(
+                TABLE_TYPE.getField(0).name(),
+                TABLE_TYPE.getField(1).name(),
+                TABLE_TYPE.getField(2).name());
     }
 
     @Override
@@ -148,20 +128,20 @@ public class AllTablesTable implements ReadonlyTable {
 
     @Override
     public InnerTableScan newScan() {
-        return new AllTablesScan();
+        return new AllPartitionsScan();
     }
 
     @Override
     public InnerTableRead newRead() {
-        return new AllTablesRead();
+        return new AllPartitionsRead();
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new AllTablesTable(rows);
+        return new AllPartitionsTable(rows);
     }
 
-    private class AllTablesScan extends ReadOnceTableScan {
+    private class AllPartitionsScan extends ReadOnceTableScan {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
@@ -170,17 +150,17 @@ public class AllTablesTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new AllTablesSplit(rows));
+            return () -> Collections.singletonList(new AllPartitionsSplit(rows));
         }
     }
 
-    private static class AllTablesSplit extends SingletonSplit {
+    private static class AllPartitionsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
         private final List<GenericRow> rows;
 
-        private AllTablesSplit(List<GenericRow> rows) {
+        private AllPartitionsSplit(List<GenericRow> rows) {
             this.rows = rows;
         }
 
@@ -192,7 +172,7 @@ public class AllTablesTable implements ReadonlyTable {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            AllTablesSplit that = (AllTablesSplit) o;
+            AllPartitionsSplit that = (AllPartitionsSplit) o;
             return Objects.equals(rows, that.rows);
         }
 
@@ -202,7 +182,7 @@ public class AllTablesTable implements ReadonlyTable {
         }
     }
 
-    private static class AllTablesRead implements InnerTableRead {
+    private static class AllPartitionsRead implements InnerTableRead {
 
         private RowType readType;
 
@@ -224,10 +204,10 @@ public class AllTablesTable implements ReadonlyTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) {
-            if (!(split instanceof AllTablesSplit)) {
+            if (!(split instanceof AllPartitionsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            List<? extends InternalRow> rows = ((AllTablesSplit) split).rows;
+            List<? extends InternalRow> rows = ((AllPartitionsSplit) split).rows;
             Iterator<? extends InternalRow> iterator = rows.iterator();
             if (readType != null) {
                 iterator =
