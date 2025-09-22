@@ -75,6 +75,16 @@ public class PartitionPathUtils {
      * @return An escaped, valid partition name.
      */
     public static String generatePartitionPath(LinkedHashMap<String, String> partitionSpec) {
+        return generatePartitionPathUtil(partitionSpec, false);
+    }
+
+    public static String generatePartitionPathOnlyValue(
+            LinkedHashMap<String, String> partitionSpec) {
+        return generatePartitionPathUtil(partitionSpec, true);
+    }
+
+    private static String generatePartitionPathUtil(
+            LinkedHashMap<String, String> partitionSpec, boolean onlyValue) {
         if (partitionSpec.isEmpty()) {
             return "";
         }
@@ -84,8 +94,10 @@ public class PartitionPathUtils {
             if (i > 0) {
                 suffixBuf.append(Path.SEPARATOR);
             }
-            suffixBuf.append(escapePathName(e.getKey()));
-            suffixBuf.append('=');
+            if (!onlyValue) {
+                suffixBuf.append(escapePathName(e.getKey()));
+                suffixBuf.append('=');
+            }
             suffixBuf.append(escapePathName(e.getValue()));
             i++;
         }

@@ -25,6 +25,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.FormatTableOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.DefaultPartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
@@ -147,12 +149,14 @@ public class FormatTableScan implements InnerTableScan {
         if (partitionFilter instanceof MultiplePartitionPredicate) {
             // generate partitions directly
             Set<BinaryRow> partitions = ((MultiplePartitionPredicate) partitionFilter).partitions();
+            Options options = new Options(table.options());
             return generatePartitions(
                     table.partitionKeys(),
                     table.partitionType(),
                     table.defaultPartName(),
                     new Path(table.location()),
-                    partitions);
+                    partitions,
+                    options.get(FormatTableOptions.partition_only_value_in_path));
         } else {
             // search paths
             Pair<Path, Integer> scanPathAndLevel =
@@ -172,7 +176,8 @@ public class FormatTableScan implements InnerTableScan {
             RowType partitionType,
             String defaultPartName,
             Path tablePath,
-            Set<BinaryRow> partitions) {
+            Set<BinaryRow> partitions,
+            boolean onlyValueInPath) {
         InternalRowPartitionComputer partitionComputer =
                 new InternalRowPartitionComputer(
                         defaultPartName,
@@ -182,7 +187,11 @@ public class FormatTableScan implements InnerTableScan {
         List<Pair<LinkedHashMap<String, String>, Path>> result = new ArrayList<>();
         for (BinaryRow part : partitions) {
             LinkedHashMap<String, String> partSpec = partitionComputer.generatePartValues(part);
-            String path = PartitionPathUtils.generatePartitionPath(partSpec);
+
+            String path =
+                    onlyValueInPath
+                            ? PartitionPathUtils.generatePartitionPathOnlyValue(partSpec)
+                            : PartitionPathUtils.generatePartitionPath(partSpec);
             result.add(Pair.of(partSpec, new Path(tablePath, path)));
         }
         return result;

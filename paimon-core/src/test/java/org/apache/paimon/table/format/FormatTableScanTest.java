@@ -117,10 +117,36 @@ class FormatTableScanTest {
                         partitionType,
                         "",
                         tableLocation,
-                        Collections.singleton(partition));
+                        Collections.singleton(partition),
+                        false);
         assertThat(result.size()).isEqualTo(1);
         assertThat(result.get(0).getLeft().toString()).isEqualTo("{year=2023, month=2}");
         assertThat(result.get(0).getRight().toString()).isEqualTo("/test/table/year=2023/month=2");
+    }
+
+    @Test
+    void testGeneratePartitionsOnlyValue() {
+        Path tableLocation = new Path("/test/table");
+        List<String> partitionKeys = Arrays.asList("year", "month");
+        RowType partitionType =
+                RowType.builder()
+                        .field("year", DataTypes.INT())
+                        .field("month", DataTypes.INT())
+                        .build();
+
+        BinaryRow partition =
+                new InternalRowSerializer(partitionType).toBinaryRow(GenericRow.of(2023, 2));
+        List<Pair<LinkedHashMap<String, String>, Path>> result =
+                FormatTableScan.generatePartitions(
+                        partitionKeys,
+                        partitionType,
+                        "",
+                        tableLocation,
+                        Collections.singleton(partition),
+                        true);
+        assertThat(result.size()).isEqualTo(1);
+        assertThat(result.get(0).getLeft().toString()).isEqualTo("{year=2023, month=2}");
+        assertThat(result.get(0).getRight().toString()).isEqualTo("/test/table/2023/2");
     }
 
     @Test
