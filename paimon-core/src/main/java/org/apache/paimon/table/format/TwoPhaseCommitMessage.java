@@ -21,7 +21,7 @@ package org.apache.paimon.table.format;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.table.sink.CommitMessage;
 
-import org.jetbrains.annotations.Nullable;
+import javax.annotation.Nullable;
 
 /** {@link CommitMessage} implementation for format table. */
 public class TwoPhaseCommitMessage implements CommitMessage {
