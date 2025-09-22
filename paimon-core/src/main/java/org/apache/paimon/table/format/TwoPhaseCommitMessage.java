@@ -19,12 +19,18 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.table.sink.CommitMessage;
 
 import javax.annotation.Nullable;
 
 /** {@link CommitMessage} implementation for format table. */
 public class TwoPhaseCommitMessage implements CommitMessage {
+    private TwoPhaseOutputStream.Committer committer;
+
+    public TwoPhaseCommitMessage(TwoPhaseOutputStream.Committer committer) {
+        this.committer = committer;
+    }
 
     @Override
     public BinaryRow partition() {
@@ -39,5 +45,9 @@ public class TwoPhaseCommitMessage implements CommitMessage {
     @Override
     public @Nullable Integer totalBuckets() {
         return 0;
+    }
+
+    public TwoPhaseOutputStream.Committer getCommitter() {
+        return committer;
     }
 }

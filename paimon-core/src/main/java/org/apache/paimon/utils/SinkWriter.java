@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RollingFileWriter;
@@ -42,6 +43,8 @@ public interface SinkWriter<T> {
     boolean write(T data) throws IOException;
 
     List<DataFileMeta> flush() throws IOException;
+
+    List<TwoPhaseOutputStream.Committer> closeAndGetCommitters() throws IOException;
 
     boolean flushMemory() throws IOException;
 
@@ -92,6 +95,18 @@ public interface SinkWriter<T> {
                 writer = null;
             }
             return flushedFiles;
+        }
+
+        @Override
+        public List<TwoPhaseOutputStream.Committer> closeAndGetCommitters() throws IOException {
+            List<TwoPhaseOutputStream.Committer> commits = new ArrayList<>();
+
+            if (writer != null) {
+                writer.close();
+                commits.addAll(writer.committers());
+                writer = null;
+            }
+            return commits;
         }
 
         @Override
@@ -193,6 +208,33 @@ public interface SinkWriter<T> {
                 writeBuffer.reset();
             }
             return flushedFiles;
+        }
+
+        @Override
+        public List<TwoPhaseOutputStream.Committer> closeAndGetCommitters() throws IOException {
+            List<TwoPhaseOutputStream.Committer> committers = new ArrayList<>();
+            if (writeBuffer != null) {
+                RollingFileWriter<T, DataFileMeta> writer = writerSupplier.get();
+                IOException exception = null;
+                try (RowBuffer.RowBufferIterator iterator = writeBuffer.newIterator()) {
+                    while (iterator.advanceNext()) {
+                        writer.write(fromRow.apply(iterator.getRow()));
+                    }
+                } catch (IOException e) {
+                    exception = e;
+                } finally {
+                    if (exception != null) {
+                        IOUtils.closeQuietly(writer);
+                        // cleanup code that might throw another exception
+                        throw exception;
+                    }
+                    writer.close();
+                }
+                committers.addAll(writer.committers());
+                // reuse writeBuffer
+                writeBuffer.reset();
+            }
+            return committers;
         }
 
         @Override

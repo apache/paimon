@@ -216,6 +216,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     path,
                     serializer::toRow,
                     fileCompression,
+                    false,
                     false);
             this.partitionStatsCollector = new SimpleStatsCollector(partitionType);
             this.sequenceNumber = sequenceNumber;

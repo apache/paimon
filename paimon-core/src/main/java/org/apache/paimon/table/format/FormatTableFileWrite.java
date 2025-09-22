@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
@@ -36,6 +37,7 @@ import org.apache.paimon.utils.RecordWriter;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -123,6 +125,17 @@ public class FormatTableFileWrite implements FileStoreWrite<InternalRow> {
                 options.writeBufferSpillable() || forceBufferSpill,
                 rowType,
                 options.fileCompression());
+    }
+
+    public List<TwoPhaseOutputStream.Committer> closeAndGetCommitters() throws Exception {
+        List<TwoPhaseOutputStream.Committer> committers = new ArrayList<>();
+        for (RecordWriter<InternalRow> writer : writers.values()) {
+            if (writer instanceof FormatTableRecordWriter) {
+                FormatTableRecordWriter formatWriter = (FormatTableRecordWriter) writer;
+                committers.addAll(formatWriter.closeAndGetCommitters());
+            }
+        }
+        return committers;
     }
 
     @Override

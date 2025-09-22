@@ -64,8 +64,16 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             boolean asyncFileWrite,
             boolean statsDenseStore,
             boolean isExternalPath,
-            @Nullable List<String> writeCols) {
-        super(fileIO, context, path, Function.identity(), writeSchema, asyncFileWrite);
+            @Nullable List<String> writeCols,
+            boolean useCommittableOutputStream) {
+        super(
+                fileIO,
+                context,
+                path,
+                Function.identity(),
+                writeSchema,
+                asyncFileWrite,
+                useCommittableOutputStream);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.isExternalPath = isExternalPath;

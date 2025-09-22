@@ -22,6 +22,7 @@ import org.apache.paimon.casting.DefaultValueRow;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
@@ -118,8 +119,25 @@ public class FormatTableWrite implements InnerTableWrite {
 
     @Override
     public List<CommitMessage> prepareCommit() throws Exception {
-        write.prepareCommit(false, 0);
-        return new ArrayList<>();
+        List<TwoPhaseOutputStream.Committer> commiters = write.closeAndGetCommitters();
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        for (TwoPhaseOutputStream.Committer committer : commiters) {
+            TwoPhaseCommitMessage twoPhaseCommitMessage = new TwoPhaseCommitMessage(committer);
+            commitMessages.add(twoPhaseCommitMessage);
+        }
+        return commitMessages;
+    }
+
+    public void commit(List<CommitMessage> commitMessages) throws Exception {
+        for (CommitMessage commitMessage : commitMessages) {
+            if (commitMessage instanceof TwoPhaseCommitMessage) {
+                TwoPhaseCommitMessage twoPhaseCommitMessage = (TwoPhaseCommitMessage) commitMessage;
+                twoPhaseCommitMessage.getCommitter().commit();
+            } else {
+                throw new RuntimeException(
+                        "Unsupported commit message type: " + commitMessage.getClass().getName());
+            }
+        }
     }
 
     @Override

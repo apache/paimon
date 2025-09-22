@@ -18,11 +18,13 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.utils.CloseableIterator;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.List;
 
 /**
  * File writer to accept one record or a branch of records and generate metadata after closing it.
@@ -108,4 +110,8 @@ public interface FileWriter<T, R> extends Closeable {
 
     /** @return the result for this closed file writer. */
     R result() throws IOException;
+
+    default List<TwoPhaseOutputStream.Committer> committers() {
+        throw new UnsupportedOperationException();
+    }
 }
