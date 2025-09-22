@@ -24,7 +24,7 @@ from typing import List, Optional, Tuple
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
-from pypaimon.read.reader.concat_batch_reader import ConcatBatchReader
+from pypaimon.read.reader.concat_batch_reader import ShardBatchReader, ConcatBatchReader
 from pypaimon.read.reader.concat_record_reader import ConcatRecordReader
 from pypaimon.read.reader.data_file_record_reader import DataFileBatchReader
 from pypaimon.read.reader.drop_delete_reader import DropDeleteRecordReader
@@ -249,7 +249,10 @@ class RawFileSplitRead(SplitRead):
 
         if not data_readers:
             return EmptyFileRecordReader()
-        concat_reader = ConcatBatchReader(data_readers)
+        if self.split.files[0].file_start_row is not None:
+            concat_reader = ShardBatchReader(data_readers, self.split)
+        else:
+            concat_reader = ConcatBatchReader(data_readers)
         # if the table is appendonly table, we don't need extra filter, all predicates has pushed down
         if self.table.is_primary_key_table and self.predicate:
             return FilterRecordReader(concat_reader, self.predicate)

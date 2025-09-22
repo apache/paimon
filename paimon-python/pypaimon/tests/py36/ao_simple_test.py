@@ -75,8 +75,8 @@ class AOSimpleTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
-        plan = read_builder.new_scan().with_shard(2, 3).plan()
-        actual = table_sort_by(table_read.to_arrow_slice(plan), 'user_id')
+        splits = read_builder.new_scan().with_shard(2, 3).plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected = pa.Table.from_pydict({
             'user_id': [5, 6, 7, 8, 11, 13, 18],
             'item_id': [1005, 1006, 1007, 1008, 1011, 1013, 1018],
@@ -86,12 +86,12 @@ class AOSimpleTest(RESTBaseTest):
         self.assertEqual(actual, expected)
 
         # Get the three actual tables
-        plan1 = read_builder.new_scan().with_shard(0, 3).plan()
-        actual1 = table_sort_by(table_read.to_arrow_slice(plan1), 'user_id')
-        plan2 = read_builder.new_scan().with_shard(1, 3).plan()
-        actual2 = table_sort_by(table_read.to_arrow_slice(plan2), 'user_id')
-        plan3 = read_builder.new_scan().with_shard(2, 3).plan()
-        actual3 = table_sort_by(table_read.to_arrow_slice(plan3), 'user_id')
+        splits1 = read_builder.new_scan().with_shard(0, 3).plan().splits()
+        actual1 = table_sort_by(table_read.to_arrow(splits1), 'user_id')
+        splits2 = read_builder.new_scan().with_shard(1, 3).plan().splits()
+        actual2 = table_sort_by(table_read.to_arrow(splits2), 'user_id')
+        splits3 = read_builder.new_scan().with_shard(2, 3).plan().splits()
+        actual3 = table_sort_by(table_read.to_arrow(splits3), 'user_id')
 
         # Concatenate the three tables
         actual = table_sort_by(pa.concat_tables([actual1, actual2, actual3]), 'user_id')
@@ -135,8 +135,8 @@ class AOSimpleTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
-        plan = read_builder.new_scan().with_shard(0, 3).plan()
-        actual = table_sort_by(table_read.to_arrow_slice(plan), 'user_id')
+        splits = read_builder.new_scan().with_shard(0, 3).plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected = pa.Table.from_pydict({
             'user_id': [1, 2, 3, 5, 8, 12],
             'item_id': [1001, 1002, 1003, 1005, 1008, 1012],
@@ -146,12 +146,12 @@ class AOSimpleTest(RESTBaseTest):
         self.assertEqual(actual, expected)
 
         # Get the three actual tables
-        plan1 = read_builder.new_scan().with_shard(0, 3).plan()
-        actual1 = table_sort_by(table_read.to_arrow_slice(plan1), 'user_id')
-        plan2 = read_builder.new_scan().with_shard(1, 3).plan()
-        actual2 = table_sort_by(table_read.to_arrow_slice(plan2), 'user_id')
-        plan3 = read_builder.new_scan().with_shard(2, 3).plan()
-        actual3 = table_sort_by(table_read.to_arrow_slice(plan3), 'user_id')
+        splits1 = read_builder.new_scan().with_shard(0, 3).plan().splits()
+        actual1 = table_sort_by(table_read.to_arrow(splits1), 'user_id')
+        splits2 = read_builder.new_scan().with_shard(1, 3).plan().splits()
+        actual2 = table_sort_by(table_read.to_arrow(splits2), 'user_id')
+        splits3 = read_builder.new_scan().with_shard(2, 3).plan().splits()
+        actual3 = table_sort_by(table_read.to_arrow(splits3), 'user_id')
 
         # Concatenate the three tables
         actual = table_sort_by(pa.concat_tables([actual1, actual2, actual3]), 'user_id')
@@ -184,8 +184,8 @@ class AOSimpleTest(RESTBaseTest):
         table_read = read_builder.new_read()
 
         # Test first shard (0, 2) - should get first 3 rows
-        plan = read_builder.new_scan().with_shard(0, 2).plan()
-        actual = table_sort_by(table_read.to_arrow_slice(plan), 'user_id')
+        splits = read_builder.new_scan().with_shard(0, 2).plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected = pa.Table.from_pydict({
             'user_id': [1, 2, 3],
             'item_id': [1001, 1002, 1003],
@@ -195,8 +195,8 @@ class AOSimpleTest(RESTBaseTest):
         self.assertEqual(actual, expected)
 
         # Test second shard (1, 2) - should get last 3 rows
-        plan = read_builder.new_scan().with_shard(1, 2).plan()
-        actual = table_sort_by(table_read.to_arrow_slice(plan), 'user_id')
+        splits = read_builder.new_scan().with_shard(1, 2).plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected = pa.Table.from_pydict({
             'user_id': [4, 5, 6],
             'item_id': [1004, 1005, 1006],
@@ -231,8 +231,8 @@ class AOSimpleTest(RESTBaseTest):
         table_read = read_builder.new_read()
 
         # Test sharding into 3 parts: 2, 2, 3 rows
-        plan1 = read_builder.new_scan().with_shard(0, 3).plan()
-        actual1 = table_sort_by(table_read.to_arrow_slice(plan1), 'user_id')
+        splits1 = read_builder.new_scan().with_shard(0, 3).plan().splits()
+        actual1 = table_sort_by(table_read.to_arrow(splits1), 'user_id')
         expected1 = pa.Table.from_pydict({
             'user_id': [1, 2],
             'item_id': [1001, 1002],
@@ -241,8 +241,8 @@ class AOSimpleTest(RESTBaseTest):
         }, schema=self.pa_schema)
         self.assertEqual(actual1, expected1)
 
-        plan2 = read_builder.new_scan().with_shard(1, 3).plan()
-        actual2 = table_sort_by(table_read.to_arrow_slice(plan2), 'user_id')
+        splits2 = read_builder.new_scan().with_shard(1, 3).plan().splits()
+        actual2 = table_sort_by(table_read.to_arrow(splits2), 'user_id')
         expected2 = pa.Table.from_pydict({
             'user_id': [3, 4],
             'item_id': [1003, 1004],
@@ -251,8 +251,8 @@ class AOSimpleTest(RESTBaseTest):
         }, schema=self.pa_schema)
         self.assertEqual(actual2, expected2)
 
-        plan3 = read_builder.new_scan().with_shard(2, 3).plan()
-        actual3 = table_sort_by(table_read.to_arrow_slice(plan3), 'user_id')
+        splits3 = read_builder.new_scan().with_shard(2, 3).plan().splits()
+        actual3 = table_sort_by(table_read.to_arrow(splits3), 'user_id')
         expected3 = pa.Table.from_pydict({
             'user_id': [5, 6, 7],
             'item_id': [1005, 1006, 1007],
@@ -287,8 +287,8 @@ class AOSimpleTest(RESTBaseTest):
 
         # Test with 6 shards (one row per shard)
         for i in range(6):
-            plan = read_builder.new_scan().with_shard(i, 6).plan()
-            actual = table_read.to_arrow_slice(plan)
+            splits = read_builder.new_scan().with_shard(i, 6).plan().splits()
+            actual = table_read.to_arrow(splits)
             self.assertEqual(len(actual), 1)
             self.assertEqual(actual['user_id'][0].as_py(), i + 1)
 
@@ -317,16 +317,16 @@ class AOSimpleTest(RESTBaseTest):
         table_read = read_builder.new_read()
 
         # Test first shard (0, 4) - should get 1 row (5//4 = 1)
-        plan = read_builder.new_scan().with_shard(0, 4).plan()
-        actual = table_read.to_arrow_slice(plan)
+        splits = read_builder.new_scan().with_shard(0, 4).plan().splits()
+        actual = table_read.to_arrow(splits)
         self.assertEqual(len(actual), 1)
 
         # Test middle shard (1, 4) - should get 1 row
-        plan = read_builder.new_scan().with_shard(1, 4).plan()
-        actual = table_read.to_arrow_slice(plan)
+        splits = read_builder.new_scan().with_shard(1, 4).plan().splits()
+        actual = table_read.to_arrow(splits)
         self.assertEqual(len(actual), 1)
 
         # Test last shard (3, 4) - should get 2 rows (remainder goes to last shard)
-        plan = read_builder.new_scan().with_shard(3, 4).plan()
-        actual = table_read.to_arrow_slice(plan)
+        splits = read_builder.new_scan().with_shard(3, 4).plan().splits()
+        actual = table_read.to_arrow(splits)
         self.assertEqual(len(actual), 2)

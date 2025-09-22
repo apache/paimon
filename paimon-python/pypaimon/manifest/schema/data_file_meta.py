@@ -50,6 +50,8 @@ class DataFileMeta:
 
     # not a schema field, just for internal usage
     file_path: str = None
+    file_start_row: int = None
+    file_end_row: int = None
 
     def set_file_path(self, table_path: Path, partition: GenericRow, bucket: int):
         path_builder = table_path

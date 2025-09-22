@@ -49,3 +49,41 @@ class ConcatBatchReader(RecordBatchReader):
             self.current_reader.close()
             self.current_reader = None
         self.queue.clear()
+
+
+class ShardBatchReader(ConcatBatchReader):
+
+    def __init__(self, readers, split):
+        super().__init__(readers)
+        self.split = split
+        self.file_idx = 0
+        self.file = None
+        self.file_start_row = 0
+        self.file_end_row = 0
+        self.cur_row = 0
+
+    def read_arrow_batch(self) -> Optional[RecordBatch]:
+        batch = super().read_arrow_batch()
+        if batch is None:
+            return None
+        # get next file according to the reader in the queue
+        if len(self.queue) + self.file_idx < len(self.split.files):
+            self.file = self.split.files[self.file_idx]
+            self.file_start_row = self.file.file_start_row
+            self.file_end_row = self.file.file_end_row
+            self.cur_row = 0
+            self.file_idx += 1
+
+        if self.file_start_row is not None or self.file_end_row is not None:
+            batch_begin_row = self.cur_row
+            self.cur_row = self.cur_row + batch.num_rows
+            # shard the first batch and the last batch in the file
+            if batch_begin_row <= self.file_start_row < self.cur_row:
+                return batch.slice(self.file_start_row - batch_begin_row,
+                                   min(self.cur_row, self.file_end_row) - self.file_start_row)
+            elif batch_begin_row < self.file_end_row <= self.cur_row:
+                return batch.slice(0, self.file_end_row - batch_begin_row)
+            elif self.file_start_row <= batch_begin_row < self.cur_row <= self.file_end_row:
+                return batch
+        else:
+            return batch
