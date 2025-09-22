@@ -64,10 +64,10 @@ public class AllPartitionsTable implements ReadonlyTable {
                             new DataField(0, "database_name", DataTypes.STRING()),
                             new DataField(1, "table_name", DataTypes.STRING()),
                             new DataField(2, "partition_name", DataTypes.STRING()),
-                            new DataField(3, "recordCount", DataTypes.BIGINT()),
-                            new DataField(4, "fileSizeInBytes", DataTypes.BIGINT()),
-                            new DataField(5, "fileCount", DataTypes.BIGINT()),
-                            new DataField(6, "lastFileCreationTime", DataTypes.BIGINT()),
+                            new DataField(3, "record_count", DataTypes.BIGINT()),
+                            new DataField(4, "file_size_in_bytes", DataTypes.BIGINT()),
+                            new DataField(5, "file_count", DataTypes.BIGINT()),
+                            new DataField(6, "last_file_creation_time", DataTypes.BIGINT()),
                             new DataField(7, "done", DataTypes.BOOLEAN())));
 
     private final List<GenericRow> rows;

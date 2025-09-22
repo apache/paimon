@@ -78,10 +78,10 @@ public class AllTablesTable implements ReadonlyTable {
                             new DataField(7, "created_by", DataTypes.STRING()),
                             new DataField(8, "updated_at", DataTypes.BIGINT()),
                             new DataField(9, "updated_by", DataTypes.STRING()),
-                            new DataField(10, "recordCount", DataTypes.BIGINT()),
-                            new DataField(11, "fileSizeInBytes", DataTypes.BIGINT()),
-                            new DataField(12, "fileCount", DataTypes.BIGINT()),
-                            new DataField(13, "lastFileCreationTime", DataTypes.BIGINT())));
+                            new DataField(10, "record_count", DataTypes.BIGINT()),
+                            new DataField(11, "file_size_in_bytes", DataTypes.BIGINT()),
+                            new DataField(12, "file_count", DataTypes.BIGINT()),
+                            new DataField(13, "last_file_creation_time", DataTypes.BIGINT())));
 
     private final List<GenericRow> rows;
 
