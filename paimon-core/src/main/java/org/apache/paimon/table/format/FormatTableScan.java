@@ -156,7 +156,7 @@ public class FormatTableScan implements InnerTableScan {
                     table.defaultPartName(),
                     new Path(table.location()),
                     partitions,
-                    options.get(FormatTableOptions.partition_only_value_in_path));
+                    options.get(FormatTableOptions.PARTITION_ONLY_VALUE_IN_PATH));
         } else {
             // search paths
             Pair<Path, Integer> scanPathAndLevel =
