@@ -33,8 +33,14 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
     sql("USE test_db")
   }
 
-  test("FormatTable: write and read non-partitioned table") {
-    for { (format, compression) <- Seq(("csv", "none"), ("json", "none"), ("parquet", "zstd")) } {
+  test("PaimonFormatTableRead: read non-partitioned table") {
+    for {
+      (format, compression) <- Seq(
+        ("csv", "gzip"),
+        ("json", "gzip"),
+        ("parquet", "zstd"),
+        ("orc", "zstd"))
+    } {
       val tableName = s"format_test_$format"
       withTable(tableName) {
         // Create format table using the same pattern as FormatTableTestBase
@@ -81,14 +87,20 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
-  test("FormatTable: write and read partitioned table") {
-    for { (format, compression) <- Seq(("parquet", "zstd")) } {
+  test("PaimonFormatTableRead: read partitioned table") {
+    for {
+      (format, compression) <- Seq(
+        ("csv", "gzip"),
+        ("json", "gzip"),
+        ("parquet", "zstd"),
+        ("orc", "zstd"))
+    } {
       val tableName = s"format_test_partitioned_$format"
       withTable(tableName) {
         // Create partitioned format table
         sql(
           s"CREATE TABLE $tableName (id INT, name STRING, value DOUBLE, dept STRING) USING $format " +
-            s"PARTITIONED BY (dept, value) TBLPROPERTIES ('type'='format-table', 'read.format-table.usePaimon'='true', 'file.compression'='$compression')")
+            s"PARTITIONED BY (dept) TBLPROPERTIES ('type'='format-table', 'read.format-table.usePaimon'='true', 'file.compression'='$compression')")
         val paimonTable = paimonCatalog.getTable(Identifier.create("test_db", tableName))
         val path =
           paimonCatalog.getTable(Identifier.create("test_db", tableName)).options().get("path")

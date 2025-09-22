@@ -21,7 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggregation
-import org.apache.paimon.table.{FileStoreTable, InnerTable, Table}
+import org.apache.paimon.table.{FileStoreTable, Table}
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions
