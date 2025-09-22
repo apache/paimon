@@ -20,30 +20,45 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate.Predicate
-import org.apache.paimon.table.{FormatTable, Table}
-
+import org.apache.paimon.table.FormatTable
+import org.apache.paimon.table.source.Split
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Scan}
 import org.apache.spark.sql.types.StructType
 
-import scala.jdk.CollectionConverters.asScalaBufferConverter
+import scala.collection.JavaConverters._
 
 /** ScanBuilder for FormatTable that supports basic scan operations. */
-class PaimonFormatTableScanBuilder(table: FormatTable) extends PaimonScanBuilder(table) {
+case class PaimonFormatTableScanBuilder(table: FormatTable) extends PaimonScanBuilder(table) {
   override def build(): Scan = {
     PaimonFormatTableScan(table, requiredSchema, pushedPaimonPredicates)
   }
 }
 
-case class PaimonFormatTableScan(table: Table, requiredSchema: StructType, filters: Seq[Predicate])
+case class PaimonFormatTableScan(
+    table: FormatTable,
+    requiredSchema: StructType,
+    filters: Seq[Predicate])
   extends ColumnPruningAndPushDown
   with ScanHelper {
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
-  private val formatDataSplits = readBuilder.newScan().plan().splits().asScala.toArray
+  protected var inputSplits: Array[Split] = _
+
+  def getOriginSplits: Array[Split] = {
+    if (inputSplits == null) {
+      inputSplits = readBuilder
+        .newScan()
+        .plan()
+        .splits()
+        .asScala
+        .toArray
+    }
+    inputSplits
+  }
 
   override def toBatch: Batch = {
-    PaimonBatch(getInputPartitions(formatDataSplits), readBuilder, metadataColumns)
+    PaimonBatch(getInputPartitions(getOriginSplits), readBuilder, metadataColumns)
   }
 
   override def supportedCustomMetrics: Array[CustomMetric] = {
@@ -56,7 +71,7 @@ case class PaimonFormatTableScan(table: Table, requiredSchema: StructType, filte
   }
 
   override def reportDriverMetrics(): Array[CustomTaskMetric] = {
-    val filesCount = formatDataSplits.length
+    val filesCount = getOriginSplits.length
     Array(
       PaimonResultedTableFilesTaskMetric(filesCount)
     )

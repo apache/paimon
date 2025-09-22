@@ -96,5 +96,5 @@ public class SparkConnectorOptions {
             key("read.format-table.usePaimon")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether to read format table use paimon).");
+                    .withDescription("Whether to read format table use paimon.");
 }

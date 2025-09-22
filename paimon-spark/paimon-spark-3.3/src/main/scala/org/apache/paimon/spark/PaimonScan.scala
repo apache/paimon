@@ -19,7 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{Predicate, TopN}
-import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
+import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
@@ -32,7 +32,7 @@ import org.apache.spark.sql.types.StructType
 import scala.collection.JavaConverters._
 
 case class PaimonScan(
-    table: InnerTable,
+    table: Table,
     requiredSchema: StructType,
     filters: Seq[Predicate],
     reservedFilters: Seq[Filter],

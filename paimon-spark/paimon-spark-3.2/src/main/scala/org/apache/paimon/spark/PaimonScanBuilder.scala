@@ -19,14 +19,14 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate}
-import org.apache.paimon.table.InnerTable
+import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.connector.read.SupportsPushDownFilters
 import org.apache.spark.sql.sources.Filter
 
 import scala.collection.mutable
 
-class PaimonScanBuilder(table: InnerTable)
+class PaimonScanBuilder(table: Table)
   extends PaimonBaseScanBuilder(table)
   with SupportsPushDownFilters {
 

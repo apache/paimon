@@ -19,7 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{Predicate, TopN}
-import org.apache.paimon.table.{InnerTable, Table}
+import org.apache.paimon.table.Table
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownRequiredColumns}
