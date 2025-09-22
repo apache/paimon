@@ -198,8 +198,8 @@ public class TypeUtilsTest {
 
     @Test
     public void testFloatCastFromString() {
-        String[] values = {"123.456", "0.00042", "1.00001"};
-        Float[] expected = {123.456f, 0.00042f, 1.00001f};
+        String[] values = {"123.456", "0.00042", "1.00001", "175.26562", "0.00046", "6.1042607E-4"};
+        Float[] expected = {123.456f, 0.00042f, 1.00001f, 175.26562f, 0.00046f, 0.00061042607f};
         for (int i = 0; i < values.length; i++) {
             Object result = TypeUtils.castFromCdcValueString(values[i], DataTypes.FLOAT());
             assertThat(result).isEqualTo(expected[i]);
