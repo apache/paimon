@@ -141,6 +141,7 @@ public class RESTApi {
 
     public static final String DATABASE_NAME_PATTERN = "databaseNamePattern";
     public static final String TABLE_NAME_PATTERN = "tableNamePattern";
+    public static final String TABLE_TYPE = "tableType";
     public static final String VIEW_NAME_PATTERN = "viewNamePattern";
     public static final String FUNCTION_NAME_PATTERN = "functionNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
@@ -354,14 +355,16 @@ public class RESTApi {
             String databaseName,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String tableNamePattern) {
+            @Nullable String tableNamePattern,
+            @Nullable String tableType) {
         ListTablesResponse response =
                 client.get(
                         resourcePaths.tables(databaseName),
                         buildPagedQueryParams(
                                 maxResults,
                                 pageToken,
-                                Pair.of(TABLE_NAME_PATTERN, tableNamePattern)),
+                                Pair.of(TABLE_NAME_PATTERN, tableNamePattern),
+                                Pair.of(TABLE_TYPE, tableType)),
                         ListTablesResponse.class,
                         restAuthFunction);
         List<String> tables = response.getTables();
@@ -385,6 +388,8 @@ public class RESTApi {
      *     from a specific point.
      * @param tableNamePattern A sql LIKE pattern (%) for table names. All tables will be returned
      *     if not set or empty. Currently, only prefix matching is supported.
+     * @param tableType Optional parameter to filter tables by table type. All table types will be
+     *     returned if not set or empty.
      * @return {@link PagedList}: elements and nextPageToken.
      * @throws NoSuchResourceException Exception thrown on HTTP 404 means the database not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
@@ -394,14 +399,16 @@ public class RESTApi {
             String databaseName,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String tableNamePattern) {
+            @Nullable String tableNamePattern,
+            @Nullable String tableType) {
         ListTableDetailsResponse response =
                 client.get(
                         resourcePaths.tableDetails(databaseName),
                         buildPagedQueryParams(
                                 maxResults,
                                 pageToken,
-                                Pair.of(TABLE_NAME_PATTERN, tableNamePattern)),
+                                Pair.of(TABLE_NAME_PATTERN, tableNamePattern),
+                                Pair.of(TABLE_TYPE, tableType)),
                         ListTableDetailsResponse.class,
                         restAuthFunction);
         List<GetTableResponse> tables = response.getTableDetails();
