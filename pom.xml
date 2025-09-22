@@ -428,6 +428,7 @@ under the License.
                 <scala.version>${scala213.version}</scala.version>
                 <paimon-spark-common.spark.version>4.0.1</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark4-common_2.13</paimon-sparkx-common>
+                <arrow.version>18.1.0</arrow.version>
                 <test.spark.main.version>4.0</test.spark.main.version>
                 <test.spark.version>4.0.1</test.spark.version>
             </properties>
