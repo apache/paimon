@@ -34,10 +34,12 @@ class MergeIntoPrimaryKeyNonBucketTableTest
 
 class MergeIntoAppendBucketedTableTest
   extends MergeIntoTableTestBase
+  with MergeIntoAppendTableTest
   with MergeIntoNotMatchedBySourceTest
   with PaimonAppendBucketedTableTest {}
 
 class MergeIntoAppendNonBucketedTableTest
   extends MergeIntoTableTestBase
+  with MergeIntoAppendTableTest
   with MergeIntoNotMatchedBySourceTest
   with PaimonAppendNonBucketTableTest {}

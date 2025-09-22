@@ -30,7 +30,6 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.schema.Schema;
@@ -115,9 +114,13 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
                 partition,
                 bucket,
                 options().bucket(),
-                DataIncrement.emptyIncrement(),
-                CompactIncrement.emptyIncrement(),
-                new IndexIncrement(Collections.emptyList(), indexFileMetas));
+                new DataIncrement(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        indexFileMetas),
+                CompactIncrement.emptyIncrement());
     }
 
     public List<IndexFileMeta> scanDVIndexFiles(BinaryRow partition, int bucket) {
@@ -153,9 +156,13 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
                 partition,
                 bucket,
                 options().bucket(),
-                DataIncrement.emptyIncrement(),
-                CompactIncrement.emptyIncrement(),
-                new IndexIncrement(indexFiles));
+                new DataIncrement(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        indexFiles,
+                        Collections.emptyList()),
+                CompactIncrement.emptyIncrement());
     }
 
     public static TestAppendFileStore createAppendStore(

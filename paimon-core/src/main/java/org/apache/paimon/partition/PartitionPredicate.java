@@ -162,6 +162,10 @@ public interface PartitionPredicate extends Serializable {
                 InternalArray nullCounts) {
             return predicate.test(rowCount, minValues, maxValues, nullCounts);
         }
+
+        public Predicate predicate() {
+            return predicate;
+        }
     }
 
     /**
@@ -244,6 +248,10 @@ public interface PartitionPredicate extends Serializable {
             return partitions.size() == 1
                     ? Optional.of(partitions.iterator().next())
                     : Optional.empty();
+        }
+
+        public Set<BinaryRow> partitions() {
+            return partitions;
         }
     }
 

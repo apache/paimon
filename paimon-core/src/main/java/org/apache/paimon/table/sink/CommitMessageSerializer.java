@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexFileMetaSerializer;
@@ -36,13 +37,11 @@ import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.utils.IOExceptionSupplier;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
@@ -51,7 +50,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    private static final int CURRENT_VERSION = 9;
+    public static final int CURRENT_VERSION = 10;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
@@ -103,14 +102,19 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
             view.writeBoolean(false);
         }
 
+        // data increment
         dataFileSerializer.serializeList(message.newFilesIncrement().newFiles(), view);
         dataFileSerializer.serializeList(message.newFilesIncrement().deletedFiles(), view);
         dataFileSerializer.serializeList(message.newFilesIncrement().changelogFiles(), view);
+        indexEntrySerializer.serializeList(message.newFilesIncrement().newIndexFiles(), view);
+        indexEntrySerializer.serializeList(message.newFilesIncrement().deletedIndexFiles(), view);
+
+        // compact increment
         dataFileSerializer.serializeList(message.compactIncrement().compactBefore(), view);
         dataFileSerializer.serializeList(message.compactIncrement().compactAfter(), view);
         dataFileSerializer.serializeList(message.compactIncrement().changelogFiles(), view);
-        indexEntrySerializer.serializeList(message.indexIncrement().newIndexFiles(), view);
-        indexEntrySerializer.serializeList(message.indexIncrement().deletedIndexFiles(), view);
+        indexEntrySerializer.serializeList(message.compactIncrement().newIndexFiles(), view);
+        indexEntrySerializer.serializeList(message.compactIncrement().deletedIndexFiles(), view);
     }
 
     @Override
@@ -132,18 +136,48 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         IOExceptionSupplier<List<DataFileMeta>> fileDeserializer = fileDeserializer(version, view);
         IOExceptionSupplier<List<IndexFileMeta>> indexEntryDeserializer =
                 indexEntryDeserializer(version, view);
-
-        return new CommitMessageImpl(
-                deserializeBinaryRow(view),
-                view.readInt(),
-                version >= 7 && view.readBoolean() ? view.readInt() : null,
-                new DataIncrement(
-                        fileDeserializer.get(), fileDeserializer.get(), fileDeserializer.get()),
-                new CompactIncrement(
-                        fileDeserializer.get(), fileDeserializer.get(), fileDeserializer.get()),
-                new IndexIncrement(
-                        indexEntryDeserializer.get(),
-                        version <= 2 ? Collections.emptyList() : indexEntryDeserializer.get()));
+        if (version >= 10) {
+            return new CommitMessageImpl(
+                    deserializeBinaryRow(view),
+                    view.readInt(),
+                    view.readBoolean() ? view.readInt() : null,
+                    new DataIncrement(
+                            fileDeserializer.get(),
+                            fileDeserializer.get(),
+                            fileDeserializer.get(),
+                            indexEntryDeserializer.get(),
+                            indexEntryDeserializer.get()),
+                    new CompactIncrement(
+                            fileDeserializer.get(),
+                            fileDeserializer.get(),
+                            fileDeserializer.get(),
+                            indexEntryDeserializer.get(),
+                            indexEntryDeserializer.get()));
+        } else {
+            BinaryRow partition = deserializeBinaryRow(view);
+            int bucket = view.readInt();
+            Integer totalBuckets = version >= 7 && view.readBoolean() ? view.readInt() : null;
+            DataIncrement dataIncrement =
+                    new DataIncrement(
+                            fileDeserializer.get(), fileDeserializer.get(), fileDeserializer.get());
+            CompactIncrement compactIncrement =
+                    new CompactIncrement(
+                            fileDeserializer.get(), fileDeserializer.get(), fileDeserializer.get());
+            if (compactIncrement.isEmpty()) {
+                dataIncrement.newIndexFiles().addAll(indexEntryDeserializer.get());
+            } else {
+                compactIncrement.newIndexFiles().addAll(indexEntryDeserializer.get());
+            }
+            if (version > 2) {
+                if (compactIncrement.isEmpty()) {
+                    dataIncrement.deletedIndexFiles().addAll(indexEntryDeserializer.get());
+                } else {
+                    compactIncrement.deletedIndexFiles().addAll(indexEntryDeserializer.get());
+                }
+            }
+            return new CommitMessageImpl(
+                    partition, bucket, totalBuckets, dataIncrement, compactIncrement);
+        }
     }
 
     private IOExceptionSupplier<List<DataFileMeta>> fileDeserializer(

@@ -94,6 +94,26 @@ public interface FileIO extends Serializable, Closeable {
     PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException;
 
     /**
+     * Opens a TwoPhaseOutputStream at the indicated Path for transactional writing.
+     *
+     * <p>This method creates a stream that supports transactional writing operations. The written
+     * data becomes visible only after calling commit on the returned committer from closeForCommit
+     * method.
+     *
+     * @param path the file target path
+     * @param overwrite if a file with this name already exists, then if true, the file will be
+     *     overwritten, and if false an error will be thrown.
+     * @return a TwoPhaseOutputStream that supports transactional writes
+     * @throws IOException Thrown, if the stream could not be opened because of an I/O, or because a
+     *     file already exists at that path and the write mode indicates to not overwrite the file.
+     * @throws UnsupportedOperationException if the filesystem does not support transactional writes
+     */
+    default TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        return new RenamingTwoPhaseOutputStream(this, path, overwrite);
+    }
+
+    /**
      * Return a file status object that represents the path.
      *
      * @param path The path we want information from

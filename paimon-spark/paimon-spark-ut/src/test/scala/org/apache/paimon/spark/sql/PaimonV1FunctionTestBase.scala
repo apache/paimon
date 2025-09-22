@@ -214,6 +214,23 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
       }
     }
   }
+
+  test("Paimon V1 Function: select with view") {
+    withUserDefinedFunction("udf_add2" -> false) {
+      sql(s"""
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
+             |USING JAR '$testUDFJarPath'
+             |""".stripMargin)
+      withTable("t") {
+        withView("v") {
+          sql("CREATE TABLE t (a INT, b INT)")
+          sql("INSERT INTO t VALUES (1, 2), (3, 4)")
+          sql("CREATE VIEW v AS SELECT udf_add2(a, b) AS c1 FROM t")
+          checkAnswer(sql("SELECT * FROM v"), Seq(Row(3), Row(7)))
+        }
+      }
+    }
+  }
 }
 
 class DisablePaimonV1FunctionTest extends PaimonSparkTestWithRestCatalogBase {

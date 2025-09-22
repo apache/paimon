@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.CoreOptions
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.catalyst.analysis.Update
 
@@ -356,5 +356,41 @@ abstract class UpdateTableTestBase extends PaimonSparkTestBase {
     sql("INSERT INTO T VALUES (1, 's', 'a')")
     sql("UPDATE T SET c = 'b' WHERE id = 1")
     checkAnswer(sql("SELECT * FROM T"), Seq(Row(1, "s", "b")))
+  }
+
+  test("Paimon update: non pk table commit kind") {
+    for (dvEnabled <- Seq(true, false)) {
+      withTable("t") {
+        sql(
+          s"CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+
+        sql("UPDATE t SET data = 111 WHERE id = 1")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, 111), Row(2, 2), Row(3, 3)))
+        val table = loadTable("t")
+        var latestSnapshot = table.latestSnapshot().get()
+        assert(latestSnapshot.id == 2)
+        assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.OVERWRITE))
+
+        sql("UPDATE t SET data = 222 WHERE id = 2")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, 111), Row(2, 222), Row(3, 3)))
+        latestSnapshot = table.latestSnapshot().get()
+        assert(latestSnapshot.id == 3)
+        assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.OVERWRITE))
+      }
+    }
+  }
+
+  test("Paimon update: pk dv table commit kind") {
+    withTable("t") {
+      sql(
+        s"CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'primary-key' = 'id')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+      sql("UPDATE t SET data = 111 WHERE id = 1")
+      val table = loadTable("t")
+      val latestSnapshot = table.latestSnapshot().get()
+      assert(latestSnapshot.id == 4)
+      assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.COMPACT))
+    }
   }
 }

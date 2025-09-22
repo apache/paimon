@@ -27,7 +27,6 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -104,9 +103,13 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
                         EMPTY_ROW,
                         0,
                         1,
-                        DataIncrement.emptyIncrement(),
-                        CompactIncrement.emptyIncrement(),
-                        new IndexIncrement(Collections.singletonList(file)));
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(file),
+                                Collections.emptyList()),
+                        CompactIncrement.emptyIncrement());
         BatchTableCommit commit = table.newBatchWriteBuilder().newCommit();
         commit.commit(Collections.singletonList(commitMessage));
 
@@ -127,9 +130,13 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
                         EMPTY_ROW,
                         0,
                         1,
-                        DataIncrement.emptyIncrement(),
-                        CompactIncrement.emptyIncrement(),
-                        new IndexIncrement(Collections.singletonList(file)));
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(file),
+                                Collections.emptyList()),
+                        CompactIncrement.emptyIncrement());
         commit = table.newBatchWriteBuilder().newCommit();
         commit.commit(Collections.singletonList(commitMessage));
 
@@ -202,8 +209,12 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
                         0,
                         1,
                         DataIncrement.emptyIncrement(),
-                        CompactIncrement.emptyIncrement(),
-                        new IndexIncrement(Collections.singletonList(file)));
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(file),
+                                Collections.emptyList()));
         BatchTableCommit commit1 = table.newBatchWriteBuilder().newCommit();
         commit1.commit(Collections.singletonList(commitMessage1));
 
@@ -235,8 +246,12 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
                         0,
                         1,
                         DataIncrement.emptyIncrement(),
-                        CompactIncrement.emptyIncrement(),
-                        new IndexIncrement(Collections.singletonList(file)));
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(file),
+                                Collections.emptyList()));
         BatchTableCommit commit2 = table.newBatchWriteBuilder().newCommit();
         commit2.commit(Collections.singletonList(commitMessage2));
 
