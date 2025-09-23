@@ -86,7 +86,7 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
         int remainCount = countLimit - acc.size();
 
-        List<InternalRow> rows = new ArrayList<>(countLimit);
+        List<InternalRow> rows = new ArrayList<>(acc.size() + input.size());
         addNonNullRows(acc, rows);
         addNonNullRows(input, rows, remainCount);
 
@@ -157,18 +157,15 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
     private void addNonNullRows(InternalArray array, List<InternalRow> rows, int remainSize) {
         int count = 0;
-        while (true) {
+        for (int i = 0; i < array.size(); i++) {
             if (count >= remainSize) {
                 return;
             }
-
-            for (int i = 0; i < array.size(); i++) {
-                if (array.isNullAt(i)) {
-                    continue;
-                }
-                rows.add(array.getRow(i, nestedFields));
-                count++;
+            if (array.isNullAt(i)) {
+                continue;
             }
+            rows.add(array.getRow(i, nestedFields));
+            count++;
         }
     }
 }
