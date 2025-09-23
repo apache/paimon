@@ -81,6 +81,8 @@ public class CoreOptions implements Serializable {
 
     public static final String NESTED_KEY = "nested-key";
 
+    public static final String COUNT_LIMIT = "count-limit";
+
     public static final String DISTINCT = "distinct";
 
     public static final String LIST_AGG_DELIMITER = "list-agg-delimiter";
@@ -2187,6 +2189,13 @@ public class CoreOptions implements Serializable {
             return Collections.emptyList();
         }
         return Arrays.stream(keyString.split(",")).map(String::trim).collect(Collectors.toList());
+    }
+
+    public int fieldNestedUpdateAggCountLimit(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + COUNT_LIMIT)
+                        .intType()
+                        .defaultValue(Integer.MAX_VALUE));
     }
 
     public boolean fieldCollectAggDistinct(String fieldName) {
