@@ -23,10 +23,8 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileStorePathFactory;
 
 import javax.annotation.Nullable;
 
@@ -63,44 +61,21 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
 
     @Override
     public BatchTableWrite newWrite() {
-        FormatTableFileWrite writer =
-                new FormatTableFileWrite(
-                        table.fileIO(), table.rowType().notNull(), pathFactory(), options);
         return new FormatTableWrite(
+                table.fileIO(),
                 rowType(),
-                writer,
-                new RowPartitionKeyExtractor(table.rowType(), table.partitionKeys()),
-                CoreOptions.fromMap(table.options()).ignoreDelete());
-    }
-
-    public FileStorePathFactory pathFactory() {
-        return pathFactory(options, options.fileFormatString());
-    }
-
-    protected FileStorePathFactory pathFactory(CoreOptions options, String format) {
-
-        return new FileStorePathFactory(
-                options.path(),
+                this.options,
                 table.partitionType(),
-                options.partitionDefaultName(),
-                format,
-                options.dataFilePrefix(),
-                options.changelogFilePrefix(),
-                options.legacyPartitionName(),
-                options.fileSuffixIncludeCompression(),
-                options.fileCompression(),
-                options.dataFilePathDirectory(),
-                null,
-                false);
+                table.partitionKeys());
     }
 
     @Override
     public BatchTableCommit newCommit() {
-        throw new UnsupportedOperationException();
+        throw new UnsupportedOperationException("FormatTable does not support commit");
     }
 
     @Override
     public BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition) {
-        throw new UnsupportedOperationException();
+        throw new UnsupportedOperationException("FormatTable does not support commit");
     }
 }

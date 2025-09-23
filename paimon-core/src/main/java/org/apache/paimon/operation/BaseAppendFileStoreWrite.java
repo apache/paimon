@@ -216,8 +216,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 FileSource.COMPACT,
                 options.asyncFileWrite(),
                 options.statsDenseStore(),
-                rowType.equals(writeType) ? null : writeType.getFieldNames(),
-                false);
+                rowType.equals(writeType) ? null : writeType.getFieldNames());
     }
 
     private RecordReaderIterator<InternalRow> createFilesIterator(

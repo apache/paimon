@@ -65,7 +65,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             boolean statsDenseStore,
             boolean isExternalPath,
             @Nullable List<String> writeCols,
-            boolean useCommittableOutputStream) {
+            boolean enableTwoPhaseCommit) {
         super(
                 fileIO,
                 context,
@@ -73,7 +73,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 Function.identity(),
                 writeSchema,
                 asyncFileWrite,
-                useCommittableOutputStream);
+                enableTwoPhaseCommit);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.isExternalPath = isExternalPath;

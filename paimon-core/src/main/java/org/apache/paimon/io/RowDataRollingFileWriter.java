@@ -53,8 +53,41 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
+            @Nullable List<String> writeCols) {
+        this(
+                fileIO,
+                schemaId,
+                fileFormat,
+                targetFileSize,
+                writeSchema,
+                pathFactory,
+                seqNumCounter,
+                fileCompression,
+                statsCollectors,
+                fileIndexOptions,
+                fileSource,
+                asyncFileWrite,
+                statsDenseStore,
+                writeCols,
+                false);
+    }
+
+    public RowDataRollingFileWriter(
+            FileIO fileIO,
+            long schemaId,
+            FileFormat fileFormat,
+            long targetFileSize,
+            RowType writeSchema,
+            DataFilePathFactory pathFactory,
+            LongCounter seqNumCounter,
+            String fileCompression,
+            SimpleColStatsCollector.Factory[] statsCollectors,
+            FileIndexOptions fileIndexOptions,
+            FileSource fileSource,
+            boolean asyncFileWrite,
+            boolean statsDenseStore,
             @Nullable List<String> writeCols,
-            boolean useCommittableOutputStream) {
+            boolean enableTwoPhaseCommit) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -71,7 +104,7 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 statsDenseStore,
                                 pathFactory.isExternalPath(),
                                 writeCols,
-                                useCommittableOutputStream),
+                                enableTwoPhaseCommit),
                 targetFileSize);
     }
 

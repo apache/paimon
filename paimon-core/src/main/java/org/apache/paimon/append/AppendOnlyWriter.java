@@ -304,8 +304,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 FileSource.APPEND,
                 asyncFileWrite,
                 statsDenseStore,
-                writeCols,
-                false);
+                writeCols);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

@@ -70,17 +70,17 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             Function<T, InternalRow> converter,
             String compression,
             boolean asyncWrite,
-            boolean useCommittableOutputStream) {
+            boolean enableTwoPhaseCommit) {
         this.fileIO = fileIO;
         this.path = path;
         this.converter = converter;
-        this.useTwoPhaseOutputStream = useCommittableOutputStream;
+        this.useTwoPhaseOutputStream = enableTwoPhaseCommit;
 
         try {
             if (factory instanceof SupportsDirectWrite) {
                 writer = ((SupportsDirectWrite) factory).create(fileIO, path, compression);
             } else {
-                if (useCommittableOutputStream) {
+                if (enableTwoPhaseCommit) {
                     out = fileIO.newTwoPhaseOutputStream(path, false);
                 } else {
                     out = fileIO.newOutputStream(path, false);

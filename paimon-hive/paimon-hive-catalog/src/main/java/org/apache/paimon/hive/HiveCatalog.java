@@ -1087,7 +1087,7 @@ public class HiveCatalog extends AbstractCatalog {
         // file.format option has a default value and cannot be empty.
         FormatTable.Format provider = FormatTable.parseFormat(coreOptions.formatType());
 
-        Map<String, String> tblProperties = new HashMap<>();
+        Map<String, String> tblProperties = new HashMap<>(tableSchema.options());
 
         Table table = newHmsTable(identifier, tblProperties, provider, externalTable);
         updateHmsTable(table, identifier, tableSchema, provider, location);

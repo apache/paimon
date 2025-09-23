@@ -18,19 +18,17 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.casting.DefaultValueRow;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.memory.MemoryPoolFactory;
-import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 import org.apache.paimon.table.sink.TableWrite;
 import org.apache.paimon.types.DataField;
@@ -38,14 +36,13 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /** {@link TableWrite} implementation for format table. */
-public class FormatTableWrite implements InnerTableWrite {
+public class FormatTableWrite implements BatchTableWrite {
 
-    private final RowType rowType;
+    private RowType rowType;
     private final FormatTableFileWrite write;
     private final RowPartitionKeyExtractor partitionKeyExtractor;
 
@@ -53,14 +50,14 @@ public class FormatTableWrite implements InnerTableWrite {
     private final @Nullable DefaultValueRow defaultValueRow;
 
     public FormatTableWrite(
+            FileIO fileIO,
             RowType rowType,
-            FormatTableFileWrite write,
-            RowPartitionKeyExtractor partitionKeyExtractor,
-            boolean ignoreDelete) {
+            CoreOptions options,
+            RowType partitionType,
+            List<String> partitionKeys) {
         this.rowType = rowType;
-        this.write = write;
-        this.partitionKeyExtractor = partitionKeyExtractor;
-
+        this.write = new FormatTableFileWrite(fileIO, rowType, options, partitionType);
+        this.partitionKeyExtractor = new RowPartitionKeyExtractor(rowType, partitionKeys);
         List<String> notNullColumnNames =
                 rowType.getFields().stream()
                         .filter(field -> !field.type().isNullable())
@@ -71,36 +68,8 @@ public class FormatTableWrite implements InnerTableWrite {
     }
 
     @Override
-    public InnerTableWrite withWriteRestore(WriteRestore writeRestore) {
-        this.write.withWriteRestore(writeRestore);
-        return this;
-    }
-
-    @Override
-    public FormatTableWrite withIgnorePreviousFiles(boolean ignorePreviousFiles) {
-        write.withIgnorePreviousFiles(ignorePreviousFiles);
-        return this;
-    }
-
-    @Override
-    public FormatTableWrite withIOManager(IOManager ioManager) {
-        write.withIOManager(ioManager);
-        return this;
-    }
-
-    @Override
     public BatchTableWrite withWriteType(RowType writeType) {
         write.withWriteType(writeType);
-        return this;
-    }
-
-    @Override
-    public FormatTableWrite withMemoryPool(MemorySegmentPool memoryPool) {
-        return this;
-    }
-
-    @Override
-    public FormatTableWrite withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
         return this;
     }
 
@@ -111,21 +80,22 @@ public class FormatTableWrite implements InnerTableWrite {
 
     @Override
     public void write(InternalRow row) throws Exception {
-        checkNullability(row);
-        row = wrapDefaultValue(row);
+        // checkNullability
+        for (int idx : notNullFieldIndex) {
+            if (row.isNullAt(idx)) {
+                String columnName = rowType.getFields().get(idx).name();
+                throw new RuntimeException(
+                        String.format("Cannot write null to non-null column(%s)", columnName));
+            }
+        }
+        row = defaultValueRow == null ? row : defaultValueRow.replaceRow(row);
         BinaryRow partition = partitionKeyExtractor.partition(row);
         write.write(partition, row);
     }
 
     @Override
     public List<CommitMessage> prepareCommit() throws Exception {
-        List<TwoPhaseOutputStream.Committer> commiters = write.closeAndGetCommitters();
-        List<CommitMessage> commitMessages = new ArrayList<>();
-        for (TwoPhaseOutputStream.Committer committer : commiters) {
-            TwoPhaseCommitMessage twoPhaseCommitMessage = new TwoPhaseCommitMessage(committer);
-            commitMessages.add(twoPhaseCommitMessage);
-        }
-        return commitMessages;
+        return write.prepareCommit();
     }
 
     public void commit(List<CommitMessage> commitMessages) throws Exception {
@@ -145,18 +115,19 @@ public class FormatTableWrite implements InnerTableWrite {
         write.close();
     }
 
-    private void checkNullability(InternalRow row) {
-        for (int idx : notNullFieldIndex) {
-            if (row.isNullAt(idx)) {
-                String columnName = rowType.getFields().get(idx).name();
-                throw new RuntimeException(
-                        String.format("Cannot write null to non-null column(%s)", columnName));
-            }
-        }
+    @Override
+    public int getBucket(InternalRow row) {
+        return 0;
     }
 
-    private InternalRow wrapDefaultValue(InternalRow row) {
-        return defaultValueRow == null ? row : defaultValueRow.replaceRow(row);
+    @Override
+    public TableWrite withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
+        return this;
+    }
+
+    @Override
+    public TableWrite withIOManager(IOManager ioManager) {
+        return this;
     }
 
     @Override
@@ -176,18 +147,7 @@ public class FormatTableWrite implements InnerTableWrite {
     }
 
     @Override
-    public FormatTableWrite withMetricRegistry(MetricRegistry metricRegistry) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public int getBucket(InternalRow row) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
-            throws Exception {
-        throw new UnsupportedOperationException();
+    public TableWrite withMetricRegistry(MetricRegistry registry) {
+        return this;
     }
 }

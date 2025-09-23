@@ -49,7 +49,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             Function<T, InternalRow> converter,
             RowType rowType,
             boolean asyncWrite,
-            boolean useCommittableOutputStream) {
+            boolean enableTwoPhaseCommit) {
         super(
                 fileIO,
                 context.factory(),
@@ -57,7 +57,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
                 converter,
                 context.compression(),
                 asyncWrite,
-                useCommittableOutputStream);
+                enableTwoPhaseCommit);
         this.rowType = rowType;
         this.statsProducer = context.statsProducer();
         this.isStatsDisabled = statsProducer.isStatsDisabled();
