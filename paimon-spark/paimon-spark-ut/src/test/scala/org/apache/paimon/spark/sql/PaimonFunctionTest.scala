@@ -64,16 +64,6 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
     }
   }
 
-  test("Paimon function: show user functions") {
-    assume(gteqSpark3_4)
-    Seq("paimon", paimonHiveCatalogName).foreach {
-      catalogName =>
-        sql(s"use $catalogName")
-        val functions = sql("show user functions").collect()
-        assert(functions.exists(_.getString(0).contains("max_pt")), catalogName)
-    }
-  }
-
   test("Paimon function: bucket join with SparkGenericCatalog") {
     sql(s"use $sparkCatalogName")
     assume(gteqSpark3_3)
@@ -120,9 +110,9 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
         {
           sql(s"use $catalogName")
           val maxPt = if (catalogName == sparkCatalogName) {
-            "paimon.max_pt"
+            "paimon.sys.max_pt"
           } else {
-            "max_pt"
+            "sys.max_pt"
           }
 
           intercept[Exception] {

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.catalog;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.spark.SparkProcedures;
 import org.apache.paimon.spark.SparkSource;
 import org.apache.paimon.spark.analysis.NoSuchProcedureException;
@@ -35,6 +34,7 @@ import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.Set;
 
+import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.spark.sql.connector.catalog.TableCatalogCapability.SUPPORT_COLUMN_DEFAULT_VALUE;
 
 /** Spark base catalog. */
@@ -54,7 +54,7 @@ public abstract class SparkBaseCatalog
 
     @Override
     public Procedure loadProcedure(Identifier identifier) throws NoSuchProcedureException {
-        if (Catalog.SYSTEM_DATABASE_NAME.equals(identifier.namespace()[0])) {
+        if (isSystemNamespace(identifier.namespace())) {
             ProcedureBuilder builder = SparkProcedures.newBuilder(identifier.name());
             if (builder != null) {
                 return builder.withTableCatalog(this).build();
@@ -63,7 +63,11 @@ public abstract class SparkBaseCatalog
         throw new NoSuchProcedureException(identifier);
     }
 
-    public boolean usePaimon(@Nullable String provider) {
+    public static boolean usePaimon(@Nullable String provider) {
         return provider == null || SparkSource.NAME().equalsIgnoreCase(provider);
+    }
+
+    public static boolean isSystemNamespace(String[] namespace) {
+        return namespace.length == 1 && namespace[0].equalsIgnoreCase(SYSTEM_DATABASE_NAME);
     }
 }

@@ -106,7 +106,7 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
         sql("INSERT INTO t VALUES (1, 2), (3, 4)")
         checkAnswer(
           sql(
-            "SELECT a, udf_add2(pow(a, pt), max_pt('t')), pow(a, udf_add2(a, pt)) FROM t ORDER BY a"),
+            "SELECT a, udf_add2(pow(a, pt), sys.max_pt('t')), pow(a, udf_add2(a, pt)) FROM t ORDER BY a"),
           Seq(Row(1, 5.0d, 1.0d), Row(3, 85.0d, 2187.0d))
         )
       }
