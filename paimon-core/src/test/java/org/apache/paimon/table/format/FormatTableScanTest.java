@@ -196,7 +196,7 @@ class FormatTableScanTest {
         LocalFileIO fileIO = LocalFileIO.create();
         fileIO.mkdirs(new Path(tableLocation, "year=2023/month=12"));
         List<Pair<LinkedHashMap<String, String>, Path>> searched =
-                searchPartSpecAndPaths(fileIO, result.getLeft(), result.getRight());
+                searchPartSpecAndPaths(fileIO, result.getLeft(), result.getRight(), null, false);
         assertThat(searched.size()).isEqualTo(1);
     }
 
@@ -227,7 +227,7 @@ class FormatTableScanTest {
         LocalFileIO fileIO = LocalFileIO.create();
         fileIO.mkdirs(new Path(tableLocation, "year=2023/month=12"));
         List<Pair<LinkedHashMap<String, String>, Path>> searched =
-                searchPartSpecAndPaths(fileIO, result.getLeft(), result.getRight());
+                searchPartSpecAndPaths(fileIO, result.getLeft(), result.getRight(), null, false);
         assertThat(searched.size()).isEqualTo(1);
     }
 
@@ -541,5 +541,27 @@ class FormatTableScanTest {
                         partitionKeys, orPredicate);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void
+            testSearchPartSpecAndPathsWhenPartitionKeysIsNotNullAndEnablePartitionOnlyValueInPathIsTrue()
+                    throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        List<String> partitionKeys = Arrays.asList("year", "month", "day", "hour");
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path partititonPath = new Path(tableLocation, "2023/12/01");
+        fileIO.mkdirs(partititonPath);
+        fileIO.mkdirs(new Path(tableLocation, "2023/12/01/00"));
+        fileIO.mkdirs(new Path(tableLocation, "2023/12/01/01"));
+
+        List<Pair<LinkedHashMap<String, String>, Path>> searched =
+                searchPartSpecAndPaths(fileIO, partititonPath, 1, partitionKeys, true);
+
+        assertThat(searched.size()).isEqualTo(2);
+        assertThat(searched.get(0).getLeft().get("year")).isEqualTo("2023");
+        assertThat(searched.get(0).getLeft().get("month")).isEqualTo("12");
+        assertThat(searched.get(0).getLeft().get("day")).isEqualTo("01");
+        assertThat(searched.get(0).getRight().toString()).contains("2023/12/01");
     }
 }

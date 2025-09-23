@@ -589,17 +589,19 @@ public abstract class CatalogTestBase {
         Random random = new Random();
         String dbName = "test_db";
         catalog.createDatabase(dbName, true);
-        int partitionValue = 10;
         HadoopCompressionType compressionType = HadoopCompressionType.GZIP;
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f1", DataTypes.INT());
         schemaBuilder.column("f2", DataTypes.INT());
         schemaBuilder.column("dt", DataTypes.INT());
-        schemaBuilder.partitionKeys("dt");
+        schemaBuilder.column("dt2", DataTypes.VARCHAR(64));
+        schemaBuilder.partitionKeys("dt", "dt2");
         schemaBuilder.option("type", "format-table");
         schemaBuilder.option("file.compression", compressionType.value());
         schemaBuilder.option("format-table.read.enable.partition-only-value-in-path", "true");
         String[] formats = {"csv", "parquet", "json"};
+        int dtPartitionValue = 10;
+        String dt2PartitionValue = "2022-01-01";
         for (String format : formats) {
             Identifier identifier = Identifier.create(dbName, "partition_table_" + format);
             schemaBuilder.option("file.format", format);
@@ -608,7 +610,12 @@ public abstract class CatalogTestBase {
             int size = 5;
             InternalRow[] datas = new InternalRow[size];
             for (int j = 0; j < size; j++) {
-                datas[j] = GenericRow.of(random.nextInt(), random.nextInt(), partitionValue);
+                datas[j] =
+                        GenericRow.of(
+                                random.nextInt(),
+                                random.nextInt(),
+                                dtPartitionValue,
+                                BinaryString.fromString(dt2PartitionValue));
             }
             FormatWriterFactory factory =
                     (buildFileFormatFactory(format)
@@ -616,8 +623,11 @@ public abstract class CatalogTestBase {
                                             new FileFormatFactory.FormatContext(
                                                     new Options(), 1024, 1024)))
                             .createWriterFactory(table.rowType());
-            Map<String, String> partitionSpec = null;
-            Path partitionPath = new Path(String.format("%s/%s", table.location(), partitionValue));
+            Path partitionPath =
+                    new Path(
+                            String.format(
+                                    "%s/%s/%s",
+                                    table.location(), dtPartitionValue, dt2PartitionValue));
             DataFilePathFactory dataFilePathFactory =
                     new DataFilePathFactory(
                             partitionPath,
@@ -628,8 +638,9 @@ public abstract class CatalogTestBase {
                             compressionType.value(),
                             null);
             write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
-            partitionSpec = new HashMap<>();
-            partitionSpec.put("dt", "" + partitionValue);
+            Map<String, String> partitionSpec = new HashMap<>();
+            partitionSpec.put("dt", "" + dtPartitionValue);
+            partitionSpec.put("dt2", dt2PartitionValue);
             List<InternalRow> readFilterData = read(table, null, null, partitionSpec, null);
             assertThat(readFilterData).containsExactlyInAnyOrder(datas);
             catalog.dropTable(Identifier.create(dbName, format), true);

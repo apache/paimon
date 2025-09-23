@@ -24,6 +24,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -258,8 +260,9 @@ public class PartitionPathUtils {
             Path currPath, List<String> partitionKeys, int partitionNumber) {
         LinkedHashMap<String, String> fullPartSpec = new LinkedHashMap<>();
         String[] split = currPath.toString().split(Path.SEPARATOR);
-        for (int i = 0; i < partitionNumber + 1; i++) {
-            fullPartSpec.put(partitionKeys.get(i), split[split.length - 1 - partitionNumber + i]);
+        int equalityPartitionSize = partitionKeys.size() - partitionNumber;
+        for (int i = 0; i < equalityPartitionSize; i++) {
+            fullPartSpec.put(partitionKeys.get(i), split[split.length - partitionKeys.size() + i]);
         }
         return fullPartSpec;
     }
@@ -275,7 +278,7 @@ public class PartitionPathUtils {
             FileIO fileIO,
             Path path,
             int partitionNumber,
-            List<String> partitionKeys,
+            @Nullable List<String> partitionKeys,
             boolean enablePartitionOnlyValueInPath) {
         FileStatus[] generatedParts = getFileStatusRecurse(path, partitionNumber, fileIO);
         List<Pair<LinkedHashMap<String, String>, Path>> ret = new ArrayList<>();
@@ -284,7 +287,7 @@ public class PartitionPathUtils {
             if (isHiddenFile(part)) {
                 continue;
             }
-            if (enablePartitionOnlyValueInPath) {
+            if (enablePartitionOnlyValueInPath && partitionKeys != null) {
                 ret.add(
                         Pair.of(
                                 extractPartitionSpecFromPathOnlyValue(
