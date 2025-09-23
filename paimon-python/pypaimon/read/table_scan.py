@@ -114,10 +114,10 @@ class TableScan:
         self.number_of_para_subtasks = number_of_para_subtasks
         return self
 
-    def _append_only_filter_by_shard(self, partitioned_split):
+    def _append_only_filter_by_shard(self, partitioned_files: defaultdict) -> (defaultdict, int, int):
         total_row = 0
         # Sort by file creation time to ensure consistent sharding
-        for key, file_entries in partitioned_split.items():
+        for key, file_entries in partitioned_files.items():
             for entry in file_entries:
                 total_row += entry.file.row_count
 
@@ -135,9 +135,9 @@ class TableScan:
         plan_end_row = 0
         entry_end_row = 0  # end row position of current file in all data
         splits_start_row = 0
-        filtered_partitioned_split = defaultdict(list)
+        filtered_partitioned_files = defaultdict(list)
         # Iterate through all file entries to find files that overlap with current shard range
-        for key, file_entries in partitioned_split.items():
+        for key, file_entries in partitioned_files.items():
             filtered_entries = []
             for entry in file_entries:
                 entry_begin_row = entry_end_row  # Starting row position of current file in all data
@@ -158,9 +158,9 @@ class TableScan:
                 # Add files that overlap with shard range to result
                 filtered_entries.append(entry)
             if filtered_entries:
-                filtered_partitioned_split[key] = filtered_entries
+                filtered_partitioned_files[key] = filtered_entries
 
-        return filtered_partitioned_split, plan_start_row, plan_end_row
+        return filtered_partitioned_files, plan_start_row, plan_end_row
 
     def _compute_split_start_end_row(self, splits: List[Split], plan_start_row, plan_end_row):
         file_end_row = 0  # end row position of current file in all data
