@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
 import org.apache.paimon.table.FormatTable
@@ -33,6 +34,25 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
     sql("USE test_db")
   }
 
+  test("PaimonFormatTableRead: csv table test options") {
+    val tableName = "format_test_csv_options"
+    withTable(tableName) {
+      // Create format table using the same pattern as FormatTableTestBase
+      sql(
+        s"CREATE TABLE $tableName (id INT, name STRING, value DOUBLE) USING csv " +
+          s"TBLPROPERTIES ('file.compression'='none', 'seq'=',', 'lineSep'='\n', " +
+          s"'${CoreOptions.FORMAT_TABLE_IMPLEMENTATION.key()}'='paimon')")
+      val paimonTable = paimonCatalog.getTable(Identifier.create("test_db", tableName))
+      val path =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).options().get("path")
+      fileIO.mkdirs(new Path(path))
+      val tableDDl = sql(s"SHOW CREATE TABLE $tableName").collect().head.getString(0)
+      assert(tableDDl.contains("csv.field-delimiter"))
+      assert(tableDDl.contains("csv.line-delimiter"))
+      sql(s"DROP TABLE $tableName")
+    }
+  }
+
   test("PaimonFormatTableRead: read non-partitioned table") {
     for {
       (format, compression) <- Seq(
@@ -44,8 +64,9 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
       val tableName = s"format_test_$format"
       withTable(tableName) {
         // Create format table using the same pattern as FormatTableTestBase
-        sql(s"CREATE TABLE $tableName (id INT, name STRING, value DOUBLE) USING $format " +
-          s"TBLPROPERTIES ('type'='format-table', 'read.format-table.usePaimon'='true','file.compression'='$compression')")
+        sql(
+          s"CREATE TABLE $tableName (id INT, name STRING, value DOUBLE) USING $format " +
+            s"TBLPROPERTIES ('file.compression'='$compression', 'seq'=',', 'lineSep'='\n')")
         val paimonTable = paimonCatalog.getTable(Identifier.create("test_db", tableName))
         val path =
           paimonCatalog.getTable(Identifier.create("test_db", tableName)).options().get("path")
@@ -56,6 +77,8 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
         sql(s"INSERT INTO $tableName VALUES (3, 'Charlie', 30.9)")
 
         // Test reading all data
+        sql(
+          s"Alter table $tableName SET TBLPROPERTIES ('${CoreOptions.FORMAT_TABLE_IMPLEMENTATION.key()}'='paimon')")
         checkAnswer(
           sql(s"SELECT * FROM $tableName ORDER BY id"),
           Seq(
@@ -100,7 +123,7 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
         // Create partitioned format table
         sql(
           s"CREATE TABLE $tableName (id INT, name STRING, value DOUBLE, dept STRING) USING $format " +
-            s"PARTITIONED BY (dept) TBLPROPERTIES ('type'='format-table', 'read.format-table.usePaimon'='true', 'file.compression'='$compression')")
+            s"PARTITIONED BY (dept) TBLPROPERTIES ('file.compression'='$compression')")
         val paimonTable = paimonCatalog.getTable(Identifier.create("test_db", tableName))
         val path =
           paimonCatalog.getTable(Identifier.create("test_db", tableName)).options().get("path")
@@ -114,6 +137,8 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
             s" (5, 'Eve', 15.8, 'Marketing')")
 
         // Test reading all data
+        sql(
+          s"Alter table $tableName SET TBLPROPERTIES ('${CoreOptions.FORMAT_TABLE_IMPLEMENTATION.key()}'='paimon')")
         checkAnswer(
           sql(s"SELECT * FROM $tableName ORDER BY id"),
           Seq(

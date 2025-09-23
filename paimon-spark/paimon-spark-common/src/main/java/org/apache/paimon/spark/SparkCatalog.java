@@ -641,7 +641,7 @@ public class SparkCatalog extends SparkBaseCatalog
         try {
             org.apache.paimon.table.Table paimonTable = catalog.getTable(toIdentifier(ident));
             if (paimonTable instanceof FormatTable) {
-                return convertToFileTable(ident, (FormatTable) paimonTable);
+                return toSparkFormatTable(ident, (FormatTable) paimonTable);
             } else {
                 return new SparkTable(
                         copyWithSQLConf(
@@ -652,7 +652,7 @@ public class SparkCatalog extends SparkBaseCatalog
         }
     }
 
-    private static FileTable convertToFileTable(Identifier ident, FormatTable formatTable) {
+    private static FileTable toSparkFormatTable(Identifier ident, FormatTable formatTable) {
         SparkSession spark = PaimonSparkSession$.MODULE$.active();
         StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
         StructType partitionSchema =
@@ -660,26 +660,30 @@ public class SparkCatalog extends SparkBaseCatalog
                         TypeUtils.project(formatTable.rowType(), formatTable.partitionKeys()));
         List<String> pathList = new ArrayList<>();
         pathList.add(formatTable.location());
-        Options options = Options.fromMap(formatTable.options());
-        CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(options.toMap());
-        FileTable sparkFileTable =
-                getSparkFileTable(
-                        formatTable, ident, pathList, options, spark, schema, partitionSchema);
-        if (Options.fromMap(formatTable.options())
-                .get(SparkConnectorOptions.READ_FORMAT_TABLE_USE_PAIMON)) {
+        Map<String, String> optionsMap = formatTable.options();
+        CoreOptions coreOptions = new CoreOptions(optionsMap);
+        if (coreOptions.formatTableImplementationIsPaimon()) {
+            if (optionsMap.containsKey("seq")) {
+                optionsMap.put("csv.field-delimiter", optionsMap.get("seq"));
+            }
+            if (optionsMap.containsKey("lineSep")) {
+                optionsMap.put("csv.line-delimiter", optionsMap.get("lineSep"));
+            }
             return new PaimonFormatTable(
                     spark,
-                    dsOptions,
+                    new CaseInsensitiveStringMap(optionsMap),
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
                     partitionSchema,
                     formatTable,
-                    sparkFileTable);
+                    ident.name());
         }
-        return sparkFileTable;
+        Options options = Options.fromMap(formatTable.options());
+        return convertToFileTable(
+                formatTable, ident, pathList, options, spark, schema, partitionSchema);
     }
 
-    private static FileTable getSparkFileTable(
+    private static FileTable convertToFileTable(
             FormatTable formatTable,
             Identifier ident,
             List<String> pathList,
