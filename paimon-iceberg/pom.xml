@@ -36,7 +36,7 @@ under the License.
         <iceberg.version>1.8.1</iceberg.version>
         <flink.version>${paimon-flink-common.flink.version}</flink.version>
         <iceberg.flink.version>1.19</iceberg.flink.version>
-        <hive.version>2.3.10</hive.version>
+        <hive.version>4.0.1</hive.version>
         <iceberg.flink.dropwizard.version>1.19.0</iceberg.flink.dropwizard.version>
     </properties>
 
