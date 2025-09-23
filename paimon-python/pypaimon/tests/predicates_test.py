@@ -26,6 +26,7 @@ import pyarrow as pa
 from pypaimon import CatalogFactory
 from pypaimon import Schema
 
+
 def _check_filtered_result(read_builder, expected_df):
     scan = read_builder.new_scan()
     read = read_builder.new_read()
@@ -33,8 +34,10 @@ def _check_filtered_result(read_builder, expected_df):
     pd.testing.assert_frame_equal(
         actual_df.reset_index(drop=True), expected_df.reset_index(drop=True))
 
+
 def _random_format():
     return random.choice(['parquet', 'avro', 'orc'])
+
 
 class PredicateTest(unittest.TestCase):
 
