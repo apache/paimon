@@ -29,51 +29,55 @@ import java.sql.Date
 class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
 
   override protected def sparkConf: SparkConf = {
-    super.sparkConf.set("spark.sql.catalog.paimon.cache-enabled", "false")
+    super.sparkConf
+      .set("spark.sql.catalog.paimon.cache-enabled", "false")
+      .set("spark.paimon.write.use-v2-write", "false")
   }
 
   import testImplicits._
 
   test("Paimon Sink: forEachBatch") {
-    failAfter(streamingTimeout) {
-      withTempDir {
-        checkpointDir =>
-          // define a change-log table and test `forEachBatch` api
-          spark.sql(s"""
-                       |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
-                       |""".stripMargin)
-          val location = loadTable("T").location().toString
+    withSparkSQLConf(("spark.paimon.write.use-v2-write", "false")) {
+      failAfter(streamingTimeout) {
+        withTempDir {
+          checkpointDir =>
+            // define a change-log table and test `forEachBatch` api
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b STRING)
+                         |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                         |""".stripMargin)
+            val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, String)]
-          val stream = inputData
-            .toDS()
-            .toDF("a", "b")
-            .writeStream
-            .option("checkpointLocation", checkpointDir.getCanonicalPath)
-            .foreachBatch {
-              (batch: Dataset[Row], id: Long) =>
-                batch.write.format("paimon").mode("append").save(location)
+            val inputData = MemoryStream[(Int, String)]
+            val stream = inputData
+              .toDS()
+              .toDF("a", "b")
+              .writeStream
+              .option("checkpointLocation", checkpointDir.getCanonicalPath)
+              .foreachBatch {
+                (batch: Dataset[Row], id: Long) =>
+                  batch.write.format("paimon").mode("append").save(location)
+              }
+              .start()
+
+            val query = () => spark.sql("SELECT * FROM T ORDER BY a")
+
+            try {
+              inputData.addData((1, "a"))
+              stream.processAllAvailable()
+              checkAnswer(query(), Row(1, "a") :: Nil)
+
+              inputData.addData((2, "b"))
+              stream.processAllAvailable()
+              checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+
+              inputData.addData((2, "b2"))
+              stream.processAllAvailable()
+              checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
+            } finally {
+              stream.stop()
             }
-            .start()
-
-          val query = () => spark.sql("SELECT * FROM T ORDER BY a")
-
-          try {
-            inputData.addData((1, "a"))
-            stream.processAllAvailable()
-            checkAnswer(query(), Row(1, "a") :: Nil)
-
-            inputData.addData((2, "b"))
-            stream.processAllAvailable()
-            checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
-
-            inputData.addData((2, "b2"))
-            stream.processAllAvailable()
-            checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
-          } finally {
-            stream.stop()
-          }
+        }
       }
     }
   }

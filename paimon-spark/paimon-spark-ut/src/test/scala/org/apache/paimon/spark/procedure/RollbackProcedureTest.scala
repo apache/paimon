@@ -29,69 +29,72 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
   import testImplicits._
 
   test("Paimon Procedure: rollback to snapshot and tag") {
-    failAfter(streamingTimeout) {
-      withTempDir {
-        checkpointDir =>
-          // define a change-log table and test `forEachBatch` api
-          spark.sql(s"""
-                       |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
-                       |""".stripMargin)
-          val table = loadTable("T")
-          val location = table.location().toString
+    withSparkSQLConf(("spark.paimon.write.use-v2-write", "false")) {
 
-          val inputData = MemoryStream[(Int, String)]
-          val stream = inputData
-            .toDS()
-            .toDF("a", "b")
-            .writeStream
-            .option("checkpointLocation", checkpointDir.getCanonicalPath)
-            .foreachBatch {
-              (batch: Dataset[Row], _: Long) =>
-                batch.write.format("paimon").mode("append").save(location)
+      failAfter(streamingTimeout) {
+        withTempDir {
+          checkpointDir =>
+            // define a change-log table and test `forEachBatch` api
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b STRING)
+                         |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                         |""".stripMargin)
+            val table = loadTable("T")
+            val location = table.location().toString
+
+            val inputData = MemoryStream[(Int, String)]
+            val stream = inputData
+              .toDS()
+              .toDF("a", "b")
+              .writeStream
+              .option("checkpointLocation", checkpointDir.getCanonicalPath)
+              .foreachBatch {
+                (batch: Dataset[Row], _: Long) =>
+                  batch.write.format("paimon").mode("append").save(location)
+              }
+              .start()
+
+            val query = () => spark.sql("SELECT * FROM T ORDER BY a")
+
+            try {
+              // snapshot-1
+              inputData.addData((1, "a"))
+              stream.processAllAvailable()
+              checkAnswer(query(), Row(1, "a") :: Nil)
+
+              checkAnswer(
+                spark.sql(
+                  "CALL paimon.sys.create_tag(table => 'test.T', tag => 'test_tag', snapshot => 1)"),
+                Row(true) :: Nil)
+
+              // snapshot-2
+              inputData.addData((2, "b"))
+              stream.processAllAvailable()
+              checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+
+              // snapshot-3
+              inputData.addData((2, "b2"))
+              stream.processAllAvailable()
+              checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
+              assertThrows[RuntimeException] {
+                spark.sql("CALL paimon.sys.rollback(table => 'test.T_exception', version =>  '2')")
+              }
+              // rollback to snapshot
+              checkAnswer(
+                spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '2')"),
+                Row(table.latestSnapshot().get().id, 2) :: Nil)
+              checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+
+              // rollback to tag
+              val taggedSnapshotId = table.tagManager().getOrThrow("test_tag").trimToSnapshot().id
+              checkAnswer(
+                spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => 'test_tag')"),
+                Row(table.latestSnapshot().get().id, taggedSnapshotId) :: Nil)
+              checkAnswer(query(), Row(1, "a") :: Nil)
+            } finally {
+              stream.stop()
             }
-            .start()
-
-          val query = () => spark.sql("SELECT * FROM T ORDER BY a")
-
-          try {
-            // snapshot-1
-            inputData.addData((1, "a"))
-            stream.processAllAvailable()
-            checkAnswer(query(), Row(1, "a") :: Nil)
-
-            checkAnswer(
-              spark.sql(
-                "CALL paimon.sys.create_tag(table => 'test.T', tag => 'test_tag', snapshot => 1)"),
-              Row(true) :: Nil)
-
-            // snapshot-2
-            inputData.addData((2, "b"))
-            stream.processAllAvailable()
-            checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
-
-            // snapshot-3
-            inputData.addData((2, "b2"))
-            stream.processAllAvailable()
-            checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
-            assertThrows[RuntimeException] {
-              spark.sql("CALL paimon.sys.rollback(table => 'test.T_exception', version =>  '2')")
-            }
-            // rollback to snapshot
-            checkAnswer(
-              spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => '2')"),
-              Row(table.latestSnapshot().get().id, 2) :: Nil)
-            checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
-
-            // rollback to tag
-            val taggedSnapshotId = table.tagManager().getOrThrow("test_tag").trimToSnapshot().id
-            checkAnswer(
-              spark.sql("CALL paimon.sys.rollback(table => 'test.T', version => 'test_tag')"),
-              Row(table.latestSnapshot().get().id, taggedSnapshotId) :: Nil)
-            checkAnswer(query(), Row(1, "a") :: Nil)
-          } finally {
-            stream.stop()
-          }
+        }
       }
     }
   }
@@ -159,60 +162,63 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
   }
 
   test("Paimon Procedure: rollback to timestamp") {
-    failAfter(streamingTimeout) {
-      withTempDir {
-        checkpointDir =>
-          // define a change-log table and test `forEachBatch` api
-          spark.sql(s"""
-                       |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
-                       |""".stripMargin)
-          val location = loadTable("T").location().toString
+    withSparkSQLConf(("spark.paimon.write.use-v2-write", "false")) {
 
-          val inputData = MemoryStream[(Int, String)]
-          val stream = inputData
-            .toDS()
-            .toDF("a", "b")
-            .writeStream
-            .option("checkpointLocation", checkpointDir.getCanonicalPath)
-            .foreachBatch {
-              (batch: Dataset[Row], _: Long) =>
-                batch.write.format("paimon").mode("append").save(location)
+      failAfter(streamingTimeout) {
+        withTempDir {
+          checkpointDir =>
+            // define a change-log table and test `forEachBatch` api
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b STRING)
+                         |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                         |""".stripMargin)
+            val location = loadTable("T").location().toString
+
+            val inputData = MemoryStream[(Int, String)]
+            val stream = inputData
+              .toDS()
+              .toDF("a", "b")
+              .writeStream
+              .option("checkpointLocation", checkpointDir.getCanonicalPath)
+              .foreachBatch {
+                (batch: Dataset[Row], _: Long) =>
+                  batch.write.format("paimon").mode("append").save(location)
+              }
+              .start()
+
+            val table = loadTable("T")
+
+            val query = () => spark.sql("SELECT * FROM T ORDER BY a")
+
+            try {
+              // snapshot-1
+              inputData.addData((1, "a"))
+              stream.processAllAvailable()
+              checkAnswer(query(), Row(1, "a") :: Nil)
+
+              // snapshot-2
+              inputData.addData((2, "b"))
+              stream.processAllAvailable()
+              checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+
+              val timestamp = System.currentTimeMillis()
+
+              // snapshot-3
+              inputData.addData((2, "b2"))
+              stream.processAllAvailable()
+              checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
+
+              // rollback to timestamp
+              checkAnswer(
+                spark.sql(
+                  s"CALL paimon.sys.rollback_to_timestamp(table => 'test.T', timestamp => $timestamp)"),
+                Row(table.latestSnapshot().get().id, 2) :: Nil)
+              checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+
+            } finally {
+              stream.stop()
             }
-            .start()
-
-          val table = loadTable("T")
-
-          val query = () => spark.sql("SELECT * FROM T ORDER BY a")
-
-          try {
-            // snapshot-1
-            inputData.addData((1, "a"))
-            stream.processAllAvailable()
-            checkAnswer(query(), Row(1, "a") :: Nil)
-
-            // snapshot-2
-            inputData.addData((2, "b"))
-            stream.processAllAvailable()
-            checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
-
-            val timestamp = System.currentTimeMillis()
-
-            // snapshot-3
-            inputData.addData((2, "b2"))
-            stream.processAllAvailable()
-            checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
-
-            // rollback to timestamp
-            checkAnswer(
-              spark.sql(
-                s"CALL paimon.sys.rollback_to_timestamp(table => 'test.T', timestamp => $timestamp)"),
-              Row(table.latestSnapshot().get().id, 2) :: Nil)
-            checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
-
-          } finally {
-            stream.stop()
-          }
+        }
       }
     }
   }

@@ -86,28 +86,31 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
   }
 
   test("Paimon Metric: report output metric") {
-    sql(s"CREATE TABLE T (id int)")
+    withSparkSQLConf(("spark.paimon.write.use-v2-write", "false")) {
 
-    var recordsWritten = 0L
-    var bytesWritten = 0L
+      sql(s"CREATE TABLE T (id int)")
 
-    val listener = new SparkListener() {
-      override def onTaskEnd(taskEnd: SparkListenerTaskEnd): Unit = {
-        val outputMetrics = taskEnd.taskMetrics.outputMetrics
-        recordsWritten += outputMetrics.recordsWritten
-        bytesWritten += outputMetrics.bytesWritten
+      var recordsWritten = 0L
+      var bytesWritten = 0L
+
+      val listener = new SparkListener() {
+        override def onTaskEnd(taskEnd: SparkListenerTaskEnd): Unit = {
+          val outputMetrics = taskEnd.taskMetrics.outputMetrics
+          recordsWritten += outputMetrics.recordsWritten
+          bytesWritten += outputMetrics.bytesWritten
+        }
       }
-    }
 
-    try {
-      spark.sparkContext.addSparkListener(listener)
-      sql(s"INSERT INTO T VALUES 1, 2, 3")
-    } finally {
-      spark.sparkContext.removeSparkListener(listener)
-    }
+      try {
+        spark.sparkContext.addSparkListener(listener)
+        sql(s"INSERT INTO T VALUES 1, 2, 3")
+      } finally {
+        spark.sparkContext.removeSparkListener(listener)
+      }
 
-    Assertions.assertEquals(3, recordsWritten)
-    Assertions.assertTrue(bytesWritten > 0)
+      Assertions.assertEquals(3, recordsWritten)
+      Assertions.assertTrue(bytesWritten > 0)
+    }
   }
 
   def metric(metrics: Array[CustomTaskMetric], name: String): Long = {

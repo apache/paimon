@@ -20,6 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.spark.sources.PaimonSourceOffset
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.streaming.{StreamingQueryException, StreamTest, Trigger}
 import org.junit.jupiter.api.Assertions
@@ -27,6 +28,11 @@ import org.junit.jupiter.api.Assertions
 import java.util.concurrent.TimeUnit
 
 class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
+
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf
+      .set("spark.paimon.write.use-v2-write", "false")
+  }
 
   import testImplicits._
 
