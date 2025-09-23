@@ -48,7 +48,6 @@ public class CastExecutors {
                 .addRule(NumericPrimitiveToDecimalCastRule.INSTANCE)
                 .addRule(DecimalToNumericPrimitiveCastRule.INSTANCE)
                 .addRule(NumericPrimitiveCastRule.INSTANCE)
-                .addRule(NumericPrimitiveToTimestamp.INSTANCE)
                 // Boolean <-> numeric rules
                 .addRule(BooleanToNumericCastRule.INSTANCE)
                 .addRule(NumericToBooleanCastRule.INSTANCE)
@@ -80,7 +79,6 @@ public class CastExecutors {
                 .addRule(TimestampToTimeCastRule.INSTANCE)
                 .addRule(DateToTimestampCastRule.INSTANCE)
                 .addRule(TimeToTimestampCastRule.INSTANCE)
-                .addRule(TimestampToNumericPrimitiveCastRule.INSTANCE)
                 // To binary rules
                 .addRule(BinaryToBinaryCastRule.INSTANCE)
                 .addRule(BinaryToStringCastRule.INSTANCE);
