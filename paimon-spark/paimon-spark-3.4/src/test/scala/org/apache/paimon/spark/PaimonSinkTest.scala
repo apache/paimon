@@ -29,7 +29,9 @@ import java.sql.Date
 class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
 
   override protected def sparkConf: SparkConf = {
-    super.sparkConf.set("spark.sql.catalog.paimon.cache-enabled", "false")
+    super.sparkConf
+      .set("spark.sql.catalog.paimon.cache-enabled", "false")
+      .set("spark.paimon.write.use-v2-write", "false")
   }
 
   import testImplicits._
