@@ -345,7 +345,8 @@ public class FieldAggregatorTest {
                                         DataTypes.FIELD(0, "k0", DataTypes.INT()),
                                         DataTypes.FIELD(1, "k1", DataTypes.INT()),
                                         DataTypes.FIELD(2, "v", DataTypes.STRING()))),
-                        Arrays.asList("k0", "k1"));
+                        Arrays.asList("k0", "k1"),
+                        Integer.MAX_VALUE);
 
         InternalArray accumulator;
         InternalArray.ElementGetter elementGetter =
@@ -383,7 +384,8 @@ public class FieldAggregatorTest {
                 new FieldNestedUpdateAgg(
                         FieldNestedUpdateAggFactory.NAME,
                         DataTypes.ARRAY(elementRowType),
-                        Collections.emptyList());
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
 
         InternalArray accumulator = null;
         InternalArray.ElementGetter elementGetter =
@@ -403,6 +405,41 @@ public class FieldAggregatorTest {
         accumulator = (InternalArray) agg.retract(accumulator, singletonArray(current));
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 1, "B")));
+    }
+
+    @Test
+    public void testFieldNestedAppendAggWithCountLimit() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Collections.emptyList(),
+                        2);
+
+        InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalRow current = row(0, 1, "B");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 1, "B")));
+
+        current = row(0, 1, "b");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(0, 1, "b")));
+
+        // count limit is 2, so the third element will be dropped
+        current = row(0, 1, "C");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(0, 1, "b")));
     }
 
     private List<Object> unnest(InternalArray array, InternalArray.ElementGetter elementGetter) {
