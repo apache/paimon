@@ -64,6 +64,16 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon function: show user functions") {
+    assume(gteqSpark3_4)
+    Seq("paimon", paimonHiveCatalogName).foreach {
+      catalogName =>
+        sql(s"use $catalogName")
+        val functions = sql("show user functions in sys").collect()
+        assert(functions.exists(_.getString(0).contains("max_pt")), catalogName)
+    }
+  }
+
   test("Paimon function: bucket join with SparkGenericCatalog") {
     sql(s"use $sparkCatalogName")
     assume(gteqSpark3_3)
