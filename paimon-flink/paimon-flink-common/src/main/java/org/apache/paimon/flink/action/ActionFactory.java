@@ -111,7 +111,16 @@ public interface ActionFactory extends Factory {
                                                     "Action %s does not support %s.",
                                                     action, FORCE_START_FLINK_JOB));
                                 }
-                                return ((ActionBase) a).forceStartFlinkJob();
+                                // Refer to Flink's AbstractParameterTool.NO_VALUE_KEY
+                                if ("__NO_VALUE_KEY".equals(params.get(FORCE_START_FLINK_JOB))) {
+                                    throw new IllegalArgumentException(
+                                            "Please specify the value for parameter "
+                                                    + FORCE_START_FLINK_JOB);
+                                }
+                                return ((ActionBase) a)
+                                        .forceStartFlinkJob(
+                                                Boolean.parseBoolean(
+                                                        params.get(FORCE_START_FLINK_JOB)));
                             });
         }
 

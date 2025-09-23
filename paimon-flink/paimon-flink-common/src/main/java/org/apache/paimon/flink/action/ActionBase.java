@@ -92,8 +92,8 @@ public abstract class ActionBase implements Action, Serializable {
      *
      * @return this ActionBase for method chaining
      */
-    public ActionBase forceStartFlinkJob() {
-        this.forceStartFlinkJob = true;
+    public ActionBase forceStartFlinkJob(boolean forceStartFlinkJob) {
+        this.forceStartFlinkJob = forceStartFlinkJob;
         return this;
     }
 

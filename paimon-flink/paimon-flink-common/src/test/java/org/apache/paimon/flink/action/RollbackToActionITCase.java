@@ -70,19 +70,6 @@ public class RollbackToActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
-                createAction(
-                                RollbackToAction.class,
-                                "rollback_to",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--version",
-                                "2")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 RollbackToAction.class,
@@ -95,7 +82,8 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                                 tableName,
                                 "--version",
                                 "2",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -143,19 +131,6 @@ public class RollbackToActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
-                createAction(
-                                RollbackToAction.class,
-                                "rollback_to",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--version",
-                                "tag2")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 RollbackToAction.class,
@@ -168,7 +143,8 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                                 tableName,
                                 "--version",
                                 "tag2",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -212,19 +188,6 @@ public class RollbackToActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
-                createAction(
-                                RollbackToTimestampAction.class,
-                                "rollback_to_timestamp",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--timestamp",
-                                timestamp + "")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 RollbackToTimestampAction.class,
@@ -237,7 +200,8 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                                 tableName,
                                 "--timestamp",
                                 timestamp + "",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":

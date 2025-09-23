@@ -53,7 +53,7 @@ public class CreateTagFromTimestampActionITTest extends ActionITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testCreateTagFromTimestampAction(boolean startFlinkJob) throws Exception {
+    public void testCreateTagFromTimestampAction(boolean forceStartFlinkJob) throws Exception {
         FileStoreTable table = prepareTable();
         TableScan.Plan plan = table.newReadBuilder().newScan().plan();
         List<String> actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
@@ -64,8 +64,8 @@ public class CreateTagFromTimestampActionITTest extends ActionITCaseBase {
         long ts = table.snapshotManager().latestSnapshot().timeMillis();
         String tag = "tag_test";
 
-        List<String> args =
-                Arrays.asList(
+        createAction(
+                        CreateTagFromTimestampAction.class,
                         "create_tag_from_timestamp",
                         "--warehouse",
                         warehouse,
@@ -76,14 +76,10 @@ public class CreateTagFromTimestampActionITTest extends ActionITCaseBase {
                         "--tag",
                         tag,
                         "--timestamp",
-                        Long.toString(ts));
-
-        if (startFlinkJob) {
-            args = new ArrayList<>(args);
-            args.add("--force_start_flink_job");
-        }
-
-        createAction(CreateTagFromTimestampAction.class, args.toArray(new String[0])).run();
+                        Long.toString(ts),
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
+                .run();
 
         Snapshot snapshot = table.tagManager().tags().firstKey();
 

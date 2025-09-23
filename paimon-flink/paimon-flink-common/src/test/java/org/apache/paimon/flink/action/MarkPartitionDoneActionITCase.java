@@ -83,19 +83,6 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
-                createAction(
-                                MarkPartitionDoneAction.class,
-                                "mark_partition_done",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--partition",
-                                "partKey0=0")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 MarkPartitionDoneAction.class,
@@ -108,7 +95,8 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                                 tableName,
                                 "--partition",
                                 "partKey0=0",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -140,21 +128,6 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
-                createAction(
-                                MarkPartitionDoneAction.class,
-                                "mark_partition_done",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--partition",
-                                "partKey0=0,partKey1=1",
-                                "--partition",
-                                "partKey0=1,partKey1=0")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 MarkPartitionDoneAction.class,
@@ -169,7 +142,8 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                                 "partKey0=0,partKey1=1",
                                 "--partition",
                                 "partKey0=1,partKey1=0",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -213,21 +187,6 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
-                createAction(
-                                MarkPartitionDoneAction.class,
-                                "mark_partition_done",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--partition",
-                                "partKey0=0,partKey1=1",
-                                "--partition",
-                                "partKey0=1,partKey1=0")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 MarkPartitionDoneAction.class,
@@ -242,7 +201,8 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                                 "partKey0=0,partKey1=1",
                                 "--partition",
                                 "partKey0=1,partKey1=0",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -295,21 +255,6 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
             switch (invoker) {
                 case "action":
-                    createAction(
-                                    MarkPartitionDoneAction.class,
-                                    "mark_partition_done",
-                                    "--warehouse",
-                                    warehouse,
-                                    "--database",
-                                    database,
-                                    "--table",
-                                    tableName,
-                                    "--partition",
-                                    "partKey0=0,partKey1=1",
-                                    "--partition",
-                                    "partKey0=1,partKey1=0")
-                            .run();
-                    break;
                 case "action_job":
                     createAction(
                                     MarkPartitionDoneAction.class,
@@ -324,7 +269,8 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                                     "partKey0=0,partKey1=1",
                                     "--partition",
                                     "partKey0=1,partKey1=0",
-                                    "--force_start_flink_job")
+                                    "--force_start_flink_job",
+                                    Boolean.toString(invoker.equals("action_job")))
                             .run();
                     break;
                 case "procedure_indexed":

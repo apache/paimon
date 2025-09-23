@@ -55,8 +55,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
     public void testDropPartitionWithSinglePartitionKey(boolean hasPk) throws Exception {
         FileStoreTable table = prepareTable(hasPk);
 
-        int mode = ThreadLocalRandom.current().nextInt(3);
-        if (mode == 0) {
+        if (ThreadLocalRandom.current().nextBoolean()) {
 
             createAction(
                             DropPartitionAction.class,
@@ -68,21 +67,9 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
                             "--table",
                             tableName,
                             "--partition",
-                            "partKey0=0")
-                    .run();
-        } else if (mode == 1) {
-            createAction(
-                            DropPartitionAction.class,
-                            "drop_partition",
-                            "--warehouse",
-                            warehouse,
-                            "--database",
-                            database,
-                            "--table",
-                            tableName,
-                            "--partition",
                             "partKey0=0",
-                            "--force_start_flink_job")
+                            "--force_start_flink_job",
+                            Boolean.toString(ThreadLocalRandom.current().nextBoolean()))
                     .run();
         } else {
             executeSQL(
@@ -135,23 +122,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
         partitions1.put("partKey0", "1");
         partitions1.put("partKey1", "0");
 
-        int mode = ThreadLocalRandom.current().nextInt(3);
-        if (mode == 0) {
-            createAction(
-                            DropPartitionAction.class,
-                            "drop_partition",
-                            "--warehouse",
-                            warehouse,
-                            "--database",
-                            database,
-                            "--table",
-                            tableName,
-                            "--partition",
-                            "partKey0=0,partKey1=1",
-                            "--partition",
-                            "partKey0=1,partKey1=0")
-                    .run();
-        } else if (mode == 1) {
+        if (ThreadLocalRandom.current().nextBoolean()) {
             createAction(
                             DropPartitionAction.class,
                             "drop_partition",
@@ -165,7 +136,8 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
                             "partKey0=0,partKey1=1",
                             "--partition",
                             "partKey0=1,partKey1=0",
-                            "--force_start_flink_job")
+                            "--force_start_flink_job",
+                            Boolean.toString(ThreadLocalRandom.current().nextBoolean()))
                     .run();
         } else {
             executeSQL(

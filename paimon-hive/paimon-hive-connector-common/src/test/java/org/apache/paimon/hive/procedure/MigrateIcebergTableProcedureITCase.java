@@ -160,7 +160,7 @@ public class MigrateIcebergTableProcedureITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("actionArguments")
-    public void testMigrateIcebergTableAction(boolean isPartitioned, boolean startFlinkJob)
+    public void testMigrateIcebergTableAction(boolean isPartitioned, boolean forceStartFlinkJob)
             throws Exception {
         TableEnvironment tEnv =
                 TableEnvironmentImpl.create(
@@ -201,9 +201,7 @@ public class MigrateIcebergTableProcedureITCase extends ActionITCaseBase {
         MigrateIcebergTableAction migrateIcebergTableAction =
                 new MigrateIcebergTableAction(
                         "default." + icebergTable, catalogConf, icebergOptions, "", 6);
-        if (startFlinkJob) {
-            migrateIcebergTableAction.forceStartFlinkJob();
-        }
+        migrateIcebergTableAction.forceStartFlinkJob(forceStartFlinkJob);
         migrateIcebergTableAction.run();
 
         tEnv.executeSql(paimonCatalogDdl(true));

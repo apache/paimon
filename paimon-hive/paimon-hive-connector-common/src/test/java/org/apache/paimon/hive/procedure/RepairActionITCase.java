@@ -57,7 +57,7 @@ public class RepairActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testRepairTableAction(boolean startFlinkJob) throws Exception {
+    public void testRepairTableAction(boolean forceStartFlinkJob) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
@@ -88,9 +88,7 @@ public class RepairActionITCase extends ActionITCaseBase {
         catalogConf.put(
                 "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
         RepairAction repairAction = new RepairAction("test_db.t_repair_hive", catalogConf);
-        if (startFlinkJob) {
-            repairAction.forceStartFlinkJob();
-        }
+        repairAction.forceStartFlinkJob(forceStartFlinkJob);
         repairAction.run();
 
         List<Row> ret =

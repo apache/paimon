@@ -321,5 +321,5 @@ submitting them as jobs. For example,
     --table <table-name> \
     [--partition <partition_spec> [--partition <partition_spec> ...]] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
-    --force_start_flink_job
+    --force_start_flink_job true
 ```

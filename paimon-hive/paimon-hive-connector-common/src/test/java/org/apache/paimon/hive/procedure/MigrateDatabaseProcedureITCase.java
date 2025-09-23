@@ -214,7 +214,8 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @MethodSource("testArguments")
-    public void testMigrateDatabaseAction(String format, boolean startFlinkJob) throws Exception {
+    public void testMigrateDatabaseAction(String format, boolean forceStartFlinkJob)
+            throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -254,9 +255,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
                 "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
         MigrateDatabaseAction migrateDatabaseAction =
                 new MigrateDatabaseAction("hive", "my_database", catalogConf, "", 6);
-        if (startFlinkJob) {
-            migrateDatabaseAction.forceStartFlinkJob();
-        }
+        migrateDatabaseAction.forceStartFlinkJob(forceStartFlinkJob);
         migrateDatabaseAction.run();
 
         tEnv.executeSql(

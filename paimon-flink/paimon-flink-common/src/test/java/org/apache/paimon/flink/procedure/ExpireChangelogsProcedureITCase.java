@@ -37,7 +37,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.IOException;
 import java.sql.Timestamp;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -193,7 +192,7 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testExpireChangelogsAction(boolean startFlinkJob) throws Exception {
+    public void testExpireChangelogsAction(boolean forceStartFlinkJob) throws Exception {
         sql(
                 "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
                         + " WITH ( 'num-sorted-run.compaction-trigger' = '9999', 'changelog-producer' = 'input', "
@@ -216,8 +215,8 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
 
         Timestamp ts5 = new Timestamp(changelogManager.changelog(5).timeMillis());
 
-        List<String> args1 =
-                Arrays.asList(
+        createAction(
+                        ExpireChangelogsAction.class,
                         "expire_changelogs",
                         "--warehouse",
                         path,
@@ -232,19 +231,16 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
                         "--older_than",
                         ts5.toString(),
                         "--max_deletes",
-                        "3");
-        if (startFlinkJob) {
-            args1 = new ArrayList<>(args1);
-            args1.add("--force_start_flink_job");
-        }
-        createAction(ExpireChangelogsAction.class, args1.toArray(new String[0]))
+                        "3",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkChangelogs(changelogManager, 4, 6);
 
         // expire all
-        List<String> args2 =
-                Arrays.asList(
+        createAction(
+                        ExpireChangelogsAction.class,
                         "expire_changelogs",
                         "--warehouse",
                         path,
@@ -253,12 +249,9 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
                         "--table",
                         "word_count",
                         "--delete_all",
-                        "true");
-        if (startFlinkJob) {
-            args2 = new ArrayList<>(args2);
-            args2.add("--force_start_flink_job");
-        }
-        createAction(ExpireChangelogsAction.class, args2.toArray(new String[0]))
+                        "true",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkAllDeleted(changelogManager);

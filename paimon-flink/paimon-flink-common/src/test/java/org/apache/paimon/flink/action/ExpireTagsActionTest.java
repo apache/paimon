@@ -29,9 +29,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
@@ -74,7 +71,7 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
         expireTags(false);
     }
 
-    public void expireTags(boolean startFlinkJob) throws Exception {
+    public void expireTags(boolean forceStartFlinkJob) throws Exception {
         FileStoreTable table = getFileStoreTable("T");
 
         // generate 5 snapshots
@@ -88,20 +85,18 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
         bEnv.executeSql("CALL sys.create_tag('default.T', 'tag-3', 3, '1h')").await();
         assertThat(table.tagManager().tags().size()).isEqualTo(3);
 
-        List<String> basicArgs =
-                Arrays.asList(
+        createAction(
+                        ExpireTagsAction.class,
                         "expire_tags",
                         "--warehouse",
                         warehouse,
                         "--database",
                         database,
                         "--table",
-                        "T");
-        List<String> args = new ArrayList<>(basicArgs);
-        if (startFlinkJob) {
-            args.add("--force_start_flink_job");
-        }
-        createAction(ExpireTagsAction.class, args.toArray(new String[0])).run();
+                        "T",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
+                .run();
         // no tags expired
         assertThat(table.tagManager().tags().size()).isEqualTo(3);
 
@@ -110,7 +105,18 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
         assertThat(table.tagManager().tags().size()).isEqualTo(5);
 
         Thread.sleep(2000);
-        createAction(ExpireTagsAction.class, args.toArray(new String[0])).run();
+        createAction(
+                        ExpireTagsAction.class,
+                        "expire_tags",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        "T",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
+                .run();
         // tag-4,tag-5 expires
         assertThat(table.tagManager().tags().size()).isEqualTo(3);
         assertThat(table.tagManager().tagExists("tag-4")).isFalse();
@@ -121,13 +127,20 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
         java.sql.Timestamp timestamp =
                 new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime).getMillisecond());
 
-        args = new ArrayList<>(basicArgs);
-        args.add("--older_than");
-        args.add(timestamp.toString());
-        if (startFlinkJob) {
-            args.add("--force_start_flink_job");
-        }
-        createAction(ExpireTagsAction.class, args.toArray(new String[0])).run();
+        createAction(
+                        ExpireTagsAction.class,
+                        "expire_tags",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        "T",
+                        "--older_than",
+                        timestamp.toString(),
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
+                .run();
         // tag-1,tag-2 expires. tag-1 expired by its file creation time.
         assertThat(table.tagManager().tags().size()).isEqualTo(1);
         assertThat(table.tagManager().tagExists("tag-3")).isTrue();

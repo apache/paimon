@@ -284,7 +284,9 @@ public class CompactAction extends TableActionBase {
                         .partitions();
         if (partitions.isEmpty()) {
             if (this.forceStartFlinkJob) {
-                env.fromSequence(0, 0).name("Placeholder Source").sinkTo(new DiscardingSink<>());
+                env.fromSequence(0, 0)
+                        .name("Nothing to Compact Source")
+                        .sinkTo(new DiscardingSink<>());
                 return true;
             } else {
                 return false;

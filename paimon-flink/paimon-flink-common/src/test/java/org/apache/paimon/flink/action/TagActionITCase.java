@@ -69,6 +69,7 @@ public class TagActionITCase extends ActionITCaseBase {
         TagManager tagManager = new TagManager(table.fileIO(), table.location());
 
         switch (invoker) {
+            case "action":
             case "action_job":
                 createAction(
                                 CreateTagAction.class,
@@ -83,23 +84,8 @@ public class TagActionITCase extends ActionITCaseBase {
                                 "tag2",
                                 "--snapshot",
                                 "2",
-                                "--force_start_flink_job")
-                        .run();
-                break;
-            case "action":
-                createAction(
-                                CreateTagAction.class,
-                                "create_tag",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--tag_name",
-                                "tag2",
-                                "--snapshot",
-                                "2")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -125,19 +111,6 @@ public class TagActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
-                createAction(
-                                DeleteTagAction.class,
-                                "delete_tag",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--tag_name",
-                                "tag2")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 DeleteTagAction.class,
@@ -150,7 +123,8 @@ public class TagActionITCase extends ActionITCaseBase {
                                 tableName,
                                 "--tag_name",
                                 "tag2",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -171,21 +145,6 @@ public class TagActionITCase extends ActionITCaseBase {
         // create tag1
         switch (invoker) {
             case "action":
-                createAction(
-                                CreateTagAction.class,
-                                "create_tag",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--tag_name",
-                                "tag1",
-                                "--snapshot",
-                                "1")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 CreateTagAction.class,
@@ -200,7 +159,8 @@ public class TagActionITCase extends ActionITCaseBase {
                                 "tag1",
                                 "--snapshot",
                                 "1",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -221,21 +181,6 @@ public class TagActionITCase extends ActionITCaseBase {
         // create tag3
         switch (invoker) {
             case "action":
-                createAction(
-                                CreateTagAction.class,
-                                "create_tag",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--tag_name",
-                                "tag3",
-                                "--snapshot",
-                                "3")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 CreateTagAction.class,
@@ -250,7 +195,8 @@ public class TagActionITCase extends ActionITCaseBase {
                                 "tag3",
                                 "--snapshot",
                                 "3",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -270,19 +216,6 @@ public class TagActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
-                createAction(
-                                DeleteTagAction.class,
-                                "delete_tag",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--tag_name",
-                                "tag1,tag3")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 DeleteTagAction.class,
@@ -295,7 +228,8 @@ public class TagActionITCase extends ActionITCaseBase {
                                 tableName,
                                 "--tag_name",
                                 "tag1,tag3",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -345,19 +279,6 @@ public class TagActionITCase extends ActionITCaseBase {
         TagManager tagManager = new TagManager(table.fileIO(), table.location());
         switch (invoker) {
             case "action":
-                createAction(
-                                CreateTagAction.class,
-                                "create_tag",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--tag_name",
-                                "tag2")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 CreateTagAction.class,
@@ -370,7 +291,8 @@ public class TagActionITCase extends ActionITCaseBase {
                                 tableName,
                                 "--tag_name",
                                 "tag2",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -391,21 +313,6 @@ public class TagActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
-                createAction(
-                                RenameTagAction.class,
-                                "rename_tag",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--tag_name",
-                                "tag2",
-                                "--target_tag_name",
-                                "tag3")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 RenameTagAction.class,
@@ -420,7 +327,8 @@ public class TagActionITCase extends ActionITCaseBase {
                                 "tag2",
                                 "--target_tag_name",
                                 "tag3",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -473,19 +381,6 @@ public class TagActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
-                createAction(
-                                CreateTagAction.class,
-                                "create_tag",
-                                "--warehouse",
-                                warehouse,
-                                "--database",
-                                database,
-                                "--table",
-                                tableName,
-                                "--tag_name",
-                                "tag2")
-                        .run();
-                break;
             case "action_job":
                 createAction(
                                 CreateTagAction.class,
@@ -498,7 +393,8 @@ public class TagActionITCase extends ActionITCaseBase {
                                 tableName,
                                 "--tag_name",
                                 "tag2",
-                                "--force_start_flink_job")
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
