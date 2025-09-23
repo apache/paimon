@@ -55,6 +55,10 @@
                         <groupId>jdk.tools</groupId>
                         <artifactId>jdk.tools</artifactId>
                     </exclusion>
+                    <exclusion>
+                        <groupId>com.github.pjfanning</groupId>
+                        <artifactId>jersey-json</artifactId>
+                    </exclusion>
                 </exclusions>
             </dependency>
 
