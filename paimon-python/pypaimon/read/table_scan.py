@@ -65,8 +65,6 @@ class TableScan:
 
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
-        self.plan_start_row = None
-        self.plan_end_row = None
 
         self.only_read_real_buckets = True if int(
             self.table.options.get('bucket', -1)) == BucketMode.POSTPONE_BUCKET.value else False
@@ -133,6 +131,8 @@ class TableScan:
         start_row = self.idx_of_this_subtask * (total_row // self.number_of_para_subtasks)
         end_row = start_row + num_row
 
+        plan_start_row = 0
+        plan_end_row = 0
         entry_end_row = 0  # end row position of current file in all data
         splits_start_row = 0
         filtered_partitioned_split = defaultdict(list)
@@ -151,18 +151,18 @@ class TableScan:
                     continue
                 if entry_begin_row <= start_row < entry_end_row:
                     splits_start_row = entry_begin_row
-                    self.plan_start_row = start_row - entry_begin_row
+                    plan_start_row = start_row - entry_begin_row
                 # If shard end position is within current file, record relative end position
                 if entry_begin_row < end_row <= entry_end_row:
-                    self.plan_end_row = end_row - splits_start_row
+                    plan_end_row = end_row - splits_start_row
                 # Add files that overlap with shard range to result
                 filtered_entries.append(entry)
             if filtered_entries:
                 filtered_partitioned_split[key] = filtered_entries
 
-        return filtered_partitioned_split
+        return filtered_partitioned_split, plan_start_row, plan_end_row
 
-    def _compute_split_start_end_row(self, splits: List[Split]):
+    def _compute_split_start_end_row(self, splits: List[Split], plan_start_row, plan_end_row):
         file_end_row = 0  # end row position of current file in all data
         for split in splits:
             files = split.files
@@ -173,12 +173,12 @@ class TableScan:
                 file_end_row += file.row_count  # Update to row position after current file
 
                 # If shard start position is within current file, record actual start position and relative offset
-                if file_begin_row <= self.plan_start_row < file_end_row:
-                    split.split_start_row = self.plan_start_row - file_begin_row
+                if file_begin_row <= plan_start_row < file_end_row:
+                    split.split_start_row = plan_start_row - file_begin_row
 
                 # If shard end position is within current file, record relative end position
-                if file_begin_row < self.plan_end_row <= file_end_row:
-                    split.split_end_row = self.plan_end_row - split_start_row
+                if file_begin_row < plan_end_row <= file_end_row:
+                    split.split_end_row = plan_end_row - split_start_row
             if split.split_start_row is None:
                 split.split_start_row = 0
             if split.split_end_row is None:
@@ -254,18 +254,18 @@ class TableScan:
         })
 
     def _create_append_only_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
-        partitioned_split = defaultdict(list)
+        partitioned_files = defaultdict(list)
         for entry in file_entries:
-            partitioned_split[(tuple(entry.partition.values), entry.bucket)].append(entry)
+            partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
         if self.idx_of_this_subtask is not None:
-            partitioned_split = self._append_only_filter_by_shard(partitioned_split)
+            partitioned_files, plan_start_row, plan_end_row = self._append_only_filter_by_shard(partitioned_files)
 
         def weight_func(f: DataFileMeta) -> int:
             return max(f.file_size, self.open_file_cost)
 
         splits = []
-        for key, file_entries in partitioned_split.items():
+        for key, file_entries in partitioned_files.items():
             if not file_entries:
                 return []
 
@@ -275,21 +275,21 @@ class TableScan:
                                                                             self.target_split_size)
             splits += self._build_split_from_pack(packed_files, file_entries, False)
         if self.idx_of_this_subtask is not None:
-            self._compute_split_start_end_row(splits)
+            self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
         return splits
 
     def _create_primary_key_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
         if self.idx_of_this_subtask is not None:
             file_entries = self._primary_key_filter_by_shard(file_entries)
-        partitioned_split = defaultdict(list)
+        partitioned_files = defaultdict(list)
         for entry in file_entries:
-            partitioned_split[(tuple(entry.partition.values), entry.bucket)].append(entry)
+            partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
         def weight_func(fl: List[DataFileMeta]) -> int:
             return max(sum(f.file_size for f in fl), self.open_file_cost)
 
         splits = []
-        for key, file_entries in partitioned_split.items():
+        for key, file_entries in partitioned_files.items():
             if not file_entries:
                 return []
 
