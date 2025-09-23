@@ -40,7 +40,7 @@ public class LoggingInterceptor implements HttpResponseInterceptor {
     @Override
     public void process(
             HttpResponse httpResponse, EntityDetails entityDetails, HttpContext httpContext) {
-        HttpCoreContext coreContext = HttpCoreContext.adapt(httpContext);
+        HttpCoreContext coreContext = HttpCoreContext.cast(httpContext);
         HttpRequest request = coreContext.getRequest();
         Long startTime = (Long) coreContext.getAttribute(REQUEST_START_TIME_KEY);
         long durationMs = System.currentTimeMillis() - startTime;

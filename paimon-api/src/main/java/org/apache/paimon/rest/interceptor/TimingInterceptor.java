@@ -35,7 +35,7 @@ public class TimingInterceptor implements HttpRequestInterceptor {
     public void process(
             HttpRequest httpRequest, EntityDetails entityDetails, HttpContext httpContext)
             throws HttpException, IOException {
-        HttpCoreContext coreContext = HttpCoreContext.adapt(httpContext);
+        HttpCoreContext coreContext = HttpCoreContext.cast(httpContext);
         coreContext.setAttribute(REQUEST_START_TIME_KEY, System.currentTimeMillis());
     }
 }
