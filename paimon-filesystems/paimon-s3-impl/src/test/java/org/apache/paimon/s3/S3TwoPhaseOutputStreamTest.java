@@ -227,7 +227,9 @@ class S3TwoPhaseOutputStreamTest {
 
         private static S3AFileSystem createStubFileSystem() {
             // Create minimal stub to avoid NullPointerException during initialization
-            return new StubS3AFileSystem();
+            StubS3AFileSystem fileSystem = new StubS3AFileSystem();
+            fileSystem.setConf(new org.apache.hadoop.conf.Configuration());
+            return fileSystem;
         }
 
         @Override
