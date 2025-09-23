@@ -54,7 +54,6 @@ import java.util.function.Supplier;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
 public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
@@ -104,9 +103,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             case -2:
                 return BucketMode.POSTPONE_MODE;
             case -1:
-                return crossPartitionUpdate ? BucketMode.CROSS_PARTITION : BucketMode.HASH_DYNAMIC;
+                return crossPartitionUpdate ? BucketMode.KEY_DYNAMIC : BucketMode.HASH_DYNAMIC;
             default:
-                checkArgument(!crossPartitionUpdate);
                 return BucketMode.HASH_FIXED;
         }
     }

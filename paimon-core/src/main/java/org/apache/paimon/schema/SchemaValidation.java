@@ -567,14 +567,6 @@ public class SchemaValidation {
         } else if (bucket < 1 && !isPostponeBucketTable(schema, bucket)) {
             throw new RuntimeException("The number of buckets needs to be greater than 0.");
         } else {
-            if (schema.crossPartitionUpdate()) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
-                                        + "(Primary key constraint %s not include all partition fields %s).",
-                                schema.primaryKeys(), schema.partitionKeys()));
-            }
-
             if (schema.primaryKeys().isEmpty() && schema.bucketKeys().isEmpty()) {
                 throw new RuntimeException(
                         "You should define a 'bucket-key' for bucketed append mode.");

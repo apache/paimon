@@ -224,7 +224,7 @@ public class FlinkSinkBuilder {
                 return buildForFixedBucket(input);
             case HASH_DYNAMIC:
                 return buildDynamicBucketSink(input, false);
-            case CROSS_PARTITION:
+            case KEY_DYNAMIC:
                 return buildDynamicBucketSink(input, true);
             case BUCKET_UNAWARE:
                 return buildUnawareBucketSink(input);
