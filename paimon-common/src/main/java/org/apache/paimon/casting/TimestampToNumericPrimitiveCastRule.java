@@ -24,6 +24,9 @@ import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.DateTimeUtils;
 
+import java.time.Instant;
+import java.time.ZoneId;
+
 /**
  * {@link DataTypeRoot#TIMESTAMP_WITHOUT_TIME_ZONE}/{@link
  * DataTypeRoot#TIMESTAMP_WITH_LOCAL_TIME_ZONE} to {@link DataTypeFamily#NUMERIC} cast rule.
@@ -55,13 +58,19 @@ public class TimestampToNumericPrimitiveCastRule extends AbstractCastRule<Timest
             if (targetType.is(DataTypeRoot.BIGINT)) {
                 return value ->
                         DateTimeUtils.unixTimestamp(
-                                Timestamp.fromLocalDateTime(value.toLocalDateTime())
+                                Timestamp.fromLocalDateTime(
+                                                Instant.ofEpochMilli(value.getMillisecond())
+                                                        .atZone(ZoneId.systemDefault())
+                                                        .toLocalDateTime())
                                         .getMillisecond());
             } else if (targetType.is(DataTypeRoot.INTEGER)) {
                 return value ->
                         (int)
                                 DateTimeUtils.unixTimestamp(
-                                        Timestamp.fromLocalDateTime(value.toLocalDateTime())
+                                        Timestamp.fromLocalDateTime(
+                                                        Instant.ofEpochMilli(value.getMillisecond())
+                                                                .atZone(ZoneId.systemDefault())
+                                                                .toLocalDateTime())
                                                 .getMillisecond());
             }
         }

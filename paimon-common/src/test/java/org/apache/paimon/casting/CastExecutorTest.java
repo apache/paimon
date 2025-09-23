@@ -317,7 +317,7 @@ public class CastExecutorTest {
 
         compareCastResult(
                 CastExecutors.resolve(new LocalZonedTimestampType(3), new BigIntType(false)),
-                timestamp2,
+                timestamp1,
                 DateTimeUtils.unixTimestamp(millisecond1));
 
         compareCastResult(
@@ -327,7 +327,7 @@ public class CastExecutorTest {
 
         compareCastResult(
                 CastExecutors.resolve(new LocalZonedTimestampType(3), new IntType(false)),
-                timestamp2,
+                timestamp1,
                 (int) DateTimeUtils.unixTimestamp(millisecond1));
 
         // cast from BigIntType or IntType to TimestampType
