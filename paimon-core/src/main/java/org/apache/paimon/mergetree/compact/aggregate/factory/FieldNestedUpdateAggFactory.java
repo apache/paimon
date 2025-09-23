@@ -36,7 +36,10 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
 
     @Override
     public FieldNestedUpdateAgg create(DataType fieldType, CoreOptions options, String field) {
-        return createFieldNestedUpdateAgg(fieldType, options.fieldNestedUpdateAggNestedKey(field));
+        return createFieldNestedUpdateAgg(
+                fieldType,
+                options.fieldNestedUpdateAggNestedKey(field),
+                options.fieldNestedUpdateAggCountLimit(field));
     }
 
     @Override
@@ -45,7 +48,7 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
     }
 
     private FieldNestedUpdateAgg createFieldNestedUpdateAgg(
-            DataType fieldType, List<String> nestedKey) {
+            DataType fieldType, List<String> nestedKey, int countLimit) {
         if (nestedKey == null) {
             nestedKey = Collections.emptyList();
         }
@@ -56,6 +59,6 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
         ArrayType arrayType = (ArrayType) fieldType;
         checkArgument(arrayType.getElementType() instanceof RowType, typeErrorMsg, fieldType);
 
-        return new FieldNestedUpdateAgg(identifier(), arrayType, nestedKey);
+        return new FieldNestedUpdateAgg(identifier(), arrayType, nestedKey, countLimit);
     }
 }
