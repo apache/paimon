@@ -19,18 +19,14 @@
 from dataclasses import dataclass
 from typing import List
 
-from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+
 from pypaimon.read.split import Split
 
 
 @dataclass
 class Plan:
     """Implementation of Plan for native Python reading."""
-    _files: List[ManifestEntry]
     _splits: List[Split]
-
-    def files(self) -> List[ManifestEntry]:
-        return self._files
 
     def splits(self) -> List[Split]:
         return self._splits
