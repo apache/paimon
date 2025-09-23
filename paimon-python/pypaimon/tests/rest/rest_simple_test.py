@@ -22,6 +22,7 @@ import pyarrow as pa
 
 from pypaimon import Schema
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
+from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor, DynamicBucketRowKeyExtractor
 
 
 class RESTSimpleTest(RESTBaseTest):
@@ -363,6 +364,93 @@ class RESTSimpleTest(RESTBaseTest):
         actual = table_read.to_arrow(plan.splits())
         self.assertEqual(len(actual), 2)
 
+    def test_with_shard_large_dataset(self):
+        """Test with_shard method using 50000 rows of data to verify performance and correctness"""
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'],
+                                            options={'bucket': '5', 'bucket-key': 'item_id'})
+        self.rest_catalog.create_table('default.test_with_shard_large_dataset', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_shard_large_dataset')
+        write_builder = table.new_batch_write_builder()
+
+        # Generate 50000 rows of test data
+        num_rows = 50000
+        batch_size = 5000  # Write in batches to avoid memory issues
+
+        for batch_start in range(0, num_rows, batch_size):
+            batch_end = min(batch_start + batch_size, num_rows)
+            batch_data = {
+                'user_id': list(range(batch_start + 1, batch_end + 1)),
+                'item_id': [2000 + i for i in range(batch_start, batch_end)],
+                'behavior': [chr(ord('a') + (i % 26)) for i in range(batch_start, batch_end)],
+                'dt': [f'p{(i % 5) + 1}' for i in range(batch_start, batch_end)],
+            }
+
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            pa_table = pa.Table.from_pydict(batch_data, schema=self.pa_schema)
+            table_write.write_arrow(pa_table)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+
+        # Test with 6 shards
+        num_shards = 6
+        shard_results = []
+        total_rows_from_shards = 0
+
+        for shard_idx in range(num_shards):
+            splits = read_builder.new_scan().with_shard(shard_idx, num_shards).plan().splits()
+            shard_result = table_read.to_arrow(splits)
+            shard_results.append(shard_result)
+            shard_rows = len(shard_result) if shard_result else 0
+            total_rows_from_shards += shard_rows
+            print(f"Shard {shard_idx}/{num_shards}: {shard_rows} rows")
+
+        # Verify that all shards together contain all the data
+        concatenated_result = pa.concat_tables(shard_results).sort_by('user_id')
+
+        # Read all data without sharding for comparison
+        all_splits = read_builder.new_scan().plan().splits()
+        all_data = table_read.to_arrow(all_splits).sort_by('user_id')
+
+        # Verify total row count
+        self.assertEqual(len(concatenated_result), len(all_data))
+        self.assertEqual(len(all_data), num_rows)
+        self.assertEqual(total_rows_from_shards, num_rows)
+
+        # Verify data integrity - check first and last few rows
+        self.assertEqual(concatenated_result['user_id'][0].as_py(), 1)
+        self.assertEqual(concatenated_result['user_id'][-1].as_py(), num_rows)
+        self.assertEqual(concatenated_result['item_id'][0].as_py(), 2000)
+        self.assertEqual(concatenated_result['item_id'][-1].as_py(), 2000 + num_rows - 1)
+
+        # Verify that concatenated result equals all data
+        self.assertEqual(concatenated_result, all_data)
+        # Test with different shard configurations
+        # Test with 10 shards
+        shard_10_results = []
+        for shard_idx in range(10):
+            splits = read_builder.new_scan().with_shard(shard_idx, 10).plan().splits()
+            shard_result = table_read.to_arrow(splits)
+            if shard_result:
+                shard_10_results.append(shard_result)
+
+        if shard_10_results:
+            concatenated_10_shards = pa.concat_tables(shard_10_results).sort_by('user_id')
+            self.assertEqual(len(concatenated_10_shards), num_rows)
+            self.assertEqual(concatenated_10_shards, all_data)
+
+        # Test with single shard (should return all data)
+        single_shard_splits = read_builder.new_scan().with_shard(0, 1).plan().splits()
+        single_shard_result = table_read.to_arrow(single_shard_splits).sort_by('user_id')
+        self.assertEqual(len(single_shard_result), num_rows)
+        self.assertEqual(single_shard_result, all_data)
+
+        print(f"Successfully tested with_shard method using {num_rows} rows of data")
+
     def test_shard_parameter_validation(self):
         """Test edge cases for parameter validation"""
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
@@ -375,19 +463,55 @@ class RESTSimpleTest(RESTBaseTest):
             read_builder.new_scan().with_shard(1, 1).plan()
         self.assertEqual(str(context.exception), "idx_of_this_subtask must be less than number_of_para_subtasks")
 
-    def test_shard_primary_key_table_not_supported(self):
-        """Test that slice operation is not supported on primary key tables"""
+    def test_with_shard_pk_dynamic_bucket(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'], primary_keys=['user_id', 'dt'])
-        self.rest_catalog.create_table('default.test_slice_pk_not_supported', schema, False)
-        table = self.rest_catalog.get_table('default.test_slice_pk_not_supported')
+        self.rest_catalog.create_table('default.test_with_shard', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_shard')
 
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        self.assertIsInstance(table_write.row_key_extractor, DynamicBucketRowKeyExtractor)
+
+        pa_table = pa.Table.from_pydict(self.data, schema=self.pa_schema)
+
+        with self.assertRaises(ValueError) as context:
+            table_write.write_arrow(pa_table)
+
+        self.assertEqual(str(context.exception), "Can't extract bucket from row in dynamic bucket mode")
+
+    def test_with_shard_pk_fixed_bucket(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'], primary_keys=['user_id', 'dt'],
+                                            options={'bucket': '5'})
+        self.rest_catalog.create_table('default.test_with_shard', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_shard')
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        self.assertIsInstance(table_write.row_key_extractor, FixedBucketRowKeyExtractor)
+
+        pa_table = pa.Table.from_pydict(self.data, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        splits = []
         read_builder = table.new_read_builder()
+        splits.extend(read_builder.new_scan().with_shard(0, 3).plan().splits())
+        splits.extend(read_builder.new_scan().with_shard(1, 3).plan().splits())
+        splits.extend(read_builder.new_scan().with_shard(2, 3).plan().splits())
 
-        # Test that slice operation raises exception on primary key table
-        with self.assertRaises(Exception) as context:
-            read_builder.new_scan().with_shard(0, 5).plan()
-
-        self.assertEqual(str(context.exception), "primary key table not support shard")
+        table_read = read_builder.new_read()
+        actual = table_read.to_arrow(splits)
+        data_expected = {
+            'user_id': [4, 6, 2, 10, 8],
+            'item_id': [1002, 1003, 1001, 1005, 1004],
+            'behavior': ['b', 'c', 'a', 'e', 'd'],
+            'dt': ['2025-08-10', '2025-08-11', '2000-10-10', '2025-08-13', '2025-08-12']
+        }
+        expected = pa.Table.from_pydict(data_expected, schema=self.pa_schema)
+        self.assertEqual(actual, expected)
 
     def test_postpone_write(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'], primary_keys=['user_id', 'dt'],

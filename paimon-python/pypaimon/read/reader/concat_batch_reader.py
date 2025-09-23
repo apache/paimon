@@ -67,12 +67,12 @@ class ShardBatchReader(ConcatBatchReader):
             cur_begin = self.cur_end  # begin idx of current batch based on the split
             self.cur_end += batch.num_rows
             # shard the first batch and the last batch
-            if cur_begin <= self.split_start_row < self.cur_end:
+            if self.split_start_row <= cur_begin < self.cur_end <= self.split_end_row:
+                return batch
+            elif cur_begin <= self.split_start_row < self.cur_end:
                 return batch.slice(self.split_start_row - cur_begin,
                                    min(self.split_end_row, self.cur_end) - self.split_start_row)
             elif cur_begin < self.split_end_row <= self.cur_end:
                 return batch.slice(0, self.split_end_row - cur_begin)
-            elif self.split_start_row <= cur_begin < self.cur_end <= self.split_end_row:
-                return batch
         else:
             return batch
