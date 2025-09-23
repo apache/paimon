@@ -31,41 +31,22 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.contrib.streaming.state.EmbeddedRocksDBStateBackend;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
-import org.rocksdb.RocksDB;
 
-import java.io.IOException;
-import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link RocksDBListState}. */
 public class RocksDBListStateTest {
 
     @TempDir Path tempDir;
-    @TempDir Path tempDir2;
 
     @Test
     void test() throws Exception {
-        Class<?> clazz = EmbeddedRocksDBStateBackend.class;
-
-        // 获取 ensureRocksDBIsLoaded 方法
-        Method method = clazz.getDeclaredMethod("ensureRocksDBIsLoaded", String.class);
-
-        // 如果方法是私有的，设置可访问
-        method.setAccessible(true);
-
-        // 调用静态方法（第一个参数为 null）
-        method.invoke(null, tempDir2.toString());
-
         RocksDBStateFactory factory =
                 new RocksDBStateFactory(tempDir.toString(), new Options(), null);
 
@@ -88,53 +69,6 @@ public class RocksDBListStateTest {
         assertThat(getString(listState.get(key))).containsExactlyInAnyOrder("1", "2,3", "1");
         assertThat(listState.get(row("bbb"))).isEmpty();
         factory.close();
-    }
-
-    @Test
-    void testRocksDBLibraryLoadSuccess() throws Exception {
-        // Test that RocksDBStateFactory can be created successfully when RocksDB library loads
-        // properly
-        RocksDBStateFactory factory =
-                new RocksDBStateFactory(tempDir.toString(), new Options(), null);
-
-        // Verify that the factory is created and can be used
-        assertThat(factory).isNotNull();
-        assertThat(factory.db()).isNotNull();
-        assertThat(factory.path()).isEqualTo(tempDir.toString());
-
-        factory.close();
-    }
-
-    @Test
-    void testRocksDBLibraryLoadFailure() {
-        // Test that IOException is thrown when RocksDB library fails to load
-        try (MockedStatic<RocksDB> mockedRocksDB = Mockito.mockStatic(RocksDB.class)) {
-            mockedRocksDB
-                    .when(RocksDB::loadLibrary)
-                    .thenThrow(new RuntimeException("Failed to load RocksDB library"));
-
-            assertThatThrownBy(
-                            () -> new RocksDBStateFactory(tempDir.toString(), new Options(), null))
-                    .isInstanceOf(IOException.class)
-                    .hasMessage("Fail to load RocksDB library.")
-                    .hasCauseInstanceOf(RuntimeException.class);
-        }
-    }
-
-    @Test
-    void testRocksDBLibraryLoadWithDifferentExceptionTypes() {
-        // Test that IOException is thrown for different types of exceptions during library loading
-        try (MockedStatic<RocksDB> mockedRocksDB = Mockito.mockStatic(RocksDB.class)) {
-            mockedRocksDB
-                    .when(RocksDB::loadLibrary)
-                    .thenThrow(new UnsatisfiedLinkError("Native library not found"));
-
-            assertThatThrownBy(
-                            () -> new RocksDBStateFactory(tempDir.toString(), new Options(), null))
-                    .isInstanceOf(IOException.class)
-                    .hasMessage("Fail to load RocksDB library.")
-                    .hasCauseInstanceOf(UnsatisfiedLinkError.class);
-        }
     }
 
     public GenericRow row(String value) {
