@@ -36,6 +36,8 @@ public interface Blob {
 
     byte[] toData();
 
+    BlobDescriptor toDescriptor();
+
     SeekableInputStream newInputStream() throws IOException;
 
     static Blob fromData(byte[] data) {

@@ -53,6 +53,11 @@ public class BlobRef implements Blob {
     }
 
     @Override
+    public BlobDescriptor toDescriptor() {
+        return descriptor;
+    }
+
+    @Override
     public SeekableInputStream newInputStream() throws IOException {
         return new OffsetSeekableInputStream(
                 uriReader.newInputStream(descriptor.uri()),

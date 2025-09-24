@@ -49,6 +49,11 @@ public class BlobData implements Blob, Serializable {
     }
 
     @Override
+    public BlobDescriptor toDescriptor() {
+        throw new RuntimeException("Blob data can not convert to descriptor.");
+    }
+
+    @Override
     public SeekableInputStream newInputStream() throws IOException {
         return new ByteArraySeekableStream(data);
     }
