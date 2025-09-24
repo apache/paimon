@@ -22,11 +22,12 @@ from urllib.parse import urlparse
 from pypaimon.api.api_response import GetTableResponse, PagedList
 from pypaimon.api.options import Options
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.api.rest_exception import NoSuchResourceException
+from pypaimon.api.rest_exception import NoSuchResourceException, AlreadyExistsException
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.catalog.catalog_exception import TableNotExistException
+from pypaimon.catalog.catalog_exception import TableNotExistException, DatabaseAlreadyExistException, \
+    TableAlreadyExistException, DatabaseNotExistException
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
@@ -107,7 +108,12 @@ class RESTCatalog(Catalog):
         return self.rest_api.list_databases_paged(max_results, page_token, database_name_pattern)
 
     def create_database(self, name: str, ignore_if_exists: bool, properties: Dict[str, str] = None):
-        self.rest_api.create_database(name, properties)
+        try:
+            self.rest_api.create_database(name, properties)
+        except AlreadyExistsException as e:
+            if not ignore_if_exists:
+                # Convert REST API exception to catalog exception
+                raise DatabaseAlreadyExistException(name) from e
 
     def get_database(self, name: str) -> Database:
         response = self.rest_api.get_database(name)
@@ -117,8 +123,13 @@ class RESTCatalog(Catalog):
         if response is not None:
             return Database(name, options)
 
-    def drop_database(self, name: str):
-        self.rest_api.drop_database(name)
+    def drop_database(self, name: str, ignore_if_exists: bool = False):
+        try:
+            self.rest_api.drop_database(name)
+        except NoSuchResourceException as e:
+            if not ignore_if_exists:
+                # Convert REST API exception to catalog exception
+                raise DatabaseNotExistException(name) from e
 
     def alter_database(self, name: str, changes: List[PropertyChange]):
         set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
@@ -154,12 +165,20 @@ class RESTCatalog(Catalog):
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
-        self.rest_api.create_table(identifier, schema)
+        try:
+            self.rest_api.create_table(identifier, schema)
+        except AlreadyExistsException as e:
+            if not ignore_if_exists:
+                raise TableAlreadyExistException(identifier) from e
 
-    def drop_table(self, identifier: Union[str, Identifier]):
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_exists: bool = False):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
-        self.rest_api.drop_table(identifier)
+        try:
+            self.rest_api.drop_table(identifier)
+        except NoSuchResourceException as e:
+            if not ignore_if_exists:
+                raise TableNotExistException(identifier) from e
 
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
         response = self.rest_api.get_table(identifier)

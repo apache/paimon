@@ -16,29 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.benchmark
+package org.apache.paimon.spark.sql
 
-import org.apache.spark.sql.paimon.PaimonBenchmark
+import org.apache.paimon.spark.PaimonSparkTestBase
 
-object BucketFunctionBenchmark extends PaimonSqlBasedBenchmark {
+import org.apache.spark.sql.Row
 
-  private val N = 20L * 1000 * 1000
+class LanceFormatTest extends PaimonSparkTestBase {
 
-  override def runBenchmarkSuite(mainArgs: Array[String]): Unit = {
-    val benchmark = PaimonBenchmark(s"Bucket function", N, output = output)
-
-    benchmark.addCase("Single int column", 3) {
-      _ => spark.range(N).selectExpr("fixed_bucket(10, id)").noop()
+  test("Lance format: read and write") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (a INT, b STRING, scores ARRAY<DOUBLE>) TBLPROPERTIES ('file.format' = 'lance')")
+      sql(
+        "INSERT INTO t VALUES (1, 'a', ARRAY(CAST(90.5 as double), CAST(88.0 as double))), (2, 'b', ARRAY(CAST(90.6 as double), CAST(88.1 as double)))")
+      checkAnswer(sql("SELECT * FROM t LIMIT 1"), Seq(Row(1, "a", Array(90.5, 88.0))))
+      checkAnswer(
+        sql("SELECT * FROM t LIMIT 10"),
+        Seq(Row(1, "a", Array(90.5, 88.0)), Row(2, "b", Array(90.6, 88.1))))
     }
-
-    benchmark.addCase("Single string column", 3) {
-      _ => spark.range(N).selectExpr("fixed_bucket(10, uuid())").noop()
-    }
-
-    benchmark.addCase("Multiple columns", 3) {
-      _ => spark.range(N).selectExpr("fixed_bucket(10, id, uuid(), uuid())").noop()
-    }
-
-    benchmark.run()
   }
 }

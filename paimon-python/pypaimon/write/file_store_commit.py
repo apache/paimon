@@ -101,7 +101,7 @@ class FileStoreCommit:
                                        f"in {msg.partition} does not belong to this partition")
 
         commit_entries = []
-        current_entries = TableScan(self.table, partition_filter, None, []).plan().files()
+        current_entries = TableScan(self.table, partition_filter, None, []).plan_files()
         for entry in current_entries:
             entry.kind = 1
             commit_entries.append(entry)
