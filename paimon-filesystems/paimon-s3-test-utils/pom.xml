@@ -20,40 +20,39 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-
     <parent>
-        <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
+        <artifactId>paimon-filesystems</artifactId>
         <version>1.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>paimon-filesystems</artifactId>
-    <name>Paimon : FileSystems : </name>
-    <packaging>pom</packaging>
+    <artifactId>paimon-s3-test-utils</artifactId>
 
-    <modules>
-        <module>paimon-hadoop-shaded</module>
-        <module>paimon-hadoop-uber</module>
-        <module>paimon-oss</module>
-        <module>paimon-oss-impl</module>
-        <module>paimon-s3</module>
-        <module>paimon-s3-impl</module>
-        <module>paimon-cosn</module>
-        <module>paimon-cosn-impl</module>
-        <module>paimon-jindo</module>
-        <module>paimon-gs</module>
-        <module>paimon-gs-impl</module>
-        <module>paimon-azure</module>
-        <module>paimon-azure-impl</module>
-        <module>paimon-obs</module>
-        <module>paimon-obs-impl</module>
-        <module>paimon-s3-test-utils</module>
-    </modules>
-
-    <properties>
-        <fs.hadoopshaded.version>3.4.2</fs.hadoopshaded.version>
-        <fs.s3.aws.version>2.29.52</fs.s3.aws.version>
-        <commons.beanutils.version>1.9.4</commons.beanutils.version>
-    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-test-utils</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>${fs.s3.aws.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>aws-core</artifactId>
+            <version>${fs.s3.aws.version}</version>
+        </dependency>
+    </dependencies>
 
 </project>

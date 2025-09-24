@@ -214,6 +214,7 @@
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-reload4j</artifactId>
                 </exclusion>
+                <!-- Exclude jeysey-json because of incompatible license -->
                 <exclusion>
                     <groupId>com.github.pjfanning</groupId>
                     <artifactId>jersey-json</artifactId>
@@ -260,10 +261,6 @@
                 <exclusion>
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-reload4j</artifactId>
-                </exclusion>
-                <exclusion>
-                    <artifactId>analyticsaccelerator-s3</artifactId>
-                    <groupId>software.amazon.s3.analyticsaccelerator</groupId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -378,6 +375,20 @@
                                         <exclude>PropertyList-1.0.dtd</exclude>
                                         <exclude>META-INF/services/javax.xml.stream.*</exclude>
                                         <exclude>META-INF/LICENSE.txt</exclude>
+                                    </excludes>
+                                </filter>
+                                <!--
+                                    analyticsaccelerator-s3 puts these files under the root of the JAR,
+                                    which causes license scanning tools to complain.
+                                    This is a transitive dependency of hadoop-aws. It uses Apache License 2.0,
+                                    and we don't bundle its transitive dependencies.
+                                 -->
+                                <filter>
+                                    <artifact>software.amazon.s3.analyticsaccelerator:analyticsaccelerator-s3</artifact>
+                                    <excludes>
+                                        <exclude>LICENSE</exclude>
+                                        <exclude>NOTICE</exclude>
+                                        <exclude>THIRD-PARTY-NOTICES</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
