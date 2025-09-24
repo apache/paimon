@@ -61,10 +61,16 @@ public class BlobTest {
 
     @Test
     public void testFromFile() {
-        BlobDescriptor descriptor = new BlobDescriptor(file, 0, 4);
-        Blob blob = Blob.fromFile(LocalFileIO.create(), descriptor);
+        Blob blob = Blob.fromFile(LocalFileIO.create(), file, 0, 4);
         assertThat(blob).isInstanceOf(BlobRef.class);
         assertThat(blob.toData()).isEqualTo("test".getBytes());
+    }
+
+    @Test
+    public void testFromPath() {
+        Blob blob = Blob.fromFile(LocalFileIO.create(), file);
+        assertThat(blob).isInstanceOf(BlobRef.class);
+        assertThat(blob.toData()).isEqualTo("test data".getBytes());
     }
 
     @Test

@@ -43,15 +43,19 @@ public interface Blob {
     }
 
     static Blob fromLocal(String file) {
-        return fromFile(LocalFileIO.create(), new BlobDescriptor(file, 0, -1));
+        return fromFile(LocalFileIO.create(), file);
     }
 
     static Blob fromHttp(String uri) {
         return fromDescriptor(UriReader.fromHttp(), new BlobDescriptor(uri, 0, -1));
     }
 
-    static Blob fromFile(FileIO fileIO, BlobDescriptor descriptor) {
-        return fromDescriptor(UriReader.fromFile(fileIO), descriptor);
+    static Blob fromFile(FileIO fileIO, String file) {
+        return fromDescriptor(UriReader.fromFile(fileIO), new BlobDescriptor(file, 0, -1));
+    }
+
+    static Blob fromFile(FileIO fileIO, String file, long offset, long length) {
+        return fromDescriptor(UriReader.fromFile(fileIO), new BlobDescriptor(file, offset, length));
     }
 
     static Blob fromDescriptor(UriReader reader, BlobDescriptor descriptor) {
