@@ -26,7 +26,7 @@ import org.apache.hadoop.fs.{FileStatus, Path}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
-import org.apache.spark.sql.connector.catalog.{SupportsPartitionManagement, TableCapability}
+import org.apache.spark.sql.connector.catalog.{SupportsPartitionManagement, SupportsRead, SupportsWrite, TableCapability}
 import org.apache.spark.sql.connector.catalog.TableCapability.BATCH_READ
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
@@ -171,8 +171,13 @@ case class PaimonFormatTable(
     override val partitionSchema_ : StructType,
     table: FormatTable,
     identName: String)
-  extends FileTable(sparkSession, options, paths, userSpecifiedSchema)
+  extends org.apache.spark.sql.connector.catalog.Table
+  with SupportsRead
+  with SupportsWrite
   with PartitionedFormatTable {
+
+  override lazy val schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType)
+
   override lazy val fileIndex: PartitioningAwareFileIndex = {
     PaimonFormatTable.createFileIndex(
       options,
