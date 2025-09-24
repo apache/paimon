@@ -32,8 +32,8 @@ import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.core5.http.ClassicHttpResponse;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicHeader;
@@ -43,12 +43,10 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.function.Function;
 
-import static org.apache.paimon.rest.HttpClientUtils.createLoggingBuilder;
+import static org.apache.paimon.rest.HttpClientUtils.DEFAULT_HTTP_CLIENT;
 
 /** Apache HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
-
-    private static final CloseableHttpClient HTTP_CLIENT = createLoggingBuilder().build();
 
     private final String uri;
 
@@ -136,6 +134,7 @@ public class HttpClient implements RESTClient {
     }
 
     private <T extends RESTResponse> T exec(HttpUriRequestBase request, Class<T> responseType) {
+<<<<<<< HEAD
         try {
             return HTTP_CLIENT.execute(
                     request,
@@ -166,6 +165,34 @@ public class HttpClient implements RESTClient {
                         }
                     });
         } catch (IOException e) {
+=======
+        try (CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(request)) {
+            String responseBodyStr = RESTUtil.extractResponseBodyAsString(response);
+            if (!RESTUtil.isSuccessful(response)) {
+                ErrorResponse error;
+                try {
+                    error = RESTApi.fromJson(responseBodyStr, ErrorResponse.class);
+                } catch (JsonProcessingException e) {
+                    error =
+                            new ErrorResponse(
+                                    null,
+                                    null,
+                                    responseBodyStr != null
+                                            ? responseBodyStr
+                                            : "response body is null",
+                                    response.getCode());
+                }
+                errorHandler.accept(error, getRequestId(response));
+            }
+            if (responseType != null && responseBodyStr != null) {
+                return RESTApi.fromJson(responseBodyStr, responseType);
+            } else if (responseType == null) {
+                return null;
+            } else {
+                throw new RESTException("response body is null.");
+            }
+        } catch (IOException | ParseException e) {
+>>>>>>> 042de11aa (fix)
             throw new RESTException(
                     e, "Error occurred while processing %s request", request.getMethod());
         }

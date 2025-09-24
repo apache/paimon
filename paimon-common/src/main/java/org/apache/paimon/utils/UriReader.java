@@ -22,19 +22,12 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.LimitedSeekableInputStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
-
-import org.apache.hc.client5.http.classic.methods.HttpGet;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
+import org.apache.paimon.rest.HttpClientUtils;
 
 import java.io.IOException;
 
-import static org.apache.paimon.rest.HttpClientUtils.createLoggingBuilder;
-
 /** An interface to read uri as a stream. */
 public interface UriReader {
-
-    CloseableHttpClient HTTP_CLIENT = createLoggingBuilder().build();
 
     SeekableInputStream newInputStream(String uri) throws IOException;
 
@@ -43,13 +36,6 @@ public interface UriReader {
     }
 
     static UriReader fromHttp() {
-        return uri -> {
-            HttpGet httpGet = new HttpGet(uri);
-            CloseableHttpResponse response = HTTP_CLIENT.execute(httpGet);
-            if (response.getCode() != 200) {
-                throw new RuntimeException("HTTP error code: " + response.getCode());
-            }
-            return new LimitedSeekableInputStream(response.getEntity().getContent());
-        };
+        return uri -> new LimitedSeekableInputStream(HttpClientUtils.getAsInputStream(uri));
     }
 }
