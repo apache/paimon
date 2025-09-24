@@ -24,7 +24,7 @@ import org.apache.paimon.fs.Path;
 /** Loader to create {@link FileSystemCatalog}. */
 public class FileSystemCatalogLoader implements CatalogLoader {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private final FileIO fileIO;
     private final Path warehouse;

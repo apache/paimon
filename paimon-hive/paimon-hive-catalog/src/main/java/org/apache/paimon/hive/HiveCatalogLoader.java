@@ -26,7 +26,7 @@ import org.apache.paimon.fs.FileIO;
 /** Loader to create {@link HiveCatalog}. */
 public class HiveCatalogLoader implements CatalogLoader {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private final FileIO fileIO;
     private final SerializableHiveConf hiveConf;

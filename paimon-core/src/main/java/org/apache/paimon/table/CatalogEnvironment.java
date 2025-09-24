@@ -43,7 +43,7 @@ import java.util.Optional;
 /** Catalog environment in table which contains log factory, metastore client factory. */
 public class CatalogEnvironment implements Serializable {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     @Nullable private final Identifier identifier;
     @Nullable private final String uuid;
