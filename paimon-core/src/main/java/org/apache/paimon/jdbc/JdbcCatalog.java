@@ -20,6 +20,7 @@ package org.apache.paimon.jdbc;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
@@ -85,10 +86,11 @@ public class JdbcCatalog extends AbstractCatalog {
     private final Options options;
     private final String warehouse;
 
-    protected JdbcCatalog(FileIO fileIO, String catalogKey, Options options, String warehouse) {
-        super(fileIO, options);
+    protected JdbcCatalog(
+            FileIO fileIO, String catalogKey, CatalogContext context, String warehouse) {
+        super(fileIO, context);
         this.catalogKey = catalogKey;
-        this.options = options;
+        this.options = context.options();
         this.warehouse = warehouse;
         Preconditions.checkNotNull(options, "Invalid catalog properties: null");
         this.connections =
@@ -153,7 +155,7 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     public CatalogLoader catalogLoader() {
-        return new JdbcCatalogLoader(fileIO, catalogKey, options, warehouse);
+        return new JdbcCatalogLoader(fileIO, catalogKey, context, warehouse);
     }
 
     @Override

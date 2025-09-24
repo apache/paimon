@@ -25,6 +25,9 @@ import java.io.IOException;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 /** Tests for {@link OffsetSeekableInputStream}. */
 public class OffsetSeekableInputStreamTest {
@@ -144,6 +147,30 @@ public class OffsetSeekableInputStreamTest {
             byte[] buffer = new byte[5];
             int bytesRead = stream.read(buffer, 0, 5);
             assertThat(bytesRead).isEqualTo(-1);
+        }
+    }
+
+    @Test
+    public void testClose() throws IOException {
+        SeekableInputStream mockStream = mock(SeekableInputStream.class);
+        OffsetSeekableInputStream offsetStream = new OffsetSeekableInputStream(mockStream, 0, 10);
+        offsetStream.close();
+        verify(mockStream, times(1)).close();
+    }
+
+    @Test
+    public void testReadWithUnlimitedLength() throws IOException {
+        long offset = 5;
+        long length = -1; // Unlimited length
+        try (OffsetSeekableInputStream stream =
+                new OffsetSeekableInputStream(wrapped, offset, length)) {
+            // Should be able to read beyond the original testData length
+            byte[] buffer = new byte[10];
+            int bytesRead = stream.read(buffer, 0, 10);
+
+            assertThat(bytesRead).isEqualTo(10);
+            assertThat(buffer).containsExactly(Arrays.copyOfRange(testData, 5, 15));
+            assertThat(stream.getPos()).isEqualTo(10);
         }
     }
 }

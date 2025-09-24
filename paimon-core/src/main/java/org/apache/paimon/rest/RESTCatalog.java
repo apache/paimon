@@ -278,7 +278,8 @@ public class RESTCatalog implements Catalog {
                 this::fileIOFromOptions,
                 this::loadTableMetadata,
                 null,
-                null);
+                null,
+                context);
     }
 
     @Override
@@ -426,7 +427,8 @@ public class RESTCatalog implements Catalog {
                     this::fileIOFromOptions,
                     i -> toTableMetadata(db, response),
                     null,
-                    null);
+                    null,
+                    context);
         } catch (TableNotExistException e) {
             throw new RuntimeException(e);
         }

@@ -19,6 +19,7 @@
 package org.apache.paimon.jdbc;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
@@ -63,7 +64,10 @@ public class JdbcCatalogTest extends CatalogTestBase {
         properties.putAll(props);
         JdbcCatalog catalog =
                 new JdbcCatalog(
-                        fileIO, "test-jdbc-catalog", Options.fromMap(properties), warehouse);
+                        fileIO,
+                        "test-jdbc-catalog",
+                        CatalogContext.create(Options.fromMap(properties)),
+                        warehouse);
         assertThat(catalog.warehouse()).isEqualTo(warehouse);
         return catalog;
     }

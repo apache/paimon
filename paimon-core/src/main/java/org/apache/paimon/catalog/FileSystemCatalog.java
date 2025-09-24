@@ -21,7 +21,6 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -49,8 +48,8 @@ public class FileSystemCatalog extends AbstractCatalog {
         this.warehouse = warehouse;
     }
 
-    public FileSystemCatalog(FileIO fileIO, Path warehouse, Options options) {
-        super(fileIO, options);
+    public FileSystemCatalog(FileIO fileIO, Path warehouse, CatalogContext context) {
+        super(fileIO, context);
         this.warehouse = warehouse;
     }
 
@@ -198,11 +197,11 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public CatalogLoader catalogLoader() {
-        return new FileSystemCatalogLoader(fileIO, warehouse, catalogOptions);
+        return new FileSystemCatalogLoader(fileIO, warehouse, context);
     }
 
     @Override
     public boolean caseSensitive() {
-        return catalogOptions.getOptional(CASE_SENSITIVE).orElse(true);
+        return context.options().getOptional(CASE_SENSITIVE).orElse(true);
     }
 }

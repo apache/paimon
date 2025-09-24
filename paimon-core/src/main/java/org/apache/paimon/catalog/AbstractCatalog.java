@@ -80,23 +80,23 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
-    protected final Options catalogOptions;
+    protected final CatalogContext context;
 
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
         this.tableDefaultOptions = new HashMap<>();
-        this.catalogOptions = new Options();
+        this.context = CatalogContext.create(new Options());
     }
 
-    protected AbstractCatalog(FileIO fileIO, Options options) {
+    protected AbstractCatalog(FileIO fileIO, CatalogContext context) {
         this.fileIO = fileIO;
-        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(options.toMap());
-        this.catalogOptions = options;
+        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(context.options().toMap());
+        this.context = context;
     }
 
     @Override
     public Map<String, String> options() {
-        return catalogOptions.toMap();
+        return context.options().toMap();
     }
 
     public abstract String warehouse();
@@ -114,7 +114,7 @@ public abstract class AbstractCatalog implements Catalog {
             return Optional.empty();
         }
 
-        String lock = catalogOptions.get(LOCK_TYPE);
+        String lock = context.options().get(LOCK_TYPE);
         if (lock == null) {
             return defaultLockFactory();
         }
@@ -129,11 +129,11 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     public Optional<CatalogLockContext> lockContext() {
-        return Optional.of(CatalogLockContext.fromOptions(catalogOptions));
+        return Optional.of(CatalogLockContext.fromOptions(context.options()));
     }
 
     protected boolean lockEnabled() {
-        return catalogOptions.getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
+        return context.options().getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
     }
 
     protected boolean allowCustomTablePath() {
@@ -474,7 +474,8 @@ public abstract class AbstractCatalog implements Catalog {
                 this::fileIO,
                 this::loadTableMetadata,
                 lockFactory().orElse(null),
-                lockContext().orElse(null));
+                lockContext().orElse(null),
+                context);
     }
 
     @Override

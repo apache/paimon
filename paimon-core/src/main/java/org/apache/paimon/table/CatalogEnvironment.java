@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
@@ -42,13 +43,14 @@ import java.util.Optional;
 /** Catalog environment in table which contains log factory, metastore client factory. */
 public class CatalogEnvironment implements Serializable {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     @Nullable private final Identifier identifier;
     @Nullable private final String uuid;
     @Nullable private final CatalogLoader catalogLoader;
     @Nullable private final CatalogLockFactory lockFactory;
     @Nullable private final CatalogLockContext lockContext;
+    @Nullable private final CatalogContext catalogContext;
     private final boolean supportsVersionManagement;
 
     public CatalogEnvironment(
@@ -57,17 +59,19 @@ public class CatalogEnvironment implements Serializable {
             @Nullable CatalogLoader catalogLoader,
             @Nullable CatalogLockFactory lockFactory,
             @Nullable CatalogLockContext lockContext,
+            @Nullable CatalogContext catalogContext,
             boolean supportsVersionManagement) {
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
         this.lockFactory = lockFactory;
         this.lockContext = lockContext;
+        this.catalogContext = catalogContext;
         this.supportsVersionManagement = supportsVersionManagement;
     }
 
     public static CatalogEnvironment empty() {
-        return new CatalogEnvironment(null, null, null, null, null, false);
+        return new CatalogEnvironment(null, null, null, null, null, null, false);
     }
 
     @Nullable
@@ -132,6 +136,11 @@ public class CatalogEnvironment implements Serializable {
         return catalogLoader;
     }
 
+    @Nullable
+    public CatalogContext catalogContext() {
+        return catalogContext;
+    }
+
     public CatalogEnvironment copy(Identifier identifier) {
         return new CatalogEnvironment(
                 identifier,
@@ -139,6 +148,7 @@ public class CatalogEnvironment implements Serializable {
                 catalogLoader,
                 lockFactory,
                 lockContext,
+                catalogContext,
                 supportsVersionManagement);
     }
 

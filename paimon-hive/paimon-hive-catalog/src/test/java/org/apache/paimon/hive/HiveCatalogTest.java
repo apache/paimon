@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
@@ -79,8 +80,8 @@ public class HiveCatalogTest extends CatalogTestBase {
         String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.SYNC_ALL_PROPERTIES.key(), "false");
-        catalog =
-                new HiveCatalog(fileIO, hiveConf, metastoreClientClass, catalogOptions, warehouse);
+        CatalogContext context = CatalogContext.create(catalogOptions, hiveConf);
+        catalog = new HiveCatalog(fileIO, hiveConf, metastoreClientClass, context, warehouse);
     }
 
     @Test

@@ -16,35 +16,42 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.data.serializer;
-
-import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
-import org.apache.paimon.io.DataInputView;
-import org.apache.paimon.io.DataOutputView;
+package org.apache.paimon.fs;
 
 import java.io.IOException;
+import java.io.InputStream;
 
-/** Type serializer for {@code Blob}. */
-public class BlobSerializer extends SerializerSingleton<Blob> {
+/** A {@link SeekableInputStream} wrapped {@link InputStream} without seek. */
+public class LimitedSeekableInputStream extends SeekableInputStream {
 
-    private static final long serialVersionUID = 1L;
+    private final InputStream in;
 
-    public static final BlobSerializer INSTANCE = new BlobSerializer();
-
-    @Override
-    public Blob copy(Blob from) {
-        return from;
+    public LimitedSeekableInputStream(InputStream in) {
+        this.in = in;
     }
 
     @Override
-    public void serialize(Blob blob, DataOutputView target) throws IOException {
-        BinarySerializer.INSTANCE.serialize(blob.toData(), target);
+    public void seek(long desired) throws IOException {
+        throw new UnsupportedOperationException();
     }
 
     @Override
-    public Blob deserialize(DataInputView source) throws IOException {
-        byte[] bytes = BinarySerializer.INSTANCE.deserialize(source);
-        return new BlobData(bytes);
+    public long getPos() throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int read() throws IOException {
+        return in.read();
+    }
+
+    @Override
+    public int read(byte[] b, int off, int len) throws IOException {
+        return in.read(b, off, len);
+    }
+
+    @Override
+    public void close() throws IOException {
+        in.close();
     }
 }
