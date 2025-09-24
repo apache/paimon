@@ -105,7 +105,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                 splitByRowId.add(Collections.singletonList(file));
                 continue;
             }
-            if (firstRowId != lastRowId) {
+            if ((file.fileTag() == null || !file.fileTag().isBlob()) && firstRowId != lastRowId) {
                 if (!currentSplit.isEmpty()) {
                     splitByRowId.add(currentSplit);
                 }

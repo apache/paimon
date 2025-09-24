@@ -35,6 +35,16 @@ import static org.apache.paimon.options.ConfigOptions.key;
 /** The stats utils to create {@link SimpleColStatsCollector.Factory}s. */
 public class StatsCollectorFactories {
 
+    private final CoreOptions options;
+
+    public StatsCollectorFactories(CoreOptions options) {
+        this.options = options;
+    }
+
+    public SimpleColStatsCollector.Factory[] statsCollectors(List<String> fieldNames) {
+        return createStatsFactories(options.statsMode(), options, fieldNames);
+    }
+
     public static SimpleColStatsCollector.Factory[] createStatsFactories(
             String statsMode, CoreOptions options, List<String> fields) {
         return createStatsFactories(statsMode, options, fields, Collections.emptyList());

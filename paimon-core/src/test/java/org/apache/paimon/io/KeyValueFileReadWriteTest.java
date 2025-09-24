@@ -101,7 +101,7 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
+        RollingFileWriterImpl<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
@@ -155,7 +155,7 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), "avro");
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
+        RollingFileWriterImpl<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
@@ -188,7 +188,7 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), "avro");
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
+        RollingFileWriterImpl<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
@@ -393,7 +393,7 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
+        RollingFileWriterImpl<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();

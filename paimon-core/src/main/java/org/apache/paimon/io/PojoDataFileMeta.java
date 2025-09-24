@@ -79,6 +79,8 @@ public class PojoDataFileMeta implements DataFileMeta {
 
     private final @Nullable List<String> writeCols;
 
+    private final @Nullable FileTag fileTag;
+
     public PojoDataFileMeta(
             String fileName,
             long fileSize,
@@ -99,7 +101,8 @@ public class PojoDataFileMeta implements DataFileMeta {
             @Nullable List<String> valueStatsCols,
             @Nullable String externalPath,
             @Nullable Long firstRowId,
-            @Nullable List<String> writeCols) {
+            @Nullable List<String> writeCols,
+            @Nullable FileTag fileTag) {
         this.fileName = fileName;
         this.fileSize = fileSize;
 
@@ -124,6 +127,7 @@ public class PojoDataFileMeta implements DataFileMeta {
         this.externalPath = externalPath;
         this.firstRowId = firstRowId;
         this.writeCols = writeCols;
+        this.fileTag = fileTag;
     }
 
     @Override
@@ -252,6 +256,12 @@ public class PojoDataFileMeta implements DataFileMeta {
     }
 
     @Override
+    @Nullable
+    public FileTag fileTag() {
+        return fileTag;
+    }
+
+    @Override
     public PojoDataFileMeta upgrade(int newLevel) {
         checkArgument(newLevel > this.level);
         return new PojoDataFileMeta(
@@ -274,7 +284,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                fileTag);
     }
 
     @Override
@@ -300,7 +311,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 newExternalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                fileTag);
     }
 
     @Override
@@ -325,7 +337,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 Collections.emptyList(),
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                fileTag);
     }
 
     @Override
@@ -350,7 +363,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                fileTag);
     }
 
     @Override
@@ -375,7 +389,34 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                fileTag);
+    }
+
+    @Override
+    public DataFileMeta assignFileTag(FileTag fileTag) {
+        return new PojoDataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath,
+                firstRowId,
+                writeCols,
+                fileTag);
     }
 
     @Override
@@ -400,7 +441,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                fileTag);
     }
 
     @Override
@@ -425,7 +467,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 newExternalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                fileTag);
     }
 
     @Override
@@ -450,7 +493,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                fileTag);
     }
 
     @Override

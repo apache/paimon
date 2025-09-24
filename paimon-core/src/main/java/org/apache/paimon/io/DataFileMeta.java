@@ -82,7 +82,37 @@ public interface DataFileMeta {
                             new DataField(17, "_EXTERNAL_PATH", newStringType(true)),
                             new DataField(18, "_FIRST_ROW_ID", new BigIntType(true)),
                             new DataField(
-                                    19, "_WRITE_COLS", new ArrayType(true, newStringType(false)))));
+                                    19, "_WRITE_COLS", new ArrayType(true, newStringType(false))),
+                            new DataField(20, "_FILE_TAG", new IntType(true))));
+
+    enum FileTag {
+        None(0),
+        BLOB_ENTRY(1),
+        BLOB_TAIL(2);
+
+        private final int value;
+
+        FileTag(int value) {
+            this.value = value;
+        }
+
+        public static FileTag fromValue(int value) {
+            for (FileTag tag : values()) {
+                if (tag.value == value) {
+                    return tag;
+                }
+            }
+            throw new IllegalArgumentException("Unknown FileTag value: " + value);
+        }
+
+        public int value() {
+            return value;
+        }
+
+        public boolean isBlob() {
+            return this == BLOB_ENTRY || this == BLOB_TAIL;
+        }
+    }
 
     BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
@@ -123,7 +153,8 @@ public interface DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                FileTag.None);
     }
 
     static DataFileMeta create(
@@ -166,7 +197,8 @@ public interface DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                FileTag.None);
     }
 
     static DataFileMeta create(
@@ -207,7 +239,8 @@ public interface DataFileMeta {
                 valueStatsCols,
                 null,
                 firstRowId,
-                writeCols);
+                writeCols,
+                FileTag.None);
     }
 
     static DataFileMeta create(
@@ -251,7 +284,54 @@ public interface DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                FileTag.None);
+    }
+
+    static DataFileMeta create(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            BinaryRow minKey,
+            BinaryRow maxKey,
+            SimpleStats keyStats,
+            SimpleStats valueStats,
+            long minSequenceNumber,
+            long maxSequenceNumber,
+            long schemaId,
+            int level,
+            List<String> extraFiles,
+            Timestamp creationTime,
+            @Nullable Long deleteRowCount,
+            @Nullable byte[] embeddedIndex,
+            @Nullable FileSource fileSource,
+            @Nullable List<String> valueStatsCols,
+            @Nullable String externalPath,
+            @Nullable Long firstRowId,
+            @Nullable List<String> writeCols,
+            @Nullable FileTag fileTag) {
+        return new PojoDataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath,
+                firstRowId,
+                writeCols,
+                fileTag);
     }
 
     String fileName();
@@ -303,6 +383,9 @@ public interface DataFileMeta {
     @Nullable
     List<String> writeCols();
 
+    @Nullable
+    FileTag fileTag();
+
     DataFileMeta upgrade(int newLevel);
 
     DataFileMeta rename(String newFileName);
@@ -312,6 +395,8 @@ public interface DataFileMeta {
     DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber);
 
     DataFileMeta assignFirstRowId(long firstRowId);
+
+    DataFileMeta assignFileTag(FileTag fileTag);
 
     default List<Path> collectFiles(DataFilePathFactory pathFactory) {
         List<Path> paths = new ArrayList<>();

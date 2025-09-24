@@ -61,6 +61,11 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteH
     assert(data.columns.length == columnNames.size + 2)
     val writeType = table.rowType().project(columnNames.asJava)
 
+    if (writeType.containsBlobType()) {
+      throw new UnsupportedOperationException(
+        "DataEvolution does not support writing partial columns mixed with BLOB type.")
+    }
+
     val written =
       data.mapPartitions {
         iter =>

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.io.DataFileMeta.FileTag
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
@@ -75,16 +76,47 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
   private val firstRowIds: Seq[Long] = table
-    .newSnapshotReader()
-    .withManifestEntryFilter(entry => entry.file().firstRowId() != null)
-    .read()
-    .splits()
+    .store()
+    .newScan()
+    .withManifestEntryFilter(
+      entry =>
+        entry.file().firstRowId() != null && (entry
+          .file()
+          .fileTag() == null || !entry.file().fileTag().isBlob))
+    .plan()
+    .files()
     .asScala
-    .map(_.asInstanceOf[DataSplit])
-    .flatMap(split => split.dataFiles().asScala.map(s => s.firstRowId().asInstanceOf[Long]))
+    .map(file => file.file().firstRowId().asInstanceOf[Long])
     .distinct
     .sorted
     .toSeq
+
+  private val firstRowIdToBlobFirstRowIds = {
+    val map = new mutable.HashMap[Long, List[Long]]()
+    val files = table
+      .store()
+      .newScan()
+      .withManifestEntryFilter(
+        entry => entry.file().fileTag() != null && entry.file().fileTag().isBlob)
+      .plan()
+      .files()
+      .asScala
+      .sortBy(f => f.file().firstRowId())
+
+    for (file <- files) {
+      if (file.file().fileTag() == FileTag.BLOB_ENTRY) {
+        val firstRowId = file.file().firstRowId().asInstanceOf[Long]
+        if (!map.contains(firstRowId)) {
+          map.put(firstRowId, List(firstRowId))
+        }
+      } else if (file.file().fileTag() == FileTag.BLOB_TAIL) {
+        val firstRowId = file.file().firstRowId().asInstanceOf[Long]
+        val list = map(firstRowId)
+        map.put(firstRowId, list :+ firstRowId)
+      }
+    }
+    map
+  }
 
   lazy val targetRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(targetTable)
   lazy val sourceRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(sourceTable)
@@ -288,6 +320,14 @@ case class MergeIntoPaimonDataEvolutionTable(
       .select(firstRowIdUdf(col(identifier)))
       .distinct()
       .as[Long]
+      .flatMap(
+        f => {
+          if (firstRowIdToBlobFirstRowIds.contains(f)) {
+            firstRowIdToBlobFirstRowIds(f)
+          } else {
+            Seq(f)
+          }
+        })
       .collect()
   }
 

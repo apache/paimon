@@ -25,7 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
-import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
@@ -123,8 +123,8 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             throws Exception {
 
         CloseableIterator<ChangelogResult> iterator = null;
-        RollingFileWriter<KeyValue, DataFileMeta> compactFileWriter = null;
-        RollingFileWriter<KeyValue, DataFileMeta> changelogFileWriter = null;
+        RollingFileWriterImpl<KeyValue, DataFileMeta> compactFileWriter = null;
+        RollingFileWriterImpl<KeyValue, DataFileMeta> changelogFileWriter = null;
         Exception collectedExceptions = null;
 
         try {

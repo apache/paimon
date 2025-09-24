@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -193,6 +194,14 @@ public abstract class TableTestBase {
         List<InternalRow> rows = new ArrayList<>();
         reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
         return rows;
+    }
+
+    protected void readDefault(Consumer<InternalRow> consumer) throws Exception {
+        Table table = getTableDefault();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        reader.forEachRemaining(consumer);
     }
 
     public void createTableDefault() throws Exception {

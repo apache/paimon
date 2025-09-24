@@ -44,7 +44,7 @@ import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link RollingFileWriter}. */
+/** Test for {@link RollingFileWriterImpl}. */
 public class RollingFileWriterTest {
 
     private static final RowType SCHEMA =
@@ -58,7 +58,7 @@ public class RollingFileWriterTest {
 
     @TempDir java.nio.file.Path tempDir;
 
-    private RollingFileWriter<InternalRow, DataFileMeta> rollingFileWriter;
+    private RollingFileWriterImpl<InternalRow, DataFileMeta> rollingFileWriter;
 
     public void initialize(String identifier) {
         initialize(identifier, false);
@@ -67,11 +67,11 @@ public class RollingFileWriterTest {
     public void initialize(String identifier, boolean statsDenseStore) {
         FileFormat fileFormat = FileFormat.fromIdentifier(identifier, new Options());
         rollingFileWriter =
-                new RollingFileWriter<>(
+                new RollingFileWriterImpl<>(
                         () ->
                                 new RowDataFileWriter(
                                         LocalFileIO.create(),
-                                        RowDataRollingFileWriter.createFileWriterContext(
+                                        RollingFileWriter.createFileWriterContext(
                                                 fileFormat,
                                                 SCHEMA,
                                                 SimpleColStatsCollector.createFullStatsFactories(

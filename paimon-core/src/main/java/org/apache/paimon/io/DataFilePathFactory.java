@@ -82,6 +82,10 @@ public class DataFilePathFactory {
         return newPath(dataFilePrefix);
     }
 
+    public Path newBlobPath() {
+        return newPathFromName(newFileName(dataFilePrefix, ".blob"));
+    }
+
     public Path newChangelogPath() {
         return newPath(changelogFilePrefix);
     }
