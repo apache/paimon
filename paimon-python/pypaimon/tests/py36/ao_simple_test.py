@@ -18,6 +18,8 @@ limitations under the License.
 import pyarrow as pa
 
 from pypaimon import Schema
+from pypaimon.catalog.catalog_exception import TableNotExistException, TableAlreadyExistException, \
+    DatabaseNotExistException, DatabaseAlreadyExistException
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
@@ -330,3 +332,56 @@ class AOSimpleTest(RESTBaseTest):
         splits = read_builder.new_scan().with_shard(3, 4).plan().splits()
         actual = table_read.to_arrow(splits)
         self.assertEqual(len(actual), 2)
+
+    def test_create_drop_database_table(self):
+        # test create database
+        self.rest_catalog.create_database("db1", False)
+
+        with self.assertRaises(DatabaseAlreadyExistException) as context:
+            self.rest_catalog.create_database("db1", False)
+
+        self.assertEqual("db1", context.exception.database)
+
+        try:
+            self.rest_catalog.create_database("db1", True)
+        except DatabaseAlreadyExistException:
+            self.fail("create_database with ignore_if_exists=True should not raise DatabaseAlreadyExistException")
+
+        # test create table
+        self.rest_catalog.create_table("db1.tbl1",
+                                       Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt']),
+                                       False)
+        with self.assertRaises(TableAlreadyExistException) as context:
+            self.rest_catalog.create_table("db1.tbl1",
+                                           Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt']),
+                                           False)
+        self.assertEqual("db1.tbl1", context.exception.identifier.get_full_name())
+
+        try:
+            self.rest_catalog.create_table("db1.tbl1",
+                                           Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt']),
+                                           True)
+        except TableAlreadyExistException:
+            self.fail("create_table with ignore_if_exists=True should not raise TableAlreadyExistException")
+
+        # test drop table
+        self.rest_catalog.drop_table("db1.tbl1", False)
+        with self.assertRaises(TableNotExistException) as context:
+            self.rest_catalog.drop_table("db1.tbl1", False)
+        self.assertEqual("db1.tbl1", context.exception.identifier.get_full_name())
+
+        try:
+            self.rest_catalog.drop_table("db1.tbl1", True)
+        except TableNotExistException:
+            self.fail("drop_table with ignore_if_exists=True should not raise TableNotExistException")
+
+        # test drop database
+        self.rest_catalog.drop_database("db1", False)
+        with self.assertRaises(DatabaseNotExistException) as context:
+            self.rest_catalog.drop_database("db1", False)
+        self.assertEqual("db1", context.exception.database)
+
+        try:
+            self.rest_catalog.drop_database("db1", True)
+        except DatabaseNotExistException:
+            self.fail("drop_database with ignore_if_exists=True should not raise DatabaseNotExistException")
