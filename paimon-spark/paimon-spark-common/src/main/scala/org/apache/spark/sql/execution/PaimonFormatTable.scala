@@ -19,10 +19,9 @@
 package org.apache.spark.sql.execution
 
 import org.apache.paimon.spark.{PaimonFormatTableScanBuilder, SparkTypeUtils}
-import org.apache.paimon.table.{FormatTable, Table}
-import org.apache.paimon.table.FormatTable.Format
+import org.apache.paimon.table.FormatTable
 
-import org.apache.hadoop.fs.{FileStatus, Path}
+import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
@@ -31,9 +30,6 @@ import org.apache.spark.sql.connector.catalog.TableCapability.BATCH_READ
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
 import org.apache.spark.sql.execution.datasources._
-import org.apache.spark.sql.execution.datasources.csv.CSVFileFormat
-import org.apache.spark.sql.execution.datasources.json.JsonFileFormat
-import org.apache.spark.sql.execution.datasources.v2.FileTable
 import org.apache.spark.sql.execution.datasources.v2.csv.{CSVScanBuilder, CSVTable}
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
@@ -167,7 +163,7 @@ case class PaimonFormatTable(
     sparkSession: SparkSession,
     options: CaseInsensitiveStringMap,
     paths: Seq[String],
-    userSpecifiedSchema: Option[StructType],
+    schema: StructType,
     override val partitionSchema_ : StructType,
     table: FormatTable,
     identName: String)
@@ -176,14 +172,12 @@ case class PaimonFormatTable(
   with SupportsWrite
   with PartitionedFormatTable {
 
-  override lazy val schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType)
-
   override lazy val fileIndex: PartitioningAwareFileIndex = {
     PaimonFormatTable.createFileIndex(
       options,
       sparkSession,
       paths,
-      userSpecifiedSchema,
+      Option.apply(schema),
       partitionSchema())
   }
 
@@ -196,7 +190,7 @@ case class PaimonFormatTable(
   }
 
   override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
-    PaimonFormatTableScanBuilder(table.copy(caseInsensitiveStringMap))
+    PaimonFormatTableScanBuilder(table.copy(caseInsensitiveStringMap), schema, Seq.empty)
   }
 
   override def newWriteBuilder(logicalWriteInfo: LogicalWriteInfo): WriteBuilder = {

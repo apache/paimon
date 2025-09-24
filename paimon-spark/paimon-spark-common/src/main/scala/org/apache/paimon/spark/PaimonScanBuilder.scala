@@ -21,7 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggregation
-import org.apache.paimon.table.{FileStoreTable, Table}
+import org.apache.paimon.table.{FileStoreTable, InnerTable}
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions
@@ -31,12 +31,10 @@ import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPred
 import org.apache.spark.sql.connector.read._
 import org.apache.spark.sql.sources.Filter
 
-import java.util.Collections
-
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
-class PaimonScanBuilder(table: Table)
+class PaimonScanBuilder(table: InnerTable)
   extends PaimonBaseScanBuilder(table)
   with SupportsPushDownV2Filters
   with SupportsPushDownLimit

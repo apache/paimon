@@ -670,7 +670,7 @@ public class SparkCatalog extends SparkBaseCatalog
                     spark,
                     new CaseInsensitiveStringMap(optionsMap),
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
+                    schema,
                     partitionSchema,
                     formatTable,
                     ident.name());

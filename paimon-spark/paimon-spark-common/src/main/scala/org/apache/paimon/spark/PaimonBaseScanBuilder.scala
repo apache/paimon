@@ -19,14 +19,14 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{Predicate, TopN}
-import org.apache.paimon.table.Table
+import org.apache.paimon.table.InnerTable
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownRequiredColumns}
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 
-abstract class PaimonBaseScanBuilder(table: Table)
+abstract class PaimonBaseScanBuilder(table: InnerTable)
   extends ScanBuilder
   with SupportsPushDownRequiredColumns
   with Logging {

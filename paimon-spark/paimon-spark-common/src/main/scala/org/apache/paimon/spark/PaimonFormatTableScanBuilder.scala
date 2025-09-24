@@ -24,7 +24,7 @@ import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.source.Split
 
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
-import org.apache.spark.sql.connector.read.{Batch, Scan}
+import org.apache.spark.sql.connector.read.{Batch, Scan, ScanBuilder}
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
@@ -41,8 +41,12 @@ import scala.collection.JavaConverters._
  * FormatTable} instances, enabling Spark to read data from tables that support different file
  * formats and scan optimizations provided by the Paimon.
  */
-case class PaimonFormatTableScanBuilder(table: FormatTable) extends PaimonScanBuilder(table) {
-  override def build() = PaimonFormatTableScan(table, requiredSchema, pushedPaimonPredicates)
+case class PaimonFormatTableScanBuilder(
+    table: FormatTable,
+    requiredSchema: StructType,
+    filters: Seq[Predicate])
+  extends ScanBuilder {
+  override def build() = PaimonFormatTableScan(table, requiredSchema, filters)
 }
 
 case class PaimonFormatTableScan(
