@@ -32,6 +32,8 @@ import java.util.List;
 
 public interface RollingFileWriter<T, R> extends FileWriter<T, List<R>> {
 
+    int CHECK_ROLLING_RECORD_CNT = 1000;
+
     void writeBundle(BundleRecords records) throws IOException;
 
     @VisibleForTesting

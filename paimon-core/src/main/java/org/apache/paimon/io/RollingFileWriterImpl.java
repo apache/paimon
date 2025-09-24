@@ -40,8 +40,6 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
     private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriterImpl.class);
 
-    private static final int CHECK_ROLLING_RECORD_CNT = 1000;
-
     private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
     private final long targetFileSize;
     private final List<AbortExecutor> closedWriters;

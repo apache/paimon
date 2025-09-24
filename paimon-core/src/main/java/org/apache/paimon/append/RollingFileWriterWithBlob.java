@@ -56,8 +56,6 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
 
     private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriterWithBlob.class);
 
-    private static final int CHECK_ROLLING_RECORD_CNT = 1000;
-
     private final Supplier<MappedWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
             writerFactory;
     private final MappedWriter<RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
@@ -118,7 +116,7 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
         List<String> blobNames = blobType.getFieldNames();
         checkArgument(blobNames.size() == 1, "Limit only one blob fields in one paimon table yet.");
         final int[] blobProjection = writeSchema.projectIndexes(blobNames);
-        Supplier<? extends SingleFileWriter<InternalRow, DataFileMeta>> xx =
+        Supplier<? extends SingleFileWriter<InternalRow, DataFileMeta>> blobWriterSupplier =
                 () ->
                         new RowDataFileWriter(
                                 fileIO,
@@ -140,7 +138,9 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
                                 pathFactory.isExternalPath(),
                                 blobNames);
         this.blobWriter =
-                new MappedWriter<>(new RollingFileWriterImpl<>(xx, targetFileSize), blobProjection);
+                new MappedWriter<>(
+                        new RollingFileWriterImpl<>(blobWriterSupplier, targetFileSize),
+                        blobProjection);
 
         this.targetFileSize = targetFileSize;
         this.results = new ArrayList<>();
@@ -203,9 +203,6 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
         }
 
         currentWriter.close();
-        // only store abort executor in memory
-        // cannot store whole writer, it includes lots of memory for example column vectors to read
-        // and write
         closedWriters.add(currentWriter.writer().abortExecutor());
         DataFileMeta mainDataFileMeta = currentWriter.result();
 
