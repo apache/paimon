@@ -34,22 +34,20 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
     sql("USE test_db")
   }
 
-  test("PaimonFormatTableRead: csv table test options") {
-    val tableName = "format_test_csv_options"
+  test("PaimonFormatTableRead table: csv with field-delimiter") {
+    val tableName = "paimon_format_test_csv_options"
     withTable(tableName) {
-      // Create format table using the same pattern as FormatTableTestBase
       sql(
-        s"CREATE TABLE $tableName (id INT, name STRING, value DOUBLE) USING csv " +
-          s"TBLPROPERTIES ('file.compression'='none', 'seq'=',', 'lineSep'='\n', " +
-          s"'${CoreOptions.FORMAT_TABLE_IMPLEMENTATION.key()}'='paimon')")
-      val paimonTable = paimonCatalog.getTable(Identifier.create("test_db", tableName))
-      val path =
-        paimonCatalog.getTable(Identifier.create("test_db", tableName)).options().get("path")
-      fileIO.mkdirs(new Path(path))
-      val tableDDl = sql(s"SHOW CREATE TABLE $tableName").collect().head.getString(0)
-      assert(tableDDl.contains("csv.field-delimiter"))
-      assert(tableDDl.contains("csv.line-delimiter"))
-      sql(s"DROP TABLE $tableName")
+        s"CREATE TABLE $tableName (f0 INT, f1 INT) USING CSV OPTIONS ('" +
+          s"file.compression'='none', 'seq'='|', 'lineSep'='\n', " +
+          s"'${CoreOptions.FORMAT_TABLE_IMPLEMENTATION
+              .key()}'='${CoreOptions.FormatTableImplementation.PAIMON.toString}')")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      val csvFile =
+        new Path(table.location(), "part-00000-0a28422e-68ba-4713-8870-2fde2d36ed06-c001.csv")
+      table.fileIO().writeFile(csvFile, "1|2\n3|4", false)
+      checkAnswer(sql(s"SELECT * FROM $tableName"), Seq(Row(1, 2), Row(3, 4)))
     }
   }
 
@@ -67,7 +65,6 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
         sql(
           s"CREATE TABLE $tableName (id INT, name STRING, value DOUBLE) USING $format " +
             s"TBLPROPERTIES ('file.compression'='$compression', 'seq'=',', 'lineSep'='\n')")
-        val paimonTable = paimonCatalog.getTable(Identifier.create("test_db", tableName))
         val path =
           paimonCatalog.getTable(Identifier.create("test_db", tableName)).options().get("path")
         fileIO.mkdirs(new Path(path))
@@ -78,7 +75,8 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
 
         // Test reading all data
         sql(
-          s"Alter table $tableName SET TBLPROPERTIES ('${CoreOptions.FORMAT_TABLE_IMPLEMENTATION.key()}'='paimon')")
+          s"Alter table $tableName SET TBLPROPERTIES ('${CoreOptions.FORMAT_TABLE_IMPLEMENTATION.key()}'" +
+            s"='${CoreOptions.FormatTableImplementation.PAIMON.toString}')")
         checkAnswer(
           sql(s"SELECT * FROM $tableName ORDER BY id"),
           Seq(
@@ -138,7 +136,8 @@ class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
 
         // Test reading all data
         sql(
-          s"Alter table $tableName SET TBLPROPERTIES ('${CoreOptions.FORMAT_TABLE_IMPLEMENTATION.key()}'='paimon')")
+          s"Alter table $tableName SET TBLPROPERTIES ('${CoreOptions.FORMAT_TABLE_IMPLEMENTATION.key()}'" +
+            s"='${CoreOptions.FormatTableImplementation.PAIMON.toString}')")
         checkAnswer(
           sql(s"SELECT * FROM $tableName ORDER BY id"),
           Seq(

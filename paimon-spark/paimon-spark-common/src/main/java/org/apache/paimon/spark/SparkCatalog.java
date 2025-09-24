@@ -663,12 +663,6 @@ public class SparkCatalog extends SparkBaseCatalog
         Map<String, String> optionsMap = formatTable.options();
         CoreOptions coreOptions = new CoreOptions(optionsMap);
         if (coreOptions.formatTableImplementationIsPaimon()) {
-            if (optionsMap.containsKey("seq")) {
-                optionsMap.put("csv.field-delimiter", optionsMap.get("seq"));
-            }
-            if (optionsMap.containsKey("lineSep")) {
-                optionsMap.put("csv.line-delimiter", optionsMap.get("lineSep"));
-            }
             return new PaimonFormatTable(
                     spark,
                     new CaseInsensitiveStringMap(optionsMap),

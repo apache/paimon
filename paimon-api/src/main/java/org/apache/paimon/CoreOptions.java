@@ -3821,8 +3821,27 @@ public class CoreOptions implements Serializable {
     }
 
     /** Specifies the implementation of format table. */
-    public enum FormatTableImplementation {
-        PAIMON,
-        ENGINE
+    public enum FormatTableImplementation implements DescribedEnum {
+        PAIMON("paimon", "Paimon format table implementation."),
+        ENGINE("engine", "Engine format table implementation.");
+
+        private final String value;
+
+        private final String description;
+
+        FormatTableImplementation(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 }
