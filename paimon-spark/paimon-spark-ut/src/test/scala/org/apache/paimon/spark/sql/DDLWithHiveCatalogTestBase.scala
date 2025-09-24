@@ -55,7 +55,9 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 val fileStoreTable = getPaimonScan("SELECT * FROM paimon_db.paimon_tbl").table
                   .asInstanceOf[FileStoreTable]
                 Assertions.assertEquals("paimon_tbl", fileStoreTable.name())
-                Assertions.assertEquals("paimon_db.paimon_tbl", fileStoreTable.fullName())
+                Assertions.assertEquals(
+                  s"$catalogName.paimon_db.paimon_tbl",
+                  fileStoreTable.fullName())
               }
             }
         }

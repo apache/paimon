@@ -176,7 +176,8 @@ public class RESTTokenFileIO implements FileIO {
                             options,
                             catalogContext.hadoopConf(),
                             catalogContext.preferIO(),
-                            catalogContext.fallbackIO());
+                            catalogContext.fallbackIO(),
+                            catalogContext.catalogName());
             try {
                 fileIO = FileIO.get(path, context);
             } catch (IOException e) {

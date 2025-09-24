@@ -156,4 +156,11 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
     // check comment in schema
     Assertions.assertTrue(Objects.equals(comment, loadTable(tableName).schema().comment()))
   }
+
+  test("Paimon describe: table full name") {
+    withTable("t") {
+      sql("CREATE TABLE t (a INT, b STRING)")
+      assert(loadTable("t").fullName().equals("paimon.test.t"))
+    }
+  }
 }

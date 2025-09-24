@@ -49,7 +49,7 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
         val node1 = nodes(0)
         assert(
           node1.isInstanceOf[AppendDataExec] &&
-            node1.toString.contains("PaimonWrite(table=test.t1"),
+            node1.toString.contains("PaimonWrite(table=paimon.test.t1"),
           s"Expected AppendDataExec with specific paimon write, but got: $node1"
         )
 
@@ -92,7 +92,7 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
         val node1 = nodes(0)
         assert(
           node1.isInstanceOf[AppendDataExec] &&
-            node1.toString.contains("PaimonWrite(table=test.t1"),
+            node1.toString.contains("PaimonWrite(table=paimon.test.t1"),
           s"Expected AppendDataExec with specific paimon write, but got: $node1"
         )
 
@@ -136,7 +136,7 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
         val node1 = nodes(0)
         assert(
           node1.isInstanceOf[AppendDataExecV1] &&
-            node1.toString.contains("AppendDataExecV1 PrimaryKeyFileStoreTable[test.t1]"),
+            node1.toString.contains("AppendDataExecV1 PrimaryKeyFileStoreTable[paimon.test.t1]"),
           s"Expected AppendDataExec with specific paimon write, but got: $node1"
         )
       }

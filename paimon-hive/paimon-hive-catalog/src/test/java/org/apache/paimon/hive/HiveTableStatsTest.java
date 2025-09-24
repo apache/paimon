@@ -64,7 +64,8 @@ public class HiveTableStatsTest {
         CatalogContext catalogContext = CatalogContext.create(catalogOptions);
         FileIO fileIO = FileIO.get(new Path(warehouse), catalogContext);
         catalog =
-                new HiveCatalog(fileIO, hiveConf, metastoreClientClass, catalogOptions, warehouse);
+                new HiveCatalog(
+                        fileIO, hiveConf, metastoreClientClass, catalogOptions, warehouse, null);
     }
 
     @Test

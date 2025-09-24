@@ -63,7 +63,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
         properties.putAll(props);
         JdbcCatalog catalog =
                 new JdbcCatalog(
-                        fileIO, "test-jdbc-catalog", Options.fromMap(properties), warehouse);
+                        fileIO, "test-jdbc-catalog", Options.fromMap(properties), warehouse, null);
         assertThat(catalog.warehouse()).isEqualTo(warehouse);
         return catalog;
     }

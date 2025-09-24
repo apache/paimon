@@ -253,6 +253,7 @@ public class CatalogUtils {
 
         CatalogEnvironment catalogEnv =
                 new CatalogEnvironment(
+                        catalog.name(),
                         tableIdentifier,
                         metadata.uuid(),
                         catalog.catalogLoader(),

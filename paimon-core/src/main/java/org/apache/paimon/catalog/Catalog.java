@@ -948,6 +948,11 @@ public interface Catalog extends AutoCloseable {
 
     // ==================== Catalog Information ==========================
 
+    /** The name of this catalog. */
+    default String name() {
+        return toString();
+    }
+
     /** Catalog options for re-creating this catalog. */
     Map<String, String> options();
 

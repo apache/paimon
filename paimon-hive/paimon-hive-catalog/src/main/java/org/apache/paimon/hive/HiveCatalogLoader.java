@@ -33,22 +33,25 @@ public class HiveCatalogLoader implements CatalogLoader {
     private final String clientClassName;
     private final Options options;
     private final String warehouse;
+    private final String name;
 
     public HiveCatalogLoader(
             FileIO fileIO,
             SerializableHiveConf hiveConf,
             String clientClassName,
             Options options,
-            String warehouse) {
+            String warehouse,
+            String name) {
         this.fileIO = fileIO;
         this.hiveConf = hiveConf;
         this.clientClassName = clientClassName;
         this.options = options;
         this.warehouse = warehouse;
+        this.name = name;
     }
 
     @Override
     public Catalog load() {
-        return new HiveCatalog(fileIO, hiveConf.conf(), clientClassName, options, warehouse);
+        return new HiveCatalog(fileIO, hiveConf.conf(), clientClassName, options, warehouse, name);
     }
 }
