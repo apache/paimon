@@ -32,10 +32,34 @@ public interface UriReader {
     SeekableInputStream newInputStream(String uri) throws IOException;
 
     static UriReader fromFile(FileIO fileIO) {
-        return uri -> fileIO.newInputStream(new Path(uri));
+        return new FileUriReader(fileIO);
     }
 
     static UriReader fromHttp() {
-        return uri -> new LimitedSeekableInputStream(HttpClientUtils.getAsInputStream(uri));
+        return new HttpUriReader();
+    }
+
+    /** A {@link UriReader} uses {@link FileIO} to read file. */
+    class FileUriReader implements UriReader {
+
+        private final FileIO fileIO;
+
+        public FileUriReader(FileIO fileIO) {
+            this.fileIO = fileIO;
+        }
+
+        @Override
+        public SeekableInputStream newInputStream(String uri) throws IOException {
+            return fileIO.newInputStream(new Path(uri));
+        }
+    }
+
+    /** A {@link UriReader} reads http uri. */
+    class HttpUriReader implements UriReader {
+
+        @Override
+        public SeekableInputStream newInputStream(String uri) throws IOException {
+            return new LimitedSeekableInputStream(HttpClientUtils.getAsInputStream(uri));
+        }
     }
 }
