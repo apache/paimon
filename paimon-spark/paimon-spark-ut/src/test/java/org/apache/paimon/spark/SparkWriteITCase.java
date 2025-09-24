@@ -346,7 +346,7 @@ public class SparkWriteITCase {
                         + "'clustering.columns'='a,b',"
                         + String.format("'clustering.strategy'='%s')", clusterStrategy));
         spark.sql("INSERT INTO T VALUES (2, 2), (1, 1), (3, 3)").collectAsList();
-        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        List<Row> rows = spark.sql("SELECT * FROM T order by a").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,1], [2,2], [3,3]]");
     }
 
