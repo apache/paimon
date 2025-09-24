@@ -40,7 +40,7 @@ install_requires = [
     'zstandard==0.24.0; python_version>="3.7"',
     'zstandard==0.19.0; python_version<"3.7"',
     'dataclasses==0.8.0; python_version < "3.7"',
-    'pip==21.3.1'
+    'pip==25.2'
 ]
 
 long_description = "See Apache Paimon Python API \
