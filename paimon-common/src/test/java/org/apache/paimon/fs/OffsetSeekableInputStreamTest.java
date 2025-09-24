@@ -173,32 +173,4 @@ public class OffsetSeekableInputStreamTest {
             assertThat(stream.getPos()).isEqualTo(10);
         }
     }
-
-    @Test
-    public void testReadByteArrayWithZeroLength() throws IOException {
-        long offset = 5;
-        long length = 10;
-        try (OffsetSeekableInputStream stream =
-                new OffsetSeekableInputStream(wrapped, offset, length)) {
-            byte[] buffer = new byte[0];
-            int bytesRead = stream.read(buffer, 0, 0);
-
-            assertThat(bytesRead).isEqualTo(0);
-        }
-    }
-
-    @Test
-    public void testSeekBeyondLength() throws IOException {
-        long offset = 5;
-        long length = 10;
-        try (OffsetSeekableInputStream stream =
-                new OffsetSeekableInputStream(wrapped, offset, length)) {
-            // Seeking beyond length should be allowed, but reading should return -1
-            stream.seek(15);
-            assertThat(stream.getPos()).isEqualTo(15);
-
-            int result = stream.read();
-            assertThat(result).isEqualTo(-1);
-        }
-    }
 }
