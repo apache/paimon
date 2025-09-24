@@ -56,10 +56,6 @@
                         <groupId>jdk.tools</groupId>
                         <artifactId>jdk.tools</artifactId>
                     </exclusion>
-                    <exclusion>
-                        <groupId>com.github.pjfanning</groupId>
-                        <artifactId>jersey-json</artifactId>
-                    </exclusion>
                 </exclusions>
             </dependency>
 
@@ -68,6 +64,14 @@
                 <groupId>commons-beanutils</groupId>
                 <artifactId>commons-beanutils</artifactId>
                 <version>${commons.beanutils.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${fs.s3.aws.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -210,34 +214,33 @@
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-reload4j</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>com.github.pjfanning</groupId>
+                    <artifactId>jersey-json</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
         <!-- AWS dependencies (bundled) -->
         <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-core</artifactId>
-            <version>${fs.s3.aws.version}</version>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-s3</artifactId>
-            <version>${fs.s3.aws.version}</version>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3-transfer-manager</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-kms</artifactId>
-            <version>${fs.s3.aws.version}</version>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>kms</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-dynamodb</artifactId>
-            <version>${fs.s3.aws.version}</version>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>dynamodb</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-sts</artifactId>
-            <version>${fs.s3.aws.version}</version>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sts</artifactId>
         </dependency>
 
         <!-- Hadoop's s3 support classes (bundled) -->
@@ -247,8 +250,8 @@
             <version>${fs.hadoopshaded.version}</version>
             <exclusions>
                 <exclusion>
-                    <groupId>com.amazonaws</groupId>
-                    <artifactId>aws-java-sdk-bundle</artifactId>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>bundle</artifactId>
                 </exclusion>
                 <exclusion>
                     <groupId>ch.qos.reload4j</groupId>
@@ -257,6 +260,10 @@
                 <exclusion>
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-reload4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>analyticsaccelerator-s3</artifactId>
+                    <groupId>software.amazon.s3.analyticsaccelerator</groupId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -371,15 +378,6 @@
                                         <exclude>PropertyList-1.0.dtd</exclude>
                                         <exclude>META-INF/services/javax.xml.stream.*</exclude>
                                         <exclude>META-INF/LICENSE.txt</exclude>
-                                    </excludes>
-                                </filter>
-                                <filter>
-                                    <artifact>com.amazonaws:aws-java-sdk-s3</artifact>
-                                    <!-- Make sure we are using the overridden XmlResponsesSaxParser.
-                                        Filter must be removed as soon as XmlResponsesSaxParser of this module is
-                                        dropped, for example when discontinuing support for Java 8. -->
-                                    <excludes>
-                                        <exclude>com/amazonaws/services/s3/model/transform/XmlResponsesSaxParser**</exclude>
                                     </excludes>
                                 </filter>
                             </filters>

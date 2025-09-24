@@ -20,7 +20,6 @@ package org.apache.paimon.s3;
 
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 
-import com.amazonaws.services.s3.model.PartETag;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -328,21 +327,6 @@ class S3TwoPhaseOutputStreamTest {
             if (targetFile.exists()) {
                 targetFile.delete();
             }
-        }
-    }
-
-    /** Mock implementation of PartETag. */
-    private static class MockPartETag extends PartETag {
-        private final String eTag;
-
-        public MockPartETag(String eTag, int partNumber) {
-            super(partNumber, eTag);
-            this.eTag = eTag;
-        }
-
-        @Override
-        public String getETag() {
-            return eTag;
         }
     }
 
