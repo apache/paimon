@@ -195,25 +195,6 @@ case class PaimonFormatTable(
     util.EnumSet.of(BATCH_READ)
   }
 
-  override def inferSchema(files: Seq[FileStatus]): Option[StructType] = {
-    Option(SparkTypeUtils.fromPaimonRowType(table.rowType()))
-  }
-
-  override def formatName: String = {
-    table.format().name().toUpperCase
-  }
-
-  override def fallbackFileFormat: Class[_ <: FileFormat] = {
-    table.format() match {
-      case Format.CSV => classOf[CSVFileFormat]
-      case Format.JSON => classOf[JsonFileFormat]
-      case Format.ORC => classOf[org.apache.spark.sql.execution.datasources.orc.OrcFileFormat]
-      case Format.PARQUET =>
-        classOf[org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat]
-      case _ => throw new UnsupportedOperationException()
-    }
-  }
-
   override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
     PaimonFormatTableScanBuilder(table.copy(caseInsensitiveStringMap))
   }
