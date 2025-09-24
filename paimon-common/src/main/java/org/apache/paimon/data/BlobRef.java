@@ -16,34 +16,35 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.blob;
+package org.apache.paimon.data;
 
-import org.apache.paimon.data.Blob;
-import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.OffsetSeekableInputStream;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.UriReader;
 
 import java.io.IOException;
+import java.util.Objects;
 
-/** BlobRef is a reference to a blob file. */
-public class BlobFileRef implements Blob {
+/**
+ * A {@link Blob} refers blob in {@link BlobDescriptor}.
+ *
+ * @since 1.4.0
+ */
+@Public
+public class BlobRef implements Blob {
 
-    private final FileIO fileIO;
-    private final Path filePath;
-    private final long blobLength;
-    private final long blobOffset;
+    private final UriReader uriReader;
+    private final BlobDescriptor descriptor;
 
-    public BlobFileRef(FileIO fileIO, Path filePath, long blobLength, long blobOffset) {
-        this.fileIO = fileIO;
-        this.filePath = filePath;
-        this.blobLength = blobLength;
-        this.blobOffset = blobOffset;
+    public BlobRef(UriReader uriReader, BlobDescriptor descriptor) {
+        this.uriReader = uriReader;
+        this.descriptor = descriptor;
     }
 
     @Override
-    public byte[] toBytes() {
+    public byte[] toData() {
         try {
             return IOUtils.readFully(newInputStream(), true);
         } catch (IOException e) {
@@ -53,8 +54,23 @@ public class BlobFileRef implements Blob {
 
     @Override
     public SeekableInputStream newInputStream() throws IOException {
-        SeekableInputStream in = fileIO.newInputStream(filePath);
-        // TODO validate Magic number?
-        return new OffsetSeekableInputStream(in, blobOffset + 4, blobLength - 16);
+        return new OffsetSeekableInputStream(
+                uriReader.newInputStream(descriptor.uri()),
+                descriptor.offset(),
+                descriptor.length());
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        BlobRef blobRef = (BlobRef) o;
+        return Objects.deepEquals(descriptor, blobRef.descriptor);
+    }
+
+    @Override
+    public int hashCode() {
+        return descriptor.hashCode();
     }
 }
