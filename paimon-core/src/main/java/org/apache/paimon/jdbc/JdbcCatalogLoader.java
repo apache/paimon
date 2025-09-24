@@ -19,9 +19,9 @@
 package org.apache.paimon.jdbc;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.options.Options;
 
 /** Loader to create {@link JdbcCatalog}. */
 public class JdbcCatalogLoader implements CatalogLoader {
@@ -30,18 +30,19 @@ public class JdbcCatalogLoader implements CatalogLoader {
 
     private final FileIO fileIO;
     private final String catalogKey;
-    private final Options options;
+    private final CatalogContext context;
     private final String warehouse;
 
-    public JdbcCatalogLoader(FileIO fileIO, String catalogKey, Options options, String warehouse) {
+    public JdbcCatalogLoader(
+            FileIO fileIO, String catalogKey, CatalogContext context, String warehouse) {
         this.fileIO = fileIO;
         this.catalogKey = catalogKey;
-        this.options = options;
+        this.context = context;
         this.warehouse = warehouse;
     }
 
     @Override
     public Catalog load() {
-        return new JdbcCatalog(fileIO, catalogKey, options, warehouse);
+        return new JdbcCatalog(fileIO, catalogKey, context, warehouse);
     }
 }
