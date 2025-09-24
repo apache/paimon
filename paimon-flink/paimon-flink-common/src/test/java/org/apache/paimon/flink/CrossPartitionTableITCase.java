@@ -22,13 +22,16 @@ import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for batch file store. */
-public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
+public class CrossPartitionTableITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
@@ -64,6 +67,12 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
                         + " 'bucket'='-1', "
                         + " 'dynamic-bucket.target-row-num'='3' "
                         + ")");
+    }
+
+    @Nullable
+    @Override
+    protected Boolean sqlSyncMode() {
+        return true;
     }
 
     @Test
@@ -171,5 +180,29 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
         sql("insert into partial_part values (1, 1, 1, 1)");
         sql("insert into partial_part values (1, 2, 1, 2)");
         assertThat(sql("select * from partial_part")).containsExactlyInAnyOrder(Row.of(1, 2, 1, 2));
+    }
+
+    @Test
+    public void testCrossPartitionWithFixedBucket() {
+        sql(
+                "create table cross_fixed (pt int, k int, v int, primary key (k) not enforced) "
+                        + "partitioned by (pt) with ('bucket' = '2')");
+        sql("insert into cross_fixed values (1, 1, 1)");
+        sql("insert into cross_fixed values (2, 2, 2)");
+        assertThat(sql("select * from cross_fixed"))
+                .containsExactlyInAnyOrder(Row.of(1, 1, 1), Row.of(2, 2, 2));
+    }
+
+    @Test
+    public void testCrossPartitionWithPostponeBucket()
+            throws ExecutionException, InterruptedException {
+        sql(
+                "create table cross_postpone (pt int, k int, v int, primary key (k) not enforced) "
+                        + "partitioned by (pt) with ('bucket' = '-2')");
+        sql("insert into cross_postpone values (1, 1, 1)");
+        sql("insert into cross_postpone values (2, 2, 2)");
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.cross_postpone')").await();
+        assertThat(sql("select * from cross_postpone"))
+                .containsExactlyInAnyOrder(Row.of(1, 1, 1), Row.of(2, 2, 2));
     }
 }

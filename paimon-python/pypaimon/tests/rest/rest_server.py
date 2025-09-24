@@ -38,7 +38,8 @@ from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
                                                 DatabaseNotExistException,
                                                 TableNoPermissionException,
-                                                TableNotExistException)
+                                                TableNotExistException, DatabaseAlreadyExistException,
+                                                TableAlreadyExistException)
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
@@ -321,6 +322,16 @@ class RESTCatalogServer:
                 ErrorResponse.RESOURCE_TYPE_TABLE, e.identifier.get_table_name(), str(e), 403
             )
             return self._mock_response(response, 403)
+        except DatabaseAlreadyExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_DATABASE, e.database, str(e), 409
+            )
+            return self._mock_response(response, 409)
+        except TableAlreadyExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_TABLE, e.identifier.get_full_name(), str(e), 409
+            )
+            return self._mock_response(response, 409)
         except Exception as e:
             self.logger.error(f"Unexpected error: {e}")
             response = ErrorResponse(None, None, str(e), 500)
@@ -377,6 +388,8 @@ class RESTCatalogServer:
             return self._generate_final_list_databases_response(parameters, databases)
         if method == "POST":
             create_database = JSON.from_json(data, CreateDatabaseRequest)
+            if create_database.name in self.database_store:
+                raise DatabaseAlreadyExistException(create_database.name)
             self.database_store.update({
                 create_database.name: self.mock_database(create_database.name, create_database.options)
             })
@@ -412,6 +425,8 @@ class RESTCatalogServer:
                 return self._generate_final_list_tables_response(parameters, tables)
             elif method == "POST":
                 create_table = JSON.from_json(data, CreateTableRequest)
+                if create_table.identifier.get_full_name() in self.table_metadata_store:
+                    raise TableAlreadyExistException(create_table.identifier)
                 table_metadata = self._create_table_metadata(
                     create_table.identifier, 1, create_table.schema, str(uuid.uuid4()), False
                 )
@@ -441,7 +456,9 @@ class RESTCatalogServer:
 
         elif method == "DELETE":
             # Drop table
-            if identifier.get_full_name() in self.table_metadata_store:
+            if identifier.get_full_name() not in self.table_metadata_store:
+                raise TableNotExistException(identifier)
+            else:
                 del self.table_metadata_store[identifier.get_full_name()]
             if identifier.get_full_name() in self.table_latest_snapshot_store:
                 del self.table_latest_snapshot_store[identifier.get_full_name()]

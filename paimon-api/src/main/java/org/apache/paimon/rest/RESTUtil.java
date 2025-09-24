@@ -27,7 +27,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
-import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
+import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
@@ -173,7 +173,7 @@ public class RESTUtil {
         return null;
     }
 
-    public static String extractResponseBodyAsString(CloseableHttpResponse response)
+    public static String extractResponseBodyAsString(ClassicHttpResponse response)
             throws IOException, ParseException {
         if (response.getEntity() == null) {
             return null;
@@ -182,7 +182,7 @@ public class RESTUtil {
         return EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
     }
 
-    public static boolean isSuccessful(CloseableHttpResponse response) {
+    public static boolean isSuccessful(ClassicHttpResponse response) {
         int code = response.getCode();
         return code == HttpStatus.SC_OK
                 || code == HttpStatus.SC_ACCEPTED

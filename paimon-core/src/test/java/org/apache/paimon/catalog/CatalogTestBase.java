@@ -296,7 +296,8 @@ public abstract class CatalogTestBase {
         // List tables paged returns an empty list when there are no tables in the database
         String databaseName = "tables_paged_db";
         catalog.createDatabase(databaseName, false);
-        PagedList<String> pagedTables = catalog.listTablesPaged(databaseName, null, null, null);
+        PagedList<String> pagedTables =
+                catalog.listTablesPaged(databaseName, null, null, null, null);
         assertThat(pagedTables.getElements()).isEmpty();
         assertNull(pagedTables.getNextPageToken());
 
@@ -309,22 +310,22 @@ public abstract class CatalogTestBase {
         // List tables paged returns a list with the names of all tables in the database in all
         // catalogs except RestCatalog
         // even if the maxResults or pageToken is not null
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         int maxResults = 2;
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         String pageToken = "table1";
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         maxResults = 8;
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null, null);
         assertPagedTables(pagedTables, tableNames);
 
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         // List tables throws DatabaseNotExistException when the database does not exist
@@ -333,7 +334,7 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.listTablesPaged(
-                                        "non_existing_db", finalMaxResults, pageToken, null));
+                                        "non_existing_db", finalMaxResults, pageToken, null, null));
     }
 
     @Test
@@ -342,7 +343,7 @@ public abstract class CatalogTestBase {
         String databaseName = "table_details_paged_db";
         catalog.createDatabase(databaseName, false);
         PagedList<Table> pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, null, null, null);
+                catalog.listTableDetailsPaged(databaseName, null, null, null, null);
         assertThat(pagedTableDetails.getElements()).isEmpty();
         assertNull(pagedTableDetails.getNextPageToken());
 
@@ -355,28 +356,30 @@ public abstract class CatalogTestBase {
                     Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
         }
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, null);
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         int maxResults = 2;
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null, null);
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, maxResults, null, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         String pageToken = "table1";
         pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null);
+                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         maxResults = 8;
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null, null);
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, maxResults, null, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null);
+                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
@@ -386,7 +389,7 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.listTableDetailsPaged(
-                                        "non_existing_db", finalMaxResults, pageToken, null));
+                                        "non_existing_db", finalMaxResults, pageToken, null, null));
     }
 
     @Test

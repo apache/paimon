@@ -25,6 +25,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.ReadonlyTable;
@@ -36,8 +38,8 @@ import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 
@@ -51,41 +53,58 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/**
- * This is a system table to display all the database-table properties.
- *
- * <pre>
- *  For example:
- *     If we select * from sys.all_table_options, we will get
- *     databasename       tablename       key      value
- *         default           test0         a         b
- *         my_db             test1         c         d
- *          ...               ...         ...       ...
- *     We can write sql to fetch the information we need.
- * </pre>
- */
-public class AllTableOptionsTable implements ReadonlyTable {
+/** This is a system table to display all the database-table-partitions. */
+public class AllPartitionsTable implements ReadonlyTable {
 
-    public static final String ALL_TABLE_OPTIONS = "all_table_options";
+    public static final String ALL_PARTITIONS = "partitions";
 
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new DataField(
-                                    0, "database_name", new VarCharType(VarCharType.MAX_LENGTH)),
-                            new DataField(1, "table_name", new VarCharType(VarCharType.MAX_LENGTH)),
-                            new DataField(2, "key", new VarCharType(VarCharType.MAX_LENGTH)),
-                            new DataField(3, "value", new VarCharType(VarCharType.MAX_LENGTH))));
+                            new DataField(0, "database_name", DataTypes.STRING()),
+                            new DataField(1, "table_name", DataTypes.STRING()),
+                            new DataField(2, "partition_name", DataTypes.STRING()),
+                            new DataField(3, "record_count", DataTypes.BIGINT()),
+                            new DataField(4, "file_size_in_bytes", DataTypes.BIGINT()),
+                            new DataField(5, "file_count", DataTypes.BIGINT()),
+                            new DataField(6, "last_file_creation_time", DataTypes.BIGINT()),
+                            new DataField(7, "done", DataTypes.BOOLEAN())));
 
-    private final Map<Identifier, Map<String, String>> allOptions;
+    private final List<GenericRow> rows;
 
-    public AllTableOptionsTable(Map<Identifier, Map<String, String>> allOptions) {
-        this.allOptions = allOptions;
+    public AllPartitionsTable(List<GenericRow> rows) {
+        this.rows = rows;
+    }
+
+    public static AllPartitionsTable fromPartitions(
+            Map<Identifier, List<Partition>> allPartitions) {
+        List<GenericRow> rows = new ArrayList<>();
+        allPartitions.forEach(
+                (identifier, partitions) ->
+                        partitions.forEach(
+                                partition -> {
+                                    Map<String, String> spec = partition.spec();
+                                    String partitionName = PartitionUtils.buildPartitionName(spec);
+                                    GenericRow row =
+                                            GenericRow.of(
+                                                    BinaryString.fromString(
+                                                            identifier.getDatabaseName()),
+                                                    BinaryString.fromString(
+                                                            identifier.getObjectName()),
+                                                    BinaryString.fromString(partitionName),
+                                                    partition.recordCount(),
+                                                    partition.fileSizeInBytes(),
+                                                    partition.fileCount(),
+                                                    partition.lastFileCreationTime(),
+                                                    partition.done());
+                                    rows.add(row);
+                                }));
+        return new AllPartitionsTable(rows);
     }
 
     @Override
     public String name() {
-        return ALL_TABLE_OPTIONS;
+        return ALL_PARTITIONS;
     }
 
     @Override
@@ -95,7 +114,10 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
     @Override
     public List<String> primaryKeys() {
-        return Collections.singletonList("table_name");
+        return Arrays.asList(
+                TABLE_TYPE.getField(0).name(),
+                TABLE_TYPE.getField(1).name(),
+                TABLE_TYPE.getField(2).name());
     }
 
     @Override
@@ -106,20 +128,20 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
     @Override
     public InnerTableScan newScan() {
-        return new AllTableOptionsScan();
+        return new AllPartitionsScan();
     }
 
     @Override
     public InnerTableRead newRead() {
-        return new AllTableOptionsRead();
+        return new AllPartitionsRead();
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new AllTableOptionsTable(allOptions);
+        return new AllPartitionsTable(rows);
     }
 
-    private class AllTableOptionsScan extends ReadOnceTableScan {
+    private class AllPartitionsScan extends ReadOnceTableScan {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
@@ -128,18 +150,18 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new AllTableSplit(allOptions));
+            return () -> Collections.singletonList(new AllPartitionsSplit(rows));
         }
     }
 
-    private static class AllTableSplit extends SingletonSplit {
+    private static class AllPartitionsSplit extends SingletonSplit {
 
         private static final long serialVersionUID = 1L;
 
-        private final Map<Identifier, Map<String, String>> allOptions;
+        private final List<GenericRow> rows;
 
-        private AllTableSplit(Map<Identifier, Map<String, String>> allOptions) {
-            this.allOptions = allOptions;
+        private AllPartitionsSplit(List<GenericRow> rows) {
+            this.rows = rows;
         }
 
         @Override
@@ -150,17 +172,17 @@ public class AllTableOptionsTable implements ReadonlyTable {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            AllTableSplit that = (AllTableSplit) o;
-            return Objects.equals(allOptions, that.allOptions);
+            AllPartitionsSplit that = (AllPartitionsSplit) o;
+            return Objects.equals(rows, that.rows);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(allOptions);
+            return Objects.hash(rows);
         }
     }
 
-    private static class AllTableOptionsRead implements InnerTableRead {
+    private static class AllPartitionsRead implements InnerTableRead {
 
         private RowType readType;
 
@@ -182,26 +204,11 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) {
-            if (!(split instanceof AllTableSplit)) {
+            if (!(split instanceof AllPartitionsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            List<InternalRow> rows = new ArrayList<>();
-            for (Map.Entry<Identifier, Map<String, String>> entry :
-                    ((AllTableSplit) split).allOptions.entrySet()) {
-                String database = entry.getKey().getDatabaseName();
-                String tableName = entry.getKey().getTableName();
-                for (Map.Entry<String, String> entry2 : entry.getValue().entrySet()) {
-                    String key = entry2.getKey();
-                    String value = entry2.getValue();
-                    rows.add(
-                            GenericRow.of(
-                                    BinaryString.fromString(database),
-                                    BinaryString.fromString(tableName),
-                                    BinaryString.fromString(key),
-                                    BinaryString.fromString(value)));
-                }
-            }
-            Iterator<InternalRow> iterator = rows.iterator();
+            List<? extends InternalRow> rows = ((AllPartitionsSplit) split).rows;
+            Iterator<? extends InternalRow> iterator = rows.iterator();
             if (readType != null) {
                 iterator =
                         Iterators.transform(
@@ -211,7 +218,8 @@ public class AllTableOptionsTable implements ReadonlyTable {
                                                         readType, AggregationFieldsTable.TABLE_TYPE)
                                                 .replaceRow(row));
             }
-            return new IteratorRecordReader<>(iterator);
+            //noinspection ReassignedVariable,unchecked
+            return new IteratorRecordReader<>((Iterator<InternalRow>) iterator);
         }
     }
 }

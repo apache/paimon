@@ -43,6 +43,8 @@ import org.apache.spark.sql.types.TimestampType;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Wrapper to fetch value from the spark internal row. */
 public class SparkInternalRowWrapper implements InternalRow, Serializable {
@@ -50,28 +52,73 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
     private transient org.apache.spark.sql.catalyst.InternalRow internalRow;
     private final int length;
     private final int rowKindIdx;
-    private final StructType structType;
+    private final StructType tableSchema;
+    private int[] fieldIndexMap = null;
 
     public SparkInternalRowWrapper(
             org.apache.spark.sql.catalyst.InternalRow internalRow,
             int rowKindIdx,
-            StructType structType,
+            StructType tableSchema,
             int length) {
         this.internalRow = internalRow;
         this.rowKindIdx = rowKindIdx;
         this.length = length;
-        this.structType = structType;
+        this.tableSchema = tableSchema;
     }
 
-    public SparkInternalRowWrapper(int rowKindIdx, StructType structType, int length) {
+    public SparkInternalRowWrapper(int rowKindIdx, StructType tableSchema, int length) {
         this.rowKindIdx = rowKindIdx;
         this.length = length;
-        this.structType = structType;
+        this.tableSchema = tableSchema;
+    }
+
+    public SparkInternalRowWrapper(
+            int rowKindIdx, StructType tableSchema, StructType dataSchema, int length) {
+        this.rowKindIdx = rowKindIdx;
+        this.length = length;
+        this.tableSchema = tableSchema;
+        this.fieldIndexMap = buildFieldIndexMap(tableSchema, dataSchema);
     }
 
     public SparkInternalRowWrapper replace(org.apache.spark.sql.catalyst.InternalRow internalRow) {
         this.internalRow = internalRow;
         return this;
+    }
+
+    private int[] buildFieldIndexMap(StructType schemaStruct, StructType dataSchema) {
+        int[] mapping = new int[schemaStruct.size()];
+
+        Map<String, Integer> rowFieldIndexMap = new HashMap<>();
+        for (int i = 0; i < dataSchema.size(); i++) {
+            rowFieldIndexMap.put(dataSchema.fields()[i].name(), i);
+        }
+
+        for (int i = 0; i < schemaStruct.size(); i++) {
+            String fieldName = schemaStruct.fields()[i].name();
+            Integer index = rowFieldIndexMap.get(fieldName);
+            mapping[i] = (index != null) ? index : -1;
+        }
+
+        return mapping;
+    }
+
+    private int getActualFieldPosition(int pos) {
+        if (fieldIndexMap == null) {
+            return pos;
+        } else {
+            if (pos < 0 || pos >= fieldIndexMap.length) {
+                return -1;
+            }
+            return fieldIndexMap[pos];
+        }
+    }
+
+    private int validateAndGetActualPosition(int pos) {
+        int actualPos = getActualFieldPosition(pos);
+        if (actualPos == -1) {
+            throw new ArrayIndexOutOfBoundsException("Field index out of bounds: " + pos);
+        }
+        return actualPos;
     }
 
     @Override
@@ -82,10 +129,12 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
     @Override
     public RowKind getRowKind() {
         if (rowKindIdx != -1) {
-            return RowKind.fromByteValue(internalRow.getByte(rowKindIdx));
-        } else {
-            return RowKind.INSERT;
+            int actualPos = getActualFieldPosition(rowKindIdx);
+            if (actualPos != -1) {
+                return RowKind.fromByteValue(internalRow.getByte(actualPos));
+            }
         }
+        return RowKind.INSERT;
     }
 
     @Override
@@ -95,69 +144,102 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
     @Override
     public boolean isNullAt(int pos) {
-        return internalRow.isNullAt(pos);
+        int actualPos = getActualFieldPosition(pos);
+        if (actualPos == -1) {
+            return true;
+        }
+        return internalRow.isNullAt(actualPos);
     }
 
     @Override
     public boolean getBoolean(int pos) {
-        return internalRow.getBoolean(pos);
+        int actualPos = validateAndGetActualPosition(pos);
+        return internalRow.getBoolean(actualPos);
     }
 
     @Override
     public byte getByte(int pos) {
-        return internalRow.getByte(pos);
+        int actualPos = validateAndGetActualPosition(pos);
+        return internalRow.getByte(actualPos);
     }
 
     @Override
     public short getShort(int pos) {
-        return internalRow.getShort(pos);
+        int actualPos = validateAndGetActualPosition(pos);
+        return internalRow.getShort(actualPos);
     }
 
     @Override
     public int getInt(int pos) {
-        return internalRow.getInt(pos);
+        int actualPos = validateAndGetActualPosition(pos);
+        return internalRow.getInt(actualPos);
     }
 
     @Override
     public long getLong(int pos) {
-        return internalRow.getLong(pos);
+        int actualPos = validateAndGetActualPosition(pos);
+        return internalRow.getLong(actualPos);
     }
 
     @Override
     public float getFloat(int pos) {
-        return internalRow.getFloat(pos);
+        int actualPos = validateAndGetActualPosition(pos);
+        return internalRow.getFloat(actualPos);
     }
 
     @Override
     public double getDouble(int pos) {
-        return internalRow.getDouble(pos);
+        int actualPos = validateAndGetActualPosition(pos);
+        return internalRow.getDouble(actualPos);
     }
 
     @Override
     public BinaryString getString(int pos) {
-        return BinaryString.fromBytes(internalRow.getUTF8String(pos).getBytes());
+        int actualPos = getActualFieldPosition(pos);
+        if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
+            return null;
+        }
+        return BinaryString.fromBytes(internalRow.getUTF8String(actualPos).getBytes());
     }
 
     @Override
     public Decimal getDecimal(int pos, int precision, int scale) {
-        org.apache.spark.sql.types.Decimal decimal = internalRow.getDecimal(pos, precision, scale);
+        int actualPos = getActualFieldPosition(pos);
+        if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
+            return null;
+        }
+        org.apache.spark.sql.types.Decimal decimal =
+                internalRow.getDecimal(actualPos, precision, scale);
         BigDecimal bigDecimal = decimal.toJavaBigDecimal();
         return Decimal.fromBigDecimal(bigDecimal, precision, scale);
     }
 
     @Override
     public Timestamp getTimestamp(int pos, int precision) {
-        return convertToTimestamp(structType.fields()[pos].dataType(), internalRow.getLong(pos));
+        int actualPos = getActualFieldPosition(pos);
+        if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
+            return null;
+        }
+        return convertToTimestamp(
+                tableSchema.fields()[pos].dataType(), internalRow.getLong(actualPos));
     }
 
     @Override
     public byte[] getBinary(int pos) {
-        return internalRow.getBinary(pos);
+        int actualPos = getActualFieldPosition(pos);
+        if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
+            return null;
+        }
+        return internalRow.getBinary(actualPos);
     }
 
     @Override
     public Variant getVariant(int pos) {
-        return SparkShimLoader.shim().toPaimonVariant(internalRow, pos);
+        int actualPos = getActualFieldPosition(pos);
+        if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
+            return null;
+        }
+        return SparkShimLoader.shim().toPaimonVariant(internalRow, actualPos);
     }
 
     @Override
@@ -167,24 +249,36 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
     @Override
     public InternalArray getArray(int pos) {
+        int actualPos = getActualFieldPosition(pos);
+        if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
+            return null;
+        }
         return new SparkInternalArray(
-                internalRow.getArray(pos),
-                ((ArrayType) (structType.fields()[pos].dataType())).elementType());
+                internalRow.getArray(actualPos),
+                ((ArrayType) (tableSchema.fields()[pos].dataType())).elementType());
     }
 
     @Override
     public InternalMap getMap(int pos) {
-        MapType mapType = (MapType) structType.fields()[pos].dataType();
+        int actualPos = getActualFieldPosition(pos);
+        if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
+            return null;
+        }
+        MapType mapType = (MapType) tableSchema.fields()[pos].dataType();
         return new SparkInternalMap(
-                internalRow.getMap(pos), mapType.keyType(), mapType.valueType());
+                internalRow.getMap(actualPos), mapType.keyType(), mapType.valueType());
     }
 
     @Override
     public InternalRow getRow(int pos, int numFields) {
+        int actualPos = getActualFieldPosition(pos);
+        if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
+            return null;
+        }
         return new SparkInternalRowWrapper(
-                internalRow.getStruct(pos, numFields),
+                internalRow.getStruct(actualPos, numFields),
                 -1,
-                (StructType) structType.fields()[pos].dataType(),
+                (StructType) tableSchema.fields()[actualPos].dataType(),
                 numFields);
     }
 

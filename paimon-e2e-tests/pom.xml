@@ -64,7 +64,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-spark-${test.spark.main.version}</artifactId>
+            <artifactId>paimon-spark-${test.spark.main.version}_${scala.binary.version}</artifactId>
             <version>${project.version}</version>
             <scope>runtime</scope>
         </dependency>
@@ -186,7 +186,7 @@ under the License.
                         </artifactItem>
                         <artifactItem>
                             <groupId>org.apache.paimon</groupId>
-                            <artifactId>paimon-spark-${test.spark.main.version}</artifactId>
+                            <artifactId>paimon-spark-${test.spark.main.version}_${scala.binary.version}</artifactId>
                             <version>${project.version}</version>
                             <destFileName>paimon-spark.jar</destFileName>
                             <type>jar</type>
