@@ -18,6 +18,7 @@
 
 package org.apache.paimon.lookup.rocksdb;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.lookup.StateFactory;
 
@@ -25,21 +26,30 @@ import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
 import org.rocksdb.DBOptions;
+import org.rocksdb.NativeLibraryLoader;
 import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.TtlDB;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 /** Factory to create state. */
 public class RocksDBStateFactory implements StateFactory {
 
+    private static final Logger LOG = LoggerFactory.getLogger(RocksDBStateFactory.class);
+
     public static final String MERGE_OPERATOR_NAME = "stringappendtest";
+    private static final int ROCKSDB_LIB_LOADING_ATTEMPTS = 3;
+
+    private static boolean rocksDbInitialized = false;
 
     private final Options options;
     private final String path;
@@ -50,6 +60,11 @@ public class RocksDBStateFactory implements StateFactory {
     public RocksDBStateFactory(
             String path, org.apache.paimon.options.Options conf, @Nullable Duration ttlSecs)
             throws IOException {
+        try {
+            ensureRocksDBIsLoaded();
+        } catch (Throwable e) {
+            throw new IOException("Could not load the native RocksDB library", e);
+        }
         DBOptions dbOptions =
                 RocksDBOptions.createDBOptions(
                         new DBOptions()
@@ -140,5 +155,60 @@ public class RocksDBStateFactory implements StateFactory {
             db.close();
             db = null;
         }
+    }
+
+    // ------------------------------------------------------------------------
+    //  static library loading utilities
+    // ------------------------------------------------------------------------
+
+    @VisibleForTesting
+    static void ensureRocksDBIsLoaded() throws IOException {
+        synchronized (RocksDBStateFactory.class) {
+            if (!rocksDbInitialized) {
+                LOG.info("Attempting to load RocksDB native library");
+
+                Throwable lastException = null;
+                for (int attempt = 1; attempt <= ROCKSDB_LIB_LOADING_ATTEMPTS; attempt++) {
+                    try {
+                        // keep same with RocksDB.loadLibrary
+                        final String tmpDir = System.getenv("ROCKSDB_SHAREDLIB_DIR");
+                        // explicitly load the JNI dependency if it has not been loaded before
+                        NativeLibraryLoader.getInstance().loadLibrary(tmpDir);
+
+                        // this initialization here should validate that the loading succeeded
+                        RocksDB.loadLibrary();
+
+                        // seems to have worked
+                        LOG.info("Successfully loaded RocksDB native library");
+                        rocksDbInitialized = true;
+                        return;
+                    } catch (Throwable t) {
+                        lastException = t;
+                        LOG.debug("RocksDB JNI library loading attempt {} failed", attempt, t);
+                        // try to force RocksDB to attempt reloading the library
+                        try {
+                            resetRocksDBLoadedFlag();
+                        } catch (Throwable tt) {
+                            LOG.debug(
+                                    "Failed to reset 'initialized' flag in RocksDB native code loader",
+                                    tt);
+                        }
+                    }
+                }
+                throw new IOException("Could not load the native RocksDB library", lastException);
+            }
+        }
+    }
+
+    @VisibleForTesting
+    static void resetRocksDBLoadedFlag() throws Exception {
+        final Field initField =
+                org.rocksdb.NativeLibraryLoader.class.getDeclaredField("initialized");
+        initField.setAccessible(true);
+        initField.setBoolean(null, false);
+    }
+
+    public static boolean rocksDbInitialized() {
+        return rocksDbInitialized;
     }
 }

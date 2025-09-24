@@ -132,7 +132,12 @@ abstract class PaimonBaseScan(
     } else {
       ""
     }
-    s"PaimonScan: [${table.name}]" + pushedFiltersStr + pushedTopNFilterStr +
+    val latestSnapshotIdStr = if (table.latestSnapshot().isPresent) {
+      s", LatestSnapshotId: [${table.latestSnapshot().get.id}],"
+    } else {
+      ""
+    }
+    s"PaimonScan: [${table.name}]" + latestSnapshotIdStr + pushedFiltersStr + pushedTopNFilterStr +
       pushDownLimit.map(limit => s", Limit: [$limit]").getOrElse("")
   }
 }

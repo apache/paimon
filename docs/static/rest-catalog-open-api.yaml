@@ -350,6 +350,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: tableType
+          description: Filter tables by table type. All table types will be returned if not set or empty.
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: OK

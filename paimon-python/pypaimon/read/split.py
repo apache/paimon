@@ -32,6 +32,8 @@ class Split:
     _file_paths: List[str]
     _row_count: int
     _file_size: int
+    split_start_row: int = None
+    split_end_row: int = None
     raw_convertible: bool = False
 
     @property

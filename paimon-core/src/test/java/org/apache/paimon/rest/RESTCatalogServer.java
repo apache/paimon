@@ -143,6 +143,7 @@ import static org.apache.paimon.rest.RESTApi.MAX_RESULTS;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTApi.PARTITION_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.TABLE_NAME_PATTERN;
+import static org.apache.paimon.rest.RESTApi.TABLE_TYPE;
 import static org.apache.paimon.rest.RESTApi.VIEW_NAME_PATTERN;
 import static org.apache.paimon.rest.ResourcePaths.FUNCTIONS;
 import static org.apache.paimon.rest.ResourcePaths.FUNCTION_DETAILS;
@@ -1296,12 +1297,30 @@ public class RESTCatalogServer {
 
     private List<String> listTables(String databaseName, Map<String, String> parameters) {
         String tableNamePattern = parameters.get(TABLE_NAME_PATTERN);
+        String tableType = parameters.get(TABLE_TYPE);
         List<String> tables = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
             if (databaseName.equals(identifier.getDatabaseName())
                     && (Objects.isNull(tableNamePattern)
                             || matchNamePattern(identifier.getTableName(), tableNamePattern))) {
+
+                // Check table type filter if specified
+                if (StringUtils.isNotEmpty(tableType)) {
+                    String actualTableType = entry.getValue().schema().options().get(TYPE.key());
+                    if (StringUtils.equals(tableType, "table")) {
+                        // When filtering by "table" type, return tables with null or "table" type
+                        if (actualTableType != null && !"table".equals(actualTableType)) {
+                            continue;
+                        }
+                    } else {
+                        // For other table types, return exact matches
+                        if (!StringUtils.equals(tableType, actualTableType)) {
+                            continue;
+                        }
+                    }
+                }
+
                 tables.add(identifier.getTableName());
             }
         }
@@ -1361,12 +1380,30 @@ public class RESTCatalogServer {
     private List<GetTableResponse> listTableDetails(
             String databaseName, Map<String, String> parameters) {
         String tableNamePattern = parameters.get(TABLE_NAME_PATTERN);
+        String tableType = parameters.get(TABLE_TYPE);
         List<GetTableResponse> tableDetails = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
             if (databaseName.equals(identifier.getDatabaseName())
                     && (Objects.isNull(tableNamePattern)
                             || matchNamePattern(identifier.getTableName(), tableNamePattern))) {
+
+                // Check table type filter if specified
+                if (StringUtils.isNotEmpty(tableType)) {
+                    String actualTableType = entry.getValue().schema().options().get(TYPE.key());
+                    if (StringUtils.equals(tableType, "table")) {
+                        // When filtering by "table" type, return tables with null or "table" type
+                        if (actualTableType != null && !"table".equals(actualTableType)) {
+                            continue;
+                        }
+                    } else {
+                        // For other table types, return exact matches
+                        if (!StringUtils.equals(tableType, actualTableType)) {
+                            continue;
+                        }
+                    }
+                }
+
                 GetTableResponse getTableResponse =
                         new GetTableResponse(
                                 entry.getValue().uuid(),
@@ -2073,9 +2110,9 @@ public class RESTCatalogServer {
                                 return new TableSnapshot(
                                         snapshot,
                                         recordCount,
+                                        fileSizeInBytes,
                                         fileCount,
-                                        lastFileCreationTime,
-                                        fileSizeInBytes);
+                                        lastFileCreationTime);
                             });
             tableWithSnapshotId2SnapshotStore.put(
                     geTableFullNameWithSnapshotId(identifier, snapshot.id()), tableSnapshot);

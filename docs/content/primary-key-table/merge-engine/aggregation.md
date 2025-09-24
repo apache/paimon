@@ -307,6 +307,10 @@ public static class BitmapContainsUDF extends ScalarFunction {
 
   Use `fields.<field-name>.nested-key=pk0,pk1,...` to specify the primary keys of the nested table. If no keys, row will be appended to array<row>.
 
+  Use `fields.<field-name>.count-limit=<Interger>` to specify the maximum number of rows in the nested table. When no nested-key, it will select data
+  sequentially up to limit; but if nested-key is specified, it cannot guarantee the correctness of the aggregation result. This option can be used to
+  avoid abnormal input.
+
   An example:
 
   {{< tabs "nested_update-example" >}}

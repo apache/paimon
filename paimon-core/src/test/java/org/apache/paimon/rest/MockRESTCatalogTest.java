@@ -84,7 +84,9 @@ class MockRESTCatalogTest extends RESTCatalogTest {
 
     @AfterEach
     public void tearDown() throws Exception {
-        restCatalogServer.shutdown();
+        if (restCatalogServer != null) {
+            restCatalogServer.shutdown();
+        }
     }
 
     @Test
@@ -177,10 +179,10 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                     Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
         }
         PagedList<String> listTablesPaged =
-                restCatalog.listTablesPaged(databaseName, 1, "dt=20230101", null);
+                restCatalog.listTablesPaged(databaseName, 1, "dt=20230101", null, null);
         PagedList<String> listTablesPaged2 =
                 restCatalog.listTablesPaged(
-                        databaseName, 1, listTablesPaged.getNextPageToken(), null);
+                        databaseName, 1, listTablesPaged.getNextPageToken(), null, null);
         assertEquals(listTablesPaged.getElements().get(0), "dt=20230102");
         assertEquals(listTablesPaged2.getElements().get(0), "dt=20230103");
     }

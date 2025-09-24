@@ -107,70 +107,25 @@ under the License.
         </dependency>
     </dependencies>
 
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>shade-paimon</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                        <configuration>
-                            <artifactSet>
-                                <includes combine.children="append">
-                                    <!-- Lance -->
-                                    <include>com.lancedb:lance-core</include>
-                                    <include>org.questdb:jar-jni</include>
-                                    <include>com.google.flatbuffers:flatbuffers-java</include>
+    <!-- If you want to use paimon-lance, you should add following dependencies to your environment. -->
+    <!-- Lance -->
+    <!-- <include>com.lancedb:lance-core</include>-->
+    <!-- <include>org.questdb:jar-jni</include>-->
+    <!-- <include>com.google.flatbuffers:flatbuffers-java</include>-->
 
-                                    <!-- Arrow -->
-                                    <include>org.apache.paimon:paimon-arrow</include>
-                                    <include>org.apache.arrow:arrow-vector</include>
-                                    <include>org.apache.arrow:arrow-format</include>
-                                    <include>org.apache.arrow:arrow-memory-core</include>
-                                    <include>org.apache.arrow:arrow-memory-unsafe</include>
-                                    <include>org.apache.arrow:arrow-c-data</include>
-                                    <include>org.eclipse.collections:eclipse-collections</include>
-                                    <include>org.eclipse.collections:eclipse-collections-api</include>
+    <!-- Arrow -->
+    <!-- <include>org.apache.paimon:paimon-arrow</include>-->
+    <!-- <include>org.apache.arrow:arrow-vector</include>-->
+    <!-- <include>org.apache.arrow:arrow-format</include>-->
+    <!-- <include>org.apache.arrow:arrow-memory-core</include>-->
+    <!-- <include>org.apache.arrow:arrow-memory-unsafe</include>-->
+    <!-- <include>org.apache.arrow:arrow-c-data</include>-->
+    <!-- <include>org.eclipse.collections:eclipse-collections</include>-->
+    <!-- <include>org.eclipse.collections:eclipse-collections-api</include>-->
 
-                                    <!-- common -->
-                                    <include>com.fasterxml.jackson.core:jackson-core</include>
-                                    <include>com.fasterxml.jackson.core:jackson-databind</include>
-                                    <include>com.fasterxml.jackson.core:jackson-annotations</include>
-                                    <include>com.fasterxml.jackson.datatype:jackson-datatype-jsr310</include>
-                                </includes>
-                            </artifactSet>
-                            <filters>
-                                <!-- Another copy of the Apache license, which we don't need. -->
-                                <filter>
-                                    <artifact>*</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/LICENSE.txt</exclude>
-                                        <exclude>LICENSE-EPL-1.0.txt</exclude>
-                                        <exclude>LICENSE-EDL-1.0.txt</exclude>
-                                        <exluce>about.html</exluce>
-                                    </excludes>
-                                </filter>
-                            </filters>
-                            <relocations>
-                                <!-- Relocate Common. -->
-                                <relocation>
-                                    <pattern>com.fasterxml.jackson</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.lance.com.fasterxml.jackson</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.eclipse.collections</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.lance.org.eclipse.collections</shadedPattern>
-                                </relocation>
-                            </relocations>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
-    </build>
+    <!-- common -->
+    <!-- <include>com.fasterxml.jackson.core:jackson-core</include>-->
+    <!-- <include>com.fasterxml.jackson.core:jackson-databind</include>-->
+    <!-- <include>com.fasterxml.jackson.core:jackson-annotations</include>-->
+    <!-- <include>com.fasterxml.jackson.datatype:jackson-datatype-jsr310</include>-->
 </project>
