@@ -19,7 +19,6 @@
 package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
@@ -123,13 +122,14 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
                     return null;
                 }
 
-                BlobDescriptor descriptor =
-                        new BlobDescriptor(
+                Blob blob =
+                        Blob.fromFile(
+                                fileIO,
                                 filePath.toString(),
                                 blobOffsets[currentPosition] + 4,
                                 blobLengths[currentPosition] - 16);
                 currentPosition++;
-                return GenericRow.of(Blob.fromFile(fileIO, descriptor));
+                return GenericRow.of(blob);
             }
 
             @Override

@@ -51,7 +51,7 @@ public interface Blob {
     }
 
     static Blob fromFile(FileIO fileIO, String file) {
-        return fromDescriptor(UriReader.fromFile(fileIO), new BlobDescriptor(file, 0, -1));
+        return fromFile(fileIO, file, 0, -1);
     }
 
     static Blob fromFile(FileIO fileIO, String file, long offset, long length) {
