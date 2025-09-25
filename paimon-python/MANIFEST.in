@@ -1,0 +1,3 @@
+include dev/requirements.txt
+include README.md
+recursive-include pypaimon *.py
