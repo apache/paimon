@@ -21,7 +21,6 @@ class OssOptions:
     OSS_SECURITY_TOKEN = "fs.oss.securityToken"
     OSS_ENDPOINT = "fs.oss.endpoint"
     OSS_REGION = "fs.oss.region"
-    OSS_BUCKET = "prefix"
 
 
 class S3Options:

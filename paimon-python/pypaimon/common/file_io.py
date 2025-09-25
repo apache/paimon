@@ -36,7 +36,7 @@ class FileIO:
         self.logger = logging.getLogger(__name__)
         scheme, netloc, path = self.parse_location(warehouse)
         if scheme in {"oss"}:
-            self.filesystem = self._initialize_oss_fs()
+            self.filesystem = self._initialize_oss_fs(path)
         elif scheme in {"s3", "s3a", "s3n"}:
             self.filesystem = self._initialize_s3_fs()
         elif scheme in {"hdfs", "viewfs"}:
@@ -56,7 +56,7 @@ class FileIO:
         else:
             return uri.scheme, uri.netloc, f"{uri.netloc}{uri.path}"
 
-    def _initialize_oss_fs(self) -> FileSystem:
+    def _initialize_oss_fs(self, path) -> FileSystem:
         from pyarrow.fs import S3FileSystem
 
         client_kwargs = {
@@ -71,7 +71,8 @@ class FileIO:
             client_kwargs['force_virtual_addressing'] = True
             client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
         else:
-            client_kwargs['endpoint_override'] = (self.properties.get(OssOptions.OSS_BUCKET) + "." +
+            oss_bucket = path.split('/')[1]
+            client_kwargs['endpoint_override'] = (oss_bucket + "." +
                                                   self.properties.get(OssOptions.OSS_ENDPOINT))
 
         return S3FileSystem(**client_kwargs)
