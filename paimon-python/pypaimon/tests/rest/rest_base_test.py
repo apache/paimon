@@ -189,6 +189,16 @@ class RESTBaseTest(unittest.TestCase):
         self.assertTrue(os.path.exists(self.warehouse + "/default/test_table/dt=p1"))
         self.assertEqual(len(glob.glob(self.warehouse + "/default/test_table/manifest/*")), 3)
 
+    def test_catalog_environment(self):
+        option_dict = {
+            "warehouse": self.warehouse
+        }
+        self.rest_catalog = CatalogFactory.create(option_dict)
+        self.rest_catalog.create_database("test_db", False)
+        self.rest_catalog.create_table("test_db.test_table", Schema.from_pyarrow_schema(self.pa_schema), False)
+        table = self.rest_catalog.get_table("test_db.test_table")
+        self.assertEqual(option_dict, table.get_catalog_options().to_map())
+
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
 

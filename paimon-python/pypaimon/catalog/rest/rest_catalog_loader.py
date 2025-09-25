@@ -22,7 +22,7 @@ RESTCatalogLoader implementation for pypaimon.
 This module provides the RESTCatalogLoader class which implements the CatalogLoader
 interface to create and load RESTCatalog instances.
 """
-
+from pypaimon.api.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_loader import CatalogLoader
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
@@ -45,15 +45,13 @@ class RESTCatalogLoader(CatalogLoader):
             context: The CatalogContext containing configuration options
         """
         self._context = context
+        self._options = context.options
 
     def context(self) -> CatalogContext:
-        """
-        Get the CatalogContext associated with this loader.
-
-        Returns:
-            The CatalogContext instance
-        """
         return self._context
+
+    def options(self) -> Options:
+        return self._options
 
     def load(self) -> RESTCatalog:
         """

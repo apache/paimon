@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 from urllib.parse import urlparse
 
+from pypaimon.api.options import Options
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
@@ -73,10 +74,11 @@ class FileSystemCatalog(Catalog):
 
         # Create catalog environment for filesystem catalog
         # Filesystem catalog doesn't support version management by default
+        from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
         catalog_environment = CatalogEnvironment(
             identifier=identifier,
             uuid=None,  # Filesystem catalog doesn't track table UUIDs
-            catalog_loader=None,  # No catalog loader for filesystem
+            catalog_loader=FileSystemCatalogLoader(Options(self.catalog_options)),
             supports_version_management=False
         )
 

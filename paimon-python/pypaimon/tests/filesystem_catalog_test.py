@@ -86,3 +86,18 @@ class FileSystemCatalogTest(unittest.TestCase):
         self.assertEqual(table.fields[2].name, "f2")
         self.assertTrue(isinstance(table.fields[2].type, AtomicType))
         self.assertEqual(table.fields[2].type.type, "STRING")
+
+    def test_catalog_environment(self):
+        fields = [
+            DataField.from_dict({"id": 1, "name": "f0", "type": "INT"}),
+            DataField.from_dict({"id": 2, "name": "f1", "type": "INT"}),
+            DataField.from_dict({"id": 3, "name": "f2", "type": "STRING"}),
+        ]
+        option_dict = {
+            "warehouse": self.warehouse
+        }
+        catalog = CatalogFactory.create(option_dict)
+        catalog.create_database("test_db", False)
+        catalog.create_table("test_db.test_table", Schema(fields=fields), False)
+        table = catalog.get_table("test_db.test_table")
+        self.assertEqual(option_dict, table.get_catalog_options().to_map())

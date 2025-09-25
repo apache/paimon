@@ -15,18 +15,18 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-from abc import ABC, abstractmethod
-
+from pypaimon.catalog.catalog import Catalog
+from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
 from pypaimon.api.options import Options
+from pypaimon.catalog.catalog_loader import CatalogLoader
 
 
-class CatalogLoader(ABC):
-    _options: Options
+class FileSystemCatalogLoader(CatalogLoader):
+    def __init__(self, options: Options) -> None:
+        self._options = options
 
-    @abstractmethod
-    def load(self):
-        pass
+    def options(self) -> Options:
+        return self._options
 
-    @abstractmethod
-    def options(self):
-        pass
+    def load(self) -> Catalog:
+        return FileSystemCatalog(self.options().to_map())

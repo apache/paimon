@@ -19,6 +19,7 @@
 from pathlib import Path
 from typing import Optional
 
+from pypaimon.api.options import Options
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
@@ -104,3 +105,6 @@ class FileStoreTable(Table):
             return DynamicBucketRowKeyExtractor(self.table_schema)
         else:
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
+
+    def get_catalog_options(self) -> Options:
+        return self.catalog_environment.catalog_loader.options()
