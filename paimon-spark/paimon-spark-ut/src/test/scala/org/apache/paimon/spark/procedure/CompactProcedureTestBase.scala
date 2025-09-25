@@ -999,7 +999,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
 
             // first cluster, the outputLevel should be 5
-            checkAnswer(spark.sql("CALL paimon.sys.cluster(table => 'T')"), Row(true) :: Nil)
+            checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
 
             // first cluster result
             val result2 = new util.ArrayList[Row]()
@@ -1061,7 +1061,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result3)
 
             // second cluster
-            checkAnswer(spark.sql("CALL paimon.sys.cluster(table => 'T')"), Row(true) :: Nil)
+            checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
             val result4 = new util.ArrayList[Row]()
             // for partition-0: only file in level-0 will be picked for clustering, outputLevel is 4
             result4.add(Row(0, 0, randomStr, 0))
