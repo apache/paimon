@@ -26,16 +26,39 @@ import java.util.Objects;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
-/** Blob descriptor to describe a blob reference. */
+/**
+ * Blob descriptor to describe a blob reference.
+ *
+ * <p>Memory Layout Description: All multi-byte numerical values (int/long) are stored using Little
+ * Endian byte order.
+ *
+ * <pre>
+ * | Offset (Bytes) | Field Name    | Type      | Size (Bytes) | Description                                         |
+ * |----------------|---------------|-----------|--------------|-----------------------------------------------------|
+ * | 0              | version       | byte      | 1            | Serialization structure version                     |
+ * | 1              | uriLength     | int       | 4            | Length (N) of the URI string in UTF-8 bytes         |
+ * | 5              | uriBytes      | byte[N]   | N            | UTF-8 encoded bytes of the URI string               |
+ * | 5 + N          | offset        | long      | 8            | Starting offset of the Blob within the URI resource |
+ * | 13 + N         | length        | long      | 8            | Length of the Blob data                             |
+ * </pre>
+ */
 public class BlobDescriptor implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    private static final byte CURRENT_VERSION = 1;
+
+    private final byte version;
     private final String uri;
     private final long offset;
     private final long length;
 
     public BlobDescriptor(String uri, long offset, long length) {
+        this(CURRENT_VERSION, uri, offset, length);
+    }
+
+    private BlobDescriptor(byte version, String uri, long offset, long length) {
+        this.version = version;
         this.uri = uri;
         this.offset = offset;
         this.length = length;
@@ -59,18 +82,24 @@ public class BlobDescriptor implements Serializable {
             return false;
         }
         BlobDescriptor that = (BlobDescriptor) o;
-        return offset == that.offset && length == that.length && Objects.equals(uri, that.uri);
+        return version == that.version
+                && offset == that.offset
+                && length == that.length
+                && Objects.equals(uri, that.uri);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(uri, offset, length);
+        return Objects.hash(version, uri, offset, length);
     }
 
     @Override
     public String toString() {
         return "BlobDescriptor{"
-                + "uri='"
+                + "version="
+                + version
+                + '\''
+                + ", uri='"
                 + uri
                 + '\''
                 + ", offset="
@@ -84,10 +113,11 @@ public class BlobDescriptor implements Serializable {
         byte[] uriBytes = uri.getBytes(UTF_8);
         int uriLength = uriBytes.length;
 
-        int totalSize = 4 + uriLength + 8 + 8;
+        int totalSize = 1 + 4 + uriLength + 8 + 8;
         ByteBuffer buffer = ByteBuffer.allocate(totalSize);
         buffer.order(ByteOrder.LITTLE_ENDIAN);
 
+        buffer.put(version);
         buffer.putInt(uriLength);
         buffer.put(uriBytes);
 
@@ -101,6 +131,15 @@ public class BlobDescriptor implements Serializable {
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         buffer.order(ByteOrder.LITTLE_ENDIAN);
 
+        byte version = buffer.get();
+        if (version != CURRENT_VERSION) {
+            throw new UnsupportedOperationException(
+                    "Expecting BlobDescriptor version to be "
+                            + CURRENT_VERSION
+                            + ", but found "
+                            + version
+                            + ".");
+        }
         int uriLength = buffer.getInt();
         byte[] uriBytes = new byte[uriLength];
         buffer.get(uriBytes);
@@ -108,7 +147,6 @@ public class BlobDescriptor implements Serializable {
 
         long offset = buffer.getLong();
         long length = buffer.getLong();
-
-        return new BlobDescriptor(uri, offset, length);
+        return new BlobDescriptor(version, uri, offset, length);
     }
 }
