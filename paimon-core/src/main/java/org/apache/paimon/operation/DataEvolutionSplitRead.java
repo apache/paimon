@@ -424,18 +424,20 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
     }
 
+    @VisibleForTesting
     public static class BlobBunch {
         List<DataFileMeta> files;
         long latestFistRowId = -1;
+        long expectedNextFirstRowId = -1;
         long lastestMaxSequenceNumber = -1;
         long rowCount;
 
-        BlobBunch() {
+        public BlobBunch() {
             this.files = new ArrayList<>();
             this.rowCount = 0;
         }
 
-        void add(DataFileMeta file) {
+        public void add(DataFileMeta file) {
             if (!file.fileTag().isBlob()) {
                 throw new IllegalArgumentException("Only blob file can be added to a blob bunch.");
             }
@@ -447,7 +449,20 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 }
                 return;
             }
-            if (files.size() != 0) {
+            if (!files.isEmpty()) {
+                long firstRowId = file.firstRowId();
+                if (firstRowId < expectedNextFirstRowId) {
+                    checkArgument(
+                            file.maxSequenceNumber() < lastestMaxSequenceNumber,
+                            "Blob file with overlapping row id should have decreasing sequence number.");
+                    return;
+                } else if (firstRowId > expectedNextFirstRowId) {
+                    throw new IllegalArgumentException(
+                            "Blob file first row id should be continuous, expect "
+                                    + expectedNextFirstRowId
+                                    + " but got "
+                                    + firstRowId);
+                }
                 checkArgument(
                         file.schemaId() == files.get(0).schemaId(),
                         "All files in a blob bunch should have the same schema id.");
@@ -457,13 +472,14 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             rowCount += file.rowCount();
             this.lastestMaxSequenceNumber = file.maxSequenceNumber();
             this.latestFistRowId = file.firstRowId();
+            this.expectedNextFirstRowId = latestFistRowId + file.rowCount();
         }
 
-        long rowCount() {
+        public long rowCount() {
             return rowCount;
         }
 
-        long firstRowId() {
+        public long firstRowId() {
             if (files.isEmpty()) {
                 return -1;
             } else {
@@ -471,7 +487,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
 
-        List<String> writeCols() {
+        public List<String> writeCols() {
             if (files.isEmpty()) {
                 return new ArrayList<>();
             } else {
@@ -479,7 +495,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
 
-        long schemaId() {
+        public long schemaId() {
             if (files.isEmpty()) {
                 return -1;
             } else {
