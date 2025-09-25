@@ -86,6 +86,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                                                 value.firstRowId() == null
                                                         ? Long.MIN_VALUE
                                                         : value.firstRowId())
+                        .thenComparingInt(f -> f.fileTag().value())
                         .thenComparing(
                                 (f1, f2) -> {
                                     // If firstRowId is the same, we should read the file with

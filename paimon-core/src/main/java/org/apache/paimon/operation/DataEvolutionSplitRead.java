@@ -59,6 +59,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.lang.String.format;
@@ -73,11 +74,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     private final FileIO fileIO;
-    private final SchemaManager schemaManager;
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
+    private final Map<Long, TableSchema> cache;
+    private final Function<Long, TableSchema> schemaFetcher;
 
     protected RowType readRowType;
 
@@ -89,7 +91,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory) {
         this.fileIO = fileIO;
-        this.schemaManager = schemaManager;
+        this.cache = new HashMap<>();
+        this.schemaFetcher =
+                schemaId -> cache.computeIfAbsent(schemaId, key -> schemaManager.schema(schemaId));
         this.schema = schema;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
@@ -169,8 +173,19 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             Builder formatBuilder)
             throws IOException {
-
-        List<FieldBunch> fieldsFiles = splitFieldBunch(needMergeFiles);
+        List<FieldBunch> fieldsFiles =
+                splitFieldBunch(
+                        needMergeFiles,
+                        file -> {
+                            checkArgument(
+                                    file.fileTag().isBlob(),
+                                    "Only blob file need to call this method.");
+                            return schemaFetcher
+                                    .apply(file.schemaId())
+                                    .logicalRowType()
+                                    .getField(file.writeCols().get(0))
+                                    .id();
+                        });
 
         long rowCount = fieldsFiles.get(0).rowCount();
         long firstRowId = fieldsFiles.get(0).firstRowId();
@@ -199,7 +214,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             FieldBunch file = fieldsFiles.get(i);
             String formatIdentifier = file.formatIdentifier();
             long schemaId = file.schemaId();
-            TableSchema dataSchema = schemaManager.schema(schemaId).project(file.writeCols());
+            TableSchema dataSchema = schemaFetcher.apply(schemaId).project(file.writeCols());
             int[] fieldIds =
                     SpecialFields.rowTypeWithRowTracking(dataSchema.logicalRowType()).getFields()
                             .stream()
@@ -278,7 +293,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                         schema,
                                         schemaId == schema.id()
                                                 ? schema
-                                                : schemaManager.schema(schemaId)));
+                                                : schemaFetcher.apply(schemaId)));
         return createFileReader(partition, file, dataFilePathFactory, formatReaderMapping);
     }
 
@@ -338,9 +353,10 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     @VisibleForTesting
-    public static List<FieldBunch> splitFieldBunch(List<DataFileMeta> needMergeFiles) {
+    public static List<FieldBunch> splitFieldBunch(
+            List<DataFileMeta> needMergeFiles, Function<DataFileMeta, Integer> blobFileToFieldId) {
         List<FieldBunch> fieldsFiles = new ArrayList<>();
-        BlobBunch blobBunch = new BlobBunch();
+        Map<Integer, BlobBunch> blobBunchMap = new HashMap<>();
         for (DataFileMeta file : needMergeFiles) {
             DataFileMeta.FileTag fileTag =
                     Optional.ofNullable(file.fileTag()).orElse(DataFileMeta.FileTag.None);
@@ -350,17 +366,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     fieldsFiles.add(FieldBunch.file(file));
                     break;
                 case BLOB_ENTRY:
-                    blobBunch.add(file);
-                    break;
                 case BLOB_TAIL:
-                    blobBunch.add(file);
-                    fieldsFiles.add(FieldBunch.blob(blobBunch));
-                    blobBunch = new BlobBunch();
+                    int fieldId = blobFileToFieldId.apply(file);
+                    blobBunchMap.computeIfAbsent(fieldId, key -> new BlobBunch()).add(file);
                     break;
                 default:
                     throw new IllegalArgumentException("Unknown file tag: " + fileTag);
             }
         }
+        blobBunchMap.values().forEach(blobBunch -> fieldsFiles.add(FieldBunch.blob(blobBunch)));
         return fieldsFiles;
     }
 
@@ -379,45 +393,46 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             return new FieldBunch(Either.right(blob));
         }
 
-        public long rowCount() {
+        long rowCount() {
             return fileOrBlob.isLeft()
                     ? fileOrBlob.getLeft().rowCount()
                     : fileOrBlob.getRight().rowCount();
         }
 
-        public long firstRowId() {
+        long firstRowId() {
             return fileOrBlob.isLeft()
                     ? fileOrBlob.getLeft().firstRowId()
                     : fileOrBlob.getRight().firstRowId();
         }
 
-        public List<String> writeCols() {
+        List<String> writeCols() {
             return fileOrBlob.isLeft()
                     ? fileOrBlob.getLeft().writeCols()
                     : fileOrBlob.getRight().writeCols();
         }
 
-        public String formatIdentifier() {
+        String formatIdentifier() {
             return fileOrBlob.isLeft()
                     ? DataFilePathFactory.formatIdentifier(fileOrBlob.getLeft().fileName())
                     : "blob";
         }
 
-        public long schemaId() {
+        long schemaId() {
             return fileOrBlob.isLeft()
                     ? fileOrBlob.getLeft().schemaId()
                     : fileOrBlob.getRight().schemaId();
         }
 
+        @VisibleForTesting
         public int size() {
             return fileOrBlob.isLeft() ? 1 : fileOrBlob.getRight().files.size();
         }
 
-        public DataFileMeta getFirstFile() {
+        DataFileMeta getFirstFile() {
             return fileOrBlob.isLeft() ? fileOrBlob.getLeft() : fileOrBlob.getRight().files.get(0);
         }
 
-        public List<DataFileMeta> files() {
+        List<DataFileMeta> files() {
             return fileOrBlob.isLeft()
                     ? Collections.singletonList(fileOrBlob.getLeft())
                     : fileOrBlob.getRight().files;
@@ -425,19 +440,19 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     @VisibleForTesting
-    public static class BlobBunch {
+    static class BlobBunch {
         List<DataFileMeta> files;
         long latestFistRowId = -1;
         long expectedNextFirstRowId = -1;
         long lastestMaxSequenceNumber = -1;
         long rowCount;
 
-        public BlobBunch() {
+        BlobBunch() {
             this.files = new ArrayList<>();
             this.rowCount = 0;
         }
 
-        public void add(DataFileMeta file) {
+        void add(DataFileMeta file) {
             if (!file.fileTag().isBlob()) {
                 throw new IllegalArgumentException("Only blob file can be added to a blob bunch.");
             }
@@ -466,7 +481,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 checkArgument(
                         file.schemaId() == files.get(0).schemaId(),
                         "All files in a blob bunch should have the same schema id.");
-                checkArgument(file.writeCols().equals(files.get(0).writeCols()));
+                checkArgument(
+                        file.writeCols().equals(files.get(0).writeCols()),
+                        "All files in a blob bunch should have the same write columns.");
             }
             files.add(file);
             rowCount += file.rowCount();
@@ -475,11 +492,11 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             this.expectedNextFirstRowId = latestFistRowId + file.rowCount();
         }
 
-        public long rowCount() {
+        long rowCount() {
             return rowCount;
         }
 
-        public long firstRowId() {
+        long firstRowId() {
             if (files.isEmpty()) {
                 return -1;
             } else {
@@ -487,7 +504,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
 
-        public List<String> writeCols() {
+        List<String> writeCols() {
             if (files.isEmpty()) {
                 return new ArrayList<>();
             } else {
@@ -495,7 +512,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
 
-        public long schemaId() {
+        long schemaId() {
             if (files.isEmpty()) {
                 return -1;
             } else {

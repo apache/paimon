@@ -56,7 +56,7 @@ public class BlobTableTest extends TableTestBase {
                         .collect(Collectors.toList());
 
         List<DataEvolutionSplitRead.FieldBunch> fieldGroups =
-                DataEvolutionSplitRead.splitFieldBunch(filesMetas);
+                DataEvolutionSplitRead.splitFieldBunch(filesMetas, key -> 0);
 
         assertThat(fieldGroups.size()).isEqualTo(2);
         assertThat(fieldGroups.get(0).size()).isEqualTo(1);
@@ -90,7 +90,7 @@ public class BlobTableTest extends TableTestBase {
         assertThat(batches.size()).isEqualTo(2);
         for (List<DataFileMeta> batch : batches) {
             List<DataEvolutionSplitRead.FieldBunch> fieldGroups =
-                    DataEvolutionSplitRead.splitFieldBunch(batch);
+                    DataEvolutionSplitRead.splitFieldBunch(batch, file -> 0);
             assertThat(fieldGroups.size()).isEqualTo(2);
             assertThat(fieldGroups.get(0).size()).isEqualTo(1);
             assertThat(fieldGroups.get(1).size()).isEqualTo(8);
