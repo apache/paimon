@@ -49,7 +49,7 @@ public class SparkConnectorOptions {
     public static final ConfigOption<Boolean> USE_V2_WRITE =
             key("write.use-v2-write")
                     .booleanType()
-                    .defaultValue(true)
+                    .defaultValue(false)
                     .withDescription(
                             "If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE and TableCapability.ACCEPT_ANY_SCHEMA.");
 
