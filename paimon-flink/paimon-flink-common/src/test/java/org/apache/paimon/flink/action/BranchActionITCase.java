@@ -31,6 +31,8 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -211,8 +213,9 @@ public class BranchActionITCase extends ActionITCaseBase {
         assertThat(branchManager.branchExists("empty_branch_name")).isFalse();
     }
 
-    @Test
-    void testFastForward() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testFastForward(boolean forceStartFlinkJob) throws Exception {
         init(warehouse);
         RowType rowType =
                 RowType.of(
@@ -263,7 +266,9 @@ public class BranchActionITCase extends ActionITCaseBase {
                         "--branch_name",
                         "branch_name_action",
                         "--tag_name",
-                        "tag3")
+                        "tag3",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .run();
         assertThat(branchManager.branchExists("branch_name_action")).isTrue();
 
@@ -287,7 +292,9 @@ public class BranchActionITCase extends ActionITCaseBase {
                         "--table",
                         tableName,
                         "--branch_name",
-                        "branch_name_action")
+                        "branch_name_action",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .run();
 
         // Check snapshot
@@ -345,7 +352,9 @@ public class BranchActionITCase extends ActionITCaseBase {
                         "--table",
                         tableName,
                         "--branch_name",
-                        "branch_name_action")
+                        "branch_name_action",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .run();
 
         // Check main branch data

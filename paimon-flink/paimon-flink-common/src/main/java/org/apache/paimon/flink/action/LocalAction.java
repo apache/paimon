@@ -18,24 +18,12 @@
 
 package org.apache.paimon.flink.action;
 
-import java.util.Map;
+import java.io.Serializable;
 
-/** Delete tag action for Flink. */
-public class DeleteTagAction extends TableActionBase implements LocalAction {
-
-    private final String tagNameStr;
-
-    public DeleteTagAction(
-            String databaseName,
-            String tableName,
-            Map<String, String> catalogConfig,
-            String tagNameStr) {
-        super(databaseName, tableName, catalogConfig);
-        this.tagNameStr = tagNameStr;
-    }
-
-    @Override
-    public void executeLocally() throws Exception {
-        table.deleteTags(tagNameStr);
-    }
+/**
+ * Interface for {@link Action}s that are recommended to be executed locally without starting a
+ * Flink job.
+ */
+public interface LocalAction extends Action, Serializable {
+    void executeLocally() throws Exception;
 }

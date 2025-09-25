@@ -23,7 +23,7 @@ import org.apache.paimon.utils.StringUtils;
 import java.util.Map;
 
 /** Rename Tag action for Flink. */
-public class RenameTagAction extends TableActionBase {
+public class RenameTagAction extends TableActionBase implements LocalAction {
     private final String tagName;
     private final String targetTagName;
 
@@ -39,7 +39,7 @@ public class RenameTagAction extends TableActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         if (StringUtils.isEmpty(tagName) || StringUtils.isEmpty(targetTagName)) {
             throw new RuntimeException(
                     String.format(

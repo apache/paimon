@@ -305,3 +305,21 @@ For more information of 'rewrite_file_index', see
     /path/to/paimon-flink-action-{{< version >}}.jar \
     rewrite_file_index --help
 ```
+
+## Force Start Flink Job
+
+Some actions, like `create_tag`, are lightweight and by default will not be submitted as a job to Flink cluster. If you
+have the need to unify the experience regardless of actions, you can use the `--force_start_flink_job` flag to make sure
+submitting them as jobs. For example,
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    drop_partition \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    [--partition <partition_spec> [--partition <partition_spec> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+    --force_start_flink_job true
+```
