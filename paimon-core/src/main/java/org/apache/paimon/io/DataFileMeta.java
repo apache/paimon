@@ -383,7 +383,6 @@ public interface DataFileMeta {
     @Nullable
     List<String> writeCols();
 
-    @Nullable
     FileTag fileTag();
 
     DataFileMeta upgrade(int newLevel);
