@@ -88,6 +88,8 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.isNullAt(17) ? null : row.getString(17).toString(),
                 row.isNullAt(18) ? null : row.getLong(18),
                 row.isNullAt(19) ? null : fromStringArrayData(row.getArray(19)),
-                row.isNullAt(20) ? DataFileMeta.FileTag.None : DataFileMeta.FileTag.fromValue(row.getInt(20)));
+                row.isNullAt(20)
+                        ? DataFileMeta.FileTag.None
+                        : DataFileMeta.FileTag.fromValue(row.getInt(20)));
     }
 }

@@ -50,21 +50,32 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Test comment. */
+/**
+ * A rolling file writer that handles both normal data and blob data. This writer creates separate
+ * files for normal columns and blob columns, managing their lifecycle and ensuring consistency
+ * between them.
+ */
 public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow, DataFileMeta> {
 
     private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriterWithBlob.class);
 
+    /** Constant for checking rolling condition periodically */
+    private static final long CHECK_ROLLING_RECORD_CNT = 1000L;
+
+    /** Expected number of blob fields in a table */
+    private static final int EXPECTED_BLOB_FIELD_COUNT = 1;
+
+    // Core components
     private final Supplier<MappedWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
             writerFactory;
     private final MappedWriter<RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
             blobWriter;
     private final long targetFileSize;
+
+    // State management
     private final List<AbortExecutor> closedWriters;
     private final List<DataFileMeta> results;
-
-    private MappedWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta> currentWriter =
-            null;
+    private MappedWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta> currentWriter;
     private long recordCount = 0;
     private boolean closed = false;
 
@@ -82,103 +93,180 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore) {
-        Pair<RowType, RowType> typeWithBlob = writeSchema.splitBlob();
-        RowType normalRowType = typeWithBlob.getLeft();
-        RowType blobType = typeWithBlob.getRight();
-        List<String> normalColumnNames = normalRowType.getFieldNames();
-        final int[] projectionNormalFields = writeSchema.projectIndexes(normalColumnNames);
-        this.writerFactory =
-                () -> {
-                    RowDataFileWriter rowDataFileWriter =
-                            new RowDataFileWriter(
-                                    fileIO,
-                                    RollingFileWriter.createFileWriterContext(
-                                            fileFormat,
-                                            normalRowType,
-                                            statsCollectorFactories.statsCollectors(
-                                                    normalColumnNames),
-                                            fileCompression),
-                                    pathFactory.newPath(),
-                                    normalRowType,
-                                    schemaId,
-                                    seqNumCounter,
-                                    fileIndexOptions,
-                                    fileSource,
-                                    asyncFileWrite,
-                                    statsDenseStore,
-                                    pathFactory.isExternalPath(),
-                                    normalColumnNames);
-                    return new MappedWriter<>(rowDataFileWriter, projectionNormalFields);
-                };
 
-        BlobFileFormat blobFileFormat = new BlobFileFormat();
-        List<String> blobNames = blobType.getFieldNames();
-        checkArgument(
-                blobNames.size() == 1, "Limit exactly one blob fields in one paimon table yet.");
-        final int[] blobProjection = writeSchema.projectIndexes(blobNames);
-        Supplier<? extends SingleFileWriter<InternalRow, DataFileMeta>> blobWriterSupplier =
-                () ->
-                        new RowDataFileWriter(
-                                fileIO,
-                                RollingFileWriter.createFileWriterContext(
-                                        blobFileFormat,
-                                        blobType,
-                                        new SimpleColStatsCollector.Factory[] {
-                                            NoneSimpleColStatsCollector::new
-                                        },
-                                        "none"),
-                                pathFactory.newBlobPath(),
-                                blobType,
-                                schemaId,
-                                seqNumCounter,
-                                new FileIndexOptions(),
-                                fileSource,
-                                asyncFileWrite,
-                                statsDenseStore,
-                                pathFactory.isExternalPath(),
-                                blobNames);
-        this.blobWriter =
-                new MappedWriter<>(
-                        new RollingFileWriterImpl<>(blobWriterSupplier, targetFileSize),
-                        blobProjection);
-
+        // Initialize basic fields
         this.targetFileSize = targetFileSize;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
+
+        // Split schema into normal and blob parts
+        Pair<RowType, RowType> typeWithBlob = writeSchema.splitBlob();
+        RowType normalRowType = typeWithBlob.getLeft();
+        RowType blobType = typeWithBlob.getRight();
+
+        // Initialize writer factory for normal data
+        this.writerFactory =
+                createNormalWriterFactory(
+                        fileIO,
+                        schemaId,
+                        fileFormat,
+                        normalRowType,
+                        writeSchema,
+                        pathFactory,
+                        seqNumCounter,
+                        fileCompression,
+                        statsCollectorFactories,
+                        fileIndexOptions,
+                        fileSource,
+                        asyncFileWrite,
+                        statsDenseStore);
+
+        // Initialize blob writer
+        this.blobWriter =
+                createBlobWriter(
+                        fileIO,
+                        schemaId,
+                        blobType,
+                        writeSchema,
+                        pathFactory,
+                        seqNumCounter,
+                        fileSource,
+                        asyncFileWrite,
+                        statsDenseStore,
+                        targetFileSize);
     }
 
-    private boolean rollingFile() throws IOException {
-        return currentWriter
-                .writer()
-                .reachTargetSize(recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
+    /** Creates a factory for normal data writers. */
+    private Supplier<MappedWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
+            createNormalWriterFactory(
+                    FileIO fileIO,
+                    long schemaId,
+                    FileFormat fileFormat,
+                    RowType normalRowType,
+                    RowType writeSchema,
+                    DataFilePathFactory pathFactory,
+                    LongCounter seqNumCounter,
+                    String fileCompression,
+                    StatsCollectorFactories statsCollectorFactories,
+                    FileIndexOptions fileIndexOptions,
+                    FileSource fileSource,
+                    boolean asyncFileWrite,
+                    boolean statsDenseStore) {
+
+        List<String> normalColumnNames = normalRowType.getFieldNames();
+        int[] projectionNormalFields = writeSchema.projectIndexes(normalColumnNames);
+
+        return () -> {
+            RowDataFileWriter rowDataFileWriter =
+                    new RowDataFileWriter(
+                            fileIO,
+                            RollingFileWriter.createFileWriterContext(
+                                    fileFormat,
+                                    normalRowType,
+                                    statsCollectorFactories.statsCollectors(normalColumnNames),
+                                    fileCompression),
+                            pathFactory.newPath(),
+                            normalRowType,
+                            schemaId,
+                            seqNumCounter,
+                            fileIndexOptions,
+                            fileSource,
+                            asyncFileWrite,
+                            statsDenseStore,
+                            pathFactory.isExternalPath(),
+                            normalColumnNames);
+            return new MappedWriter<>(rowDataFileWriter, projectionNormalFields);
+        };
     }
 
+    /** Creates a blob writer for handling blob data. */
+    private MappedWriter<RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
+            createBlobWriter(
+                    FileIO fileIO,
+                    long schemaId,
+                    RowType blobType,
+                    RowType writeSchema,
+                    DataFilePathFactory pathFactory,
+                    LongCounter seqNumCounter,
+                    FileSource fileSource,
+                    boolean asyncFileWrite,
+                    boolean statsDenseStore,
+                    long targetFileSize) {
+
+        BlobFileFormat blobFileFormat = new BlobFileFormat();
+        List<String> blobNames = blobType.getFieldNames();
+
+        // Validate blob field count
+        checkArgument(
+                blobNames.size() == EXPECTED_BLOB_FIELD_COUNT,
+                "Limit exactly one blob fields in one paimon table yet.");
+
+        int[] blobProjection = writeSchema.projectIndexes(blobNames);
+        return new MappedWriter<>(
+                new RollingFileWriterImpl<>(
+                        () ->
+                                new RowDataFileWriter(
+                                        fileIO,
+                                        RollingFileWriter.createFileWriterContext(
+                                                blobFileFormat,
+                                                blobType,
+                                                new SimpleColStatsCollector.Factory[] {
+                                                    NoneSimpleColStatsCollector::new
+                                                },
+                                                "none"),
+                                        pathFactory.newBlobPath(),
+                                        blobType,
+                                        schemaId,
+                                        seqNumCounter,
+                                        new FileIndexOptions(),
+                                        fileSource,
+                                        asyncFileWrite,
+                                        statsDenseStore,
+                                        pathFactory.isExternalPath(),
+                                        blobNames),
+                        targetFileSize),
+                blobProjection);
+    }
+
+    /**
+     * Writes a single row to both normal and blob writers. Automatically handles file rolling when
+     * target size is reached.
+     *
+     * @param row The row to write
+     * @throws IOException if writing fails
+     */
     @Override
     public void write(InternalRow row) throws IOException {
         try {
-            // Open the current writer if write the first record or roll over happen before.
             if (currentWriter == null) {
-                openCurrentWriter();
+                currentWriter = writerFactory.get();
             }
-
             currentWriter.write(row);
             blobWriter.write(row);
-            recordCount += 1;
+            recordCount++;
 
             if (rollingFile()) {
                 closeCurrentWriter();
             }
         } catch (Throwable e) {
-            LOG.warn(
-                    "Exception occurs when writing file "
-                            + (currentWriter == null ? null : currentWriter.writer().path())
-                            + ". Cleaning up.",
-                    e);
-            abort();
+            handleWriteException(e);
             throw e;
         }
     }
 
+    /** Handles write exceptions by logging and cleaning up resources. */
+    private void handleWriteException(Throwable e) {
+        String filePath = (currentWriter == null) ? null : currentWriter.writer().path().toString();
+        LOG.warn("Exception occurs when writing file {}. Cleaning up.", filePath, e);
+        abort();
+    }
+
+    /**
+     * Writes a bundle of records by iterating through each row.
+     *
+     * @param bundle The bundle of records to write
+     * @throws IOException if writing fails
+     */
     @Override
     public void writeBundle(BundleRecords bundle) throws IOException {
         // TODO: support bundle projection
@@ -187,51 +275,20 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
         }
     }
 
-    private void openCurrentWriter() {
-        currentWriter = writerFactory.get();
-    }
-
-    private void closeCurrentWriter() throws IOException {
-        if (currentWriter == null) {
-            return;
-        }
-
-        currentWriter.close();
-        closedWriters.add(currentWriter.writer().abortExecutor());
-        DataFileMeta mainDataFileMeta = currentWriter.result();
-
-        blobWriter.close();
-        List<DataFileMeta> blobFileMetas = blobWriter.result();
-        List<DataFileMeta> blobTaggedMetas = new ArrayList<>();
-        for (int i = 0; i < blobFileMetas.size() - 1; i++) {
-            blobTaggedMetas.add(
-                    blobFileMetas.get(i).assignFileTag(DataFileMeta.FileTag.BLOB_ENTRY));
-        }
-        blobTaggedMetas.add(
-                blobFileMetas
-                        .get(blobFileMetas.size() - 1)
-                        .assignFileTag(DataFileMeta.FileTag.BLOB_TAIL));
-
-        if (mainDataFileMeta.rowCount()
-                != blobTaggedMetas.stream().mapToLong(DataFileMeta::rowCount).sum()) {
-            throw new IllegalStateException(
-                    "This is a bug: The row count of main file and blob files does not match. "
-                            + "Main file: "
-                            + mainDataFileMeta
-                            + ", blob files: "
-                            + blobTaggedMetas);
-        }
-
-        results.add(mainDataFileMeta);
-        results.addAll(blobTaggedMetas);
-        currentWriter = null;
-    }
-
+    /**
+     * Returns the total number of records written.
+     *
+     * @return the record count
+     */
     @Override
     public long recordCount() {
         return recordCount;
     }
 
+    /**
+     * Aborts all writers and cleans up resources. This method should be called when an error occurs
+     * during writing.
+     */
     @Override
     public void abort() {
         if (currentWriter != null) {
@@ -243,12 +300,110 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
         blobWriter.abort();
     }
 
+    /** Checks if the current file should be rolled based on size and record count. */
+    private boolean rollingFile() throws IOException {
+        return currentWriter
+                .writer()
+                .reachTargetSize(recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
+    }
+
+    /**
+     * Closes the current writer and processes the results. Validates consistency between main and
+     * blob files.
+     *
+     * @throws IOException if closing fails
+     */
+    private void closeCurrentWriter() throws IOException {
+        if (currentWriter == null) {
+            return;
+        }
+
+        // Close main writer and get metadata
+        DataFileMeta mainDataFileMeta = closeMainWriter();
+
+        // Close blob writer and process blob metadata
+        List<DataFileMeta> blobTaggedMetas = closeBlobWriter();
+
+        // Validate consistency between main and blob files
+        validateFileConsistency(mainDataFileMeta, blobTaggedMetas);
+
+        // Add results to the results list
+        results.add(mainDataFileMeta);
+        results.addAll(blobTaggedMetas);
+
+        // Reset current writer
+        currentWriter = null;
+    }
+
+    /** Closes the main writer and returns its metadata. */
+    private DataFileMeta closeMainWriter() throws IOException {
+        currentWriter.close();
+        closedWriters.add(currentWriter.writer().abortExecutor());
+        return currentWriter.result();
+    }
+
+    /** Closes the blob writer and processes blob metadata with appropriate tags. */
+    private List<DataFileMeta> closeBlobWriter() throws IOException {
+        blobWriter.close();
+        List<DataFileMeta> blobFileMetas = blobWriter.result();
+        return tagBlobFileMetas(blobFileMetas);
+    }
+
+    /** Tags blob file metadata with appropriate file tags. */
+    private List<DataFileMeta> tagBlobFileMetas(List<DataFileMeta> blobFileMetas) {
+        List<DataFileMeta> blobTaggedMetas = new ArrayList<>();
+
+        // Tag all but the last blob file as BLOB_ENTRY
+        for (int i = 0; i < blobFileMetas.size() - 1; i++) {
+            blobTaggedMetas.add(
+                    blobFileMetas.get(i).assignFileTag(DataFileMeta.FileTag.BLOB_ENTRY));
+        }
+
+        // Tag the last blob file as BLOB_TAIL
+        if (!blobFileMetas.isEmpty()) {
+            blobTaggedMetas.add(
+                    blobFileMetas
+                            .get(blobFileMetas.size() - 1)
+                            .assignFileTag(DataFileMeta.FileTag.BLOB_TAIL));
+        }
+
+        return blobTaggedMetas;
+    }
+
+    /** Validates that the row counts match between main and blob files. */
+    private void validateFileConsistency(
+            DataFileMeta mainDataFileMeta, List<DataFileMeta> blobTaggedMetas) {
+        long mainRowCount = mainDataFileMeta.rowCount();
+        long blobRowCount = blobTaggedMetas.stream().mapToLong(DataFileMeta::rowCount).sum();
+
+        if (mainRowCount != blobRowCount) {
+            throw new IllegalStateException(
+                    String.format(
+                            "This is a bug: The row count of main file and blob files does not match. "
+                                    + "Main file: %s (row count: %d), blob files: %s (total row count: %d)",
+                            mainDataFileMeta, mainRowCount, blobTaggedMetas, blobRowCount));
+        }
+    }
+
+    /**
+     * Returns the list of file metadata for all written files. This method can only be called after
+     * the writer has been closed.
+     *
+     * @return list of file metadata
+     * @throws IllegalStateException if the writer is not closed
+     */
     @Override
     public List<DataFileMeta> result() {
         Preconditions.checkState(closed, "Cannot access the results unless close all writers.");
         return results;
     }
 
+    /**
+     * Closes the writer and finalizes all files. This method ensures proper cleanup and validation
+     * of written data.
+     *
+     * @throws IOException if closing fails
+     */
     @Override
     public void close() throws IOException {
         if (closed) {
@@ -258,15 +413,17 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
         try {
             closeCurrentWriter();
         } catch (IOException e) {
-            LOG.warn(
-                    "Exception occurs when writing file "
-                            + currentWriter.writer().path()
-                            + ". Cleaning up.",
-                    e);
-            abort();
+            handleCloseException(e);
             throw e;
         } finally {
             closed = true;
         }
+    }
+
+    /** Handles exceptions that occur during closing. */
+    private void handleCloseException(IOException e) {
+        String filePath = (currentWriter == null) ? null : currentWriter.writer().path().toString();
+        LOG.warn("Exception occurs when writing file {}. Cleaning up.", filePath, e);
+        abort();
     }
 }
