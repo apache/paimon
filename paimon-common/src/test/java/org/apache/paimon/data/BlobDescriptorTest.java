@@ -20,13 +20,16 @@ package org.apache.paimon.data;
 
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Constructor;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link BlobDescriptor}. */
 public class BlobDescriptorTest {
 
     @Test
-    public void testEquals() {
+    public void testEquals() throws Exception {
         String uri1 = "/test/path1";
         String uri2 = "/test/path2";
 
@@ -35,11 +38,12 @@ public class BlobDescriptorTest {
         BlobDescriptor descriptor3 = new BlobDescriptor(uri2, 100L, 200L);
         BlobDescriptor descriptor4 = new BlobDescriptor(uri1, 150L, 200L);
         BlobDescriptor descriptor5 = new BlobDescriptor(uri1, 100L, 250L);
-
+        BlobDescriptor descriptor6 = createDescriptorWithVersion((byte) 2, uri1, 100L, 200L);
         assertThat(descriptor1).isEqualTo(descriptor2);
         assertThat(descriptor1).isNotEqualTo(descriptor3);
         assertThat(descriptor1).isNotEqualTo(descriptor4);
         assertThat(descriptor1).isNotEqualTo(descriptor5);
+        assertThat(descriptor1).isNotEqualTo(descriptor6);
         assertThat(descriptor1).isNotEqualTo(null);
         assertThat(descriptor1).isNotEqualTo(new Object());
     }
@@ -60,6 +64,7 @@ public class BlobDescriptorTest {
         BlobDescriptor descriptor = new BlobDescriptor(uri, 100L, 200L);
 
         String toString = descriptor.toString();
+        assertThat(toString).contains("version=1");
         assertThat(toString).contains("uri='/test/path'");
         assertThat(toString).contains("offset=100");
         assertThat(toString).contains("length=200");
@@ -79,5 +84,24 @@ public class BlobDescriptorTest {
         assertThat(deserialized.offset()).isEqualTo(original.offset());
         assertThat(deserialized.length()).isEqualTo(original.length());
         assertThat(deserialized).isEqualTo(original);
+    }
+
+    @Test
+    public void testDeserializeWithUnsupportedVersion() {
+        String uri = "/test/path";
+        byte[] serialized = new BlobDescriptor(uri, 1, 1).serialize();
+        serialized[0] = 2;
+        assertThatThrownBy(() -> BlobDescriptor.deserialize(serialized))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Expecting BlobDescriptor version to be 1, but found 2.");
+    }
+
+    private BlobDescriptor createDescriptorWithVersion(
+            byte version, String uri, long offset, long length) throws Exception {
+        Constructor<BlobDescriptor> constructor =
+                BlobDescriptor.class.getDeclaredConstructor(
+                        byte.class, String.class, long.class, long.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(version, uri, offset, length);
     }
 }
