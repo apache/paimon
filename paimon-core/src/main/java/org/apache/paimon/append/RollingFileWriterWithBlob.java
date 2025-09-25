@@ -18,7 +18,6 @@
 
 package org.apache.paimon.append;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
@@ -87,7 +86,7 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
         RowType normalRowType = typeWithBlob.getLeft();
         RowType blobType = typeWithBlob.getRight();
         List<String> normalColumnNames = normalRowType.getFieldNames();
-        final int[] projection = writeSchema.projectIndexes(normalColumnNames);
+        final int[] projectionNormalFields = writeSchema.projectIndexes(normalColumnNames);
         this.writerFactory =
                 () -> {
                     RowDataFileWriter rowDataFileWriter =
@@ -109,12 +108,13 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
                                     statsDenseStore,
                                     pathFactory.isExternalPath(),
                                     normalColumnNames);
-                    return new MappedWriter<>(rowDataFileWriter, projection);
+                    return new MappedWriter<>(rowDataFileWriter, projectionNormalFields);
                 };
 
         BlobFileFormat blobFileFormat = new BlobFileFormat();
         List<String> blobNames = blobType.getFieldNames();
-        checkArgument(blobNames.size() == 1, "Limit only one blob fields in one paimon table yet.");
+        checkArgument(
+                blobNames.size() == 1, "Limit exactly one blob fields in one paimon table yet.");
         final int[] blobProjection = writeSchema.projectIndexes(blobNames);
         Supplier<? extends SingleFileWriter<InternalRow, DataFileMeta>> blobWriterSupplier =
                 () ->
@@ -147,16 +147,10 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
         this.closedWriters = new ArrayList<>();
     }
 
-    @VisibleForTesting
-    public long targetFileSize() {
-        return targetFileSize;
-    }
-
-    private boolean rollingFile(boolean forceCheck) throws IOException {
+    private boolean rollingFile() throws IOException {
         return currentWriter
                 .writer()
-                .reachTargetSize(
-                        forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
+                .reachTargetSize(recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
     }
 
     @Override
@@ -171,7 +165,7 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
             blobWriter.write(row);
             recordCount += 1;
 
-            if (rollingFile(false)) {
+            if (rollingFile()) {
                 closeCurrentWriter();
             }
         } catch (Throwable e) {
@@ -221,7 +215,7 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
         if (mainDataFileMeta.rowCount()
                 != blobTaggedMetas.stream().mapToLong(DataFileMeta::rowCount).sum()) {
             throw new IllegalStateException(
-                    "The row count of main file and blob files does not match. "
+                    "This is a bug: The row count of main file and blob files does not match. "
                             + "Main file: "
                             + mainDataFileMeta
                             + ", blob files: "
