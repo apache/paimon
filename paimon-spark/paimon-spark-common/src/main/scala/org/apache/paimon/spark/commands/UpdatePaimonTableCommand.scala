@@ -143,12 +143,21 @@ case class UpdatePaimonTableCommand(
       sparkSession: SparkSession,
       toUpdateScanRelation: LogicalPlan): Seq[CommitMessage] = {
     var updateColumns = updateExpressions.zip(relation.output).map {
+      case (_, origin) if origin.name == ROW_ID_COLUMN =>
+        col(ROW_ID_COLUMN)
+      case (_, origin) if origin.name == SEQUENCE_NUMBER_COLUMN =>
+        toColumn(
+          optimizedIf(
+            condition,
+            Literal(null),
+            toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
+          .as(SEQUENCE_NUMBER_COLUMN)
       case (update, origin) =>
         val updated = optimizedIf(condition, update, origin)
         toColumn(updated).as(origin.name, origin.metadata)
     }
 
-    if (coreOptions.rowTrackingEnabled()) {
+    if (coreOptions.rowTrackingEnabled() && !relation.outputSet.exists(_.name == ROW_ID_COLUMN)) {
       updateColumns ++= Seq(
         col(ROW_ID_COLUMN),
         toColumn(
