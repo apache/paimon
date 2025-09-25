@@ -53,6 +53,11 @@
             <artifactId>aws-core</artifactId>
             <version>${fs.s3.aws.version}</version>
         </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sdk-core</artifactId>
+            <version>${fs.s3.aws.version}</version>
+        </dependency>
     </dependencies>
 
 </project>
