@@ -1923,13 +1923,11 @@ public class CoreOptions implements Serializable {
                                     + "in 'clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
                                     + "and 'hilbert' for 5 or more columns.");
 
-    @Immutable
-    public static final ConfigOption<String> LIQUID_CLUSTERING_COLUMNS =
-            key("liquid-clustering.columns")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Specifies the column name(s) used for liquid clustering, in the format 'columnName1,columnName2'. ");
+    public static final ConfigOption<Boolean> CLUSTERING_INCREMENTAL =
+            key("clustering.incremental")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether enable incremental clustering.");
 
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
@@ -2983,12 +2981,12 @@ public class CoreOptions implements Serializable {
         return clusteringColumns(options.get(CLUSTERING_COLUMNS));
     }
 
-    public OrderType clusteringStrategy(int columnSize) {
-        return clusteringStrategy(options.get(CLUSTERING_STRATEGY), columnSize);
+    public boolean clusteringIncrementalEnabled() {
+        return options.get(CLUSTERING_INCREMENTAL);
     }
 
-    public List<String> liquidClusterColumns() {
-        return clusteringColumns(options.get(LIQUID_CLUSTERING_COLUMNS));
+    public OrderType clusteringStrategy(int columnSize) {
+        return clusteringStrategy(options.get(CLUSTERING_STRATEGY), columnSize);
     }
 
     public static List<String> clusteringColumns(String clusteringColumns) {

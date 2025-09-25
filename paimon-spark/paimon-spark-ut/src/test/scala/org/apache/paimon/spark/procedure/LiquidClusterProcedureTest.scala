@@ -26,6 +26,7 @@ import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions
+import org.scalatest.time.{Minutes, Span}
 
 import java.util
 
@@ -37,13 +38,13 @@ class LiquidClusterProcedureTest extends PaimonSparkTestBase with StreamTest {
   import testImplicits._
 
   test("Paimon Procedure: cluster for unpartitioned table") {
-    failAfter(streamingTimeout) {
+    failAfter(Span(10, Minutes)) {
       withTempDir {
         checkpointDir =>
           spark.sql(
             s"""
                |CREATE TABLE T (a INT, b INT, c STRING)
-               |TBLPROPERTIES ('bucket'='-1', 'num-levels'='6', 'num-sorted-run.compaction-trigger'='2', 'liquid-clustering.columns'='a,b', 'clustering.strategy'='zorder')
+               |TBLPROPERTIES ('bucket'='-1','num-levels'='6', 'num-sorted-run.compaction-trigger'='2', 'clustering.columns'='a,b', 'clustering.strategy'='zorder', 'clustering.incremental' = 'true')
                |""".stripMargin)
           val location = loadTable("T").location().toString
 
@@ -74,6 +75,7 @@ class LiquidClusterProcedureTest extends PaimonSparkTestBase with StreamTest {
             inputData.addData((2, 0, randomStr))
             inputData.addData((2, 1, randomStr))
             inputData.addData((2, 2, randomStr))
+            // 由于目前复用了 clustering.columns，所以 SparkWriter 需要关闭写入时的 Cluster，避免inputData写入的文件不可控
             stream.processAllAvailable()
 
             val result = new util.ArrayList[Row]()
@@ -191,7 +193,7 @@ class LiquidClusterProcedureTest extends PaimonSparkTestBase with StreamTest {
             s"""
                |CREATE TABLE T (a INT, b INT, c STRING, pt INT)
                |PARTITIONED BY (pt)
-               |TBLPROPERTIES ('bucket'='-1', 'num-levels'='6', 'num-sorted-run.compaction-trigger'='2', 'liquid-clustering.columns'='a,b', 'clustering.strategy'='zorder')
+               |TBLPROPERTIES ('bucket'='-1', 'num-levels'='6', 'num-sorted-run.compaction-trigger'='2', 'clustering.columns'='a,b', 'clustering.strategy'='zorder', 'clustering.incremental' = 'true')
                |""".stripMargin)
           val location = loadTable("T").location().toString
 

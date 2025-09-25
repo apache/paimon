@@ -30,7 +30,7 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Optional;
 
-/** doc. */
+/** Cluster strategy to decide which files to select for cluster. */
 public class ClusterStrategy {
 
     private static final Logger LOG = LoggerFactory.getLogger(ClusterStrategy.class);
@@ -64,14 +64,21 @@ public class ClusterStrategy {
         int maxLevel = numLevels - 1;
         if (runs.isEmpty()) {
             // no sorted run, no need to compact
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("no sorted run, no need to compact");
+            }
             return Optional.empty();
         }
 
         if (runs.size() == 1 && runs.get(0).level() == maxLevel) {
-            // only one sorted run in the maxLevel with the same cluster key
             long schemaId = runs.get(0).run().files().get(0).schemaId();
             CoreOptions coreOptions = CoreOptions.fromMap(schemaManager.schema(schemaId).options());
-            if (coreOptions.liquidClusterColumns().equals(clusterKeys)) {
+            // only one sorted run in the maxLevel with the same cluster key
+            if (coreOptions.clusteringColumns().equals(clusterKeys)) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(
+                            "only one sorted run in the maxLevel with the same cluster key, no need to compact");
+                }
                 return Optional.empty();
             }
         }

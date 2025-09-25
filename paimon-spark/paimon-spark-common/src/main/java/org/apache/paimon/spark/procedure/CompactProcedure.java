@@ -23,8 +23,13 @@ import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
+import org.apache.paimon.append.cluster.ClusterManager;
+import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -42,6 +47,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
@@ -91,6 +97,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import scala.collection.JavaConverters;
+import scala.collection.Seq;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -147,7 +156,7 @@ public class CompactProcedure extends BaseProcedure {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String partitions = blank(args, 1) ? null : args.getString(1);
         // make full compact strategy as default.
-        String compactStrategy = blank(args, 2) ? FULL : args.getString(2);
+        String compactStrategy = blank(args, 2) ? null : args.getString(2);
         String sortType = blank(args, 3) ? OrderType.NONE.name() : args.getString(3);
         List<String> sortColumns =
                 blank(args, 4)
@@ -166,7 +175,9 @@ public class CompactProcedure extends BaseProcedure {
                     "sort compact do not support 'partition_idle_time'.");
         }
 
-        if (!(compactStrategy.equalsIgnoreCase(FULL) || compactStrategy.equalsIgnoreCase(MINOR))) {
+        if (!(compactStrategy == null
+                || compactStrategy.equalsIgnoreCase(FULL)
+                || compactStrategy.equalsIgnoreCase(MINOR))) {
             throw new IllegalArgumentException(
                     String.format(
                             "The compact strategy only supports 'full' or 'minor', but '%s' is configured.",
@@ -205,6 +216,12 @@ public class CompactProcedure extends BaseProcedure {
                             dynamicOptions, CoreOptions.WRITE_ONLY.key(), "false");
                     ProcedureUtils.putAllOptions(dynamicOptions, options);
                     table = table.copy(dynamicOptions);
+                    if (((FileStoreTable) table).coreOptions().clusteringIncrementalEnabled()
+                            && (!OrderType.NONE.name().equals(sortType))) {
+                        throw new IllegalArgumentException(
+                                "The table has enabled incremental clustering, do not support sort compact.");
+                    }
+
                     InternalRow internalRow =
                             newInternalRow(
                                     execute(
@@ -238,6 +255,13 @@ public class CompactProcedure extends BaseProcedure {
             @Nullable Duration partitionIdleTime) {
         BucketMode bucketMode = table.bucketMode();
         OrderType orderType = OrderType.of(sortType);
+
+        boolean clusterIncrementalEnabled = table.coreOptions().clusteringIncrementalEnabled();
+        if (compactStrategy == null) {
+            // make full compact strategy as default for compact.
+            // make non-full compact strategy as default for incremental clustering.
+            compactStrategy = clusterIncrementalEnabled ? MINOR : FULL;
+        }
         boolean fullCompact = compactStrategy.equalsIgnoreCase(FULL);
         RowType partitionType = table.schema().logicalPartitionType();
         Predicate filter =
@@ -251,6 +275,15 @@ public class CompactProcedure extends BaseProcedure {
                                 .getOrElse(null);
         PartitionPredicate partitionPredicate =
                 PartitionPredicate.fromPredicate(partitionType, filter);
+
+        if (clusterIncrementalEnabled) {
+            checkArgument(
+                    bucketMode == BucketMode.BUCKET_UNAWARE,
+                    "only append unaware-bucket table support incremental clustering.");
+            clusterIncrementalUnAwareBucketTable(table, fullCompact, relation);
+            return true;
+        }
+
         if (orderType.equals(OrderType.NONE)) {
             JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
             switch (bucketMode) {
@@ -521,6 +554,96 @@ public class CompactProcedure extends BaseProcedure {
         }
     }
 
+    private void clusterIncrementalUnAwareBucketTable(
+            FileStoreTable table, boolean fullCompaction, DataSourceV2Relation relation) {
+        ClusterManager clusterManager = new ClusterManager(table);
+        Map<BinaryRow, CompactUnit> compactUnits = clusterManager.prepareForCluster(fullCompaction);
+
+        // generate splits for each partition
+        Map<BinaryRow, DataSplit[]> partitionSplits =
+                compactUnits.entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        Map.Entry::getKey,
+                                        entry ->
+                                                clusterManager
+                                                        .toSplits(
+                                                                entry.getKey(),
+                                                                entry.getValue().files())
+                                                        .toArray(new DataSplit[0])));
+
+        // sort in partition
+        TableSorter sorter =
+                TableSorter.getSorter(
+                        table, clusterManager.clusterCurve(), clusterManager.clusterKeys());
+        LOG.info(
+                "Start to sort in partition, cluster curve is {}, cluster keys is {}",
+                clusterManager.clusterCurve(),
+                clusterManager.clusterKeys());
+
+        Dataset<Row> datasetForWrite =
+                partitionSplits.values().stream()
+                        .map(
+                                split -> {
+                                    Dataset<Row> dataset =
+                                            PaimonUtils.createDataset(
+                                                    spark(),
+                                                    ScanPlanHelper$.MODULE$.createNewScanPlan(
+                                                            split, relation));
+                                    return sorter.sort(dataset);
+                                })
+                        .reduce(Dataset::union)
+                        .orElse(null);
+        if (datasetForWrite != null) {
+            // set to write only to prevent invoking compaction
+            // do not use overwrite, we don't need to overwrite the whole partition
+            PaimonSparkWriter writer = PaimonSparkWriter.apply(table).writeOnly();
+            Seq<CommitMessage> commitMessages = writer.write(datasetForWrite);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Commit messages after writing:{}", commitMessages);
+            }
+
+            // re-organize the commit messages to generate the compact messages
+            Map<BinaryRow, List<DataFileMeta>> partitionClustered = new HashMap<>();
+            for (CommitMessage commitMessage : JavaConverters.seqAsJavaList(commitMessages)) {
+                checkArgument(commitMessage.bucket() == 0);
+                partitionClustered
+                        .computeIfAbsent(commitMessage.partition(), k -> new ArrayList<>())
+                        .addAll(((CommitMessageImpl) commitMessage).newFilesIncrement().newFiles());
+            }
+
+            List<CommitMessage> clusterMessages = new ArrayList<>();
+            for (Map.Entry<BinaryRow, List<DataFileMeta>> entry : partitionClustered.entrySet()) {
+                BinaryRow partition = entry.getKey();
+                List<DataFileMeta> clusterBefore = compactUnits.get(partition).files();
+                // upgrade the clustered file to outputLevel
+                List<DataFileMeta> clusterAfter =
+                        clusterManager.upgrade(
+                                entry.getValue(), compactUnits.get(partition).outputLevel());
+                LOG.info(
+                        "Partition {}: upgrade file level to {}",
+                        partition,
+                        compactUnits.get(partition).outputLevel());
+                CompactIncrement compactIncrement =
+                        new CompactIncrement(clusterBefore, clusterAfter, Collections.emptyList());
+                clusterMessages.add(
+                        new CommitMessageImpl(
+                                partition,
+                                // bucket 0 is bucket for unaware-bucket table
+                                // for compatibility with the old design
+                                0,
+                                table.coreOptions().bucket(),
+                                DataIncrement.emptyIncrement(),
+                                compactIncrement));
+            }
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Commit messages after reorganizing:{}", clusterMessages);
+            }
+
+            writer.commit(JavaConverters.asScalaBuffer(clusterMessages).toSeq());
+        }
+    }
+
     private Map<BinaryRow, DataSplit[]> packForSort(List<DataSplit> dataSplits) {
         // Make a single partition as a compact group
         return dataSplits.stream()
@@ -546,6 +669,10 @@ public class CompactProcedure extends BaseProcedure {
                             sparkParallelism, readParallelism, readParallelism));
         }
         return readParallelism;
+    }
+
+    private String defaultCompactStrategy(boolean clusterIncrementalEnabled) {
+        return clusterIncrementalEnabled ? MINOR : FULL;
     }
 
     @VisibleForTesting

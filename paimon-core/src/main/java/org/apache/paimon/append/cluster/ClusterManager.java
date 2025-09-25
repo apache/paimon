@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.SplitGenerator;
@@ -40,7 +41,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-/** doc. */
+import static org.apache.paimon.CoreOptions.CLUSTERING_INCREMENTAL;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
+/** Manager for Incremental Clustering. */
 public class ClusterManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(ClusterManager.class);
@@ -54,18 +58,25 @@ public class ClusterManager {
     private int maxLevel;
 
     public ClusterManager(FileStoreTable table) {
+        checkArgument(
+                table.bucketMode() == BucketMode.BUCKET_UNAWARE,
+                "only append unaware-bucket table support incremental clustering.");
         // drop stats to reduce memory usage
         this.snapshotReader = table.newSnapshotReader().dropStats();
         CoreOptions options = table.coreOptions();
+        checkArgument(
+                options.clusteringIncrementalEnabled(),
+                "Only support incremental clustering when '%s' is true.",
+                CLUSTERING_INCREMENTAL.key());
         this.clusterStrategy =
                 new ClusterStrategy(
                         table.schemaManager(),
-                        options.liquidClusterColumns(),
+                        options.clusteringColumns(),
                         options.maxSizeAmplificationPercent(),
                         options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger());
-        this.clusterCurve = options.clusteringStrategy(options.liquidClusterColumns().size());
-        this.clusterKeys = options.liquidClusterColumns();
+        this.clusterCurve = options.clusteringStrategy(options.clusteringColumns().size());
+        this.clusterKeys = options.clusteringColumns();
         this.maxLevel = options.numLevels();
     }
 
@@ -93,7 +104,6 @@ public class ClusterManager {
         }
 
         // 2. pick files to be clustered for each partition
-        // TODO：consider the maxLevel in existed files
         Map<BinaryRow, Optional<CompactUnit>> units =
                 partitionLevels.entrySet().stream()
                         .collect(
@@ -139,6 +149,17 @@ public class ClusterManager {
     public Map<BinaryRow, List<LevelSortedRun>> constructLevels() {
         List<DataSplit> dataSplits = snapshotReader.read().dataSplits();
 
+        maxLevel =
+                Math.max(
+                        maxLevel,
+                        dataSplits.stream()
+                                        .flatMap(split -> split.dataFiles().stream())
+                                        .mapToInt(DataFileMeta::level)
+                                        .max()
+                                        .orElse(-1)
+                                + 1);
+        checkArgument(maxLevel > 1, "Number of levels must be at least 2.");
+
         Map<BinaryRow, List<DataFileMeta>> partitionFiles = new HashMap<>();
         for (DataSplit dataSplit : dataSplits) {
             partitionFiles
@@ -166,6 +187,9 @@ public class ClusterManager {
                             new LevelSortedRun(level, SortedRun.fromSingle(level0File)));
                 }
             } else {
+                // don't need to guarantee that the files within the same sorted run are
+                // non-overlapping here, so we call SortedRun.fromSorted() to avoid sorting and
+                // validation
                 partitionLevels.add(
                         new LevelSortedRun(level, SortedRun.fromSorted(entry.getValue())));
             }
