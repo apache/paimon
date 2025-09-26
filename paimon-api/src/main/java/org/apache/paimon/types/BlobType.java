@@ -19,6 +19,10 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.utils.Pair;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Data type of binary large object.
@@ -60,5 +64,22 @@ public final class BlobType extends DataType {
     @Override
     public <R> R accept(DataTypeVisitor<R> visitor) {
         return visitor.visit(this);
+    }
+
+    public static Pair<RowType, RowType> splitBlob(RowType rowType) {
+        List<DataField> fields = rowType.getFields();
+        List<DataField> normalFields = new ArrayList<>();
+        List<DataField> blobFields = new ArrayList<>();
+
+        for (DataField field : fields) {
+            DataTypeRoot type = field.type().getTypeRoot();
+            if (type == DataTypeRoot.BLOB) {
+                blobFields.add(field);
+            } else {
+                normalFields.add(field);
+            }
+        }
+
+        return Pair.of(new RowType(normalFields), new RowType(blobFields));
     }
 }
