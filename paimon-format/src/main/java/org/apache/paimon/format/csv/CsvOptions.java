@@ -29,13 +29,14 @@ public class CsvOptions {
             ConfigOptions.key("csv.field-delimiter")
                     .stringType()
                     .defaultValue(",")
-                    .withFallbackKeys("field-delimiter")
+                    .withFallbackKeys("field-delimiter", "seq")
                     .withDescription("The field delimiter for CSV or TXT format");
 
     public static final ConfigOption<String> LINE_DELIMITER =
             ConfigOptions.key("csv.line-delimiter")
                     .stringType()
                     .defaultValue("\n")
+                    .withFallbackKeys("lineSep")
                     .withDescription("The line delimiter for CSV format");
 
     public static final ConfigOption<String> QUOTE_CHARACTER =

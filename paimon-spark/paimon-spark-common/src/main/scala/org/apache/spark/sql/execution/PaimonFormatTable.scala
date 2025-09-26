@@ -18,11 +18,17 @@
 
 package org.apache.spark.sql.execution
 
+import org.apache.paimon.spark.{PaimonFormatTableScanBuilder, SparkTypeUtils}
+import org.apache.paimon.table.FormatTable
+
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
-import org.apache.spark.sql.connector.catalog.SupportsPartitionManagement
+import org.apache.spark.sql.connector.catalog.{SupportsPartitionManagement, SupportsRead, SupportsWrite, TableCapability}
+import org.apache.spark.sql.connector.catalog.TableCapability.BATCH_READ
+import org.apache.spark.sql.connector.read.ScanBuilder
+import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.datasources.v2.csv.{CSVScanBuilder, CSVTable}
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
@@ -153,6 +159,45 @@ trait PartitionedFormatTable extends SupportsPartitionManagement {
   }
 }
 
+case class PaimonFormatTable(
+    sparkSession: SparkSession,
+    options: CaseInsensitiveStringMap,
+    paths: Seq[String],
+    schema: StructType,
+    override val partitionSchema_ : StructType,
+    table: FormatTable,
+    identName: String)
+  extends org.apache.spark.sql.connector.catalog.Table
+  with SupportsRead
+  with SupportsWrite
+  with PartitionedFormatTable {
+
+  override lazy val fileIndex: PartitioningAwareFileIndex = {
+    PaimonFormatTable.createFileIndex(
+      options,
+      sparkSession,
+      paths,
+      Option.apply(schema),
+      partitionSchema())
+  }
+
+  override def name(): String = {
+    identName
+  }
+
+  override def capabilities(): util.Set[TableCapability] = {
+    util.EnumSet.of(BATCH_READ)
+  }
+
+  override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
+    PaimonFormatTableScanBuilder(table.copy(caseInsensitiveStringMap), schema, Seq.empty)
+  }
+
+  override def newWriteBuilder(logicalWriteInfo: LogicalWriteInfo): WriteBuilder = {
+    throw new UnsupportedOperationException()
+  }
+}
+
 class PartitionedCSVTable(
     name: String,
     sparkSession: SparkSession,
@@ -182,6 +227,11 @@ class PartitionedCSVTable(
       paths,
       userSpecifiedSchema,
       partitionSchema())
+  }
+
+  override def newWriteBuilder(info: _root_.org.apache.spark.sql.connector.write.LogicalWriteInfo)
+      : _root_.org.apache.spark.sql.connector.write.WriteBuilder = {
+    super.newWriteBuilder(info)
   }
 }
 

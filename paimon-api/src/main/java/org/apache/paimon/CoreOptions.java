@@ -1971,6 +1971,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1024)
                     .withDescription("Threshold for merging records to binary buffer in lookup.");
 
+    public static final ConfigOption<FormatTableImplementation> FORMAT_TABLE_IMPLEMENTATION =
+            key("format-table.implementation")
+                    .enumType(FormatTableImplementation.class)
+                    .defaultValue(FormatTableImplementation.ENGINE)
+                    .withDescription("Format table uses paimon or engine.");
+
     public static final ConfigOption<Boolean> FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH =
             ConfigOptions.key("format-table.partition-path-only-value")
                     .booleanType()
@@ -3035,6 +3041,10 @@ public class CoreOptions implements Serializable {
         return options.get(LOOKUP_MERGE_RECORDS_THRESHOLD);
     }
 
+    public boolean formatTableImplementationIsPaimon() {
+        return options.get(FORMAT_TABLE_IMPLEMENTATION) == FormatTableImplementation.PAIMON;
+    }
+
     public boolean formatTablePartitionOnlyValueInPath() {
         return options.get(FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH);
     }
@@ -3827,5 +3837,30 @@ public class CoreOptions implements Serializable {
         NONE,
         HASH
         // TODO : Supports range-partition strategy.
+    }
+
+    /** Specifies the implementation of format table. */
+    public enum FormatTableImplementation implements DescribedEnum {
+        PAIMON("paimon", "Paimon format table implementation."),
+        ENGINE("engine", "Engine format table implementation.");
+
+        private final String value;
+
+        private final String description;
+
+        FormatTableImplementation(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 }
