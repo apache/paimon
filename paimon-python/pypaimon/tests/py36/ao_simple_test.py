@@ -15,11 +15,15 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+from unittest.mock import patch
+
 import pyarrow as pa
 
 from pypaimon import Schema
 from pypaimon.catalog.catalog_exception import TableNotExistException, TableAlreadyExistException, \
     DatabaseNotExistException, DatabaseAlreadyExistException
+from pypaimon.common.config import OssOptions
+from pypaimon.common.file_io import FileIO
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
@@ -385,3 +389,33 @@ class AOSimpleTest(RESTBaseTest):
             self.rest_catalog.drop_database("db1", True)
         except DatabaseNotExistException:
             self.fail("drop_database with ignore_if_exists=True should not raise DatabaseNotExistException")
+
+    def test_initialize_oss_fs_pyarrow_lt_7(self):
+        props = {
+            OssOptions.OSS_ACCESS_KEY_ID: "AKID",
+            OssOptions.OSS_ACCESS_KEY_SECRET: "SECRET",
+            OssOptions.OSS_SECURITY_TOKEN: "TOKEN",
+            OssOptions.OSS_REGION: "cn-hangzhou",
+            OssOptions.OSS_ENDPOINT: "oss-cn-hangzhou.aliyuncs.com",
+        }
+
+        with patch("pypaimon.common.file_io.pyarrow.__version__", "6.0.0"), \
+                patch("pyarrow.fs.S3FileSystem") as mock_s3fs:
+            FileIO("oss://oss-bucket/paimon-database/paimon-table", props)
+            mock_s3fs.assert_called_once_with(access_key="AKID",
+                                              secret_key="SECRET",
+                                              session_token="TOKEN",
+                                              region="cn-hangzhou",
+                                              endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])
+            FileIO("oss://oss-bucket.endpoint/paimon-database/paimon-table", props)
+            mock_s3fs.assert_called_with(access_key="AKID",
+                                         secret_key="SECRET",
+                                         session_token="TOKEN",
+                                         region="cn-hangzhou",
+                                         endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])
+            FileIO("oss://access_id:secret_key@Endpoint/oss-bucket/paimon-database/paimon-table", props)
+            mock_s3fs.assert_called_with(access_key="AKID",
+                                         secret_key="SECRET",
+                                         session_token="TOKEN",
+                                         region="cn-hangzhou",
+                                         endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])

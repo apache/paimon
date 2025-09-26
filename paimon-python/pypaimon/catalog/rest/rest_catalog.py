@@ -19,6 +19,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
+import pyarrow
+from packaging.version import parse
+
 from pypaimon.api.api_response import GetTableResponse, PagedList
 from pypaimon.api.options import Options
 from pypaimon.api.rest_api import RESTApi
@@ -200,17 +203,17 @@ class RESTCatalog(Catalog):
             uuid=response.get_id()
         )
 
-    def file_io_from_options(self, table_path: Path) -> FileIO:
-        return FileIO(str(table_path), self.context.options.data)
+    def file_io_from_options(self, table_path: str) -> FileIO:
+        return FileIO(table_path, self.context.options.data)
 
-    def file_io_for_data(self, table_path: Path, identifier: Identifier):
+    def file_io_for_data(self, table_path: str, identifier: Identifier):
         return RESTTokenFileIO(identifier, table_path, self.context.options.data) \
             if self.data_token_enabled else self.file_io_from_options(table_path)
 
     def load_table(self,
                    identifier: Identifier,
-                   internal_file_io: Callable[[Path], Any],
-                   external_file_io: Callable[[Path], Any],
+                   internal_file_io: Callable[[str], Any],
+                   external_file_io: Callable[[str], Any],
                    metadata_loader: Callable[[Identifier], TableMetadata],
                    ) -> FileStoreTable:
         metadata = metadata_loader(identifier)
@@ -223,9 +226,12 @@ class RESTCatalog(Catalog):
             supports_version_management=True  # REST catalogs support version management
         )
         path_parsed = urlparse(schema.options.get(CoreOptions.PATH))
-        path = Path(path_parsed.path) if path_parsed.scheme is None else Path(schema.options.get(CoreOptions.PATH))
-        table_path = path_parsed.netloc + "/" + path_parsed.path \
-            if path_parsed.scheme == "file" else path_parsed.path[1:]
+        path = path_parsed.path if path_parsed.scheme is None else schema.options.get(CoreOptions.PATH)
+        if path_parsed.scheme == "file":
+            table_path = path_parsed.path
+        else:
+            table_path = path_parsed.netloc + path_parsed.path \
+                if parse(pyarrow.__version__) >= parse("7.0.0") else path_parsed.path[1:]
         table = self.create(data_file_io(path),
                             Path(table_path),
                             schema,
