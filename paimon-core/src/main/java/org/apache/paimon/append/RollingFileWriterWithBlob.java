@@ -59,10 +59,10 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
 
     private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriterWithBlob.class);
 
-    /** Constant for checking rolling condition periodically */
+    /** Constant for checking rolling condition periodically. */
     private static final long CHECK_ROLLING_RECORD_CNT = 1000L;
 
-    /** Expected number of blob fields in a table */
+    /** Expected number of blob fields in a table. */
     private static final int EXPECTED_BLOB_FIELD_COUNT = 1;
 
     // Core components
