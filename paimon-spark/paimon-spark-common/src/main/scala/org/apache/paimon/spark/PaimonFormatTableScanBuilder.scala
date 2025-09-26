@@ -29,18 +29,7 @@ import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
-/**
- * A ScanBuilder implementation for {@link FormatTable} that supports basic scan operations.
- *
- * <p>This class is a key component of the new format table reading functionality in Paimon Spark.
- * It is responsible for constructing a {@link Scan} for a given {@link FormatTable}, applying
- * required schema and predicate pushdown as needed. The builder leverages the capabilities of
- * {@code FormatTable} to efficiently plan and execute scans over tables with various formats.
- *
- * <p>Relationship to {@code FormatTable}: This builder is specifically designed to work with {@code
- * FormatTable} instances, enabling Spark to read data from tables that support different file
- * formats and scan optimizations provided by the Paimon.
- */
+/** A ScanBuilder implementation for {@link FormatTable} that supports basic scan operations. */
 case class PaimonFormatTableScanBuilder(
     table: FormatTable,
     requiredSchema: StructType,

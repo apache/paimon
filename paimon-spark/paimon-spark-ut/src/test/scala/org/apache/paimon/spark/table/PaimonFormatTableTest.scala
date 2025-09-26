@@ -16,16 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.table
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
+import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.table.FormatTable
 
 import org.apache.spark.sql.Row
 
-class PaimonFormatTableReadITCase extends PaimonSparkTestWithRestCatalogBase {
+class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
 
   override protected def beforeEach(): Unit = {
     super.beforeEach()
