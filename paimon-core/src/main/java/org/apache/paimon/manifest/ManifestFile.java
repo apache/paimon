@@ -26,7 +26,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -142,7 +142,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
      * <p>NOTE: This method is atomic.
      */
     public List<ManifestFileMeta> write(List<ManifestEntry> entries) {
-        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer = createRollingWriter();
+        RollingFileWriterImpl<ManifestEntry, ManifestFileMeta> writer = createRollingWriter();
         try {
             writer.write(entries);
             writer.close();
@@ -152,8 +152,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         return writer.result();
     }
 
-    public RollingFileWriter<ManifestEntry, ManifestFileMeta> createRollingWriter() {
-        return new RollingFileWriter<>(
+    public RollingFileWriterImpl<ManifestEntry, ManifestFileMeta> createRollingWriter() {
+        return new RollingFileWriterImpl<>(
                 () -> new ManifestEntryWriter(writerFactory, pathFactory.newPath(), compression),
                 suggestedFileSize);
     }

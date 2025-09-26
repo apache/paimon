@@ -94,10 +94,10 @@ public class KeyValueFileWriterFactory {
         return formatContext.pathFactory(new WriteFormatKey(level, false));
     }
 
-    public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
+    public RollingFileWriterImpl<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
             int level, FileSource fileSource) {
         WriteFormatKey key = new WriteFormatKey(level, false);
-        return new RollingFileWriter<>(
+        return new RollingFileWriterImpl<>(
                 () -> {
                     DataFilePathFactory pathFactory = formatContext.pathFactory(key);
                     return createDataFileWriter(
@@ -106,9 +106,10 @@ public class KeyValueFileWriterFactory {
                 suggestedFileSize);
     }
 
-    public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
+    public RollingFileWriterImpl<KeyValue, DataFileMeta> createRollingChangelogFileWriter(
+            int level) {
         WriteFormatKey key = new WriteFormatKey(level, true);
-        return new RollingFileWriter<>(
+        return new RollingFileWriterImpl<>(
                 () -> {
                     DataFilePathFactory pathFactory = formatContext.pathFactory(key);
                     return createDataFileWriter(

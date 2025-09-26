@@ -31,7 +31,7 @@ import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.iceberg.IcebergPathFactory;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta.Content;
 import org.apache.paimon.iceberg.metadata.IcebergPartitionSpec;
-import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.MemorySize;
@@ -170,8 +170,8 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
 
     public List<IcebergManifestFileMeta> rollingWrite(
             Iterator<IcebergManifestEntry> entries, long sequenceNumber, Content content) {
-        RollingFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> writer =
-                new RollingFileWriter<>(
+        RollingFileWriterImpl<IcebergManifestEntry, IcebergManifestFileMeta> writer =
+                new RollingFileWriterImpl<>(
                         () -> createWriter(sequenceNumber, content), targetFileSize.getBytes());
         try {
             writer.write(entries);

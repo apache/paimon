@@ -19,160 +19,50 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.io.SingleFileWriter.AbortExecutor;
-import org.apache.paimon.utils.Preconditions;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.SimpleStatsCollector;
+import org.apache.paimon.format.avro.AvroFileFormat;
+import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
-import java.util.function.Supplier;
 
-/**
- * Writer to roll over to a new file if the current size exceed the target file size.
- *
- * @param <T> record data type.
- * @param <R> the file metadata result.
- */
-public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
+public interface RollingFileWriter<T, R> extends FileWriter<T, List<R>> {
 
-    private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriter.class);
+    int CHECK_ROLLING_RECORD_CNT = 1000;
 
-    private static final int CHECK_ROLLING_RECORD_CNT = 1000;
-
-    private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
-    private final long targetFileSize;
-    private final List<AbortExecutor> closedWriters;
-    private final List<R> results;
-
-    private SingleFileWriter<T, R> currentWriter = null;
-    private long recordCount = 0;
-    private boolean closed = false;
-
-    public RollingFileWriter(
-            Supplier<? extends SingleFileWriter<T, R>> writerFactory, long targetFileSize) {
-        this.writerFactory = writerFactory;
-        this.targetFileSize = targetFileSize;
-        this.results = new ArrayList<>();
-        this.closedWriters = new ArrayList<>();
-    }
+    void writeBundle(BundleRecords records) throws IOException;
 
     @VisibleForTesting
-    public long targetFileSize() {
-        return targetFileSize;
+    static FileWriterContext createFileWriterContext(
+            FileFormat fileFormat,
+            RowType rowType,
+            SimpleColStatsCollector.Factory[] statsCollectors,
+            String fileCompression) {
+        return new FileWriterContext(
+                fileFormat.createWriterFactory(rowType),
+                createStatsProducer(fileFormat, rowType, statsCollectors),
+                fileCompression);
     }
 
-    private boolean rollingFile(boolean forceCheck) throws IOException {
-        return currentWriter.reachTargetSize(
-                forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
-    }
-
-    @Override
-    public void write(T row) throws IOException {
-        try {
-            // Open the current writer if write the first record or roll over happen before.
-            if (currentWriter == null) {
-                openCurrentWriter();
-            }
-
-            currentWriter.write(row);
-            recordCount += 1;
-
-            if (rollingFile(false)) {
-                closeCurrentWriter();
-            }
-        } catch (Throwable e) {
-            LOG.warn(
-                    "Exception occurs when writing file "
-                            + (currentWriter == null ? null : currentWriter.path())
-                            + ". Cleaning up.",
-                    e);
-            abort();
-            throw e;
+    static SimpleStatsProducer createStatsProducer(
+            FileFormat fileFormat,
+            RowType rowType,
+            SimpleColStatsCollector.Factory[] statsCollectors) {
+        boolean isDisabled =
+                Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
+                        .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
+        if (isDisabled) {
+            return SimpleStatsProducer.disabledProducer();
         }
-    }
-
-    public void writeBundle(BundleRecords bundle) throws IOException {
-        try {
-            // Open the current writer if write the first record or roll over happen before.
-            if (currentWriter == null) {
-                openCurrentWriter();
-            }
-
-            currentWriter.writeBundle(bundle);
-            recordCount += bundle.rowCount();
-
-            if (rollingFile(true)) {
-                closeCurrentWriter();
-            }
-        } catch (Throwable e) {
-            LOG.warn(
-                    "Exception occurs when writing file "
-                            + (currentWriter == null ? null : currentWriter.path())
-                            + ". Cleaning up.",
-                    e);
-            abort();
-            throw e;
+        if (fileFormat instanceof AvroFileFormat) {
+            SimpleStatsCollector collector = new SimpleStatsCollector(rowType, statsCollectors);
+            return SimpleStatsProducer.fromCollector(collector);
         }
-    }
-
-    private void openCurrentWriter() {
-        currentWriter = writerFactory.get();
-    }
-
-    private void closeCurrentWriter() throws IOException {
-        if (currentWriter == null) {
-            return;
-        }
-
-        currentWriter.close();
-        // only store abort executor in memory
-        // cannot store whole writer, it includes lots of memory for example column vectors to read
-        // and write
-        closedWriters.add(currentWriter.abortExecutor());
-        results.add(currentWriter.result());
-        currentWriter = null;
-    }
-
-    @Override
-    public long recordCount() {
-        return recordCount;
-    }
-
-    @Override
-    public void abort() {
-        if (currentWriter != null) {
-            currentWriter.abort();
-        }
-        for (AbortExecutor abortExecutor : closedWriters) {
-            abortExecutor.abort();
-        }
-    }
-
-    @Override
-    public List<R> result() {
-        Preconditions.checkState(closed, "Cannot access the results unless close all writers.");
-        return results;
-    }
-
-    @Override
-    public void close() throws IOException {
-        if (closed) {
-            return;
-        }
-
-        try {
-            closeCurrentWriter();
-        } catch (IOException e) {
-            LOG.warn(
-                    "Exception occurs when writing file " + currentWriter.path() + ". Cleaning up.",
-                    e);
-            abort();
-            throw e;
-        } finally {
-            closed = true;
-        }
+        return SimpleStatsProducer.fromExtractor(
+                fileFormat.createStatsExtractor(rowType, statsCollectors).orElse(null));
     }
 }
