@@ -31,7 +31,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
-import org.apache.paimon.io.RollingFileWriterImpl;
+import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter;
 import org.apache.paimon.mergetree.compact.ChangelogResult;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
@@ -196,7 +196,7 @@ public class ChangelogMergeTreeRewriterTest {
     public void testWriteReusedKey() throws Exception {
         Path testPath = new Path(path, UUID.randomUUID().toString());
         KeyValueFileWriterFactory writerFactory = createWriterFactory(testPath, keyType, valueType);
-        RollingFileWriterImpl<KeyValue, DataFileMeta> writer =
+        RollingFileWriter<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingChangelogFileWriter(0);
 
         GenericRow key = new GenericRow(1);
@@ -273,7 +273,7 @@ public class ChangelogMergeTreeRewriterTest {
     private List<DataFileMeta> createFile(
             Map<Integer, Integer> kvs, RowType keyType, RowType valueType) throws IOException {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(path, keyType, valueType);
-        RollingFileWriterImpl<KeyValue, DataFileMeta> writer =
+        RollingFileWriter<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingChangelogFileWriter(0);
 
         try {

@@ -106,8 +106,7 @@ public class KeyValueFileWriterFactory {
                 suggestedFileSize);
     }
 
-    public RollingFileWriterImpl<KeyValue, DataFileMeta> createRollingChangelogFileWriter(
-            int level) {
+    public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
         WriteFormatKey key = new WriteFormatKey(level, true);
         return new RollingFileWriterImpl<>(
                 () -> {
