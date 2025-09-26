@@ -1769,12 +1769,13 @@ public class CoreOptions implements Serializable {
                                     + "a forced lookup compaction will be performed to flush L0 files to higher level. "
                                     + "This option is only valid when lookup-compact mode is gentle.");
 
-    public static final ConfigOption<Integer> DELETE_FILE_THREAD_NUM =
-            key("delete-file.thread-num")
+    public static final ConfigOption<Integer> FILE_OPERATION_THREAD_NUM =
+            key("file-operation.thread-num")
                     .intType()
                     .noDefaultValue()
+                    .withFallbackKeys("delete-file.thread-num")
                     .withDescription(
-                            "The maximum number of concurrent deleting files. "
+                            "The maximum number of concurrent file operations. "
                                     + "By default is the number of processors available to the Java virtual machine.");
 
     public static final ConfigOption<String> SCAN_FALLBACK_BRANCH =
@@ -2278,8 +2279,8 @@ public class CoreOptions implements Serializable {
         return options.get(SNAPSHOT_CLEAN_EMPTY_DIRECTORIES);
     }
 
-    public int deleteFileThreadNum() {
-        return options.getOptional(DELETE_FILE_THREAD_NUM)
+    public int fileOperationThreadNum() {
+        return options.getOptional(FILE_OPERATION_THREAD_NUM)
                 .orElseGet(() -> Runtime.getRuntime().availableProcessors());
     }
 
