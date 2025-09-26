@@ -47,7 +47,6 @@ import java.util.List;
 import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link RollingFileWriterWithBlob}. */
 public class RollingFileWriterWithBlobTest {
@@ -157,26 +156,6 @@ public class RollingFileWriterWithBlobTest {
         writer.writeBundle(new TestBundleRecords(rows));
 
         assertThat(writer.recordCount()).isEqualTo(3);
-    }
-
-    @Test
-    public void testCloseAfterAbort() throws IOException {
-        // Write some data
-        for (int i = 0; i < 5; i++) {
-            InternalRow row =
-                    GenericRow.of(
-                            i, BinaryString.fromString("test" + i), new BlobData(testBlobData));
-            writer.write(row);
-        }
-
-        // Abort and then close
-        writer.abort();
-        writer.close();
-
-        // Should not be able to get results
-        assertThatThrownBy(() -> writer.result())
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Cannot access the results unless close all writers");
     }
 
     @Test

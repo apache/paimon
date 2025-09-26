@@ -293,6 +293,7 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
     public void abort() {
         if (currentWriter != null) {
             currentWriter.abort();
+            currentWriter = null;
         }
         for (AbortExecutor abortExecutor : closedWriters) {
             abortExecutor.abort();
