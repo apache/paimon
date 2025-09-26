@@ -227,8 +227,11 @@ class RESTCatalog(Catalog):
         )
         path_parsed = urlparse(schema.options.get(CoreOptions.PATH))
         path = path_parsed.path if path_parsed.scheme is None else schema.options.get(CoreOptions.PATH)
-        table_path = path_parsed.netloc + "/" + path_parsed.path \
-            if parse(pyarrow.__version__) >= parse("7.0.0") else path_parsed.path[1:]
+        if path_parsed.scheme == "file":
+            table_path = path_parsed.path
+        else:
+            table_path = path_parsed.netloc + path_parsed.path \
+                if parse(pyarrow.__version__) >= parse("7.0.0") else path_parsed.path[1:]
         table = self.create(data_file_io(path),
                             Path(table_path),
                             schema,

@@ -91,12 +91,11 @@ class FileIO:
         # Based on https://github.com/apache/arrow/issues/40506
         if parse(pyarrow.__version__) >= parse("7.0.0"):
             client_kwargs['force_virtual_addressing'] = True
-            # client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
-            client_kwargs['endpoint_override'] = "oss-cn-hangzhou.aliyuncs.com"
+            client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
         else:
             oss_bucket = self._extract_oss_bucket(path)
             client_kwargs['endpoint_override'] = (oss_bucket + "." +
-                                                  "oss-cn-hangzhou.aliyuncs.com")
+                                                  self.properties.get(OssOptions.OSS_ENDPOINT))
 
         return S3FileSystem(**client_kwargs)
 
