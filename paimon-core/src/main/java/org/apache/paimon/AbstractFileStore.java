@@ -298,7 +298,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.commitMinRetryWait(),
                 options.commitMaxRetryWait(),
                 options.commitStrictModeLastSafeSnapshot().orElse(null),
-                options.rowTrackingEnabled());
+                options.rowTrackingEnabled(),
+                !schema.primaryKeys().isEmpty(),
+                options.deletionVectorsEnabled(),
+                newIndexFileHandler());
     }
 
     @Override

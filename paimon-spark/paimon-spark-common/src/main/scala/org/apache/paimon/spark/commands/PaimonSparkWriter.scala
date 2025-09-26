@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.CoreOptions
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.CoreOptions.{PartitionSinkStrategy, WRITE_ONLY}
 import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
@@ -304,10 +304,11 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
    * deletion vectors; else, one index file will contain all deletion vector with the same partition
    * and bucket.
    */
-  def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVector]): Seq[CommitMessage] = {
+  def persistDeletionVectors(
+      deletionVectors: Dataset[SparkDeletionVector],
+      snapshot: Snapshot): Seq[CommitMessage] = {
     val sparkSession = deletionVectors.sparkSession
     import sparkSession.implicits._
-    val snapshot = table.snapshotManager().latestSnapshotFromFileSystem()
     val serializedCommits = deletionVectors
       .groupByKey(_.partitionAndBucket)
       .mapGroups {

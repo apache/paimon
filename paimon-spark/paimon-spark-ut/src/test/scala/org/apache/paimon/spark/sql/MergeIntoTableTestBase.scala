@@ -760,46 +760,49 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
   }
 
   test("Paimon MergeInto: concurrent merge and compact") {
-    withTable("s", "t") {
-      sql("CREATE TABLE s (id INT, b INT, c INT)")
-      sql("INSERT INTO s VALUES (1, 1, 1)")
+    for (dvEnabled <- Seq("true", "false")) {
+      withTable("s", "t") {
+        sql("CREATE TABLE s (id INT, b INT, c INT)")
+        sql("INSERT INTO s VALUES (1, 1, 1)")
 
-      sql("CREATE TABLE t (id INT, b INT, c INT)")
-      sql("INSERT INTO t VALUES (1, 1, 1)")
+        sql(
+          s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+        sql("INSERT INTO t VALUES (1, 1, 1)")
 
-      val mergeInto = Future {
-        for (_ <- 1 to 10) {
-          try {
-            sql("""
-                  |MERGE INTO t
-                  |USING s
-                  |ON t.id = s.id
-                  |WHEN MATCHED THEN
-                  |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
-                  |""".stripMargin)
-          } catch {
-            case a: Throwable =>
-              assert(
-                a.getMessage.contains("Conflicts during commits") || a.getMessage.contains(
-                  "Missing file"))
+        val mergeInto = Future {
+          for (_ <- 1 to 10) {
+            try {
+              sql("""
+                    |MERGE INTO t
+                    |USING s
+                    |ON t.id = s.id
+                    |WHEN MATCHED THEN
+                    |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                    |""".stripMargin)
+            } catch {
+              case a: Throwable =>
+                assert(
+                  a.getMessage.contains("Conflicts during commits") || a.getMessage.contains(
+                    "Missing file"))
+            }
+            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
           }
-          checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
         }
-      }
 
-      val compact = Future {
-        for (_ <- 1 to 10) {
-          try {
-            sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'id')")
-          } catch {
-            case a: Throwable => assert(a.getMessage.contains("Conflicts during commits"))
+        val compact = Future {
+          for (_ <- 1 to 10) {
+            try {
+              sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'id')")
+            } catch {
+              case a: Throwable => assert(a.getMessage.contains("Conflicts during commits"))
+            }
+            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
           }
-          checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
         }
-      }
 
-      Await.result(mergeInto, 60.seconds)
-      Await.result(compact, 60.seconds)
+        Await.result(mergeInto, 60.seconds)
+        Await.result(compact, 60.seconds)
+      }
     }
   }
 }

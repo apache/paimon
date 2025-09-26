@@ -886,23 +886,25 @@ public class FileStoreCommitTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), String.valueOf(bitmap64));
         TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // create files
+        CommitMessageImpl commitMessage0 =
+                store.writeDataFiles(partition, 0, Arrays.asList("f1", "f2"));
+        store.commit(commitMessage0);
 
         // commit 1
         CommitMessageImpl commitMessage1 =
                 store.writeDVIndexFiles(
-                        BinaryRow.EMPTY_ROW,
-                        0,
-                        Collections.singletonMap("f1", Arrays.asList(1, 3)));
+                        partition, 0, Collections.singletonMap("f1", Arrays.asList(1, 3)));
         CommitMessageImpl commitMessage2 =
                 store.writeDVIndexFiles(
-                        BinaryRow.EMPTY_ROW,
-                        0,
-                        Collections.singletonMap("f2", Arrays.asList(2, 4)));
+                        partition, 0, Collections.singletonMap("f2", Arrays.asList(2, 4)));
         store.commit(commitMessage1, commitMessage2);
 
         // assert 1
-        assertThat(store.scanDVIndexFiles(BinaryRow.EMPTY_ROW, 0).size()).isEqualTo(2);
-        BucketedDvMaintainer maintainer = store.createOrRestoreDVMaintainer(BinaryRow.EMPTY_ROW, 0);
+        assertThat(store.scanDVIndexFiles(partition, 0).size()).isEqualTo(2);
+        BucketedDvMaintainer maintainer = store.createOrRestoreDVMaintainer(partition, 0);
         Map<String, DeletionVector> dvs = maintainer.deletionVectors();
         assertThat(dvs.size()).isEqualTo(2);
         assertThat(dvs.get("f2").isDeleted(2)).isTrue();
@@ -912,16 +914,16 @@ public class FileStoreCommitTest {
         // commit 2
         CommitMessage commitMessage3 =
                 store.writeDVIndexFiles(
-                        BinaryRow.EMPTY_ROW, 0, Collections.singletonMap("f2", Arrays.asList(3)));
+                        partition, 0, Collections.singletonMap("f2", Arrays.asList(3)));
         List<IndexFileMeta> deleted =
                 new ArrayList<>(commitMessage1.newFilesIncrement().newIndexFiles());
         deleted.addAll(commitMessage2.newFilesIncrement().newIndexFiles());
-        CommitMessage commitMessage4 = store.removeIndexFiles(BinaryRow.EMPTY_ROW, 0, deleted);
+        CommitMessage commitMessage4 = store.removeIndexFiles(partition, 0, deleted);
         store.commit(commitMessage3, commitMessage4);
 
         // assert 2
-        assertThat(store.scanDVIndexFiles(BinaryRow.EMPTY_ROW, 0).size()).isEqualTo(1);
-        maintainer = store.createOrRestoreDVMaintainer(BinaryRow.EMPTY_ROW, 0);
+        assertThat(store.scanDVIndexFiles(partition, 0).size()).isEqualTo(1);
+        maintainer = store.createOrRestoreDVMaintainer(partition, 0);
         dvs = maintainer.deletionVectors();
         assertThat(dvs.size()).isEqualTo(2);
         assertThat(dvs.get("f1").isDeleted(3)).isTrue();
