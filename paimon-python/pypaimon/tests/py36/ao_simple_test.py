@@ -401,9 +401,21 @@ class AOSimpleTest(RESTBaseTest):
 
         with patch("pypaimon.common.file_io.pyarrow.__version__", "6.0.0"), \
                 patch("pyarrow.fs.S3FileSystem") as mock_s3fs:
-            FileIO("oss:/oss-bucket/paimon-database/paimon-table", props)
+            FileIO("oss://oss-bucket/paimon-database/paimon-table", props)
             mock_s3fs.assert_called_once_with(access_key="AKID",
                                               secret_key="SECRET",
                                               session_token="TOKEN",
                                               region="cn-hangzhou",
                                               endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])
+            FileIO("oss://oss-bucket.endpoint/paimon-database/paimon-table", props)
+            mock_s3fs.assert_called_with(access_key="AKID",
+                                         secret_key="SECRET",
+                                         session_token="TOKEN",
+                                         region="cn-hangzhou",
+                                         endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])
+            FileIO("oss://access_id:secret_key@Endpoint/oss-bucket/paimon-database/paimon-table", props)
+            mock_s3fs.assert_called_with(access_key="AKID",
+                                         secret_key="SECRET",
+                                         session_token="TOKEN",
+                                         region="cn-hangzhou",
+                                         endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])

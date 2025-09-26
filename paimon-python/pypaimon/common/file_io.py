@@ -31,10 +31,10 @@ from pypaimon.common.config import OssOptions, S3Options
 
 
 class FileIO:
-    def __init__(self, warehouse: str, catalog_options: dict):
+    def __init__(self, path: str, catalog_options: dict):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
-        scheme, netloc, path = self.parse_location(warehouse)
+        scheme, netloc, _ = self.parse_location(path)
         if scheme in {"oss"}:
             self.filesystem = self._initialize_oss_fs(path)
         elif scheme in {"s3", "s3a", "s3n"}:
@@ -56,6 +56,28 @@ class FileIO:
         else:
             return uri.scheme, uri.netloc, f"{uri.netloc}{uri.path}"
 
+    def _extract_oss_bucket(self, location) -> str:
+        uri = urlparse(location)
+        if uri.scheme and uri.scheme != "oss":
+            raise ValueError("Not an OSS URI: {}".format(location))
+
+        netloc = uri.netloc or ""
+        # parse oss://access_id:secret_key@Endpoint/bucket/path/to/object
+        if (getattr(uri, "username", None) or getattr(uri, "password", None)) or ("@" in netloc):
+            first_segment = uri.path.lstrip("/").split("/", 1)[0]
+            if not first_segment:
+                raise ValueError("Invalid OSS URI without bucket: {}".format(location))
+            return first_segment
+
+        # parse oss://bucket/... or oss://bucket.endpoint/...
+        host = getattr(uri, "hostname", None) or netloc
+        if not host:
+            raise ValueError("Invalid OSS URI without host: {}".format(location))
+        bucket = host.split(".", 1)[0]
+        if not bucket:
+            raise ValueError("Invalid OSS URI without bucket: {}".format(location))
+        return bucket
+
     def _initialize_oss_fs(self, path) -> FileSystem:
         from pyarrow.fs import S3FileSystem
 
@@ -69,11 +91,12 @@ class FileIO:
         # Based on https://github.com/apache/arrow/issues/40506
         if parse(pyarrow.__version__) >= parse("7.0.0"):
             client_kwargs['force_virtual_addressing'] = True
-            client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
+            # client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
+            client_kwargs['endpoint_override'] = "oss-cn-hangzhou.aliyuncs.com"
         else:
-            oss_bucket = path.split('/')[1]
+            oss_bucket = self._extract_oss_bucket(path)
             client_kwargs['endpoint_override'] = (oss_bucket + "." +
-                                                  self.properties.get(OssOptions.OSS_ENDPOINT))
+                                                  "oss-cn-hangzhou.aliyuncs.com")
 
         return S3FileSystem(**client_kwargs)
 
