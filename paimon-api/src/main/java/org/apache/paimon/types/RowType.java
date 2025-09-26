@@ -21,7 +21,6 @@ package org.apache.paimon.types;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.SpecialFields;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -302,33 +301,6 @@ public final class RowType extends DataType {
                                 .map(k -> fields.get(fieldNames.indexOf(k)))
                                 .collect(Collectors.toList()))
                 .copy(isNullable());
-    }
-
-    public Pair<RowType, RowType> splitBlob() {
-        List<DataField> fields = getFields();
-        List<DataField> normalFields = new ArrayList<>();
-        List<DataField> blobFields = new ArrayList<>();
-
-        for (DataField field : fields) {
-            DataTypeRoot type = field.type().getTypeRoot();
-            if (type == DataTypeRoot.BLOB) {
-                blobFields.add(field);
-            } else {
-                normalFields.add(field);
-            }
-        }
-
-        return Pair.of(new RowType(normalFields), new RowType(blobFields));
-    }
-
-    public boolean containsBlobType() {
-        for (DataField field : fields) {
-            DataTypeRoot type = field.type().getTypeRoot();
-            if (type == DataTypeRoot.BLOB) {
-                return true;
-            }
-        }
-        return false;
     }
 
     public int[] projectIndexes(List<String> names) {

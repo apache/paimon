@@ -48,8 +48,8 @@ import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link RollingFileWriterWithBlob}. */
-public class RollingFileWriterWithBlobTest {
+/** Tests for {@link RollingBlobFileWriter}. */
+public class RollingBlobFileWriterTest {
 
     private static final RowType SCHEMA =
             RowType.builder()
@@ -64,7 +64,7 @@ public class RollingFileWriterWithBlobTest {
 
     @TempDir java.nio.file.Path tempDir;
 
-    private RollingFileWriterWithBlob writer;
+    private RollingBlobFileWriter writer;
     private DataFilePathFactory pathFactory;
     private LongCounter seqNumCounter;
     private byte[] testBlobData;
@@ -90,7 +90,7 @@ public class RollingFileWriterWithBlobTest {
 
         // Initialize the writer
         writer =
-                new RollingFileWriterWithBlob(
+                new RollingBlobFileWriter(
                         fileIO,
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),

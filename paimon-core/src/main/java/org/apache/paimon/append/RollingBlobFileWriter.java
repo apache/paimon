@@ -34,6 +34,7 @@ import org.apache.paimon.io.SingleFileWriter.AbortExecutor;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Pair;
@@ -54,10 +55,25 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * A rolling file writer that handles both normal data and blob data. This writer creates separate
  * files for normal columns and blob columns, managing their lifecycle and ensuring consistency
  * between them.
+ *
+ * <pre>
+ * For example,
+ * given a table schema with normal columns (id INT, name STRING) and a blob column (data BLOB),
+ * this writer will create separate files for (id, name) and (data).
+ * It will roll files based on the specified target file size, ensuring that both normal and blob
+ * files are rolled simultaneously.
+ *
+ * Every time a file is rolled, the writer will close the current normal data file and blob data files,
+ * so one normal data file may correspond to multiple blob data files.
+ *
+ * Normal file1: f1.parquet may including (b1.blob, b2.blob, b3.blob)
+ * Normal file2: f1-2.parquet may including (b4.blob, b5.blob)
+ *
+ * </pre>
  */
-public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow, DataFileMeta> {
+public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, DataFileMeta> {
 
-    private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriterWithBlob.class);
+    private static final Logger LOG = LoggerFactory.getLogger(RollingBlobFileWriter.class);
 
     /** Constant for checking rolling condition periodically. */
     private static final long CHECK_ROLLING_RECORD_CNT = 1000L;
@@ -66,20 +82,23 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
     private static final int EXPECTED_BLOB_FIELD_COUNT = 1;
 
     // Core components
-    private final Supplier<MappedWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
+    private final Supplier<
+                    PeojectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
             writerFactory;
-    private final MappedWriter<RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
+    private final PeojectedFileWriter<
+                    RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
             blobWriter;
     private final long targetFileSize;
 
     // State management
     private final List<AbortExecutor> closedWriters;
     private final List<DataFileMeta> results;
-    private MappedWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta> currentWriter;
+    private PeojectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>
+            currentWriter;
     private long recordCount = 0;
     private boolean closed = false;
 
-    public RollingFileWriterWithBlob(
+    public RollingBlobFileWriter(
             FileIO fileIO,
             long schemaId,
             FileFormat fileFormat,
@@ -100,7 +119,7 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
         this.closedWriters = new ArrayList<>();
 
         // Split schema into normal and blob parts
-        Pair<RowType, RowType> typeWithBlob = writeSchema.splitBlob();
+        Pair<RowType, RowType> typeWithBlob = BlobType.splitBlob(writeSchema);
         RowType normalRowType = typeWithBlob.getLeft();
         RowType blobType = typeWithBlob.getRight();
 
@@ -137,7 +156,7 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
     }
 
     /** Creates a factory for normal data writers. */
-    private Supplier<MappedWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
+    private Supplier<PeojectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
             createNormalWriterFactory(
                     FileIO fileIO,
                     long schemaId,
@@ -175,12 +194,13 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
                             statsDenseStore,
                             pathFactory.isExternalPath(),
                             normalColumnNames);
-            return new MappedWriter<>(rowDataFileWriter, projectionNormalFields);
+            return new PeojectedFileWriter<>(rowDataFileWriter, projectionNormalFields);
         };
     }
 
     /** Creates a blob writer for handling blob data. */
-    private MappedWriter<RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
+    private PeojectedFileWriter<
+                    RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
             createBlobWriter(
                     FileIO fileIO,
                     long schemaId,
@@ -202,7 +222,7 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
                 "Limit exactly one blob fields in one paimon table yet.");
 
         int[] blobProjection = writeSchema.projectIndexes(blobNames);
-        return new MappedWriter<>(
+        return new PeojectedFileWriter<>(
                 new RollingFileWriterImpl<>(
                         () ->
                                 new RowDataFileWriter(
