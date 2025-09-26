@@ -24,6 +24,15 @@ import org.apache.paimon.utils.ProjectedRow;
 
 import java.io.IOException;
 
+/**
+ * A delegating {@link org.apache.paimon.io.FileWriter} which applies a field projection to each
+ * incoming {@link org.apache.paimon.data.InternalRow} before forwarding it to the underlying
+ * writer.
+ *
+ * <p>This is useful when the physical file schema is a subset of the logical write schema. The
+ * projection is evaluated via {@link org.apache.paimon.utils.ProjectedRow} to avoid object
+ * allocations.
+ */
 public class MappedWriter<T extends FileWriter<InternalRow, R>, R>
         implements FileWriter<InternalRow, R> {
 
