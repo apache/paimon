@@ -102,7 +102,8 @@ public class KeyValueFileReadWriteTest {
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
         RollingFileWriterImpl<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+                (RollingFileWriterImpl<KeyValue, DataFileMeta>)
+                        writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
         List<DataFileMeta> actualMetas = writer.result();
@@ -155,7 +156,7 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), "avro");
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriterImpl<KeyValue, DataFileMeta> writer =
+        RollingFileWriter<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
@@ -188,7 +189,7 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), "avro");
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriterImpl<KeyValue, DataFileMeta> writer =
+        RollingFileWriter<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
@@ -393,7 +394,7 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriterImpl<KeyValue, DataFileMeta> writer =
+        RollingFileWriter<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();

@@ -25,7 +25,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.RollingFileWriterImpl;
+import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
@@ -59,11 +59,11 @@ public interface SinkWriter<T> {
      */
     class DirectSinkWriter<T> implements SinkWriter<T> {
 
-        private final Supplier<RollingFileWriterImpl<T, DataFileMeta>> writerSupplier;
+        private final Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier;
 
-        private RollingFileWriterImpl<T, DataFileMeta> writer;
+        private RollingFileWriter<T, DataFileMeta> writer;
 
-        public DirectSinkWriter(Supplier<RollingFileWriterImpl<T, DataFileMeta>> writerSupplier) {
+        public DirectSinkWriter(Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier) {
             this.writerSupplier = writerSupplier;
         }
 
@@ -129,7 +129,7 @@ public interface SinkWriter<T> {
      */
     class BufferedSinkWriter<T> implements SinkWriter<T> {
 
-        private final Supplier<RollingFileWriterImpl<T, DataFileMeta>> writerSupplier;
+        private final Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier;
         private final Function<T, InternalRow> toRow;
         private final Function<InternalRow, T> fromRow;
         private final IOManager ioManager;
@@ -141,7 +141,7 @@ public interface SinkWriter<T> {
         private RowBuffer writeBuffer;
 
         public BufferedSinkWriter(
-                Supplier<RollingFileWriterImpl<T, DataFileMeta>> writerSupplier,
+                Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier,
                 Function<T, InternalRow> toRow,
                 Function<InternalRow, T> fromRow,
                 IOManager ioManager,
@@ -172,7 +172,7 @@ public interface SinkWriter<T> {
         public List<DataFileMeta> flush() throws IOException {
             List<DataFileMeta> flushedFiles = new ArrayList<>();
             if (writeBuffer != null) {
-                RollingFileWriterImpl<T, DataFileMeta> writer = writerSupplier.get();
+                RollingFileWriter<T, DataFileMeta> writer = writerSupplier.get();
                 IOException exception = null;
                 try (RowBuffer.RowBufferIterator iterator = writeBuffer.newIterator()) {
                     while (iterator.advanceNext()) {

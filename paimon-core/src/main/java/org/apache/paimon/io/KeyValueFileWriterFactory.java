@@ -94,7 +94,7 @@ public class KeyValueFileWriterFactory {
         return formatContext.pathFactory(new WriteFormatKey(level, false));
     }
 
-    public RollingFileWriterImpl<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
+    public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
             int level, FileSource fileSource) {
         WriteFormatKey key = new WriteFormatKey(level, false);
         return new RollingFileWriterImpl<>(
