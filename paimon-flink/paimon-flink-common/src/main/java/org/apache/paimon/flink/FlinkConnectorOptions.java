@@ -539,6 +539,12 @@ public class FlinkConnectorOptions {
                                     + "multiple option group separated by commas. "
                                     + "Now only 'external-paths' is supported.");
 
+    public static final ConfigOption<String> BLOB_FIELD =
+            key("blob.field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the blob field.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

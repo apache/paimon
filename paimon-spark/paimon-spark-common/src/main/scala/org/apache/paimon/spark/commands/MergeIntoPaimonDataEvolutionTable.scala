@@ -75,16 +75,42 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
   private val firstRowIds: Seq[Long] = table
-    .newSnapshotReader()
-    .withManifestEntryFilter(entry => entry.file().firstRowId() != null)
-    .read()
-    .splits()
+    .store()
+    .newScan()
+    .withManifestEntryFilter(
+      entry =>
+        entry.file().firstRowId() != null && (!entry
+          .file()
+          .isBlob))
+    .plan()
+    .files()
     .asScala
-    .map(_.asInstanceOf[DataSplit])
-    .flatMap(split => split.dataFiles().asScala.map(s => s.firstRowId().asInstanceOf[Long]))
+    .map(file => file.file().firstRowId().asInstanceOf[Long])
     .distinct
     .sorted
     .toSeq
+
+  private val firstRowIdToBlobFirstRowIds = {
+    val map = new mutable.HashMap[Long, List[Long]]()
+    val files = table
+      .store()
+      .newScan()
+      .withManifestEntryFilter(entry => entry.file().isBlob)
+      .plan()
+      .files()
+      .asScala
+      .sortBy(f => f.file().firstRowId())
+
+    for (file <- files) {
+      val firstRowId = file.file().firstRowId().asInstanceOf[Long]
+      val firstIdInNormalFile = floorBinarySearch(firstRowIds, firstRowId)
+      map.update(
+        firstIdInNormalFile,
+        map.getOrElseUpdate(firstIdInNormalFile, List.empty[Long]) :+ firstRowId
+      )
+    }
+    map
+  }
 
   lazy val targetRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(targetTable)
   lazy val sourceRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(sourceTable)
@@ -288,6 +314,14 @@ case class MergeIntoPaimonDataEvolutionTable(
       .select(firstRowIdUdf(col(identifier)))
       .distinct()
       .as[Long]
+      .flatMap(
+        f => {
+          if (firstRowIdToBlobFirstRowIds.contains(f)) {
+            firstRowIdToBlobFirstRowIds(f)
+          } else {
+            Seq(f)
+          }
+        })
       .collect()
   }
 
