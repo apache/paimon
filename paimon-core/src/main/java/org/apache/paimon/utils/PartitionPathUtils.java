@@ -24,6 +24,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -75,6 +77,11 @@ public class PartitionPathUtils {
      * @return An escaped, valid partition name.
      */
     public static String generatePartitionPath(LinkedHashMap<String, String> partitionSpec) {
+        return generatePartitionPathUtil(partitionSpec, false);
+    }
+
+    public static String generatePartitionPathUtil(
+            LinkedHashMap<String, String> partitionSpec, boolean onlyValue) {
         if (partitionSpec.isEmpty()) {
             return "";
         }
@@ -84,8 +91,10 @@ public class PartitionPathUtils {
             if (i > 0) {
                 suffixBuf.append(Path.SEPARATOR);
             }
-            suffixBuf.append(escapePathName(e.getKey()));
-            suffixBuf.append('=');
+            if (!onlyValue) {
+                suffixBuf.append(escapePathName(e.getKey()));
+                suffixBuf.append('=');
+            }
             suffixBuf.append(escapePathName(e.getValue()));
             i++;
         }
@@ -98,12 +107,13 @@ public class PartitionPathUtils {
         return partitions.stream()
                 .map(
                         partition ->
-                                PartitionPathUtils.generatePartitionPath(partition, partitionType))
+                                PartitionPathUtils.generatePartitionPath(
+                                        partition, partitionType, false))
                 .collect(Collectors.toList());
     }
 
     public static String generatePartitionPath(
-            Map<String, String> partitionSpec, RowType partitionType) {
+            Map<String, String> partitionSpec, RowType partitionType, boolean onlyValue) {
         LinkedHashMap<String, String> linkedPartitionSpec = new LinkedHashMap<>();
         List<DataField> fields = partitionType.getFields();
 
@@ -115,7 +125,9 @@ public class PartitionPathUtils {
             }
         }
 
-        return generatePartitionPath(linkedPartitionSpec);
+        return onlyValue
+                ? generatePartitionPathUtil(linkedPartitionSpec, true)
+                : generatePartitionPath(linkedPartitionSpec);
     }
 
     /**
@@ -239,6 +251,17 @@ public class PartitionPathUtils {
         return fullPartSpec;
     }
 
+    public static LinkedHashMap<String, String> extractPartitionSpecFromPathOnlyValue(
+            Path currPath, List<String> partitionKeys, int partitionNumber) {
+        LinkedHashMap<String, String> fullPartSpec = new LinkedHashMap<>();
+        String[] split = currPath.toString().split(Path.SEPARATOR);
+        int equalityPartitionSize = partitionKeys.size() - partitionNumber;
+        for (int i = 0; i < equalityPartitionSize; i++) {
+            fullPartSpec.put(partitionKeys.get(i), split[split.length - partitionKeys.size() + i]);
+        }
+        return fullPartSpec;
+    }
+
     /**
      * Search all partitions in this path.
      *
@@ -247,7 +270,11 @@ public class PartitionPathUtils {
      * @return all partition specs to its path.
      */
     public static List<Pair<LinkedHashMap<String, String>, Path>> searchPartSpecAndPaths(
-            FileIO fileIO, Path path, int partitionNumber) {
+            FileIO fileIO,
+            Path path,
+            int partitionNumber,
+            @Nullable List<String> partitionKeys,
+            boolean enablePartitionOnlyValueInPath) {
         FileStatus[] generatedParts = getFileStatusRecurse(path, partitionNumber, fileIO);
         List<Pair<LinkedHashMap<String, String>, Path>> ret = new ArrayList<>();
         for (FileStatus part : generatedParts) {
@@ -255,7 +282,15 @@ public class PartitionPathUtils {
             if (isHiddenFile(part)) {
                 continue;
             }
-            ret.add(Pair.of(extractPartitionSpecFromPath(part.getPath()), part.getPath()));
+            if (enablePartitionOnlyValueInPath && partitionKeys != null) {
+                ret.add(
+                        Pair.of(
+                                extractPartitionSpecFromPathOnlyValue(
+                                        part.getPath(), partitionKeys, partitionNumber),
+                                part.getPath()));
+            } else {
+                ret.add(Pair.of(extractPartitionSpecFromPath(part.getPath()), part.getPath()));
+            }
         }
         return ret;
     }
