@@ -363,12 +363,6 @@ under the License.
             <td>Enable data file thin mode to avoid duplicate columns storage.</td>
         </tr>
         <tr>
-            <td><h5>delete-file.thread-num</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.</td>
-        </tr>
-        <tr>
             <td><h5>delete.force-produce-changelog</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -451,6 +445,12 @@ under the License.
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>Whether enabled read file index.</td>
+        </tr>
+        <tr>
+            <td><h5>file-operation.thread-num</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent file operations. By default is the number of processors available to the Java virtual machine.</td>
         </tr>
         <tr>
             <td><h5>file-reader-async-threshold</h5></td>

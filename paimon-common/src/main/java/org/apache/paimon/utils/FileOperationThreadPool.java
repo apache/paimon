@@ -24,10 +24,10 @@ import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
-/** Thread pool to delete files using {@link FileIO}. */
-public class FileDeletionThreadPool {
+/** Thread pool to operate files using {@link FileIO}. */
+public class FileOperationThreadPool {
 
-    private static final String THREAD_NAME = "DELETE-FILE-THREAD-POOL";
+    private static final String THREAD_NAME = "FILE-OPERATION-THREAD-POOL";
 
     private static ThreadPoolExecutor executorService =
             createCachedThreadPool(Runtime.getRuntime().availableProcessors(), THREAD_NAME);

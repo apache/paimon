@@ -751,7 +751,7 @@ public class FileDeletionTest {
                         store.newStatsFileHandler(),
                         store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                         store.options().cleanEmptyDirectories(),
-                        store.options().deleteFileThreadNum());
+                        store.options().fileOperationThreadNum());
 
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
@@ -816,7 +816,7 @@ public class FileDeletionTest {
                         store.newStatsFileHandler(),
                         store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                         store.options().cleanEmptyDirectories(),
-                        store.options().deleteFileThreadNum());
+                        store.options().fileOperationThreadNum());
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
                         snapshotManager, changelogManager, snapshotDeletion, tagManager);
