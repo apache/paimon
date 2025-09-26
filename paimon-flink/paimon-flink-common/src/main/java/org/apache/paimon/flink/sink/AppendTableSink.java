@@ -23,6 +23,7 @@ import org.apache.paimon.flink.compact.AppendPreCommitCompactCoordinatorOperator
 import org.apache.paimon.flink.compact.AppendPreCommitCompactWorkerOperator;
 import org.apache.paimon.flink.source.AppendBypassCoordinateOperatorFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -98,7 +99,10 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
         }
 
         boolean enableCompaction =
-                !table.coreOptions().writeOnly() && !table.coreOptions().dataEvolutionEnabled();
+                !table.coreOptions().writeOnly()
+                        && !table.coreOptions().dataEvolutionEnabled()
+                        && !(table.bucketMode() == BucketMode.BUCKET_UNAWARE
+                                && table.coreOptions().clusteringIncrementalEnabled());
         boolean isStreamingMode =
                 input.getExecutionEnvironment()
                                 .getConfiguration()

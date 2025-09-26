@@ -101,6 +101,10 @@ public class CompactAction extends TableActionBase {
         checkArgument(
                 !((FileStoreTable) table).coreOptions().dataEvolutionEnabled(),
                 "Compact action does not support data evolution table yet. ");
+        checkArgument(
+                !(((FileStoreTable) table).bucketMode() == BucketMode.BUCKET_UNAWARE
+                        && ((FileStoreTable) table).coreOptions().clusteringIncrementalEnabled()),
+                "The table has enabled incremental clustering, and do not support compact in flink yet.");
         HashMap<String, String> dynamicOptions = new HashMap<>(tableConf);
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
         table = table.copy(dynamicOptions);
