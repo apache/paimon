@@ -18,12 +18,17 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.table.types.logical.BinaryType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.VarBinaryType;
 
 import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Conversion between {@link LogicalType} and {@link DataType}. */
 public class LogicalTypeConversion {
@@ -35,6 +40,13 @@ public class LogicalTypeConversion {
 
     public static LogicalType toLogicalType(DataType dataType) {
         return dataType.accept(DataTypeToLogicalType.INSTANCE);
+    }
+
+    public static BlobType toBlobType(LogicalType logicalType) {
+        checkArgument(
+                logicalType instanceof BinaryType || logicalType instanceof VarBinaryType,
+                "Expected BinaryType or VarBinaryType, but got: " + logicalType);
+        return new BlobType();
     }
 
     public static RowType toDataType(org.apache.flink.table.types.logical.RowType logicalType) {

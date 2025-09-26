@@ -25,6 +25,8 @@ import org.apache.paimon.spark.commands.DataEvolutionPaimonWriter.{deserializeCo
 import org.apache.paimon.spark.write.WriteHelper
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink._
+import org.apache.paimon.types.DataType
+import org.apache.paimon.types.DataTypeRoot.BLOB
 
 import org.apache.spark.sql._
 
@@ -60,6 +62,11 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteH
     import sparkSession.implicits._
     assert(data.columns.length == columnNames.size + 2)
     val writeType = table.rowType().project(columnNames.asJava)
+
+    if (writeType.getFieldTypes.stream.anyMatch((t: DataType) => t.is(BLOB))) {
+      throw new UnsupportedOperationException(
+        "DataEvolution does not support writing partial columns mixed with BLOB type.")
+    }
 
     val written =
       data.mapPartitions {

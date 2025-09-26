@@ -18,22 +18,17 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.SimpleStatsCollector;
-import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 
 import javax.annotation.Nullable;
 
-import java.util.Arrays;
 import java.util.List;
 
 /** {@link RollingFileWriterImpl} for data files containing {@link InternalRow}. */
@@ -58,7 +53,7 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
                 () ->
                         new RowDataFileWriter(
                                 fileIO,
-                                createFileWriterContext(
+                                RollingFileWriter.createFileWriterContext(
                                         fileFormat, writeSchema, statsCollectors, fileCompression),
                                 pathFactory.newPath(),
                                 writeSchema,
@@ -71,35 +66,5 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
                                 pathFactory.isExternalPath(),
                                 writeCols),
                 targetFileSize);
-    }
-
-    @VisibleForTesting
-    static FileWriterContext createFileWriterContext(
-            FileFormat fileFormat,
-            RowType rowType,
-            SimpleColStatsCollector.Factory[] statsCollectors,
-            String fileCompression) {
-        return new FileWriterContext(
-                fileFormat.createWriterFactory(rowType),
-                createStatsProducer(fileFormat, rowType, statsCollectors),
-                fileCompression);
-    }
-
-    private static SimpleStatsProducer createStatsProducer(
-            FileFormat fileFormat,
-            RowType rowType,
-            SimpleColStatsCollector.Factory[] statsCollectors) {
-        boolean isDisabled =
-                Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
-                        .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
-        if (isDisabled) {
-            return SimpleStatsProducer.disabledProducer();
-        }
-        if (fileFormat instanceof AvroFileFormat) {
-            SimpleStatsCollector collector = new SimpleStatsCollector(rowType, statsCollectors);
-            return SimpleStatsProducer.fromCollector(collector);
-        }
-        return SimpleStatsProducer.fromExtractor(
-                fileFormat.createStatsExtractor(rowType, statsCollectors).orElse(null));
     }
 }
