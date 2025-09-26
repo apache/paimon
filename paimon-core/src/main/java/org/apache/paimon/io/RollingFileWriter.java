@@ -30,6 +30,14 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
+/**
+ * A file writer that automatically rolls over to a new file when a target size is reached and
+ * supports writing bundles of records.
+ *
+ * <p>This interface also provides utilities to construct a {@link FileWriterContext} with
+ * appropriate statistics collection (collector-based for Avro, extractor-based for others), so
+ * implementations can focus on rolling logic and I/O.
+ */
 public interface RollingFileWriter<T, R> extends FileWriter<T, List<R>> {
 
     int CHECK_ROLLING_RECORD_CNT = 1024;
