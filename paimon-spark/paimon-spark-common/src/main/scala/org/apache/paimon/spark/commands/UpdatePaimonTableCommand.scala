@@ -71,6 +71,7 @@ case class UpdatePaimonTableCommand(
 
   /** Update for table without primary keys */
   private def performUpdateForNonPkTable(sparkSession: SparkSession): Seq[CommitMessage] = {
+    val readSnapshot = table.snapshotManager().latestSnapshot()
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
     val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
@@ -100,7 +101,7 @@ case class UpdatePaimonTableCommand(
           val addCommitMessage = writeOnlyUpdatedData(sparkSession, touchedDataSplits)
 
           // Step4: write these deletion vectors.
-          val indexCommitMsg = writer.persistDeletionVectors(deletionVectors)
+          val indexCommitMsg = writer.persistDeletionVectors(deletionVectors, readSnapshot)
 
           addCommitMessage ++ indexCommitMsg
         } finally {
