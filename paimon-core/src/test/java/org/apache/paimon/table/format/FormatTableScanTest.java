@@ -174,8 +174,13 @@ public class FormatTableScanTest {
                         fileIO,
                         result.getLeft(),
                         result.getRight(),
-                        null,
+                        partitionKeys,
                         enablePartitionValueOnly);
+        LinkedHashMap<String, String> expectPartitionSpec =
+                new LinkedHashMap<>(partitionKeys.size());
+        expectPartitionSpec.put("year", "2023");
+        expectPartitionSpec.put("month", "12");
+        assertThat(searched.get(0).getLeft()).isEqualTo(expectPartitionSpec);
         assertThat(searched.size()).isEqualTo(1);
     }
 
@@ -209,8 +214,13 @@ public class FormatTableScanTest {
                         fileIO,
                         result.getLeft(),
                         result.getRight(),
-                        null,
+                        partitionKeys,
                         enablePartitionValueOnly);
+        LinkedHashMap<String, String> expectPartitionSpec =
+                new LinkedHashMap<>(partitionKeys.size());
+        expectPartitionSpec.put("year", "2023");
+        expectPartitionSpec.put("month", "12");
+        assertThat(searched.get(0).getLeft()).isEqualTo(expectPartitionSpec);
         assertThat(searched.size()).isEqualTo(1);
     }
 
@@ -241,7 +251,17 @@ public class FormatTableScanTest {
         partitionPath = enablePartitionValueOnly ? "2023/12" : "year=2023/month=12";
         fileIO.mkdirs(new Path(tableLocation, partitionPath));
         List<Pair<LinkedHashMap<String, String>, Path>> searched =
-                searchPartSpecAndPaths(fileIO, result.getLeft(), result.getRight(), null, false);
+                searchPartSpecAndPaths(
+                        fileIO,
+                        result.getLeft(),
+                        result.getRight(),
+                        partitionKeys,
+                        enablePartitionValueOnly);
+        LinkedHashMap<String, String> expectPartitionSpec =
+                new LinkedHashMap<>(partitionKeys.size());
+        expectPartitionSpec.put("year", "2023");
+        expectPartitionSpec.put("month", "12");
+        assertThat(searched.get(0).getLeft()).isEqualTo(expectPartitionSpec);
         assertThat(searched.size()).isEqualTo(1);
     }
 
