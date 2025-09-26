@@ -1971,6 +1971,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1024)
                     .withDescription("Threshold for merging records to binary buffer in lookup.");
 
+    public static final ConfigOption<Boolean> FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH =
+            ConfigOptions.key("format-table.partition-path-only-value")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Format table file path only contain partition value.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3027,6 +3033,10 @@ public class CoreOptions implements Serializable {
 
     public int lookupMergeRecordsThreshold() {
         return options.get(LOOKUP_MERGE_RECORDS_THRESHOLD);
+    }
+
+    public boolean formatTablePartitionOnlyValueInPath() {
+        return options.get(FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH);
     }
 
     /** Specifies the merge engine for table with primary key. */

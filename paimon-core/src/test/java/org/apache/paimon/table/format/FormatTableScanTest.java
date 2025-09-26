@@ -26,14 +26,15 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
+import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -48,135 +49,106 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link FormatTableScan}. */
-class FormatTableScanTest {
+@ExtendWith(ParameterizedTestExtension.class)
+public class FormatTableScanTest {
 
     @TempDir java.nio.file.Path tmpPath;
 
-    @ParameterizedTest
-    @ValueSource(
-            strings = {
-                "File.txt",
-                "file.txt",
-                "123file.txt",
-                "F",
-                "File-1.txt",
-                "a",
-                "0",
-                "9test",
-                "Test_file.log"
-            })
-    void testValidDataFileNames(String fileName) {
-        assertTrue(
-                FormatTableScan.isDataFileName(fileName),
-                "Filename '" + fileName + "' should be valid");
+    private final boolean enablePartitionValueOnly;
+    private final Path defaultTableLocation = new Path("/test/table_scan");
+    private final RowType partitionType =
+            RowType.builder()
+                    .field("year", DataTypes.INT())
+                    .field("month", DataTypes.INT())
+                    .build();
+    private final BinaryRow partition =
+            new InternalRowSerializer(partitionType).toBinaryRow(GenericRow.of(2023, 2));
+    private final String partitionPath;
+    private final List<String> partitionKeys = partitionType.getFieldNames();
+
+    public FormatTableScanTest(boolean enablePartitionValueOnly, String partitionPath) {
+        this.enablePartitionValueOnly = enablePartitionValueOnly;
+        this.partitionPath = defaultTableLocation + partitionPath;
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {".hidden", "_file.txt"})
-    void testInvalidDataFileNames(String fileName) {
-        assertFalse(
-                FormatTableScan.isDataFileName(fileName),
-                "Filename '" + fileName + "' should be invalid");
+    @Parameters(name = "enablePartitionValueOnly={0},partitionPath={1}")
+    public static List<Object[]> parameters() {
+        return Arrays.asList(
+                new Object[] {false, "/year=2023/month=2"}, new Object[] {true, "/2023/2"});
     }
 
-    @Test
+    @TestTemplate
+    void testValidDataFileNames() {
+        // Test valid data file names
+        String[] fileNames = {"File.txt", "file.txt", "123file.txt", "data", "Test_file.log"};
+        for (String fileName : fileNames) {
+            assertTrue(
+                    FormatTableScan.isDataFileName(fileName),
+                    "Filename '" + fileName + "' should be valid");
+        }
+    }
+
+    @TestTemplate
+    void testInvalidDataFileNames() {
+        String[] fileNames = {".hidden", "_file.txt"};
+        for (String fileName : fileNames) {
+            assertFalse(
+                    FormatTableScan.isDataFileName(fileName),
+                    "Filename '" + fileName + "' should be invalid");
+        }
+    }
+
+    @TestTemplate
     void testNullInput() {
         assertFalse(FormatTableScan.isDataFileName(null), "Null input should return false");
     }
 
-    @Test
+    @TestTemplate
     void testComputeScanPathAndLevelNoPartitionKeys() {
-        Path tableLocation = new Path("/test/table");
         List<String> partitionKeys = Collections.emptyList();
         RowType partitionType = RowType.of();
         PartitionPredicate partitionFilter = PartitionPredicate.alwaysTrue();
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
+                        defaultTableLocation, partitionKeys, partitionFilter, partitionType, false);
 
-        assertThat(result.getLeft()).isEqualTo(tableLocation);
+        assertThat(result.getLeft()).isEqualTo(defaultTableLocation);
         assertThat(result.getRight()).isEqualTo(0);
     }
 
-    @Test
+    @TestTemplate
     void testGeneratePartitions() {
-        Path tableLocation = new Path("/test/table");
-        List<String> partitionKeys = Arrays.asList("year", "month");
-        RowType partitionType =
-                RowType.builder()
-                        .field("year", DataTypes.INT())
-                        .field("month", DataTypes.INT())
-                        .build();
-
-        BinaryRow partition =
-                new InternalRowSerializer(partitionType).toBinaryRow(GenericRow.of(2023, 2));
         List<Pair<LinkedHashMap<String, String>, Path>> result =
                 FormatTableScan.generatePartitions(
                         partitionKeys,
                         partitionType,
                         "",
-                        tableLocation,
+                        defaultTableLocation,
                         Collections.singleton(partition),
-                        false);
+                        enablePartitionValueOnly);
         assertThat(result.size()).isEqualTo(1);
         assertThat(result.get(0).getLeft().toString()).isEqualTo("{year=2023, month=2}");
-        assertThat(result.get(0).getRight().toString()).isEqualTo("/test/table/year=2023/month=2");
+        assertThat(result.get(0).getRight().toString()).isEqualTo(partitionPath);
     }
 
-    @Test
-    void testGeneratePartitionsOnlyValue() {
-        Path tableLocation = new Path("/test/table");
-        List<String> partitionKeys = Arrays.asList("year", "month");
-        RowType partitionType =
-                RowType.builder()
-                        .field("year", DataTypes.INT())
-                        .field("month", DataTypes.INT())
-                        .build();
-
-        BinaryRow partition =
-                new InternalRowSerializer(partitionType).toBinaryRow(GenericRow.of(2023, 2));
-        List<Pair<LinkedHashMap<String, String>, Path>> result =
-                FormatTableScan.generatePartitions(
-                        partitionKeys,
-                        partitionType,
-                        "",
-                        tableLocation,
-                        Collections.singleton(partition),
-                        true);
-        assertThat(result.size()).isEqualTo(1);
-        assertThat(result.get(0).getLeft().toString()).isEqualTo("{year=2023, month=2}");
-        assertThat(result.get(0).getRight().toString()).isEqualTo("/test/table/2023/2");
-    }
-
-    @Test
+    @TestTemplate
     void testGetScanPathAndLevelNullFilter() {
-        Path tableLocation = new Path("/test/table");
-        List<String> partitionKeys = Arrays.asList("year", "month");
-        RowType partitionType =
-                RowType.builder()
-                        .field("year", DataTypes.INT())
-                        .field("month", DataTypes.INT())
-                        .build();
-
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, null, partitionType, false);
+                        defaultTableLocation,
+                        partitionType.getFieldNames(),
+                        null,
+                        partitionType,
+                        false);
 
-        assertThat(result.getLeft()).isEqualTo(tableLocation);
+        assertThat(result.getLeft()).isEqualTo(defaultTableLocation);
         assertThat(result.getRight()).isEqualTo(2);
     }
 
-    @Test
+    @TestTemplate
     void testGetScanPathAndLevelWithEqualityFilter() throws IOException {
         Path tableLocation = new Path(tmpPath.toUri());
-        List<String> partitionKeys = Arrays.asList("year", "month");
-        RowType partitionType =
-                RowType.builder()
-                        .field("year", DataTypes.INT())
-                        .field("month", DataTypes.INT())
-                        .build();
-
         // Create equality predicate for all partition keys
         PredicateBuilder builder = new PredicateBuilder(partitionType);
         Predicate equalityPredicate =
@@ -186,29 +158,32 @@ class FormatTableScanTest {
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
-
+                        tableLocation,
+                        partitionKeys,
+                        partitionFilter,
+                        partitionType,
+                        enablePartitionValueOnly);
+        String partitionPath = enablePartitionValueOnly ? "2023/12" : "year=2023/month=12";
         // Should optimize to specific partition path
-        assertThat(result.getLeft().toString()).isEqualTo(tableLocation + "year=2023/month=12");
+        assertThat(result.getLeft().toString()).isEqualTo(tableLocation + partitionPath);
         assertThat(result.getRight()).isEqualTo(0);
 
         // test searchPartSpecAndPaths
         LocalFileIO fileIO = LocalFileIO.create();
-        fileIO.mkdirs(new Path(tableLocation, "year=2023/month=12"));
+        fileIO.mkdirs(new Path(tableLocation, partitionPath));
         List<Pair<LinkedHashMap<String, String>, Path>> searched =
-                searchPartSpecAndPaths(fileIO, result.getLeft(), result.getRight(), null, false);
+                searchPartSpecAndPaths(
+                        fileIO,
+                        result.getLeft(),
+                        result.getRight(),
+                        null,
+                        enablePartitionValueOnly);
         assertThat(searched.size()).isEqualTo(1);
     }
 
-    @Test
+    @TestTemplate
     void testComputeScanPathWithFirstLevel() throws IOException {
         Path tableLocation = new Path(tmpPath.toUri());
-        List<String> partitionKeys = Arrays.asList("year", "month");
-        RowType partitionType =
-                RowType.builder()
-                        .field("year", DataTypes.INT())
-                        .field("month", DataTypes.INT())
-                        .build();
         // Create equality predicate for only the first partition key
         PredicateBuilder builder = new PredicateBuilder(partitionType);
         Predicate firstKeyEqualityPredicate = builder.equal(0, 2023);
@@ -217,30 +192,29 @@ class FormatTableScanTest {
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
+                        tableLocation,
+                        partitionKeys,
+                        partitionFilter,
+                        partitionType,
+                        enablePartitionValueOnly);
 
         // Should optimize to specific partition path for first key
-        assertThat(result.getLeft().toString()).isEqualTo(tableLocation + "year=2023");
+        String partitionPath = enablePartitionValueOnly ? "2023" : "year=2023";
+        assertThat(result.getLeft().toString()).isEqualTo(tableLocation + partitionPath);
         assertThat(result.getRight()).isEqualTo(1);
 
         // test searchPartSpecAndPaths
         LocalFileIO fileIO = LocalFileIO.create();
-        fileIO.mkdirs(new Path(tableLocation, "year=2023/month=12"));
+        partitionPath = enablePartitionValueOnly ? "2023/12" : "year=2023/month=12";
+        fileIO.mkdirs(new Path(tableLocation, partitionPath));
         List<Pair<LinkedHashMap<String, String>, Path>> searched =
                 searchPartSpecAndPaths(fileIO, result.getLeft(), result.getRight(), null, false);
         assertThat(searched.size()).isEqualTo(1);
     }
 
-    @Test
+    @TestTemplate
     void testComputeScanPathAndLevel() {
-        Path tableLocation = new Path("/test/table");
-        List<String> partitionKeys = Arrays.asList("year", "month");
-        RowType partitionType =
-                RowType.builder()
-                        .field("year", DataTypes.INT())
-                        .field("month", DataTypes.INT())
-                        .build();
-
+        Path tableLocation = new Path(tmpPath.toUri());
         // Create non-equality predicate
         PredicateBuilder builder = new PredicateBuilder(partitionType);
         Predicate nonEqualityPredicate = builder.greaterThan(0, 2022);
@@ -249,22 +223,20 @@ class FormatTableScanTest {
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
+                        tableLocation,
+                        partitionKeys,
+                        partitionFilter,
+                        partitionType,
+                        enablePartitionValueOnly);
 
         // Should not optimize, keep original path and level
         assertThat(result.getLeft()).isEqualTo(tableLocation);
         assertThat(result.getRight()).isEqualTo(2);
     }
 
-    @Test
+    @TestTemplate
     void testComputeScanPathAndLevelWithOrPredicate() {
-        Path tableLocation = new Path("/test/table");
-        List<String> partitionKeys = Arrays.asList("year", "month");
-        RowType partitionType =
-                RowType.builder()
-                        .field("year", DataTypes.INT())
-                        .field("month", DataTypes.INT())
-                        .build();
+        Path tableLocation = new Path(tmpPath.toUri());
 
         // Create OR predicate (not equality-only)
         PredicateBuilder builder = new PredicateBuilder(partitionType);
@@ -274,14 +246,18 @@ class FormatTableScanTest {
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
+                        tableLocation,
+                        partitionKeys,
+                        partitionFilter,
+                        partitionType,
+                        enablePartitionValueOnly);
 
         // Should not optimize, keep original path and level
         assertThat(result.getLeft()).isEqualTo(tableLocation);
         assertThat(result.getRight()).isEqualTo(2);
     }
 
-    @Test
+    @TestTemplate
     void testExtractEqualityPartitionSpecWithLeadingConsecutiveEquality() {
         List<String> partitionKeys = Arrays.asList("year", "month", "day");
         RowType partitionType =
@@ -303,14 +279,19 @@ class FormatTableScanTest {
         Path tableLocation = new Path("/test/table");
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
+                        tableLocation,
+                        partitionKeys,
+                        partitionFilter,
+                        partitionType,
+                        enablePartitionValueOnly);
 
         // Should optimize to year and month path (leading consecutive equality)
-        assertThat(result.getLeft().toString()).isEqualTo("/test/table/year=2023/month=12");
+        String partitionPath = enablePartitionValueOnly ? "/2023/12" : "/year=2023/month=12";
+        assertThat(result.getLeft().toString()).isEqualTo(tableLocation + partitionPath);
         assertThat(result.getRight()).isEqualTo(1);
     }
 
-    @Test
+    @TestTemplate
     void testExtractEqualityPartitionSpecWithNonConsecutiveEquality() {
         List<String> partitionKeys = Arrays.asList("year", "month", "day");
         RowType partitionType =
@@ -332,14 +313,19 @@ class FormatTableScanTest {
         Path tableLocation = new Path("/test/table");
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
+                        tableLocation,
+                        partitionKeys,
+                        partitionFilter,
+                        partitionType,
+                        enablePartitionValueOnly);
 
         // Should optimize only to year path (first equality, then stop at non-equality)
-        assertThat(result.getLeft().toString()).isEqualTo("/test/table/year=2023");
+        String partitionPath = enablePartitionValueOnly ? "/2023" : "/year=2023";
+        assertThat(result.getLeft().toString()).isEqualTo(tableLocation + partitionPath);
         assertThat(result.getRight()).isEqualTo(2);
     }
 
-    @Test
+    @TestTemplate
     void testExtractEqualityPartitionSpecWithSecondPartitionKeyEqualityOnly() {
         List<String> partitionKeys = Arrays.asList("year", "month", "day");
         RowType partitionType =
@@ -361,14 +347,18 @@ class FormatTableScanTest {
         Path tableLocation = new Path("/test/table");
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
+                        tableLocation,
+                        partitionKeys,
+                        partitionFilter,
+                        partitionType,
+                        enablePartitionValueOnly);
 
         // Should not optimize because first partition key is not equality
         assertThat(result.getLeft()).isEqualTo(tableLocation);
         assertThat(result.getRight()).isEqualTo(3);
     }
 
-    @Test
+    @TestTemplate
     void testExtractEqualityPartitionSpecWithAllEqualityConditions() {
         List<String> partitionKeys = Arrays.asList("year", "month", "day");
         RowType partitionType =
@@ -390,14 +380,20 @@ class FormatTableScanTest {
         Path tableLocation = new Path("/test/table");
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
-                        tableLocation, partitionKeys, partitionFilter, partitionType, false);
+                        tableLocation,
+                        partitionKeys,
+                        partitionFilter,
+                        partitionType,
+                        enablePartitionValueOnly);
 
         // Should optimize to full partition path and no further filtering needed
-        assertThat(result.getLeft().toString()).isEqualTo("/test/table/year=2023/month=12/day=25");
+        String partitionPath =
+                enablePartitionValueOnly ? "/2023/12/25" : "/year=2023/month=12/day=25";
+        assertThat(result.getLeft().toString()).isEqualTo(tableLocation + partitionPath);
         assertThat(result.getRight()).isEqualTo(0);
     }
 
-    @Test
+    @TestTemplate
     public void testExtractEqualityPartitionSpecWithAllEqualityWhenAllIsAnd() {
         RowType type =
                 RowType.builder()
@@ -424,7 +420,7 @@ class FormatTableScanTest {
         assertThat(result.get("day")).isEqualTo("25");
     }
 
-    @Test
+    @TestTemplate
     public void testExtractEqualityPartitionSpecWithLeadingConsecutiveEqualityWhenAllIsAnd() {
         RowType type =
                 RowType.builder()
@@ -452,7 +448,7 @@ class FormatTableScanTest {
         assertThat(result.containsKey("day")).isFalse();
     }
 
-    @Test
+    @TestTemplate
     public void testExtractEqualityPartitionSpecWithFirstPartitionKeyEqualityWhenAllIsAnd() {
         RowType type =
                 RowType.builder()
@@ -478,7 +474,7 @@ class FormatTableScanTest {
         assertThat(result.containsKey("day")).isFalse();
     }
 
-    @Test
+    @TestTemplate
     public void testExtractEqualityPartitionSpecWithNoLeadingEqualityWhenAllIsAnd() {
         RowType type =
                 RowType.builder()
@@ -502,7 +498,7 @@ class FormatTableScanTest {
         assertThat(result).isEmpty();
     }
 
-    @Test
+    @TestTemplate
     public void testExtractEqualityPartitionSpecWithNonEqualityPredicateWhenAllIsAnd() {
         RowType type =
                 RowType.builder()
@@ -523,7 +519,7 @@ class FormatTableScanTest {
         assertThat(result).isEmpty();
     }
 
-    @Test
+    @TestTemplate
     public void testExtractLeadingEqualityPartitionSpecWhenOnlyAndWithOrPredicate() {
         RowType type =
                 RowType.builder()
@@ -541,27 +537,5 @@ class FormatTableScanTest {
                         partitionKeys, orPredicate);
 
         assertThat(result).isEmpty();
-    }
-
-    @Test
-    public void
-            testSearchPartSpecAndPathsWhenPartitionKeysIsNotNullAndEnablePartitionOnlyValueInPathIsTrue()
-                    throws IOException {
-        Path tableLocation = new Path(tmpPath.toUri());
-        List<String> partitionKeys = Arrays.asList("year", "month", "day", "hour");
-        LocalFileIO fileIO = LocalFileIO.create();
-        Path partititonPath = new Path(tableLocation, "2023/12/01");
-        fileIO.mkdirs(partititonPath);
-        fileIO.mkdirs(new Path(tableLocation, "2023/12/01/00"));
-        fileIO.mkdirs(new Path(tableLocation, "2023/12/01/01"));
-
-        List<Pair<LinkedHashMap<String, String>, Path>> searched =
-                searchPartSpecAndPaths(fileIO, partititonPath, 1, partitionKeys, true);
-
-        assertThat(searched.size()).isEqualTo(2);
-        assertThat(searched.get(0).getLeft().get("year")).isEqualTo("2023");
-        assertThat(searched.get(0).getLeft().get("month")).isEqualTo("12");
-        assertThat(searched.get(0).getLeft().get("day")).isEqualTo("01");
-        assertThat(searched.get(0).getRight().toString()).contains("2023/12/01");
     }
 }

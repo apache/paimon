@@ -80,12 +80,7 @@ public class PartitionPathUtils {
         return generatePartitionPathUtil(partitionSpec, false);
     }
 
-    public static String generatePartitionPathOnlyValue(
-            LinkedHashMap<String, String> partitionSpec) {
-        return generatePartitionPathUtil(partitionSpec, true);
-    }
-
-    private static String generatePartitionPathUtil(
+    public static String generatePartitionPathUtil(
             LinkedHashMap<String, String> partitionSpec, boolean onlyValue) {
         if (partitionSpec.isEmpty()) {
             return "";
@@ -131,7 +126,7 @@ public class PartitionPathUtils {
         }
 
         return onlyValue
-                ? generatePartitionPathOnlyValue(linkedPartitionSpec)
+                ? generatePartitionPathUtil(linkedPartitionSpec, true)
                 : generatePartitionPath(linkedPartitionSpec);
     }
 

@@ -601,7 +601,7 @@ public abstract class CatalogTestBase {
         schemaBuilder.partitionKeys("dt", "dt2");
         schemaBuilder.option("type", "format-table");
         schemaBuilder.option("file.compression", compressionType.value());
-        schemaBuilder.option("format-table.path.only-partition-value", "true");
+        schemaBuilder.option("format-table.partition-path-only-value", "true");
         String[] formats = {"csv", "parquet", "json"};
         int dtPartitionValue = 10;
         String dt2PartitionValue = "2022-01-01";
