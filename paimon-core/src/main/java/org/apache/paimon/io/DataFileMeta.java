@@ -256,6 +256,10 @@ public interface DataFileMeta {
 
     String fileName();
 
+    default boolean isBlob() {
+        return fileFormat().equals("blob");
+    }
+
     long fileSize();
 
     long rowCount();

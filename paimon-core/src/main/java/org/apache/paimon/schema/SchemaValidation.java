@@ -159,7 +159,7 @@ public class SchemaValidation {
 
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
-        fileFormat.validateDataFields(new RowType(schema.fields()));
+        fileFormat.validateDataFields(new RowType(schema.fields()).splitBlob().getLeft());
 
         // Check column names in schema
         schema.fieldNames()
@@ -646,6 +646,12 @@ public class SchemaValidation {
             checkArgument(
                     !options.deletionVectorsEnabled(),
                     "Data evolution config must disabled with deletion-vectors.enabled");
+        }
+
+        if (schema.logicalRowType().containsBlobType()) {
+            checkArgument(
+                    options.dataEvolutionEnabled(),
+                    "Data evolution config must enabled for table with BLOB type column.");
         }
     }
 }

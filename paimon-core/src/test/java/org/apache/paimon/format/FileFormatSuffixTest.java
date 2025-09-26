@@ -45,7 +45,7 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.LinkedList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -76,7 +76,8 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         null);
         FileFormat fileFormat = FileFormat.fromIdentifier(format, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>();
-        CoreOptions options = new CoreOptions(new HashMap<>());
+        CoreOptions options =
+                new CoreOptions(Collections.singletonMap("metadata.stats-mode", "truncate(16)"));
         AppendOnlyWriter appendOnlyWriter =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),
@@ -97,8 +98,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         false,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         CompressOptions.defaultOptions(),
-                        StatsCollectorFactories.createStatsFactories(
-                                "truncate(16)", options, SCHEMA.getFieldNames()),
+                        new StatsCollectorFactories(options),
                         MemorySize.MAX_VALUE,
                         new FileIndexOptions(),
                         true,
