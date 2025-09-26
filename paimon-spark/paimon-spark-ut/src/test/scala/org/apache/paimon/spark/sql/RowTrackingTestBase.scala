@@ -74,6 +74,11 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(1, 1, 0, 1), Row(3, 3, 2, 1))
       )
+      sql("DELETE FROM t WHERE _ROW_ID = 2")
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 1, 0, 1))
+      )
     }
   }
 
@@ -91,6 +96,18 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(1, 1, 0, 1), Row(2, 22, 1, 2), Row(3, 3, 2, 1))
+      )
+
+      sql("UPDATE t SET data = 222 WHERE _ROW_ID = 1")
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 1, 0, 1), Row(2, 222, 1, 3), Row(3, 3, 2, 1))
+      )
+
+      sql("UPDATE t SET data = 111 WHERE _SEQUENCE_NUMBER = 1")
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 111, 0, 4), Row(2, 222, 1, 3), Row(3, 111, 2, 4))
       )
     }
   }

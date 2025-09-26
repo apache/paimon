@@ -122,17 +122,20 @@ case class SparkTable(table: Table)
   override def metadataColumns: Array[MetadataColumn] = {
     val partitionType = SparkTypeUtils.toSparkPartitionType(table)
 
-    val _metadataColumns = ArrayBuffer[MetadataColumn](
-      PaimonMetadataColumn.FILE_PATH,
-      PaimonMetadataColumn.ROW_INDEX,
-      PaimonMetadataColumn.PARTITION(partitionType),
-      PaimonMetadataColumn.BUCKET
-    )
+    val _metadataColumns = ArrayBuffer[MetadataColumn]()
 
     if (coreOptions.rowTrackingEnabled()) {
       _metadataColumns.append(PaimonMetadataColumn.ROW_ID)
       _metadataColumns.append(PaimonMetadataColumn.SEQUENCE_NUMBER)
     }
+
+    _metadataColumns.appendAll(
+      Seq(
+        PaimonMetadataColumn.FILE_PATH,
+        PaimonMetadataColumn.ROW_INDEX,
+        PaimonMetadataColumn.PARTITION(partitionType),
+        PaimonMetadataColumn.BUCKET
+      ))
 
     _metadataColumns.toArray
   }
