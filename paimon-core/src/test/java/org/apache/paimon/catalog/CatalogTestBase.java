@@ -25,19 +25,9 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.format.FileFormatFactory;
-import org.apache.paimon.format.FormatWriter;
-import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.HadoopCompressionType;
-import org.apache.paimon.format.SupportsDirectWrite;
-import org.apache.paimon.format.csv.CsvFileFormatFactory;
-import org.apache.paimon.format.json.JsonFileFormatFactory;
-import org.apache.paimon.format.parquet.ParquetFileFormatFactory;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.ResolvingFileIO;
-import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
@@ -51,9 +41,11 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.format.FormatTableWrite;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.system.AllTableOptionsTable;
@@ -79,7 +71,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -620,27 +611,7 @@ public abstract class CatalogTestBase {
                                 dtPartitionValue,
                                 BinaryString.fromString(dt2PartitionValue));
             }
-            FormatWriterFactory factory =
-                    (buildFileFormatFactory(format)
-                                    .create(
-                                            new FileFormatFactory.FormatContext(
-                                                    new Options(), 1024, 1024)))
-                            .createWriterFactory(table.rowType());
-            Path partitionPath =
-                    new Path(
-                            String.format(
-                                    "%s/%s/%s",
-                                    table.location(), dtPartitionValue, dt2PartitionValue));
-            DataFilePathFactory dataFilePathFactory =
-                    new DataFilePathFactory(
-                            partitionPath,
-                            format,
-                            "data",
-                            "change",
-                            true,
-                            compressionType.value(),
-                            null);
-            write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
+            writeAndCheckCommitFormatTable(table, datas, null);
             Map<String, String> partitionSpec = new HashMap<>();
             partitionSpec.put("dt", "" + dtPartitionValue);
             partitionSpec.put("dt2", dt2PartitionValue);
@@ -652,7 +623,7 @@ public abstract class CatalogTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testFormatTableRead(boolean partitioned) throws Exception {
+    public void testFormatTableReadAndWrite(boolean partitioned) throws Exception {
         if (!supportsFormatTable()) {
             return;
         }
@@ -680,7 +651,7 @@ public abstract class CatalogTestBase {
             int[] projection = new int[] {1, 2};
             PredicateBuilder builder = new PredicateBuilder(table.rowType().project(projection));
             Predicate predicate = builder.greaterOrEqual(0, 10);
-            int size = 5;
+            int size = 2000;
             int checkSize = 3;
             InternalRow[] datas = new InternalRow[size];
             InternalRow[] checkDatas = new InternalRow[checkSize];
@@ -694,59 +665,21 @@ public abstract class CatalogTestBase {
             }
             InternalRow dataWithDiffPartition =
                     GenericRow.of(random.nextInt(), random.nextInt(), 11);
-            FormatWriterFactory factory =
-                    (buildFileFormatFactory(format)
-                                    .create(
-                                            new FileFormatFactory.FormatContext(
-                                                    new Options(), 1024, 1024)))
-                            .createWriterFactory(table.rowType());
             Map<String, String> partitionSpec = null;
+            int dataSize = size;
             if (partitioned) {
-                Path partitionPath =
-                        new Path(String.format("%s/%s", table.location(), "dt=" + partitionValue));
-                DataFilePathFactory dataFilePathFactory =
-                        new DataFilePathFactory(
-                                partitionPath,
-                                format,
-                                "data",
-                                "change",
-                                true,
-                                compressionType.value(),
-                                null);
-                Path diffPartitionPath =
-                        new Path(String.format("%s/%s", table.location(), "dt=" + 11));
-                DataFilePathFactory diffPartitionPathFactory =
-                        new DataFilePathFactory(
-                                diffPartitionPath,
-                                format,
-                                "data",
-                                "change",
-                                true,
-                                compressionType.value(),
-                                null);
-                write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
-                write(
-                        factory,
-                        diffPartitionPathFactory.newPath(),
-                        compressionType.value(),
-                        dataWithDiffPartition);
+                writeAndCheckCommitFormatTable(table, datas, dataWithDiffPartition);
+                dataSize = size + 1;
                 partitionSpec = new HashMap<>();
                 partitionSpec.put("dt", "" + partitionValue);
             } else {
-                DataFilePathFactory dataFilePathFactory =
-                        new DataFilePathFactory(
-                                new Path(table.location()),
-                                format,
-                                "data",
-                                "change",
-                                true,
-                                compressionType.value(),
-                                null);
-                write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
+                writeAndCheckCommitFormatTable(table, datas, null);
             }
             List<InternalRow> readFilterData =
                     read(table, predicate, projection, partitionSpec, null);
             assertThat(readFilterData).containsExactlyInAnyOrder(checkDatas);
+            List<InternalRow> readallData = read(table, null, null, null, null);
+            assertThat(readallData).hasSize(dataSize);
             int limit = checkSize - 1;
             List<InternalRow> readLimitData =
                     read(table, predicate, projection, partitionSpec, limit);
@@ -765,36 +698,19 @@ public abstract class CatalogTestBase {
         }
     }
 
-    protected FileFormatFactory buildFileFormatFactory(String format) {
-        switch (format) {
-            case "csv":
-                return new CsvFileFormatFactory();
-            case "parquet":
-                return new ParquetFileFormatFactory();
-            case "json":
-                return new JsonFileFormatFactory();
-            default:
-                throw new IllegalArgumentException("Unsupported format: " + format);
-        }
-    }
-
-    protected void write(
-            FormatWriterFactory factory, Path file, String compression, InternalRow... rows)
-            throws IOException {
-        FormatWriter writer;
-        PositionOutputStream out = null;
-        if (factory instanceof SupportsDirectWrite) {
-            writer = ((SupportsDirectWrite) factory).create(fileIO, file, compression);
-        } else {
-            out = fileIO.newOutputStream(file, true);
-            writer = factory.create(out, compression);
-        }
-        for (InternalRow row : rows) {
-            writer.addElement(row);
-        }
-        writer.close();
-        if (out != null) {
-            out.close();
+    private void writeAndCheckCommitFormatTable(
+            Table table, InternalRow[] datas, InternalRow dataWithDiffPartition) throws Exception {
+        try (FormatTableWrite write = (FormatTableWrite) table.newBatchWriteBuilder().newWrite()) {
+            for (InternalRow row : datas) {
+                write.write(row);
+            }
+            if (dataWithDiffPartition != null) {
+                write.write(dataWithDiffPartition);
+            }
+            List<CommitMessage> committers = write.prepareCommit();
+            List<InternalRow> readData = read(table, null, null, null, null);
+            assertThat(readData).isEmpty();
+            write.commit(committers);
         }
     }
 

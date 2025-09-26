@@ -19,7 +19,6 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.io.SingleFileWriter.AbortExecutor;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
@@ -44,7 +43,7 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
     private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
     private final long targetFileSize;
-    private final List<AbortExecutor> closedWriters;
+    private final List<FileWriterAbortExecutor> closedWriters;
     private final List<R> results;
 
     private SingleFileWriter<T, R> currentWriter = null;
@@ -146,7 +145,7 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         if (currentWriter != null) {
             currentWriter.abort();
         }
-        for (AbortExecutor abortExecutor : closedWriters) {
+        for (FileWriterAbortExecutor abortExecutor : closedWriters) {
             abortExecutor.abort();
         }
     }

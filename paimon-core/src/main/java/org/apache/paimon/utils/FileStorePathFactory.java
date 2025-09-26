@@ -173,15 +173,25 @@ public class FileStorePathFactory {
                 createExternalPathProvider(partition, bucket));
     }
 
-    public DataFilePathFactory createFormatTableDataFilePathFactory(BinaryRow partition) {
+    public DataFilePathFactory createFormatTableDataFilePathFactory(
+            BinaryRow partition, boolean onlyValue) {
         return new DataFilePathFactory(
-                partitionPath(partition),
+                partitionPath(partition, onlyValue),
                 formatIdentifier,
                 dataFilePrefix,
                 changelogFilePrefix,
                 fileSuffixIncludeCompression,
                 fileCompression,
                 createExternalPartitionPathProvider(partition));
+    }
+
+    private ExternalPathProvider createExternalPartitionPathProvider(
+            BinaryRow partition, boolean onlyValue) {
+        if (externalPaths == null || externalPaths.isEmpty()) {
+            return null;
+        }
+
+        return new ExternalPathProvider(externalPaths, partitionPath(partition, onlyValue));
     }
 
     private ExternalPathProvider createExternalPartitionPathProvider(BinaryRow partition) {
@@ -192,9 +202,9 @@ public class FileStorePathFactory {
         return new ExternalPathProvider(externalPaths, partitionPath(partition));
     }
 
-    public Path partitionPath(BinaryRow partition) {
+    private Path partitionPath(BinaryRow partition, boolean onlyValue) {
         Path relativeBucketPath = null;
-        String partitionPath = getPartitionString(partition);
+        String partitionPath = getPartitionString(partition, onlyValue);
         if (!partitionPath.isEmpty()) {
             relativeBucketPath = new Path(partitionPath);
         }
@@ -205,6 +215,10 @@ public class FileStorePathFactory {
                             : new Path(dataFilePathDirectory);
         }
         return relativeBucketPath != null ? new Path(root, relativeBucketPath) : root;
+    }
+
+    public Path partitionPath(BinaryRow partition) {
+        return partitionPath(partition, false);
     }
 
     @Nullable
@@ -246,6 +260,14 @@ public class FileStorePathFactory {
                 partitionComputer.generatePartValues(
                         Preconditions.checkNotNull(
                                 partition, "Partition row data is null. This is unexpected.")));
+    }
+
+    public String getPartitionString(BinaryRow partition, boolean onlyValue) {
+        return PartitionPathUtils.generatePartitionPathUtil(
+                partitionComputer.generatePartValues(
+                        Preconditions.checkNotNull(
+                                partition, "Partition row data is null. This is unexpected.")),
+                onlyValue);
     }
 
     // @TODO, need to be changed

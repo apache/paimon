@@ -252,11 +252,10 @@ public class PartitionPathUtils {
     }
 
     public static LinkedHashMap<String, String> extractPartitionSpecFromPathOnlyValue(
-            Path currPath, List<String> partitionKeys, int partitionNumber) {
+            Path currPath, List<String> partitionKeys) {
         LinkedHashMap<String, String> fullPartSpec = new LinkedHashMap<>();
         String[] split = currPath.toString().split(Path.SEPARATOR);
-        int equalityPartitionSize = partitionKeys.size() - partitionNumber;
-        for (int i = 0; i < equalityPartitionSize; i++) {
+        for (int i = 0; i < partitionKeys.size(); i++) {
             fullPartSpec.put(partitionKeys.get(i), split[split.length - partitionKeys.size() + i]);
         }
         return fullPartSpec;
@@ -286,7 +285,7 @@ public class PartitionPathUtils {
                 ret.add(
                         Pair.of(
                                 extractPartitionSpecFromPathOnlyValue(
-                                        part.getPath(), partitionKeys, partitionNumber),
+                                        part.getPath(), partitionKeys),
                                 part.getPath()));
             } else {
                 ret.add(Pair.of(extractPartitionSpecFromPath(part.getPath()), part.getPath()));
