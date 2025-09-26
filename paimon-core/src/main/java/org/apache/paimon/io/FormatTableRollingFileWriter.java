@@ -75,35 +75,26 @@ public class FormatTableRollingFileWriter {
 
     public void write(InternalRow row) throws IOException {
         try {
-            // Open the current writer if write the first record or roll over happen before.
             if (currentWriter == null) {
-                openCurrentWriter();
+                currentWriter = writerFactory.get();
             }
 
             currentWriter.write(row);
             recordCount += 1;
-
-            if (rollingFile(false)) {
+            boolean needRolling =
+                    currentWriter.reachTargetSize(
+                            recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
+            if (needRolling) {
                 closeCurrentWriter();
             }
         } catch (Throwable e) {
             LOG.warn(
-                    "Exception occurs when writing file "
-                            + (currentWriter == null ? null : currentWriter.path())
-                            + ". Cleaning up.",
+                    "Exception occurs when writing file {}. Cleaning up.",
+                    currentWriter == null ? null : currentWriter.path(),
                     e);
             abort();
             throw e;
         }
-    }
-
-    private boolean rollingFile(boolean forceCheck) throws IOException {
-        return currentWriter.reachTargetSize(
-                forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
-    }
-
-    private void openCurrentWriter() {
-        currentWriter = writerFactory.get();
     }
 
     private void closeCurrentWriter() throws IOException {
@@ -142,8 +133,7 @@ public class FormatTableRollingFileWriter {
             closeCurrentWriter();
         } catch (IOException e) {
             LOG.warn(
-                    "Exception occurs when writing file " + currentWriter.path() + ". Cleaning up.",
-                    e);
+                    "Exception occurs when writing file {}. Cleaning up.", currentWriter.path(), e);
             abort();
             throw e;
         } finally {

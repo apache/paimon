@@ -132,7 +132,6 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         // and write
         closedWriters.add(currentWriter.abortExecutor());
         results.add(currentWriter.result());
-
         currentWriter = null;
     }
 

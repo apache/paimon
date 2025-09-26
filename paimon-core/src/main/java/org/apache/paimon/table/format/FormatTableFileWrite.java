@@ -102,7 +102,8 @@ public class FormatTableFileWrite {
                 fileIO,
                 fileFormat,
                 options.targetFileSize(false),
-                pathFactory.createFormatTableDataFilePathFactory(partition),
+                pathFactory.createFormatTableDataFilePathFactory(
+                        partition, options.formatTablePartitionOnlyValueInPath()),
                 rowType,
                 options.fileCompression());
     }

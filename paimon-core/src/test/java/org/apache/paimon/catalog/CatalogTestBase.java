@@ -611,27 +611,7 @@ public abstract class CatalogTestBase {
                                 dtPartitionValue,
                                 BinaryString.fromString(dt2PartitionValue));
             }
-            FormatWriterFactory factory =
-                    (buildFileFormatFactory(format)
-                                    .create(
-                                            new FileFormatFactory.FormatContext(
-                                                    new Options(), 1024, 1024)))
-                            .createWriterFactory(table.rowType());
-            Path partitionPath =
-                    new Path(
-                            String.format(
-                                    "%s/%s/%s",
-                                    table.location(), dtPartitionValue, dt2PartitionValue));
-            DataFilePathFactory dataFilePathFactory =
-                    new DataFilePathFactory(
-                            partitionPath,
-                            format,
-                            "data",
-                            "change",
-                            true,
-                            compressionType.value(),
-                            null);
-            write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
+            writeAndCheckCommitFormatTable(table, datas, null);
             Map<String, String> partitionSpec = new HashMap<>();
             partitionSpec.put("dt", "" + dtPartitionValue);
             partitionSpec.put("dt2", dt2PartitionValue);
