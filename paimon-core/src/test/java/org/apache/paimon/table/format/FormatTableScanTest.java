@@ -147,6 +147,39 @@ public class FormatTableScanTest {
     }
 
     @TestTemplate
+    void testComputeScanPathWithoutFilter() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        PredicateBuilder builder = new PredicateBuilder(partitionType);
+        Predicate predicate = PredicateBuilder.and(builder.greaterThan(0, 2022));
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromPredicate(partitionType, predicate);
+        Pair<Path, Integer> result =
+                FormatTableScan.computeScanPathAndLevel(
+                        tableLocation,
+                        partitionKeys,
+                        partitionFilter,
+                        partitionType,
+                        enablePartitionValueOnly);
+
+        // Should optimize to specific partition path for first key
+        assertThat(result.getLeft()).isEqualTo(tableLocation);
+        assertThat(result.getRight()).isEqualTo(2);
+
+        // test searchPartSpecAndPaths
+        LocalFileIO fileIO = LocalFileIO.create();
+        String partitionPath = enablePartitionValueOnly ? "2023/12" : "year=2023/month=12";
+        fileIO.mkdirs(new Path(tableLocation, partitionPath));
+        List<Pair<LinkedHashMap<String, String>, Path>> searched =
+                searchPartSpecAndPaths(
+                        fileIO,
+                        result.getLeft(),
+                        result.getRight(),
+                        null,
+                        enablePartitionValueOnly);
+        assertThat(searched.size()).isEqualTo(1);
+    }
+
+    @TestTemplate
     void testGetScanPathAndLevelWithEqualityFilter() throws IOException {
         Path tableLocation = new Path(tmpPath.toUri());
         // Create equality predicate for all partition keys
