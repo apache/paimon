@@ -641,11 +641,13 @@ public abstract class CatalogTestBase {
                             compressionType.value(),
                             null);
             write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
+            List<InternalRow> readAllData = read(table, null, null, null, null);
+            assertThat(readAllData).containsExactlyInAnyOrder(datas);
             Map<String, String> partitionSpec = new HashMap<>();
-            partitionSpec.put("dt", "" + dtPartitionValue);
-            partitionSpec.put("dt2", dt2PartitionValue);
+            partitionSpec.put("dt", "" + dtPartitionValue + 1);
+            partitionSpec.put("dt2", dt2PartitionValue + 1);
             List<InternalRow> readFilterData = read(table, null, null, partitionSpec, null);
-            assertThat(readFilterData).containsExactlyInAnyOrder(datas);
+            assertThat(readFilterData).isEmpty();
             catalog.dropTable(Identifier.create(dbName, format), true);
         }
     }
