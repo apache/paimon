@@ -15,33 +15,32 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ##########################################################################
+import os
+from pypaimon import __version__
 from setuptools import find_packages, setup
 
-VERSION = "0.3.dev"  # noqa
+VERSION = __version__
 
 PACKAGES = find_packages(include=["pypaimon*"])
 
-install_requires = [
-    'readerwriterlock==1.0.9',
-    'fsspec==2024.3.1; python_version>"3.6"',
-    'fsspec==2021.10.1; python_version=="3.6"',
-    'cachetools==5.3.3; python_version>"3.6"',
-    'cachetools==4.2.4; python_version=="3.6"',
-    'ossfs==2023.12.0; python_version>"3.6"',
-    'ossfs==2021.8.0; python_version=="3.6"',
-    'pyarrow>=16;   python_version >= "3.8"',
-    'pyarrow==6.0.1; python_version < "3.8"',
-    'pandas==2.3.2; python_version >= "3.7"',
-    'pandas==1.1.5; python_version < "3.7"',
-    'polars==1.32.0; python_version>"3.6"',
-    'polars==0.9.12; python_version=="3.6"',
-    'fastavro==1.11.1; python_version>"3.6"',
-    'fastavro==1.4.7; python_version=="3.6"',
-    'zstandard==0.24.0; python_version>="3.7"',
-    'zstandard==0.19.0; python_version<"3.7"',
-    'dataclasses==0.8.0; python_version < "3.7"',
-    'pip==21.3.1'
-]
+
+def read_requirements():
+    """Read requirements from dev/requirements.txt file."""
+    requirements_path = os.path.join(os.path.dirname(__file__), 'dev', 'requirements.txt')
+    requirements = []
+
+    if os.path.exists(requirements_path):
+        with open(requirements_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines and comments
+                if line and not line.startswith('#'):
+                    requirements.append(line)
+
+    return requirements
+
+
+install_requires = read_requirements()
 
 long_description = "See Apache Paimon Python API \
 [Doc](https://paimon.apache.org/docs/master/program-api/python-api/) for usage."

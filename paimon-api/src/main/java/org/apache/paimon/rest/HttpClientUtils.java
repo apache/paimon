@@ -21,7 +21,10 @@ package org.apache.paimon.rest;
 import org.apache.paimon.rest.interceptor.LoggingInterceptor;
 import org.apache.paimon.rest.interceptor.TimingInterceptor;
 
+import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
@@ -32,8 +35,13 @@ import org.apache.hc.core5.reactor.ssl.SSLBufferMode;
 import org.apache.hc.core5.ssl.SSLContexts;
 import org.apache.hc.core5.util.Timeout;
 
+import java.io.IOException;
+import java.io.InputStream;
+
 /** Utils for {@link HttpClientBuilder}. */
 public class HttpClientUtils {
+
+    public static final CloseableHttpClient DEFAULT_HTTP_CLIENT = createLoggingBuilder().build();
 
     public static HttpClientBuilder createLoggingBuilder() {
         HttpClientBuilder clientBuilder = createBuilder();
@@ -73,5 +81,14 @@ public class HttpClientUtils {
                         HttpsSupport.getDefaultHostnameVerifier()));
 
         return connectionManagerBuilder.build();
+    }
+
+    public static InputStream getAsInputStream(String uri) throws IOException {
+        HttpGet httpGet = new HttpGet(uri);
+        CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(httpGet);
+        if (response.getCode() != 200) {
+            throw new RuntimeException("HTTP error code: " + response.getCode());
+        }
+        return response.getEntity().getContent();
     }
 }

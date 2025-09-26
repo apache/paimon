@@ -41,6 +41,6 @@ public class FileSystemCatalogFactory implements CatalogFactory {
                     "Only managed table is supported in File system catalog.");
         }
 
-        return new FileSystemCatalog(fileIO, warehouse, context.options());
+        return new FileSystemCatalog(fileIO, warehouse, context);
     }
 }

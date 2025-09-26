@@ -161,6 +161,7 @@ public class RESTCatalogServer {
 
     private final String databaseUri;
 
+    private final CatalogContext catalogContext;
     private final FileSystemCatalog catalog;
     private final MockWebServer server;
 
@@ -190,7 +191,7 @@ public class RESTCatalogServer {
         Options conf = new Options();
         this.configResponse.getDefaults().forEach(conf::setString);
         conf.setString(WAREHOUSE.key(), dataPath);
-        CatalogContext context = CatalogContext.create(conf);
+        this.catalogContext = CatalogContext.create(conf);
         Path warehousePath = new Path(dataPath);
         FileIO fileIO;
         try {
@@ -199,7 +200,7 @@ public class RESTCatalogServer {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        this.catalog = new FileSystemCatalog(fileIO, warehousePath, context.options());
+        this.catalog = new FileSystemCatalog(fileIO, warehousePath, catalogContext);
         Dispatcher dispatcher = initDispatcher(authProvider);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
@@ -2270,6 +2271,7 @@ public class RESTCatalogServer {
                             catalog.catalogLoader(),
                             catalog.lockFactory().orElse(null),
                             catalog.lockContext().orElse(null),
+                            catalogContext,
                             false);
             Path path = new Path(schema.options().get(PATH.key()));
             FileIO dataFileIO = catalog.fileIO();

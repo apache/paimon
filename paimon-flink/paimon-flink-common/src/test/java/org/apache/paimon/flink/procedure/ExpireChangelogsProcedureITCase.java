@@ -31,6 +31,8 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.sql.Timestamp;
@@ -188,8 +190,9 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
         checkBatchRead(40);
     }
 
-    @Test
-    public void testExpireChangelogsAction() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testExpireChangelogsAction(boolean forceStartFlinkJob) throws Exception {
         sql(
                 "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
                         + " WITH ( 'num-sorted-run.compaction-trigger' = '9999', 'changelog-producer' = 'input', "
@@ -228,7 +231,9 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
                         "--older_than",
                         ts5.toString(),
                         "--max_deletes",
-                        "3")
+                        "3",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkChangelogs(changelogManager, 4, 6);
@@ -244,7 +249,9 @@ public class ExpireChangelogsProcedureITCase extends CatalogITCaseBase {
                         "--table",
                         "word_count",
                         "--delete_all",
-                        "true")
+                        "true",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkAllDeleted(changelogManager);

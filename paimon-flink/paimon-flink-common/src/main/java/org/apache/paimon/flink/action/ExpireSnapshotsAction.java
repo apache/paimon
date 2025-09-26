@@ -20,12 +20,10 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.procedure.ExpireSnapshotsProcedure;
 
-import org.apache.flink.table.procedure.DefaultProcedureContext;
-
 import java.util.Map;
 
 /** Expire snapshots action for Flink. */
-public class ExpireSnapshotsAction extends ActionBase {
+public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
 
     private final String database;
     private final String table;
@@ -54,16 +52,10 @@ public class ExpireSnapshotsAction extends ActionBase {
         this.options = options;
     }
 
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         ExpireSnapshotsProcedure expireSnapshotsProcedure = new ExpireSnapshotsProcedure();
         expireSnapshotsProcedure.withCatalog(catalog);
         expireSnapshotsProcedure.call(
-                new DefaultProcedureContext(env),
-                database + "." + table,
-                retainMax,
-                retainMin,
-                olderThan,
-                maxDeletes,
-                options);
+                null, database + "." + table, retainMax, retainMin, olderThan, maxDeletes, options);
     }
 }
