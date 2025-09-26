@@ -1969,6 +1969,19 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1024)
                     .withDescription("Threshold for merging records to binary buffer in lookup.");
 
+    @Immutable
+    public static final ConfigOption<Boolean> BLOB_STORAGE_ENABLED =
+            key("blob-storage.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to enable blob ability in data evolution table.");
+
+    public static final ConfigOption<String> BLOB_FIELD =
+            key("blob.field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the blob field.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3018,6 +3031,15 @@ public class CoreOptions implements Serializable {
 
     public int lookupMergeRecordsThreshold() {
         return options.get(LOOKUP_MERGE_RECORDS_THRESHOLD);
+    }
+
+    public boolean blobStorageEnabled() {
+        return options.get(BLOB_STORAGE_ENABLED);
+    }
+
+    @Nullable
+    public String blobField() {
+        return options.get(BLOB_FIELD);
     }
 
     /** Specifies the merge engine for table with primary key. */
