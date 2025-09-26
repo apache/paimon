@@ -30,151 +30,155 @@ class CreateTagFromTimestampProcedureTest extends PaimonSparkTestBase with Strea
   import testImplicits._
 
   test("Paimon Procedure: Create tags from snapshots commit-time ") {
-    failAfter(streamingTimeout) {
-      withTempDir {
-        checkpointDir =>
-          spark.sql(s"""
-                       |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
-                       |""".stripMargin)
-          val location = loadTable("T").location().toString
+    withSparkSQLConf(("spark.paimon.write.use-v2-write", "false")) {
 
-          val inputData = MemoryStream[(Int, String)]
-          val stream = inputData
-            .toDS()
-            .toDF("a", "b")
-            .writeStream
-            .option("checkpointLocation", checkpointDir.getCanonicalPath)
-            .foreachBatch {
-              (batch: Dataset[Row], _: Long) =>
-                batch.write.format("paimon").mode("append").save(location)
+      failAfter(streamingTimeout) {
+        withTempDir {
+          checkpointDir =>
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b STRING)
+                         |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                         |""".stripMargin)
+            val location = loadTable("T").location().toString
+
+            val inputData = MemoryStream[(Int, String)]
+            val stream = inputData
+              .toDS()
+              .toDF("a", "b")
+              .writeStream
+              .option("checkpointLocation", checkpointDir.getCanonicalPath)
+              .foreachBatch {
+                (batch: Dataset[Row], _: Long) =>
+                  batch.write.format("paimon").mode("append").save(location)
+              }
+              .start()
+
+            try {
+
+              for (i <- 1 to 4) {
+                inputData.addData((i, "a"))
+                stream.processAllAvailable()
+                Thread.sleep(500L)
+              }
+
+              val table = loadTable("T")
+              val earliestCommitTime = table.snapshotManager.earliestSnapshot.timeMillis
+              val commitTime3 = table.snapshotManager.snapshot(3).timeMillis
+              val commitTime4 = table.snapshotManager.snapshot(4).timeMillis
+
+              // create tag from timestamp that earlier than the earliest snapshot commit time.
+              checkAnswer(
+                spark.sql(s"""CALL paimon.sys.create_tag_from_timestamp(
+                             |table => 'test.T',
+                             | tag => 'test_tag',
+                             |  timestamp => ${earliestCommitTime - 1})""".stripMargin),
+                Row("test_tag", 1, earliestCommitTime, "null") :: Nil
+              )
+
+              // create tag from timestamp that equals to snapshot-3 commit time.
+              checkAnswer(
+                spark.sql(s"""CALL paimon.sys.create_tag_from_timestamp(
+                             |table => 'test.T',
+                             | tag => 'test_tag2',
+                             |  timestamp => $commitTime3)""".stripMargin),
+                Row("test_tag2", 3, commitTime3, "null") :: Nil
+              )
+
+              // create tag from timestamp that later than snapshot-3 commit time.
+              checkAnswer(
+                spark.sql(s"""CALL paimon.sys.create_tag_from_timestamp(
+                             |table => 'test.T',
+                             |tag => 'test_tag3',
+                             |timestamp => ${commitTime3 + 1})""".stripMargin),
+                Row("test_tag3", 4, commitTime4, "null") :: Nil
+              )
+
+              // create tag from timestamp that later than the latest snapshot commit time and throw SnapshotNotExistException.
+              assertThrows[SnapshotNotExistException] {
+                spark.sql(s"""CALL paimon.sys.create_tag_from_timestamp(
+                             |table => 'test.T',
+                             |tag => 'test_tag3',
+                             |timestamp => ${Long.MaxValue})""".stripMargin)
+              }
+
+            } finally {
+              stream.stop()
             }
-            .start()
-
-          try {
-
-            for (i <- 1 to 4) {
-              inputData.addData((i, "a"))
-              stream.processAllAvailable()
-              Thread.sleep(500L)
-            }
-
-            val table = loadTable("T")
-            val earliestCommitTime = table.snapshotManager.earliestSnapshot.timeMillis
-            val commitTime3 = table.snapshotManager.snapshot(3).timeMillis
-            val commitTime4 = table.snapshotManager.snapshot(4).timeMillis
-
-            // create tag from timestamp that earlier than the earliest snapshot commit time.
-            checkAnswer(
-              spark.sql(s"""CALL paimon.sys.create_tag_from_timestamp(
-                           |table => 'test.T',
-                           | tag => 'test_tag',
-                           |  timestamp => ${earliestCommitTime - 1})""".stripMargin),
-              Row("test_tag", 1, earliestCommitTime, "null") :: Nil
-            )
-
-            // create tag from timestamp that equals to snapshot-3 commit time.
-            checkAnswer(
-              spark.sql(s"""CALL paimon.sys.create_tag_from_timestamp(
-                           |table => 'test.T',
-                           | tag => 'test_tag2',
-                           |  timestamp => $commitTime3)""".stripMargin),
-              Row("test_tag2", 3, commitTime3, "null") :: Nil
-            )
-
-            // create tag from timestamp that later than snapshot-3 commit time.
-            checkAnswer(
-              spark.sql(s"""CALL paimon.sys.create_tag_from_timestamp(
-                           |table => 'test.T',
-                           |tag => 'test_tag3',
-                           |timestamp => ${commitTime3 + 1})""".stripMargin),
-              Row("test_tag3", 4, commitTime4, "null") :: Nil
-            )
-
-            // create tag from timestamp that later than the latest snapshot commit time and throw SnapshotNotExistException.
-            assertThrows[SnapshotNotExistException] {
-              spark.sql(s"""CALL paimon.sys.create_tag_from_timestamp(
-                           |table => 'test.T',
-                           |tag => 'test_tag3',
-                           |timestamp => ${Long.MaxValue})""".stripMargin)
-            }
-
-          } finally {
-            stream.stop()
-          }
+        }
       }
     }
   }
 
   test("Paimon Procedure: Create tags from tags commit-time") {
-    failAfter(streamingTimeout) {
-      withTempDir {
-        checkpointDir =>
-          spark.sql(s"""
-                       |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
-                       |""".stripMargin)
-          val location = loadTable("T").location().toString
+    withSparkSQLConf(("spark.paimon.write.use-v2-write", "false")) {
 
-          val inputData = MemoryStream[(Int, String)]
-          val stream = inputData
-            .toDS()
-            .toDF("a", "b")
-            .writeStream
-            .option("checkpointLocation", checkpointDir.getCanonicalPath)
-            .foreachBatch {
-              (batch: Dataset[Row], _: Long) =>
-                batch.write.format("paimon").mode("append").save(location)
-            }
-            .start()
+      failAfter(streamingTimeout) {
+        withTempDir {
+          checkpointDir =>
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b STRING)
+                         |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                         |""".stripMargin)
+            val location = loadTable("T").location().toString
 
-          try {
-            for (i <- 1 to 2) {
-              inputData.addData((i, "a"))
-              stream.processAllAvailable()
-              Thread.sleep(500L)
-            }
+            val inputData = MemoryStream[(Int, String)]
+            val stream = inputData
+              .toDS()
+              .toDF("a", "b")
+              .writeStream
+              .option("checkpointLocation", checkpointDir.getCanonicalPath)
+              .foreachBatch {
+                (batch: Dataset[Row], _: Long) =>
+                  batch.write.format("paimon").mode("append").save(location)
+              }
+              .start()
 
-            checkAnswer(
-              spark.sql(
-                "CALL paimon.sys.create_tag(" +
+            try {
+              for (i <- 1 to 2) {
+                inputData.addData((i, "a"))
+                stream.processAllAvailable()
+                Thread.sleep(500L)
+              }
+
+              checkAnswer(
+                spark.sql("CALL paimon.sys.create_tag(" +
                   "table => 'test.T', tag => 'test_tag', snapshot => 1)"),
-              Row(true) :: Nil)
+                Row(true) :: Nil)
 
-            val table = loadTable("T")
-            val latestCommitTime = table.snapshotManager.latestSnapshot().timeMillis
-            val tagsCommitTime = table.tagManager().getOrThrow("test_tag").timeMillis
-            assert(latestCommitTime > tagsCommitTime)
+              val table = loadTable("T")
+              val latestCommitTime = table.snapshotManager.latestSnapshot().timeMillis
+              val tagsCommitTime = table.tagManager().getOrThrow("test_tag").timeMillis
+              assert(latestCommitTime > tagsCommitTime)
 
-            // make snapshot 1 expire.
-            checkAnswer(
-              spark.sql(
-                "CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1, retain_min => 1)"),
-              Row(1) :: Nil)
+              // make snapshot 1 expire.
+              checkAnswer(
+                spark.sql(
+                  "CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 1, retain_min => 1)"),
+                Row(1) :: Nil)
 
-            // create tag from timestamp that earlier than the expired snapshot 1.
-            checkAnswer(
-              spark.sql(s"""CALL paimon.sys.create_tag_from_timestamp(
-                           |table => 'test.T',
-                           | tag => 'test_tag1',
-                           |  timestamp => ${tagsCommitTime - 1})""".stripMargin),
-              Row("test_tag1", 1, tagsCommitTime, "null") :: Nil
-            )
+              // create tag from timestamp that earlier than the expired snapshot 1.
+              checkAnswer(
+                spark.sql(s"""CALL paimon.sys.create_tag_from_timestamp(
+                             |table => 'test.T',
+                             | tag => 'test_tag1',
+                             |  timestamp => ${tagsCommitTime - 1})""".stripMargin),
+                Row("test_tag1", 1, tagsCommitTime, "null") :: Nil
+              )
 
-            // create tag from timestamp that later than the expired snapshot 1.
-            checkAnswer(
-              spark.sql(s"""CALL paimon.sys.create_tag_from_timestamp(
-                           |table => 'test.T',
-                           |tag => 'test_tag2',
-                           |timestamp => ${tagsCommitTime + 1})""".stripMargin),
-              Row("test_tag2", 2, latestCommitTime, "null") :: Nil
-            )
+              // create tag from timestamp that later than the expired snapshot 1.
+              checkAnswer(
+                spark.sql(s"""CALL paimon.sys.create_tag_from_timestamp(
+                             |table => 'test.T',
+                             |tag => 'test_tag2',
+                             |timestamp => ${tagsCommitTime + 1})""".stripMargin),
+                Row("test_tag2", 2, latestCommitTime, "null") :: Nil
+              )
 
-          } finally {
-            stream.stop()
-          }
+            } finally {
+              stream.stop()
+            }
+        }
       }
     }
   }
-
 }
