@@ -35,7 +35,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.DataFilePathFactories;
-import org.apache.paimon.utils.FileDeletionThreadPool;
+import org.apache.paimon.utils.FileOperationThreadPool;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
@@ -102,7 +102,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         this.statsFileHandler = statsFileHandler;
         this.cleanEmptyDirectories = cleanEmptyDirectories;
         this.deletionBuckets = new HashMap<>();
-        this.deleteFileExecutor = FileDeletionThreadPool.getExecutorService(deleteFileThreadNum);
+        this.deleteFileExecutor = FileOperationThreadPool.getExecutorService(deleteFileThreadNum);
     }
 
     /**

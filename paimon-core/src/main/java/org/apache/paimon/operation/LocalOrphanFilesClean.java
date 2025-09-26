@@ -89,7 +89,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         this.deleteFiles = new ArrayList<>();
         this.executor =
                 createCachedThreadPool(
-                        table.coreOptions().deleteFileThreadNum(), "ORPHAN_FILES_CLEAN");
+                        table.coreOptions().fileOperationThreadNum(), "ORPHAN_FILES_CLEAN");
         this.dryRun = dryRun;
     }
 
@@ -276,7 +276,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         : new HashMap<String, String>() {
                             {
                                 put(
-                                        CoreOptions.DELETE_FILE_THREAD_NUM.key(),
+                                        CoreOptions.FILE_OPERATION_THREAD_NUM.key(),
                                         parallelism.toString());
                             }
                         };
