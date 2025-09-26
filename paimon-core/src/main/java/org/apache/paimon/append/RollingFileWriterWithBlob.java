@@ -322,14 +322,14 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
         DataFileMeta mainDataFileMeta = closeMainWriter();
 
         // Close blob writer and process blob metadata
-        List<DataFileMeta> blobTaggedMetas = closeBlobWriter();
+        List<DataFileMeta> blobMetas = closeBlobWriter();
 
         // Validate consistency between main and blob files
-        validateFileConsistency(mainDataFileMeta, blobTaggedMetas);
+        validateFileConsistency(mainDataFileMeta, blobMetas);
 
         // Add results to the results list
         results.add(mainDataFileMeta);
-        results.addAll(blobTaggedMetas);
+        results.addAll(blobMetas);
 
         // Reset current writer
         currentWriter = null;

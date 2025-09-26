@@ -19,7 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.RollingFileWriterImpl;
+import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -237,7 +237,7 @@ public class ManifestFileMerger {
             return Optional.empty();
         }
 
-        RollingFileWriterImpl<ManifestEntry, ManifestFileMeta> writer =
+        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                 manifestFile.createRollingWriter();
         Exception exception = null;
         try {
