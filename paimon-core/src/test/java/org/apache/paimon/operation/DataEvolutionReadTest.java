@@ -47,8 +47,7 @@ public class DataEvolutionReadTest {
 
     @Test
     public void testAddSingleBlobEntry() {
-        DataFileMeta blobEntry =
-                createBlobFile("blob1", 0L, 100L, 1L, DataFileMeta.FileTag.BLOB_ENTRY);
+        DataFileMeta blobEntry = createBlobFile("blob1", 0L, 100L, 1L);
 
         blobBunch.add(blobEntry);
 
@@ -61,10 +60,8 @@ public class DataEvolutionReadTest {
 
     @Test
     public void testAddBlobEntryAndTail() {
-        DataFileMeta blobEntry =
-                createBlobFile("blob1", 0, 100, 1, DataFileMeta.FileTag.BLOB_ENTRY);
-        DataFileMeta blobTail =
-                createBlobFile("blob2", 100, 200, 1, DataFileMeta.FileTag.BLOB_TAIL);
+        DataFileMeta blobEntry = createBlobFile("blob1", 0, 100, 1);
+        DataFileMeta blobTail = createBlobFile("blob2", 100, 200, 1);
 
         blobBunch.add(blobEntry);
         blobBunch.add(blobTail);
@@ -89,10 +86,8 @@ public class DataEvolutionReadTest {
 
     @Test
     public void testAddBlobFileWithSameFirstRowId() {
-        DataFileMeta blobEntry1 =
-                createBlobFile("blob1", 0, 100, 1, DataFileMeta.FileTag.BLOB_ENTRY);
-        DataFileMeta blobEntry2 =
-                createBlobFile("blob2", 0, 50, 2, DataFileMeta.FileTag.BLOB_ENTRY);
+        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
+        DataFileMeta blobEntry2 = createBlobFile("blob2", 0, 50, 2);
 
         blobBunch.add(blobEntry1);
         // Adding file with same firstRowId but higher sequence number should throw exception
@@ -104,10 +99,8 @@ public class DataEvolutionReadTest {
 
     @Test
     public void testAddBlobFileWithSameFirstRowIdAndLowerSequenceNumber() {
-        DataFileMeta blobEntry1 =
-                createBlobFile("blob1", 0, 100, 2, DataFileMeta.FileTag.BLOB_ENTRY);
-        DataFileMeta blobEntry2 =
-                createBlobFile("blob2", 0, 50, 1, DataFileMeta.FileTag.BLOB_ENTRY);
+        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 2);
+        DataFileMeta blobEntry2 = createBlobFile("blob2", 0, 50, 1);
 
         blobBunch.add(blobEntry1);
         // Adding file with same firstRowId and lower sequence number should be ignored
@@ -119,10 +112,8 @@ public class DataEvolutionReadTest {
 
     @Test
     public void testAddBlobFileWithOverlappingRowId() {
-        DataFileMeta blobEntry1 =
-                createBlobFile("blob1", 0, 100, 2, DataFileMeta.FileTag.BLOB_ENTRY);
-        DataFileMeta blobEntry2 =
-                createBlobFile("blob2", 50, 150, 1, DataFileMeta.FileTag.BLOB_ENTRY);
+        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 2);
+        DataFileMeta blobEntry2 = createBlobFile("blob2", 50, 150, 1);
 
         blobBunch.add(blobEntry1);
         // Adding file with overlapping row id and lower sequence number should be ignored
@@ -134,10 +125,8 @@ public class DataEvolutionReadTest {
 
     @Test
     public void testAddBlobFileWithOverlappingRowIdAndHigherSequenceNumber() {
-        DataFileMeta blobEntry1 =
-                createBlobFile("blob1", 0, 100, 1, DataFileMeta.FileTag.BLOB_ENTRY);
-        DataFileMeta blobEntry2 =
-                createBlobFile("blob2", 50, 150, 2, DataFileMeta.FileTag.BLOB_ENTRY);
+        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
+        DataFileMeta blobEntry2 = createBlobFile("blob2", 50, 150, 2);
 
         blobBunch.add(blobEntry1);
         // Adding file with overlapping row id and higher sequence number should throw exception
@@ -149,10 +138,8 @@ public class DataEvolutionReadTest {
 
     @Test
     public void testAddBlobFileWithNonContinuousRowId() {
-        DataFileMeta blobEntry1 =
-                createBlobFile("blob1", 0, 100, 1, DataFileMeta.FileTag.BLOB_ENTRY);
-        DataFileMeta blobEntry2 =
-                createBlobFile("blob2", 200, 300, 1, DataFileMeta.FileTag.BLOB_ENTRY);
+        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
+        DataFileMeta blobEntry2 = createBlobFile("blob2", 200, 300, 1);
 
         blobBunch.add(blobEntry1);
         // Adding file with non-continuous row id should throw exception
@@ -163,16 +150,9 @@ public class DataEvolutionReadTest {
 
     @Test
     public void testAddBlobFileWithDifferentWriteCols() {
-        DataFileMeta blobEntry1 =
-                createBlobFile("blob1", 0, 100, 1, DataFileMeta.FileTag.BLOB_ENTRY);
+        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
         DataFileMeta blobEntry2 =
-                createBlobFileWithCols(
-                        "blob2",
-                        100,
-                        200,
-                        1,
-                        Arrays.asList("different_col"),
-                        DataFileMeta.FileTag.BLOB_ENTRY);
+                createBlobFileWithCols("blob2", 100, 200, 1, Arrays.asList("different_col"));
 
         blobBunch.add(blobEntry1);
         // Adding file with different write columns should throw exception
@@ -184,14 +164,10 @@ public class DataEvolutionReadTest {
     @Test
     public void testComplexBlobBunchScenario() {
         // Create a complex scenario with multiple blob entries and a tail
-        DataFileMeta blobEntry1 =
-                createBlobFile("blob1", 0, 100, 1, DataFileMeta.FileTag.BLOB_ENTRY);
-        DataFileMeta blobEntry2 =
-                createBlobFile("blob2", 100, 200, 1, DataFileMeta.FileTag.BLOB_ENTRY);
-        DataFileMeta blobEntry3 =
-                createBlobFile("blob3", 300, 300, 1, DataFileMeta.FileTag.BLOB_ENTRY);
-        DataFileMeta blobTail =
-                createBlobFile("blob4", 600, 400, 1, DataFileMeta.FileTag.BLOB_TAIL);
+        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
+        DataFileMeta blobEntry2 = createBlobFile("blob2", 100, 200, 1);
+        DataFileMeta blobEntry3 = createBlobFile("blob3", 300, 300, 1);
+        DataFileMeta blobTail = createBlobFile("blob4", 600, 400, 1);
 
         blobBunch.add(blobEntry1);
         blobBunch.add(blobEntry2);
@@ -210,30 +186,30 @@ public class DataEvolutionReadTest {
         List<DataFileMeta> waited = new ArrayList<>();
 
         waited.add(createNormalFile("others", 0, 1000, 1, 1));
-        waited.add(createBlobFile("blob1", 0, 1000, 1, DataFileMeta.FileTag.BLOB_TAIL));
-        waited.add(createBlobFile("blob2", 0, 500, 2, DataFileMeta.FileTag.BLOB_ENTRY));
-        waited.add(createBlobFile("blob3", 500, 250, 2, DataFileMeta.FileTag.BLOB_ENTRY));
-        waited.add(createBlobFile("blob4", 750, 250, 2, DataFileMeta.FileTag.BLOB_TAIL));
-        waited.add(createBlobFile("blob5", 0, 100, 3, DataFileMeta.FileTag.BLOB_ENTRY));
-        waited.add(createBlobFile("blob6", 100, 400, 3, DataFileMeta.FileTag.BLOB_ENTRY));
-        waited.add(createBlobFile("blob7", 750, 100, 3, DataFileMeta.FileTag.BLOB_ENTRY));
-        waited.add(createBlobFile("blob8", 850, 150, 3, DataFileMeta.FileTag.BLOB_TAIL));
-        waited.add(createBlobFile("blob9", 100, 650, 4, DataFileMeta.FileTag.BLOB_ENTRY));
+        waited.add(createBlobFile("blob1", 0, 1000, 1));
+        waited.add(createBlobFile("blob2", 0, 500, 2));
+        waited.add(createBlobFile("blob3", 500, 250, 2));
+        waited.add(createBlobFile("blob4", 750, 250, 2));
+        waited.add(createBlobFile("blob5", 0, 100, 3));
+        waited.add(createBlobFile("blob6", 100, 400, 3));
+        waited.add(createBlobFile("blob7", 750, 100, 3));
+        waited.add(createBlobFile("blob8", 850, 150, 3));
+        waited.add(createBlobFile("blob9", 100, 650, 4));
 
         List<List<DataFileMeta>> batches = DataEvolutionSplitGenerator.split(waited);
         assertThat(batches.size()).isEqualTo(1);
 
         List<DataFileMeta> batch = batches.get(0);
 
-        assertThat(batch.get(1).fileName()).isEqualTo("blob5"); // pick
-        assertThat(batch.get(2).fileName()).isEqualTo("blob2"); // skip
-        assertThat(batch.get(3).fileName()).isEqualTo("blob1"); // skip
-        assertThat(batch.get(4).fileName()).isEqualTo("blob9"); // pick
-        assertThat(batch.get(5).fileName()).isEqualTo("blob6"); // skip
-        assertThat(batch.get(6).fileName()).isEqualTo("blob3"); // skip
-        assertThat(batch.get(7).fileName()).isEqualTo("blob7"); // pick
-        assertThat(batch.get(8).fileName()).isEqualTo("blob4"); // skip
-        assertThat(batch.get(9).fileName()).isEqualTo("blob8"); // pick
+        assertThat(batch.get(1).fileName()).contains("blob5"); // pick
+        assertThat(batch.get(2).fileName()).contains("blob2"); // skip
+        assertThat(batch.get(3).fileName()).contains("blob1"); // skip
+        assertThat(batch.get(4).fileName()).contains("blob9"); // pick
+        assertThat(batch.get(5).fileName()).contains("blob6"); // skip
+        assertThat(batch.get(6).fileName()).contains("blob3"); // skip
+        assertThat(batch.get(7).fileName()).contains("blob7"); // pick
+        assertThat(batch.get(8).fileName()).contains("blob4"); // skip
+        assertThat(batch.get(9).fileName()).contains("blob8"); // pick
 
         List<DataEvolutionSplitRead.FieldBunch> fieldBunches =
                 DataEvolutionSplitRead.splitFieldBunch(batch, file -> 0);
@@ -241,10 +217,10 @@ public class DataEvolutionReadTest {
 
         DataEvolutionSplitRead.BlobBunch blobBunch = fieldBunches.get(1).fileOrBlob.getRight();
         assertThat(blobBunch.files).hasSize(4);
-        assertThat(blobBunch.files.get(0).fileName()).isEqualTo("blob5");
-        assertThat(blobBunch.files.get(1).fileName()).isEqualTo("blob9");
-        assertThat(blobBunch.files.get(2).fileName()).isEqualTo("blob7");
-        assertThat(blobBunch.files.get(3).fileName()).isEqualTo("blob8");
+        assertThat(blobBunch.files.get(0).fileName()).contains("blob5");
+        assertThat(blobBunch.files.get(1).fileName()).contains("blob9");
+        assertThat(blobBunch.files.get(2).fileName()).contains("blob7");
+        assertThat(blobBunch.files.get(3).fileName()).contains("blob8");
     }
 
     @Test
@@ -253,87 +229,33 @@ public class DataEvolutionReadTest {
         List<DataFileMeta> waited = new ArrayList<>();
 
         waited.add(createNormalFile("others", 0, 1000, 1, 1));
-        waited.add(createBlobFile("blob1", 0, 1000, 1, DataFileMeta.FileTag.BLOB_TAIL));
-        waited.add(createBlobFile("blob2", 0, 500, 2, DataFileMeta.FileTag.BLOB_ENTRY));
-        waited.add(createBlobFile("blob3", 500, 250, 2, DataFileMeta.FileTag.BLOB_ENTRY));
-        waited.add(createBlobFile("blob4", 750, 250, 2, DataFileMeta.FileTag.BLOB_TAIL));
-        waited.add(createBlobFile("blob5", 0, 100, 3, DataFileMeta.FileTag.BLOB_ENTRY));
-        waited.add(createBlobFile("blob6", 100, 400, 3, DataFileMeta.FileTag.BLOB_ENTRY));
-        waited.add(createBlobFile("blob7", 750, 100, 3, DataFileMeta.FileTag.BLOB_ENTRY));
-        waited.add(createBlobFile("blob8", 850, 150, 3, DataFileMeta.FileTag.BLOB_TAIL));
-        waited.add(createBlobFile("blob9", 100, 650, 4, DataFileMeta.FileTag.BLOB_ENTRY));
+        waited.add(createBlobFile("blob1", 0, 1000, 1));
+        waited.add(createBlobFile("blob2", 0, 500, 2));
+        waited.add(createBlobFile("blob3", 500, 250, 2));
+        waited.add(createBlobFile("blob4", 750, 250, 2));
+        waited.add(createBlobFile("blob5", 0, 100, 3));
+        waited.add(createBlobFile("blob6", 100, 400, 3));
+        waited.add(createBlobFile("blob7", 750, 100, 3));
+        waited.add(createBlobFile("blob8", 850, 150, 3));
+        waited.add(createBlobFile("blob9", 100, 650, 4));
         waited.add(
-                createBlobFileWithCols(
-                        "blob11",
-                        0,
-                        1000,
-                        1,
-                        Collections.singletonList("blobc2"),
-                        DataFileMeta.FileTag.BLOB_TAIL));
+                createBlobFileWithCols("blob11", 0, 1000, 1, Collections.singletonList("blobc2")));
         waited.add(
-                createBlobFileWithCols(
-                        "blob12",
-                        0,
-                        500,
-                        2,
-                        Collections.singletonList("blobc2"),
-                        DataFileMeta.FileTag.BLOB_ENTRY));
+                createBlobFileWithCols("blob12", 0, 500, 2, Collections.singletonList("blobc2")));
         waited.add(
-                createBlobFileWithCols(
-                        "blob13",
-                        500,
-                        250,
-                        2,
-                        Collections.singletonList("blobc2"),
-                        DataFileMeta.FileTag.BLOB_ENTRY));
+                createBlobFileWithCols("blob13", 500, 250, 2, Collections.singletonList("blobc2")));
         waited.add(
-                createBlobFileWithCols(
-                        "blob14",
-                        750,
-                        250,
-                        2,
-                        Collections.singletonList("blobc2"),
-                        DataFileMeta.FileTag.BLOB_TAIL));
+                createBlobFileWithCols("blob14", 750, 250, 2, Collections.singletonList("blobc2")));
         waited.add(
-                createBlobFileWithCols(
-                        "blob15",
-                        0,
-                        100,
-                        3,
-                        Collections.singletonList("blobc2"),
-                        DataFileMeta.FileTag.BLOB_ENTRY));
+                createBlobFileWithCols("blob15", 0, 100, 3, Collections.singletonList("blobc2")));
         waited.add(
-                createBlobFileWithCols(
-                        "blob16",
-                        100,
-                        400,
-                        3,
-                        Collections.singletonList("blobc2"),
-                        DataFileMeta.FileTag.BLOB_ENTRY));
+                createBlobFileWithCols("blob16", 100, 400, 3, Collections.singletonList("blobc2")));
         waited.add(
-                createBlobFileWithCols(
-                        "blob17",
-                        750,
-                        100,
-                        3,
-                        Collections.singletonList("blobc2"),
-                        DataFileMeta.FileTag.BLOB_ENTRY));
+                createBlobFileWithCols("blob17", 750, 100, 3, Collections.singletonList("blobc2")));
         waited.add(
-                createBlobFileWithCols(
-                        "blob18",
-                        850,
-                        150,
-                        3,
-                        Collections.singletonList("blobc2"),
-                        DataFileMeta.FileTag.BLOB_TAIL));
+                createBlobFileWithCols("blob18", 850, 150, 3, Collections.singletonList("blobc2")));
         waited.add(
-                createBlobFileWithCols(
-                        "blob19",
-                        100,
-                        650,
-                        4,
-                        Collections.singletonList("blobc2"),
-                        DataFileMeta.FileTag.BLOB_ENTRY));
+                createBlobFileWithCols("blob19", 100, 650, 4, Collections.singletonList("blobc2")));
 
         List<List<DataFileMeta>> batches = DataEvolutionSplitGenerator.split(waited);
         assertThat(batches.size()).isEqualTo(1);
@@ -347,33 +269,24 @@ public class DataEvolutionReadTest {
 
         DataEvolutionSplitRead.BlobBunch blobBunch = fieldBunches.get(1).fileOrBlob.getRight();
         assertThat(blobBunch.files).hasSize(4);
-        assertThat(blobBunch.files.get(0).fileName()).isEqualTo("blob5");
-        assertThat(blobBunch.files.get(1).fileName()).isEqualTo("blob9");
-        assertThat(blobBunch.files.get(2).fileName()).isEqualTo("blob7");
-        assertThat(blobBunch.files.get(3).fileName()).isEqualTo("blob8");
+        assertThat(blobBunch.files.get(0).fileName()).contains("blob5");
+        assertThat(blobBunch.files.get(1).fileName()).contains("blob9");
+        assertThat(blobBunch.files.get(2).fileName()).contains("blob7");
+        assertThat(blobBunch.files.get(3).fileName()).contains("blob8");
 
         blobBunch = fieldBunches.get(2).fileOrBlob.getRight();
         assertThat(blobBunch.files).hasSize(4);
-        assertThat(blobBunch.files.get(0).fileName()).isEqualTo("blob15");
-        assertThat(blobBunch.files.get(1).fileName()).isEqualTo("blob19");
-        assertThat(blobBunch.files.get(2).fileName()).isEqualTo("blob17");
-        assertThat(blobBunch.files.get(3).fileName()).isEqualTo("blob18");
+        assertThat(blobBunch.files.get(0).fileName()).contains("blob15");
+        assertThat(blobBunch.files.get(1).fileName()).contains("blob19");
+        assertThat(blobBunch.files.get(2).fileName()).contains("blob17");
+        assertThat(blobBunch.files.get(3).fileName()).contains("blob18");
     }
 
     /** Creates a blob file with the specified parameters. */
     private DataFileMeta createBlobFile(
-            String fileName,
-            long firstRowId,
-            long rowCount,
-            long maxSequenceNumber,
-            DataFileMeta.FileTag fileTag) {
+            String fileName, long firstRowId, long rowCount, long maxSequenceNumber) {
         return createBlobFileWithCols(
-                fileName,
-                firstRowId,
-                rowCount,
-                maxSequenceNumber,
-                Arrays.asList("blob_col"),
-                fileTag);
+                fileName, firstRowId, rowCount, maxSequenceNumber, Arrays.asList("blob_col"));
     }
 
     /** Creates a blob file with custom write columns. */
@@ -382,30 +295,28 @@ public class DataEvolutionReadTest {
             long firstRowId,
             long rowCount,
             long maxSequenceNumber,
-            List<String> writeCols,
-            DataFileMeta.FileTag fileTag) {
+            List<String> writeCols) {
         return DataFileMeta.create(
-                        fileName,
-                        rowCount,
-                        rowCount,
-                        DataFileMeta.EMPTY_MIN_KEY,
-                        DataFileMeta.EMPTY_MAX_KEY,
-                        SimpleStats.EMPTY_STATS,
-                        SimpleStats.EMPTY_STATS,
-                        0,
-                        maxSequenceNumber,
-                        0L,
-                        DataFileMeta.DUMMY_LEVEL,
-                        Collections.emptyList(),
-                        Timestamp.fromEpochMillis(System.currentTimeMillis()),
-                        rowCount,
-                        null,
-                        FileSource.APPEND,
-                        null,
-                        null,
-                        firstRowId,
-                        writeCols)
-                .assignFileTag(fileTag);
+                fileName + ".blob",
+                rowCount,
+                rowCount,
+                DataFileMeta.EMPTY_MIN_KEY,
+                DataFileMeta.EMPTY_MAX_KEY,
+                SimpleStats.EMPTY_STATS,
+                SimpleStats.EMPTY_STATS,
+                0,
+                maxSequenceNumber,
+                0L,
+                DataFileMeta.DUMMY_LEVEL,
+                Collections.emptyList(),
+                Timestamp.fromEpochMillis(System.currentTimeMillis()),
+                rowCount,
+                null,
+                FileSource.APPEND,
+                null,
+                null,
+                firstRowId,
+                writeCols);
     }
 
     /** Creates a normal (non-blob) file for testing. */

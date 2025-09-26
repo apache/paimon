@@ -58,7 +58,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -178,8 +177,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         needMergeFiles,
                         file -> {
                             checkArgument(
-                                    file.fileTag().isBlob(),
-                                    "Only blob file need to call this method.");
+                                    file.isBlob(), "Only blob file need to call this method.");
                             return schemaFetcher
                                     .apply(file.schemaId())
                                     .logicalRowType()
@@ -358,20 +356,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         List<FieldBunch> fieldsFiles = new ArrayList<>();
         Map<Integer, BlobBunch> blobBunchMap = new HashMap<>();
         for (DataFileMeta file : needMergeFiles) {
-            DataFileMeta.FileTag fileTag =
-                    Optional.ofNullable(file.fileTag()).orElse(DataFileMeta.FileTag.None);
-            switch (fileTag) {
-                case None:
-                    // Normal file, just add it to the current merge split
-                    fieldsFiles.add(FieldBunch.file(file));
-                    break;
-                case BLOB_ENTRY:
-                case BLOB_TAIL:
-                    int fieldId = blobFileToFieldId.apply(file);
-                    blobBunchMap.computeIfAbsent(fieldId, key -> new BlobBunch()).add(file);
-                    break;
-                default:
-                    throw new IllegalArgumentException("Unknown file tag: " + fileTag);
+            if (file.isBlob()) {
+                int fieldId = blobFileToFieldId.apply(file);
+                blobBunchMap.computeIfAbsent(fieldId, key -> new BlobBunch()).add(file);
+            } else {
+                // Normal file, just add it to the current merge split
+                fieldsFiles.add(FieldBunch.file(file));
             }
         }
         blobBunchMap.values().forEach(blobBunch -> fieldsFiles.add(FieldBunch.blob(blobBunch)));
@@ -453,7 +443,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
 
         void add(DataFileMeta file) {
-            if (!file.fileTag().isBlob()) {
+            if (!file.isBlob()) {
                 throw new IllegalArgumentException("Only blob file can be added to a blob bunch.");
             }
 

@@ -61,8 +61,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 toStringArrayData(meta.valueStatsCols()),
                 meta.externalPath().map(BinaryString::fromString).orElse(null),
                 meta.firstRowId(),
-                meta.writeCols() == null ? null : toStringArrayData(meta.writeCols()),
-                meta.fileTag() == null ? 0 : meta.fileTag().value());
+                meta.writeCols() == null ? null : toStringArrayData(meta.writeCols()));
     }
 
     @Override
@@ -87,9 +86,6 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
                 row.isNullAt(17) ? null : row.getString(17).toString(),
                 row.isNullAt(18) ? null : row.getLong(18),
-                row.isNullAt(19) ? null : fromStringArrayData(row.getArray(19)),
-                row.isNullAt(20)
-                        ? DataFileMeta.FileTag.None
-                        : DataFileMeta.FileTag.fromValue(row.getInt(20)));
+                row.isNullAt(19) ? null : fromStringArrayData(row.getArray(19)));
     }
 }

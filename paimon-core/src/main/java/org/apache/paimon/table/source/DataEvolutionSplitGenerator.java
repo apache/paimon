@@ -86,7 +86,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                                                 value.firstRowId() == null
                                                         ? Long.MIN_VALUE
                                                         : value.firstRowId())
-                        .thenComparingInt(f -> f.fileTag().value())
+                        .thenComparingInt(f -> f.isBlob() ? 1 : 0)
                         .thenComparing(
                                 (f1, f2) -> {
                                     // If firstRowId is the same, we should read the file with
@@ -106,7 +106,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                 splitByRowId.add(Collections.singletonList(file));
                 continue;
             }
-            if ((file.fileTag() == null || !file.fileTag().isBlob()) && firstRowId != lastRowId) {
+            if (!file.isBlob() && firstRowId != lastRowId) {
                 if (!currentSplit.isEmpty()) {
                     splitByRowId.add(currentSplit);
                 }

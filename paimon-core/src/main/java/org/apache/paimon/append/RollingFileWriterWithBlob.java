@@ -345,29 +345,7 @@ public class RollingFileWriterWithBlob implements RollingFileWriter<InternalRow,
     /** Closes the blob writer and processes blob metadata with appropriate tags. */
     private List<DataFileMeta> closeBlobWriter() throws IOException {
         blobWriter.close();
-        List<DataFileMeta> blobFileMetas = blobWriter.result();
-        return tagBlobFileMetas(blobFileMetas);
-    }
-
-    /** Tags blob file metadata with appropriate file tags. */
-    private List<DataFileMeta> tagBlobFileMetas(List<DataFileMeta> blobFileMetas) {
-        List<DataFileMeta> blobTaggedMetas = new ArrayList<>();
-
-        // Tag all but the last blob file as BLOB_ENTRY
-        for (int i = 0; i < blobFileMetas.size() - 1; i++) {
-            blobTaggedMetas.add(
-                    blobFileMetas.get(i).assignFileTag(DataFileMeta.FileTag.BLOB_ENTRY));
-        }
-
-        // Tag the last blob file as BLOB_TAIL
-        if (!blobFileMetas.isEmpty()) {
-            blobTaggedMetas.add(
-                    blobFileMetas
-                            .get(blobFileMetas.size() - 1)
-                            .assignFileTag(DataFileMeta.FileTag.BLOB_TAIL));
-        }
-
-        return blobTaggedMetas;
+        return blobWriter.result();
     }
 
     /** Validates that the row counts match between main and blob files. */
