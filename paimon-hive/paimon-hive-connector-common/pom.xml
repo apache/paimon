@@ -578,6 +578,12 @@ under the License.
             <artifactId>hudi-flink1.18-bundle</artifactId>
             <version>${hudi.version}</version>
             <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.hudi</groupId>
+                    <artifactId>hudi-aws</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- this is for huid clone test, and it should be put before hive-exec

@@ -21,11 +21,6 @@ package org.apache.paimon.s3;
 import org.apache.paimon.testutils.junit.DockerImageVersions;
 import org.apache.paimon.utils.Preconditions;
 
-import com.amazonaws.auth.AWSStaticCredentialsProvider;
-import com.amazonaws.auth.BasicAWSCredentials;
-import com.amazonaws.client.builder.AwsClientBuilder;
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3Client;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
@@ -33,7 +28,14 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
 import org.testcontainers.utility.Base58;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
+import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Locale;
@@ -91,16 +93,16 @@ public class MinioTestContainer extends GenericContainer<MinioTestContainer>
         return String.format("%s-%s", prefix, Base58.randomString(length).toLowerCase(Locale.ROOT));
     }
 
-    /** Creates {@link AmazonS3} client for accessing the {@code Minio} instance. */
-    private AmazonS3 getClient() {
-        return AmazonS3Client.builder()
-                .withCredentials(
-                        new AWSStaticCredentialsProvider(
-                                new BasicAWSCredentials(accessKey, secretKey)))
-                .withPathStyleAccessEnabled(true)
-                .withEndpointConfiguration(
-                        new AwsClientBuilder.EndpointConfiguration(
-                                getHttpEndpoint(), "unused-region"))
+    /** Creates {@link S3Client} for accessing the {@code Minio} instance. */
+    private S3Client getClient() {
+        return S3Client.builder()
+                .region(Region.US_EAST_1) // MinIO requires a region; any value works
+                .credentialsProvider(
+                        StaticCredentialsProvider.create(
+                                AwsBasicCredentials.create(accessKey, secretKey)))
+                .serviceConfiguration(
+                        S3Configuration.builder().pathStyleAccessEnabled(true).build())
+                .endpointOverride(URI.create(getHttpEndpoint()))
                 .build();
     }
 
@@ -118,7 +120,7 @@ public class MinioTestContainer extends GenericContainer<MinioTestContainer>
     }
 
     private void createDefaultBucket() {
-        getClient().createBucket(defaultBucketName);
+        getClient().createBucket(CreateBucketRequest.builder().bucket(defaultBucketName).build());
     }
 
     /**
