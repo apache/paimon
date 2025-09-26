@@ -155,7 +155,6 @@ public class CompactProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String partitions = blank(args, 1) ? null : args.getString(1);
-        // make full compact strategy as default.
         String compactStrategy = blank(args, 2) ? null : args.getString(2);
         String sortType = blank(args, 3) ? OrderType.NONE.name() : args.getString(3);
         List<String> sortColumns =
