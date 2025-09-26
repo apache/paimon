@@ -18,8 +18,11 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.types.RowType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,46 +33,47 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Writer to roll over to a new file if the current size exceed the target file size.
- *
- * @param <T> record data type.
- * @param <R> the file metadata result.
+ * Format table's writer to roll over to a new file if the current size exceed the target file size.
  */
-public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
+public class FormatTableRollingFileWriter {
 
-    private static final Logger LOG = LoggerFactory.getLogger(RollingFileWriter.class);
+    private static final Logger LOG = LoggerFactory.getLogger(FormatTableRollingFileWriter.class);
 
     private static final int CHECK_ROLLING_RECORD_CNT = 1000;
 
-    private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
+    private final Supplier<FormatTableSingleFileWriter> writerFactory;
     private final long targetFileSize;
     private final List<FileWriterAbortExecutor> closedWriters;
-    private final List<R> results;
+    private final List<TwoPhaseOutputStream.Committer> committers;
 
-    private SingleFileWriter<T, R> currentWriter = null;
+    private FormatTableSingleFileWriter currentWriter = null;
     private long recordCount = 0;
     private boolean closed = false;
 
-    public RollingFileWriter(
-            Supplier<? extends SingleFileWriter<T, R>> writerFactory, long targetFileSize) {
-        this.writerFactory = writerFactory;
+    public FormatTableRollingFileWriter(
+            FileIO fileIO,
+            FileFormat fileFormat,
+            long targetFileSize,
+            RowType writeSchema,
+            DataFilePathFactory pathFactory,
+            String fileCompression) {
+        this.writerFactory =
+                () ->
+                        new FormatTableSingleFileWriter(
+                                fileIO,
+                                fileFormat.createWriterFactory(writeSchema),
+                                pathFactory.newPath(),
+                                fileCompression);
         this.targetFileSize = targetFileSize;
-        this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
+        this.committers = new ArrayList<>();
     }
 
-    @VisibleForTesting
     public long targetFileSize() {
         return targetFileSize;
     }
 
-    private boolean rollingFile(boolean forceCheck) throws IOException {
-        return currentWriter.reachTargetSize(
-                forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
-    }
-
-    @Override
-    public void write(T row) throws IOException {
+    public void write(InternalRow row) throws IOException {
         try {
             // Open the current writer if write the first record or roll over happen before.
             if (currentWriter == null) {
@@ -93,28 +97,9 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         }
     }
 
-    public void writeBundle(BundleRecords bundle) throws IOException {
-        try {
-            // Open the current writer if write the first record or roll over happen before.
-            if (currentWriter == null) {
-                openCurrentWriter();
-            }
-
-            currentWriter.writeBundle(bundle);
-            recordCount += bundle.rowCount();
-
-            if (rollingFile(true)) {
-                closeCurrentWriter();
-            }
-        } catch (Throwable e) {
-            LOG.warn(
-                    "Exception occurs when writing file "
-                            + (currentWriter == null ? null : currentWriter.path())
-                            + ". Cleaning up.",
-                    e);
-            abort();
-            throw e;
-        }
+    private boolean rollingFile(boolean forceCheck) throws IOException {
+        return currentWriter.reachTargetSize(
+                forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
     }
 
     private void openCurrentWriter() {
@@ -127,21 +112,14 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         }
 
         currentWriter.close();
-        // only store abort executor in memory
-        // cannot store whole writer, it includes lots of memory for example column vectors to read
-        // and write
         closedWriters.add(currentWriter.abortExecutor());
-        results.add(currentWriter.result());
+        if (currentWriter.committers() != null) {
+            committers.addAll(currentWriter.committers());
+        }
 
         currentWriter = null;
     }
 
-    @Override
-    public long recordCount() {
-        return recordCount;
-    }
-
-    @Override
     public void abort() {
         if (currentWriter != null) {
             currentWriter.abort();
@@ -151,13 +129,10 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
         }
     }
 
-    @Override
-    public List<R> result() {
-        Preconditions.checkState(closed, "Cannot access the results unless close all writers.");
-        return results;
+    public List<TwoPhaseOutputStream.Committer> committers() {
+        return committers;
     }
 
-    @Override
     public void close() throws IOException {
         if (closed) {
             return;

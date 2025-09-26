@@ -18,44 +18,32 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
-import org.apache.paimon.io.BundleRecords;
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.io.FormatTableRollingFileWriter;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
-/**
- * TwoPhaseCommit directly sink data to file, no memory cache here, use OrcWriter/ParquetWrite/etc
- * directly write data. May cause out-of-memory.
- */
-public class TwoPhaseCommitDirectSinkWriter<T> {
+/** TwoPhaseCommit directly sink data to file. */
+public class TwoPhaseCommitDirectSinkWriter {
 
-    private final Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier;
+    private final Supplier<FormatTableRollingFileWriter> writerSupplier;
 
-    private RollingFileWriter<T, DataFileMeta> writer;
+    private FormatTableRollingFileWriter writer;
 
-    public TwoPhaseCommitDirectSinkWriter(
-            Supplier<RollingFileWriter<T, DataFileMeta>> writerSupplier) {
+    public TwoPhaseCommitDirectSinkWriter(Supplier<FormatTableRollingFileWriter> writerSupplier) {
         this.writerSupplier = writerSupplier;
     }
 
-    public boolean write(T data) throws IOException {
+    public boolean write(InternalRow data) throws IOException {
         if (writer == null) {
             writer = writerSupplier.get();
         }
         writer.write(data);
         return true;
-    }
-
-    public void writeBundle(BundleRecords bundle) throws IOException {
-        if (writer == null) {
-            writer = writerSupplier.get();
-        }
-        writer.writeBundle(bundle);
     }
 
     public List<TwoPhaseOutputStream.Committer> closeAndGetCommitters() throws IOException {

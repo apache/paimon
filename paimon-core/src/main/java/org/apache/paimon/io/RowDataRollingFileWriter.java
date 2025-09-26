@@ -54,40 +54,6 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             boolean asyncFileWrite,
             boolean statsDenseStore,
             @Nullable List<String> writeCols) {
-        this(
-                fileIO,
-                schemaId,
-                fileFormat,
-                targetFileSize,
-                writeSchema,
-                pathFactory,
-                seqNumCounter,
-                fileCompression,
-                statsCollectors,
-                fileIndexOptions,
-                fileSource,
-                asyncFileWrite,
-                statsDenseStore,
-                writeCols,
-                false);
-    }
-
-    public RowDataRollingFileWriter(
-            FileIO fileIO,
-            long schemaId,
-            FileFormat fileFormat,
-            long targetFileSize,
-            RowType writeSchema,
-            DataFilePathFactory pathFactory,
-            LongCounter seqNumCounter,
-            String fileCompression,
-            SimpleColStatsCollector.Factory[] statsCollectors,
-            FileIndexOptions fileIndexOptions,
-            FileSource fileSource,
-            boolean asyncFileWrite,
-            boolean statsDenseStore,
-            @Nullable List<String> writeCols,
-            boolean enableTwoPhaseCommit) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -103,8 +69,7 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 asyncFileWrite,
                                 statsDenseStore,
                                 pathFactory.isExternalPath(),
-                                writeCols,
-                                enableTwoPhaseCommit),
+                                writeCols),
                 targetFileSize);
     }
 
@@ -125,9 +90,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             RowType rowType,
             SimpleColStatsCollector.Factory[] statsCollectors) {
         boolean isDisabled =
-                statsCollectors == null
-                        || Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
-                                .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
+                Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
+                        .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
         if (isDisabled) {
             return SimpleStatsProducer.disabledProducer();
         }

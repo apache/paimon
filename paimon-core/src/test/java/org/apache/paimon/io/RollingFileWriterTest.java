@@ -98,8 +98,7 @@ public class RollingFileWriterTest {
                                         true,
                                         statsDenseStore,
                                         false,
-                                        null,
-                                        false),
+                                        null),
                         TARGET_FILE_SIZE);
     }
 

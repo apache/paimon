@@ -88,7 +88,7 @@ public abstract class KeyValueDataFileWriter
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
             boolean isExternalPath) {
-        super(fileIO, context, path, converter, writeRowType, options.asyncFileWrite(), false);
+        super(fileIO, context, path, converter, writeRowType, options.asyncFileWrite());
 
         this.keyType = keyType;
         this.valueType = valueType;
