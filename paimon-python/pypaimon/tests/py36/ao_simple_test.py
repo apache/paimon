@@ -406,4 +406,4 @@ class AOSimpleTest(RESTBaseTest):
                                               secret_key="SECRET",
                                               session_token="TOKEN",
                                               region="cn-hangzhou",
-                                              endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT], )
+                                              endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])
