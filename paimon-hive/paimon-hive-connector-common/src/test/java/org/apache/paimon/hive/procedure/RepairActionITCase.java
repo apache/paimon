@@ -29,7 +29,8 @@ import org.apache.flink.types.Row;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashMap;
 import java.util.List;
@@ -54,8 +55,9 @@ public class RepairActionITCase extends ActionITCaseBase {
         TEST_HIVE_METASTORE.stop();
     }
 
-    @Test
-    public void testRepairTableAction() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRepairTableAction(boolean forceStartFlinkJob) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
@@ -86,6 +88,7 @@ public class RepairActionITCase extends ActionITCaseBase {
         catalogConf.put(
                 "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
         RepairAction repairAction = new RepairAction("test_db.t_repair_hive", catalogConf);
+        repairAction.forceStartFlinkJob(forceStartFlinkJob);
         repairAction.run();
 
         List<Row> ret =

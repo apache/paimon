@@ -20,12 +20,10 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.procedure.ExpireChangelogsProcedure;
 
-import org.apache.flink.table.procedure.DefaultProcedureContext;
-
 import java.util.Map;
 
 /** Expire changelogs action for Flink. */
-public class ExpireChangelogsAction extends ActionBase {
+public class ExpireChangelogsAction extends ActionBase implements LocalAction {
     private final String database;
     private final String table;
     private final Integer retainMax;
@@ -53,11 +51,11 @@ public class ExpireChangelogsAction extends ActionBase {
         this.deleteAll = deleteAll;
     }
 
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         ExpireChangelogsProcedure expireChangelogsProcedure = new ExpireChangelogsProcedure();
         expireChangelogsProcedure.withCatalog(catalog);
         expireChangelogsProcedure.call(
-                new DefaultProcedureContext(env),
+                null,
                 database + "." + table,
                 retainMax,
                 retainMin,

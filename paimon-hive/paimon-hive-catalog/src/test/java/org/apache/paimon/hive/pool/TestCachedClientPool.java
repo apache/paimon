@@ -421,7 +421,7 @@ public class TestCachedClientPool {
                                                         fileIO,
                                                         hiveConf,
                                                         metastoreClientClass,
-                                                        options,
+                                                        CatalogContext.create(options),
                                                         warehouse);
                                             } catch (Exception e) {
                                                 throw new RuntimeException(e);

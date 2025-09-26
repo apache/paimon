@@ -35,7 +35,9 @@ public class OffsetSeekableInputStream extends SeekableInputStream {
         this.wrapped = wrapped;
         this.offset = offset;
         this.length = length;
-        wrapped.seek(offset);
+        if (offset != 0) {
+            wrapped.seek(offset);
+        }
     }
 
     @Override
@@ -50,19 +52,23 @@ public class OffsetSeekableInputStream extends SeekableInputStream {
 
     @Override
     public int read() throws IOException {
-        if (getPos() >= length) {
-            return -1;
+        if (length != -1) {
+            if (getPos() >= length) {
+                return -1;
+            }
         }
         return wrapped.read();
     }
 
     @Override
     public int read(byte[] b, int off, int len) throws IOException {
-        long realLen = Math.min(len, length - getPos());
-        if (realLen == 0) {
-            return -1;
+        if (length != -1) {
+            len = (int) Math.min(len, length - getPos());
+            if (len == 0) {
+                return -1;
+            }
         }
-        return wrapped.read(b, off, (int) realLen);
+        return wrapped.read(b, off, len);
     }
 
     @Override
