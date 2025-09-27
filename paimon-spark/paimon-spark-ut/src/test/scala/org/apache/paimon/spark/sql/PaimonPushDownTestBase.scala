@@ -477,6 +477,81 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon pushDown: topN convert to limit for single primary-key table") {
+    assume(gteqSpark3_3)
+    withTable("dv_test") {
+      spark.sql("""
+                  |CREATE TABLE dv_test (id INT, c1 INT, c2 STRING) TBLPROPERTIES (
+                  |'bucket' = '2',
+                  |'primary-key'='id',
+                  |'deletion-vectors.enabled' = 'true'
+                  |)
+                  |""".stripMargin)
+
+      spark.sql("insert into table dv_test values(1, 1, 'a'),(3, 3, 'c'),(5, 5, 'e'),(7, 7, 'g')")
+      spark.sql("insert into table dv_test values(2, 2, 'b'),(4, 4, 'd'),(6, 6, 'f'),(8, 8, 'h')")
+      spark.sql("delete from dv_test where id IN (1, 4, 5, 8)")
+
+      // test can convert
+      // test only order by primary-key
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY id ASC LIMIT 3"),
+        Row(2, 2, "b") :: Row(3, 3, "c") :: Row(6, 6, "f") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY id DESC LIMIT 3"),
+        Row(7, 7, "g") :: Row(6, 6, "f") :: Row(3, 3, "c") :: Nil)
+
+      // test order with non-primary key
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY id ASC, c1 DESC LIMIT 3"),
+        Row(2, 2, "b") :: Row(3, 3, "c") :: Row(6, 6, "f") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY id DESC, c1 DESC, c2 ASC LIMIT 3"),
+        Row(7, 7, "g") :: Row(6, 6, "f") :: Row(3, 3, "c") :: Nil)
+    }
+  }
+
+  test("Paimon pushDown: topN convert to limit for multi primary-key table") {
+    assume(gteqSpark3_3)
+    withTable("dv_test") {
+      spark.sql("""
+                  |CREATE TABLE dv_test (id_0 INT, id_1 INT, c1 INT, c2 STRING) TBLPROPERTIES (
+                  |'bucket' = '2',
+                  |'primary-key'='id_0,id_1',
+                  |'deletion-vectors.enabled' = 'true'
+                  |)
+                  |""".stripMargin)
+
+      spark.sql(
+        "insert into table dv_test values(1, 1, 1, 'a'),(1, 3, 3, 'c'),(1, 5, 5, 'e'),(1, 7, 7, 'g')")
+      spark.sql(
+        "insert into table dv_test values(2, 2, 2, 'b'),(2, 4, 4, 'd'),(2, 6, 6, 'f'),(2, 8, 8, 'h')")
+      spark.sql("delete from dv_test where id_1 IN (1, 4, 5, 8)")
+
+      // test can convert
+      checkAnswer(
+        spark.sql("SELECT id_0 FROM dv_test ORDER BY id_0 LIMIT 3"),
+        Row(1) :: Row(1) :: Row(2) :: Nil)
+      checkAnswer(
+        spark.sql("SELECT id_0 FROM dv_test ORDER BY id_0 DESC LIMIT 3"),
+        Row(2) :: Row(2) :: Row(1) :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY id_0, id_1 LIMIT 3"),
+        Row(1, 3, 3, "c") :: Row(1, 7, 7, "g") :: Row(2, 2, 2, "b") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY id_0 DESC, id_1 DESC LIMIT 3"),
+        Row(2, 6, 6, "f") :: Row(2, 2, 2, "b") :: Row(1, 7, 7, "g") :: Nil)
+
+      // test order with non-primary key
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY id_0, id_1, c1 ASC LIMIT 3"),
+        Row(1, 3, 3, "c") :: Row(1, 7, 7, "g") :: Row(2, 2, 2, "b") :: Nil)
+      checkAnswer(
+        spark.sql("SELECT * FROM dv_test ORDER BY id_0, id_1, c1 DESC LIMIT 3"),
+        Row(1, 3, 3, "c") :: Row(1, 7, 7, "g") :: Row(2, 2, 2, "b") :: Nil)
+    }
+  }
+
   test(s"Paimon pushdown: parquet in-filter") {
     withTable("T") {
       spark.sql(s"""

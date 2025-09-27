@@ -19,6 +19,7 @@
 package org.apache.paimon.fileindex.bitmap;
 
 import org.apache.paimon.fileindex.FileIndexResult;
+import org.apache.paimon.predicate.LimitDirection;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringBitmap32;
 
@@ -59,8 +60,8 @@ public class BitmapIndexResult extends LazyField<RoaringBitmap32> implements Fil
         return new BitmapIndexResult(() -> RoaringBitmap32.andNot(get(), deletion));
     }
 
-    public FileIndexResult limit(int limit) {
-        return new BitmapIndexResult(() -> get().limit(limit));
+    public FileIndexResult limit(int limit, LimitDirection direction) {
+        return new BitmapIndexResult(() -> get().limit(limit, direction));
     }
 
     @Override

@@ -19,7 +19,9 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.predicate.LimitDirection;
 
+import org.roaringbitmap.IntIterator;
 import org.roaringbitmap.RoaringBitmap;
 
 import java.io.DataInput;
@@ -28,6 +30,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
 import java.util.Objects;
+
+import static org.apache.paimon.predicate.LimitDirection.HEAD;
 
 /** A compressed bitmap for 32-bit integer. */
 public class RoaringBitmap32 {
@@ -106,7 +110,28 @@ public class RoaringBitmap32 {
     }
 
     public RoaringBitmap32 limit(int k) {
-        return new RoaringBitmap32(roaringBitmap.limit(k));
+        return limit(k, HEAD);
+    }
+
+    public RoaringBitmap32 limit(int k, LimitDirection direction) {
+        if (getCardinality() <= k) {
+            return clone();
+        }
+
+        // limit from head
+        if (HEAD.equals(direction)) {
+            return new RoaringBitmap32(roaringBitmap.limit(k));
+        }
+
+        // limit from tail
+        int limit = k;
+        RoaringBitmap bitmap = new RoaringBitmap();
+        IntIterator iterator = roaringBitmap.getReverseIntIterator();
+        while (iterator.hasNext() && limit > 0) {
+            bitmap.add(iterator.next());
+            limit--;
+        }
+        return new RoaringBitmap32(bitmap);
     }
 
     public void remove(int position) {

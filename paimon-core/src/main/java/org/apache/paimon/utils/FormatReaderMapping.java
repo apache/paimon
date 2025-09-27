@@ -18,12 +18,16 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.partition.PartitionUtils;
+import org.apache.paimon.predicate.LimitDirection;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.RichLimit;
 import org.apache.paimon.predicate.SortValue;
+import org.apache.paimon.predicate.SortValue.SortDirection;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
@@ -43,10 +47,15 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Function;
 
+import static org.apache.paimon.predicate.LimitDirection.HEAD;
+import static org.apache.paimon.predicate.LimitDirection.TAIL;
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_ID_START;
+import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
 
 /** Class with index mapping and format reader. */
 public class FormatReaderMapping {
@@ -64,7 +73,7 @@ public class FormatReaderMapping {
     private final List<Predicate> dataFilters;
     private final Map<String, Integer> systemFields;
     @Nullable private final TopN topN;
-    @Nullable private final Integer limit;
+    @Nullable private final RichLimit limit;
 
     public FormatReaderMapping(
             @Nullable int[] indexMapping,
@@ -76,7 +85,7 @@ public class FormatReaderMapping {
             List<Predicate> dataFilters,
             Map<String, Integer> systemFields,
             @Nullable TopN topN,
-            @Nullable Integer limit) {
+            @Nullable RichLimit limit) {
         this.indexMapping = combine(indexMapping, trimmedKeyMapping);
         this.castMapping = castMapping;
         this.readerFactory = readerFactory;
@@ -145,7 +154,7 @@ public class FormatReaderMapping {
     }
 
     @Nullable
-    public Integer getLimit() {
+    public RichLimit getLimit() {
         return limit;
     }
 
@@ -158,6 +167,7 @@ public class FormatReaderMapping {
         @Nullable private final List<Predicate> filters;
         @Nullable private final TopN topN;
         @Nullable private final Integer limit;
+        private final boolean deletionVectorsEnabled;
 
         public Builder(
                 FileFormatDiscover formatDiscover,
@@ -165,13 +175,15 @@ public class FormatReaderMapping {
                 Function<TableSchema, List<DataField>> fieldsExtractor,
                 @Nullable List<Predicate> filters,
                 @Nullable TopN topN,
-                @Nullable Integer limit) {
+                @Nullable Integer limit,
+                boolean deletionVectorsEnabled) {
             this.formatDiscover = formatDiscover;
             this.readFields = readFields;
             this.fieldsExtractor = fieldsExtractor;
             this.filters = filters;
             this.topN = topN;
             this.limit = limit;
+            this.deletionVectorsEnabled = deletionVectorsEnabled;
         }
 
         /**
@@ -223,6 +235,17 @@ public class FormatReaderMapping {
             List<Predicate> readFilters =
                     enabledFilterPushDown ? readFilters(filters, tableSchema, dataSchema) : null;
 
+            TopN pushTopN = evolutionTopN(tableSchema, dataSchema);
+            RichLimit pushLimit = limit == null ? null : new RichLimit(limit, HEAD);
+
+            // try convert the TopN to limit
+            Optional<RichLimit> converted =
+                    tryConvertTopNToLimit(pushTopN, pushLimit, tableSchema, deletionVectorsEnabled);
+            if (converted.isPresent()) {
+                pushTopN = null;
+                pushLimit = converted.get();
+            }
+
             return new FormatReaderMapping(
                     indexCastMapping.getIndexMapping(),
                     indexCastMapping.getCastMapping(),
@@ -237,8 +260,8 @@ public class FormatReaderMapping {
                     dataSchema,
                     readFilters,
                     systemFields,
-                    evolutionTopN(tableSchema, dataSchema),
-                    limit);
+                    pushTopN,
+                    pushLimit);
         }
 
         @Nullable
@@ -257,6 +280,72 @@ public class FormatReaderMapping {
                 }
             }
             return pushTopN;
+        }
+
+        @VisibleForTesting
+        static Optional<RichLimit> tryConvertTopNToLimit(
+                TopN pushTopN,
+                RichLimit pushLimit,
+                TableSchema schema,
+                boolean deletionVectorsEnabled) {
+            // only for primary key table in deletion-vector mode.
+            if (pushTopN == null
+                    || pushLimit != null
+                    || !deletionVectorsEnabled
+                    || schema.primaryKeys().isEmpty()) {
+                return Optional.empty();
+            }
+
+            // The follow rules can convert TopN to limit.
+            // 1. The preceding sort keys must matches with the trimmed primary keys in order,
+            //      and the sort direction must be the same.
+            // 2. If non-primary key including, all the trimmed primary keys must matches in order
+            // first.
+
+            // e.g. trimmed primary keys: c1, c2. non-primary keys: n1
+            // ORDER BY c1 LIMIT 1 (match)
+            // ORDER BY c1 DESC LIMIT 1 (match)
+            // ORDER BY c1, c2 LIMIT 1 (match)
+            // ORDER BY c1 DESC, c2 DESC LIMIT 1 (match)
+
+            // non-primary key `n1` can be ignored, if all the primary keys matches (because primary
+            // keys is unique).
+            // ORDER BY c1, c2, n1 ASC LIMIT 1 (match)
+            // ORDER BY c1, c2, n1 DESC LIMIT 1 (match)
+            // ORDER BY c1 DESC, c2 DESC, n1 ASC LIMIT 1 (match)
+            // ORDER BY c1 DESC, c2 DESC, n1 DESC LIMIT 1 (match)
+
+            // this following example will not convert TopN to limit.
+            // ORDER BY c1, c2 DESC LIMIT 1 (not match)
+            // ORDER BY c1 DESC, c2 LIMIT 1 (not match)
+            // ORDER BY c1, n1 LIMIT 1 (not match)
+            List<DataField> pkFields = schema.trimmedPrimaryKeysFields();
+            List<SortValue> orders = pushTopN.orders();
+            if (isNullOrEmpty(orders)) {
+                return Optional.empty();
+            }
+
+            SortDirection firstDirection = null;
+            for (int i = 0; i < pkFields.size(); i++) {
+                if (i > orders.size() - 1) {
+                    break;
+                }
+
+                DataField field = pkFields.get(i);
+                SortValue sort = orders.get(i);
+                SortDirection direction = sort.direction();
+                if (firstDirection == null) {
+                    firstDirection = direction;
+                }
+
+                if (!Objects.equals(firstDirection, direction)
+                        || field.id() != sort.field().index()) {
+                    return Optional.empty();
+                }
+            }
+
+            LimitDirection direction = ASCENDING.equals(firstDirection) ? HEAD : TAIL;
+            return Optional.of(new RichLimit(pushTopN.limit(), direction));
         }
 
         public FormatReaderMapping build(
