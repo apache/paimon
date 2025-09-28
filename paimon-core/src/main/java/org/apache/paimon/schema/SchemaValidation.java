@@ -653,6 +653,10 @@ public class SchemaValidation {
             checkArgument(
                     options.dataEvolutionEnabled(),
                     "Data evolution config must enabled for table with BLOB type column.");
+
+            checkArgument(
+                    BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldCount() == 1,
+                    "Table with BLOB type column only support one BLOB column.");
         }
     }
 }
