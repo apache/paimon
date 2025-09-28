@@ -186,7 +186,7 @@ public class PostgresActionUtils {
         customConverterConfigs.put(JsonConverterConfig.DECIMAL_FORMAT_CONFIG, "numeric");
         CdcDebeziumDeserializationSchema schema =
                 new CdcDebeziumDeserializationSchema(true, customConverterConfigs);
-        return sourceBuilder.deserializer(schema).includeSchemaChanges(true).build();
+        return sourceBuilder.deserializer(schema).build();
     }
 
     public static void registerJdbcDriver() {
