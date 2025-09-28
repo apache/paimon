@@ -23,6 +23,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.types.logical.RowType;
@@ -125,6 +126,17 @@ public class FormatCatalogTable implements CatalogTable {
     @Override
     public Optional<String> getDetailedDescription() {
         return getDescription();
+    }
+
+    public DynamicTableSource createTableSource(DynamicTableFactory.Context context) {
+        return FactoryUtil.createDynamicTableSource(
+                null,
+                context.getObjectIdentifier(),
+                context.getCatalogTable(),
+                new HashMap<>(),
+                context.getConfiguration(),
+                context.getClassLoader(),
+                context.isTemporary());
     }
 
     public DynamicTableSink createTableSink(DynamicTableFactory.Context context) {
