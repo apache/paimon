@@ -624,8 +624,8 @@ public abstract class CatalogTestBase {
                     (buildFileFormatFactory(format)
                                     .create(
                                             new FileFormatFactory.FormatContext(
-                                                    new Options(), 1024, 1024)))
-                            .createWriterFactory(table.rowType());
+                                                    new Options(table.options()), 1024, 1024)))
+                            .createWriterFactory(getFormatTableWriteRowType(table));
             Path partitionPath =
                     new Path(
                             String.format(
@@ -700,8 +700,8 @@ public abstract class CatalogTestBase {
                     (buildFileFormatFactory(format)
                                     .create(
                                             new FileFormatFactory.FormatContext(
-                                                    new Options(), 1024, 1024)))
-                            .createWriterFactory(table.rowType());
+                                                    new Options(table.options()), 1024, 1024)))
+                            .createWriterFactory(getFormatTableWriteRowType(table));
             Map<String, String> partitionSpec = null;
             if (partitioned) {
                 Path partitionPath =
@@ -767,6 +767,14 @@ public abstract class CatalogTestBase {
         }
     }
 
+    protected RowType getFormatTableWriteRowType(Table table) {
+        return table.rowType()
+                .project(
+                        table.rowType().getFieldNames().stream()
+                                .filter(name -> !table.partitionKeys().contains(name))
+                                .collect(Collectors.toList()));
+    }
+
     protected FileFormatFactory buildFileFormatFactory(String format) {
         switch (format) {
             case "csv":
@@ -828,7 +836,10 @@ public abstract class CatalogTestBase {
                 readBuilder.newRead().executeFilter().createReader(scan.plan())) {
             InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
             List<InternalRow> rows = new ArrayList<>();
-            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+            reader.forEachRemaining(
+                    row -> {
+                        rows.add(serializer.copy(row));
+                    });
             return rows;
         }
     }
