@@ -77,7 +77,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
-    private final Map<Long, TableSchema> cache;
     private final Function<Long, TableSchema> schemaFetcher;
 
     protected RowType readRowType;
@@ -90,7 +89,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory) {
         this.fileIO = fileIO;
-        this.cache = new HashMap<>();
+        final Map<Long, TableSchema> cache = new HashMap<>();
         this.schemaFetcher =
                 schemaId -> cache.computeIfAbsent(schemaId, key -> schemaManager.schema(schemaId));
         this.schema = schema;
