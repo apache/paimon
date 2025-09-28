@@ -102,6 +102,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -1348,6 +1349,92 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
             AtomicInteger cnt = new AtomicInteger(0);
             reader.forEachRemaining(row -> cnt.incrementAndGet());
             assertThat(cnt.get()).isEqualTo(limit);
+            reader.close();
+        }
+    }
+
+    @Test
+    public void testTopNConvertToLimit() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(SOURCE_SPLIT_TARGET_SIZE, MemorySize.ofBytes(1));
+                            conf.set(BUCKET, 3);
+                        });
+
+        int rowCount = 1500000;
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // append
+        for (int i = 0; i < rowCount; i++) {
+            int pt = i % 3;
+            write.write(rowDataWithKind(RowKind.INSERT, pt, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // update
+        int updateRowCount = 300000;
+        for (int i = 0; i < updateRowCount; i++) {
+            int pt = i % 3;
+            write.write(rowDataWithKind(RowKind.INSERT, pt, i, (long) i));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        // test bottom k
+        {
+            int k = 10;
+            FieldRef primaryKey = new FieldRef(1, "a", DataTypes.INT());
+            TopN topN = new TopN(primaryKey, ASCENDING, NULLS_LAST, k);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withTopN(topN).createReader(plan.splits());
+            PriorityQueue<Integer> heap = new PriorityQueue<>(k, (x, y) -> -x.compareTo(y));
+            reader.forEachRemaining(
+                    row -> {
+                        int id = row.getInt(1);
+                        if (heap.size() < k) {
+                            heap.add(id);
+                        } else if (heap.peek() > id) {
+                            heap.poll();
+                            heap.add(id);
+                        }
+                    });
+            assertThat(heap).hasSize(k);
+            for (int i = k - 1; i >= 0; i--) {
+                assertThat(heap.poll()).isEqualTo(i);
+            }
+            reader.close();
+        }
+
+        // test top k
+        {
+            int k = 10;
+            FieldRef primaryKey = new FieldRef(1, "a", DataTypes.INT());
+            TopN topN = new TopN(primaryKey, DESCENDING, NULLS_LAST, k);
+            TableScan.Plan plan = table.newScan().plan();
+            RecordReader<InternalRow> reader =
+                    table.newRead().withTopN(topN).createReader(plan.splits());
+            PriorityQueue<Integer> heap = new PriorityQueue<>(k, Integer::compareTo);
+            reader.forEachRemaining(
+                    row -> {
+                        int id = row.getInt(1);
+                        if (heap.size() < k) {
+                            heap.add(id);
+                        } else if (heap.peek() < id) {
+                            heap.poll();
+                            heap.add(id);
+                        }
+                    });
+            assertThat(heap).hasSize(k);
+            for (int i = 0; i < k; i++) {
+                assertThat(heap.poll()).isEqualTo(rowCount - k + i);
+            }
             reader.close();
         }
     }
