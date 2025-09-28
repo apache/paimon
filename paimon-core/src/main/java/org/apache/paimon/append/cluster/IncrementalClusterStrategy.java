@@ -31,16 +31,16 @@ import java.util.List;
 import java.util.Optional;
 
 /** Cluster strategy to decide which files to select for cluster. */
-public class ClusterStrategy {
+public class IncrementalClusterStrategy {
 
-    private static final Logger LOG = LoggerFactory.getLogger(ClusterStrategy.class);
+    private static final Logger LOG = LoggerFactory.getLogger(IncrementalClusterStrategy.class);
 
     private final List<String> clusterKeys;
     private final SchemaManager schemaManager;
 
     private final UniversalCompaction universalCompaction;
 
-    public ClusterStrategy(
+    public IncrementalClusterStrategy(
             SchemaManager schemaManager,
             List<String> clusterKeys,
             int maxSizeAmp,

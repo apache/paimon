@@ -45,19 +45,19 @@ import static org.apache.paimon.CoreOptions.CLUSTERING_INCREMENTAL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manager for Incremental Clustering. */
-public class ClusterManager {
+public class IncrementalClusterManager {
 
-    private static final Logger LOG = LoggerFactory.getLogger(ClusterManager.class);
+    private static final Logger LOG = LoggerFactory.getLogger(IncrementalClusterManager.class);
 
     private final SnapshotReader snapshotReader;
 
-    private final ClusterStrategy clusterStrategy;
+    private final IncrementalClusterStrategy incrementalClusterStrategy;
     private final CoreOptions.OrderType clusterCurve;
     private final List<String> clusterKeys;
 
     private int maxLevel;
 
-    public ClusterManager(FileStoreTable table) {
+    public IncrementalClusterManager(FileStoreTable table) {
         checkArgument(
                 table.bucketMode() == BucketMode.BUCKET_UNAWARE,
                 "only append unaware-bucket table support incremental clustering.");
@@ -68,8 +68,8 @@ public class ClusterManager {
                 options.clusteringIncrementalEnabled(),
                 "Only support incremental clustering when '%s' is true.",
                 CLUSTERING_INCREMENTAL.key());
-        this.clusterStrategy =
-                new ClusterStrategy(
+        this.incrementalClusterStrategy =
+                new IncrementalClusterStrategy(
                         table.schemaManager(),
                         options.clusteringColumns(),
                         options.maxSizeAmplificationPercent(),
@@ -110,7 +110,7 @@ public class ClusterManager {
                                 Collectors.toMap(
                                         Map.Entry::getKey,
                                         entry ->
-                                                clusterStrategy.pick(
+                                                incrementalClusterStrategy.pick(
                                                         maxLevel,
                                                         entry.getValue(),
                                                         fullCompaction)));

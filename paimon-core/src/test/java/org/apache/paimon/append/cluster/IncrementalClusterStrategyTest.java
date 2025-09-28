@@ -46,26 +46,27 @@ import java.util.Optional;
 import static java.util.Collections.emptyList;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link ClusterStrategy}. */
-public class ClusterStrategyTest {
+/** Test for {@link IncrementalClusterStrategy}. */
+public class IncrementalClusterStrategyTest {
 
     @TempDir static java.nio.file.Path tempDir;
 
     private static SchemaManager schemaManager;
-    private static ClusterStrategy clusterStrategy;
+    private static IncrementalClusterStrategy incrementalClusterStrategy;
 
     @BeforeAll
     public static void setUp() throws Exception {
         schemaManager = new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
         prepareSchema();
-        clusterStrategy = new ClusterStrategy(schemaManager, Arrays.asList("f0", "f1"), 25, 1, 3);
+        incrementalClusterStrategy =
+                new IncrementalClusterStrategy(schemaManager, Arrays.asList("f0", "f1"), 25, 1, 3);
     }
 
     @Test
     public void testPickFullCompactionWithEmptyRuns() {
         // Test case: empty runs should return empty
         Optional<CompactUnit> result =
-                clusterStrategy.pickFullCompaction(3, Collections.emptyList());
+                incrementalClusterStrategy.pickFullCompaction(3, Collections.emptyList());
         assertThat(result.isPresent()).isFalse();
     }
 
@@ -78,7 +79,7 @@ public class ClusterStrategyTest {
         LevelSortedRun run = new LevelSortedRun(maxLevel, SortedRun.fromSingle(file));
         List<LevelSortedRun> runs = Collections.singletonList(run);
 
-        Optional<CompactUnit> result = clusterStrategy.pickFullCompaction(3, runs);
+        Optional<CompactUnit> result = incrementalClusterStrategy.pickFullCompaction(3, runs);
         assertThat(result.isPresent()).isFalse();
     }
 
@@ -91,7 +92,7 @@ public class ClusterStrategyTest {
         LevelSortedRun run = new LevelSortedRun(maxLevel, SortedRun.fromSingle(file));
         List<LevelSortedRun> runs = Collections.singletonList(run);
 
-        Optional<CompactUnit> result = clusterStrategy.pickFullCompaction(3, runs);
+        Optional<CompactUnit> result = incrementalClusterStrategy.pickFullCompaction(3, runs);
         assertThat(result.isPresent()).isTrue();
         assertThat(result.get().outputLevel()).isEqualTo(maxLevel);
         assertThat(result.get().files()).hasSize(1);
@@ -107,7 +108,7 @@ public class ClusterStrategyTest {
         LevelSortedRun run = new LevelSortedRun(runLevel, SortedRun.fromSingle(file));
         List<LevelSortedRun> runs = Collections.singletonList(run);
 
-        Optional<CompactUnit> result = clusterStrategy.pickFullCompaction(3, runs);
+        Optional<CompactUnit> result = incrementalClusterStrategy.pickFullCompaction(3, runs);
         assertThat(result.isPresent()).isTrue();
         assertThat(result.get().outputLevel()).isEqualTo(maxLevel);
         assertThat(result.get().files()).hasSize(1);
@@ -128,7 +129,7 @@ public class ClusterStrategyTest {
 
         List<LevelSortedRun> runs = Arrays.asList(run1, run2, run3);
 
-        Optional<CompactUnit> result = clusterStrategy.pickFullCompaction(3, runs);
+        Optional<CompactUnit> result = incrementalClusterStrategy.pickFullCompaction(3, runs);
         assertThat(result.isPresent()).isTrue();
         assertThat(result.get().outputLevel()).isEqualTo(maxLevel);
         assertThat(result.get().files()).hasSize(3);
@@ -150,7 +151,7 @@ public class ClusterStrategyTest {
         List<LevelSortedRun> runs = Arrays.asList(run1, run2);
 
         // Test with numLevels = 5, maxLevel should be 4
-        Optional<CompactUnit> result = clusterStrategy.pickFullCompaction(5, runs);
+        Optional<CompactUnit> result = incrementalClusterStrategy.pickFullCompaction(5, runs);
         assertThat(result.isPresent()).isTrue();
         assertThat(result.get().outputLevel()).isEqualTo(4); // maxLevel = numLevels - 1
         assertThat(result.get().files()).hasSize(2);
@@ -170,7 +171,7 @@ public class ClusterStrategyTest {
 
         List<LevelSortedRun> runs = Arrays.asList(run1, run2, run3);
 
-        Optional<CompactUnit> result = clusterStrategy.pickFullCompaction(3, runs);
+        Optional<CompactUnit> result = incrementalClusterStrategy.pickFullCompaction(3, runs);
         assertThat(result.isPresent()).isTrue();
         assertThat(result.get().outputLevel()).isEqualTo(maxLevel);
         assertThat(result.get().files()).hasSize(3);

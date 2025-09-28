@@ -23,7 +23,7 @@ import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
-import org.apache.paimon.append.cluster.ClusterManager;
+import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
@@ -275,14 +275,6 @@ public class CompactProcedure extends BaseProcedure {
         PartitionPredicate partitionPredicate =
                 PartitionPredicate.fromPredicate(partitionType, filter);
 
-        if (clusterIncrementalEnabled) {
-            checkArgument(
-                    bucketMode == BucketMode.BUCKET_UNAWARE,
-                    "only append unaware-bucket table support incremental clustering.");
-            clusterIncrementalUnAwareBucketTable(table, fullCompact, relation);
-            return true;
-        }
-
         if (orderType.equals(OrderType.NONE)) {
             JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
             switch (bucketMode) {
@@ -296,8 +288,12 @@ public class CompactProcedure extends BaseProcedure {
                             javaSparkContext);
                     break;
                 case BUCKET_UNAWARE:
-                    compactUnAwareBucketTable(
-                            table, partitionPredicate, partitionIdleTime, javaSparkContext);
+                    if (clusterIncrementalEnabled) {
+                        clusterIncrementalUnAwareBucketTable(table, fullCompact, relation);
+                    } else {
+                        compactUnAwareBucketTable(
+                                table, partitionPredicate, partitionIdleTime, javaSparkContext);
+                    }
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -555,8 +551,9 @@ public class CompactProcedure extends BaseProcedure {
 
     private void clusterIncrementalUnAwareBucketTable(
             FileStoreTable table, boolean fullCompaction, DataSourceV2Relation relation) {
-        ClusterManager clusterManager = new ClusterManager(table);
-        Map<BinaryRow, CompactUnit> compactUnits = clusterManager.prepareForCluster(fullCompaction);
+        IncrementalClusterManager incrementalClusterManager = new IncrementalClusterManager(table);
+        Map<BinaryRow, CompactUnit> compactUnits =
+                incrementalClusterManager.prepareForCluster(fullCompaction);
 
         // generate splits for each partition
         Map<BinaryRow, DataSplit[]> partitionSplits =
@@ -565,7 +562,7 @@ public class CompactProcedure extends BaseProcedure {
                                 Collectors.toMap(
                                         Map.Entry::getKey,
                                         entry ->
-                                                clusterManager
+                                                incrementalClusterManager
                                                         .toSplits(
                                                                 entry.getKey(),
                                                                 entry.getValue().files())
@@ -574,11 +571,13 @@ public class CompactProcedure extends BaseProcedure {
         // sort in partition
         TableSorter sorter =
                 TableSorter.getSorter(
-                        table, clusterManager.clusterCurve(), clusterManager.clusterKeys());
+                        table,
+                        incrementalClusterManager.clusterCurve(),
+                        incrementalClusterManager.clusterKeys());
         LOG.info(
                 "Start to sort in partition, cluster curve is {}, cluster keys is {}",
-                clusterManager.clusterCurve(),
-                clusterManager.clusterKeys());
+                incrementalClusterManager.clusterCurve(),
+                incrementalClusterManager.clusterKeys());
 
         Dataset<Row> datasetForWrite =
                 partitionSplits.values().stream()
@@ -617,7 +616,7 @@ public class CompactProcedure extends BaseProcedure {
                 List<DataFileMeta> clusterBefore = compactUnits.get(partition).files();
                 // upgrade the clustered file to outputLevel
                 List<DataFileMeta> clusterAfter =
-                        clusterManager.upgrade(
+                        incrementalClusterManager.upgrade(
                                 entry.getValue(), compactUnits.get(partition).outputLevel());
                 LOG.info(
                         "Partition {}: upgrade file level to {}",
@@ -668,10 +667,6 @@ public class CompactProcedure extends BaseProcedure {
                             sparkParallelism, readParallelism, readParallelism));
         }
         return readParallelism;
-    }
-
-    private String defaultCompactStrategy(boolean clusterIncrementalEnabled) {
-        return clusterIncrementalEnabled ? MINOR : FULL;
     }
 
     @VisibleForTesting

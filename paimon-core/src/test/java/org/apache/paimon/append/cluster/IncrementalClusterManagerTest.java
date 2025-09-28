@@ -43,8 +43,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link ClusterManager}. */
-public class ClusterManagerTest {
+/** Test for {@link IncrementalClusterManager}. */
+public class IncrementalClusterManagerTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -55,7 +55,7 @@ public class ClusterManagerTest {
         options.put(CoreOptions.BUCKET_KEY.key(), "f0");
         FileStoreTable table = createTable(options, Collections.emptyList());
 
-        assertThatThrownBy(() -> new ClusterManager(table))
+        assertThatThrownBy(() -> new IncrementalClusterManager(table))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
                         "only append unaware-bucket table support incremental clustering");
@@ -67,7 +67,7 @@ public class ClusterManagerTest {
         options.put(CoreOptions.BUCKET.key(), "-1");
         options.put(CoreOptions.CLUSTERING_INCREMENTAL.key(), "false");
         FileStoreTable table = createTable(options, Collections.emptyList());
-        assertThatThrownBy(() -> new ClusterManager(table))
+        assertThatThrownBy(() -> new IncrementalClusterManager(table))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
                         "Only support incremental clustering when 'clustering.incremental' is true.");
@@ -78,10 +78,10 @@ public class ClusterManagerTest {
 
     @Test
     public void testConstructPartitionLevels() throws Exception {
-        // Create a valid table for ClusterManager
+        // Create a valid table for IncrementalClusterManager
         Map<String, String> options = new HashMap<>();
         FileStoreTable table = createTable(options, Collections.emptyList());
-        ClusterManager clusterManager = new ClusterManager(table);
+        IncrementalClusterManager incrementalClusterManager = new IncrementalClusterManager(table);
 
         // Create test files with different levels
         List<DataFileMeta> partitionFiles = new ArrayList<>();
@@ -103,7 +103,8 @@ public class ClusterManagerTest {
         partitionFiles.add(level2File1);
 
         // Call the method under test
-        List<LevelSortedRun> result = clusterManager.constructPartitionLevels(partitionFiles);
+        List<LevelSortedRun> result =
+                incrementalClusterManager.constructPartitionLevels(partitionFiles);
 
         // Verify the results
         assertThat(result).hasSize(4); // 2 level-0 runs + 1 level-1 run + 1 level-2 run
@@ -129,10 +130,10 @@ public class ClusterManagerTest {
 
     @Test
     public void testUpgrade() throws Exception {
-        // Create a valid table for ClusterManager
+        // Create a valid table for IncrementalClusterManager
         Map<String, String> options = new HashMap<>();
         FileStoreTable table = createTable(options, Collections.emptyList());
-        ClusterManager clusterManager = new ClusterManager(table);
+        IncrementalClusterManager incrementalClusterManager = new IncrementalClusterManager(table);
 
         // Create test files with different levels
         List<DataFileMeta> filesAfterCluster = new ArrayList<>();
@@ -145,7 +146,8 @@ public class ClusterManagerTest {
 
         // Test upgrading to level 3
         int outputLevel = 3;
-        List<DataFileMeta> upgradedFiles = clusterManager.upgrade(filesAfterCluster, outputLevel);
+        List<DataFileMeta> upgradedFiles =
+                incrementalClusterManager.upgrade(filesAfterCluster, outputLevel);
 
         // Verify the results
         assertThat(upgradedFiles).hasSize(3);

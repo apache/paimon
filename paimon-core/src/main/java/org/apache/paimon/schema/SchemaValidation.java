@@ -239,6 +239,8 @@ public class SchemaValidation {
         validateMergeFunctionFactory(schema);
 
         validateRowTracking(schema, options);
+
+        validateIncrementalClustering(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -654,6 +656,19 @@ public class SchemaValidation {
             checkArgument(
                     !options.deletionVectorsEnabled(),
                     "Data evolution config must disabled with deletion-vectors.enabled");
+        }
+    }
+
+    private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {
+        if (options.clusteringIncrementalEnabled()) {
+            checkArgument(
+                    options.bucket() == -1,
+                    "Cannot define %s for incremental clustering  table, it only support bucket = -1",
+                    CoreOptions.BUCKET.key());
+            checkArgument(
+                    schema.primaryKeys().isEmpty(),
+                    "Cannot define %s for incremental clustering table.",
+                    PRIMARY_KEY.key());
         }
     }
 }
