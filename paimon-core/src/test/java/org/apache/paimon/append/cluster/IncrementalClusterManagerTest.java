@@ -53,12 +53,11 @@ public class IncrementalClusterManagerTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.BUCKET_KEY.key(), "f0");
-        FileStoreTable table = createTable(options, Collections.emptyList());
 
-        assertThatThrownBy(() -> new IncrementalClusterManager(table))
+        assertThatThrownBy(() -> createTable(options, Collections.emptyList()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
-                        "only append unaware-bucket table support incremental clustering");
+                        "Cannot define bucket for incremental clustering  table, it only support bucket = -1");
     }
 
     @Test
@@ -72,9 +71,6 @@ public class IncrementalClusterManagerTest {
                 .hasMessageContaining(
                         "Only support incremental clustering when 'clustering.incremental' is true.");
     }
-
-    @Test
-    public void testPrepareForClustering() throws Exception {}
 
     @Test
     public void testConstructPartitionLevels() throws Exception {
