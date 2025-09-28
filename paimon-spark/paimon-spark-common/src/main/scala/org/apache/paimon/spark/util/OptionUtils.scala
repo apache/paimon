@@ -47,6 +47,21 @@ object OptionUtils extends SQLConfHelper {
     conf.getConfString(s"$PAIMON_OPTION_PREFIX${option.key()}", option.defaultValue().toString)
   }
 
+  private def getSparkVersionSpecificDefault(option: ConfigOption[_]): String = {
+    val sparkVersion = org.apache.spark.SPARK_VERSION
+
+    option.key() match {
+      case key if key == SparkConnectorOptions.USE_V2_WRITE.key() =>
+        if (sparkVersion >= "3.4") {
+          "false"
+        } else {
+          option.defaultValue().toString
+        }
+      case _ =>
+        option.defaultValue().toString
+    }
+  }
+
   def checkRequiredConfigurations(): Unit = {
     if (getOptionString(SparkConnectorOptions.REQUIRED_SPARK_CONFS_CHECK_ENABLED).toBoolean) {
       if (!paimonExtensionEnabled) {
@@ -60,7 +75,13 @@ object OptionUtils extends SQLConfHelper {
   }
 
   def useV2Write(): Boolean = {
-    getOptionString(SparkConnectorOptions.USE_V2_WRITE).toBoolean
+    val defaultValue = getSparkVersionSpecificDefault(SparkConnectorOptions.USE_V2_WRITE)
+    conf
+      .getConfString(
+        s"$PAIMON_OPTION_PREFIX${SparkConnectorOptions.USE_V2_WRITE.key()}",
+        defaultValue
+      )
+      .toBoolean
   }
 
   def writeMergeSchemaEnabled(): Boolean = {

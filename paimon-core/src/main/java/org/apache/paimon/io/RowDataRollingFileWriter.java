@@ -36,8 +36,8 @@ import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.List;
 
-/** {@link RollingFileWriter} for data files containing {@link InternalRow}. */
-public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, DataFileMeta> {
+/** {@link RollingFileWriterImpl} for data files containing {@link InternalRow}. */
+public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow, DataFileMeta> {
 
     public RowDataRollingFileWriter(
             FileIO fileIO,

@@ -1769,12 +1769,13 @@ public class CoreOptions implements Serializable {
                                     + "a forced lookup compaction will be performed to flush L0 files to higher level. "
                                     + "This option is only valid when lookup-compact mode is gentle.");
 
-    public static final ConfigOption<Integer> DELETE_FILE_THREAD_NUM =
-            key("delete-file.thread-num")
+    public static final ConfigOption<Integer> FILE_OPERATION_THREAD_NUM =
+            key("file-operation.thread-num")
                     .intType()
                     .noDefaultValue()
+                    .withFallbackKeys("delete-file.thread-num")
                     .withDescription(
-                            "The maximum number of concurrent deleting files. "
+                            "The maximum number of concurrent file operations. "
                                     + "By default is the number of processors available to the Java virtual machine.");
 
     public static final ConfigOption<String> SCAN_FALLBACK_BRANCH =
@@ -1970,6 +1971,12 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(1024)
                     .withDescription("Threshold for merging records to binary buffer in lookup.");
+
+    public static final ConfigOption<FormatTableImplementation> FORMAT_TABLE_IMPLEMENTATION =
+            key("format-table.implementation")
+                    .enumType(FormatTableImplementation.class)
+                    .defaultValue(FormatTableImplementation.ENGINE)
+                    .withDescription("Format table uses paimon or engine.");
 
     public static final ConfigOption<Boolean> FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH =
             ConfigOptions.key("format-table.partition-path-only-value")
@@ -2272,8 +2279,8 @@ public class CoreOptions implements Serializable {
         return options.get(SNAPSHOT_CLEAN_EMPTY_DIRECTORIES);
     }
 
-    public int deleteFileThreadNum() {
-        return options.getOptional(DELETE_FILE_THREAD_NUM)
+    public int fileOperationThreadNum() {
+        return options.getOptional(FILE_OPERATION_THREAD_NUM)
                 .orElseGet(() -> Runtime.getRuntime().availableProcessors());
     }
 
@@ -3033,6 +3040,10 @@ public class CoreOptions implements Serializable {
 
     public int lookupMergeRecordsThreshold() {
         return options.get(LOOKUP_MERGE_RECORDS_THRESHOLD);
+    }
+
+    public boolean formatTableImplementationIsPaimon() {
+        return options.get(FORMAT_TABLE_IMPLEMENTATION) == FormatTableImplementation.PAIMON;
     }
 
     public boolean formatTablePartitionOnlyValueInPath() {
@@ -3827,5 +3838,30 @@ public class CoreOptions implements Serializable {
         NONE,
         HASH
         // TODO : Supports range-partition strategy.
+    }
+
+    /** Specifies the implementation of format table. */
+    public enum FormatTableImplementation implements DescribedEnum {
+        PAIMON("paimon", "Paimon format table implementation."),
+        ENGINE("engine", "Engine format table implementation.");
+
+        private final String value;
+
+        private final String description;
+
+        FormatTableImplementation(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 }

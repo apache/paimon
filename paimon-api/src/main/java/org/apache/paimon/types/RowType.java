@@ -286,13 +286,6 @@ public final class RowType extends DataType {
         }
     }
 
-    public RowType appendDataField(String name, DataType type) {
-        List<DataField> newFields = new ArrayList<>(fields);
-        int newId = currentHighestFieldId(fields) + 1;
-        newFields.add(new DataField(newId, name, type));
-        return new RowType(newFields);
-    }
-
     public RowType project(int[] mapping) {
         List<DataField> fields = getFields();
         return new RowType(

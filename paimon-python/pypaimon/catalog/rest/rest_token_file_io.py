@@ -31,7 +31,7 @@ from pypaimon.common.identifier import Identifier
 
 class RESTTokenFileIO(FileIO):
 
-    def __init__(self, identifier: Identifier, path: Path,
+    def __init__(self, identifier: Identifier, path: str,
                  catalog_options: Optional[dict] = None):
         self.identifier = identifier
         self.path = path
@@ -39,12 +39,12 @@ class RESTTokenFileIO(FileIO):
         self.api_instance: Optional[RESTApi] = None
         self.lock = threading.Lock()
         self.log = logging.getLogger(__name__)
-        super().__init__(str(path), catalog_options)
+        super().__init__(path, catalog_options)
 
-    def _initialize_oss_fs(self) -> FileSystem:
+    def _initialize_oss_fs(self, path) -> FileSystem:
         self.try_to_refresh_token()
         self.properties.update(self.token.token)
-        return super()._initialize_oss_fs()
+        return super()._initialize_oss_fs(path)
 
     def new_output_stream(self, path: Path):
         return self.filesystem.open_output_stream(str(path))

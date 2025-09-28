@@ -455,7 +455,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 new ConsumerManager(fileIO, path, snapshotManager().branch()),
                 options.snapshotExpireExecutionMode(),
                 name(),
-                options.forceCreatingSnapshot());
+                options.forceCreatingSnapshot(),
+                options.fileOperationThreadNum());
     }
 
     @Override
