@@ -25,13 +25,12 @@ import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.FormatTableRollingFileWriter;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.RecordWriter;
-import org.apache.paimon.utils.TwoPhaseCommitDirectSinkWriter;
 
+import java.util.ArrayList;
 import java.util.List;
 
-/** {@link RecordWriter} for format table. */
-public class FormatTableRecordWriter {
+/** record writer for format table. */
+public class FormatTableRecordWriter implements AutoCloseable {
 
     private final FileIO fileIO;
     private final DataFilePathFactory pathFactory;
@@ -39,7 +38,7 @@ public class FormatTableRecordWriter {
     private final String fileCompression;
     private final FileFormat fileFormat;
     private final long targetFileSize;
-    private final TwoPhaseCommitDirectSinkWriter twoPhaseCommitSinkWriter;
+    private FormatTableRollingFileWriter writer;
 
     public FormatTableRecordWriter(
             FileIO fileIO,
@@ -54,27 +53,35 @@ public class FormatTableRecordWriter {
         this.writeSchema = writeSchema;
         this.fileFormat = fileFormat;
         this.targetFileSize = targetFileSize;
-        this.twoPhaseCommitSinkWriter =
-                new TwoPhaseCommitDirectSinkWriter(this::createRollingRowWriter);
     }
 
-    public void write(InternalRow rowData) throws Exception {
-        boolean success = twoPhaseCommitSinkWriter.write(rowData);
-        if (!success) {
-            throw new RuntimeException("Failed to write row data.");
+    public void write(InternalRow data) throws Exception {
+        if (writer == null) {
+            writer = createRollingRowWriter();
         }
+        writer.write(data);
     }
 
     public List<TwoPhaseOutputStream.Committer> closeAndGetCommitters() throws Exception {
-        return twoPhaseCommitSinkWriter.closeAndGetCommitters();
+        List<TwoPhaseOutputStream.Committer> commits = new ArrayList<>();
+        if (writer != null) {
+            writer.close();
+            commits.addAll(writer.committers());
+            writer = null;
+        }
+        return commits;
+    }
+
+    @Override
+    public void close() throws Exception {
+        if (writer != null) {
+            writer.abort();
+            writer = null;
+        }
     }
 
     private FormatTableRollingFileWriter createRollingRowWriter() {
         return new FormatTableRollingFileWriter(
                 fileIO, fileFormat, targetFileSize, writeSchema, pathFactory, fileCompression);
-    }
-
-    public void close() throws Exception {
-        twoPhaseCommitSinkWriter.close();
     }
 }

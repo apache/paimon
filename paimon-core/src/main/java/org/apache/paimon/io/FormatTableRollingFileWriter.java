@@ -35,7 +35,7 @@ import java.util.function.Supplier;
 /**
  * Format table's writer to roll over to a new file if the current size exceed the target file size.
  */
-public class FormatTableRollingFileWriter {
+public class FormatTableRollingFileWriter implements AutoCloseable {
 
     private static final Logger LOG = LoggerFactory.getLogger(FormatTableRollingFileWriter.class);
 
@@ -124,6 +124,7 @@ public class FormatTableRollingFileWriter {
         return committers;
     }
 
+    @Override
     public void close() throws IOException {
         if (closed) {
             return;

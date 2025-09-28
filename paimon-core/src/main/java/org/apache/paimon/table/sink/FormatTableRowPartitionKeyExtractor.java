@@ -22,21 +22,17 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.RowType;
 
-/** A {@link PartitionKeyExtractor} to {@link InternalRow}. */
-public class RowPartitionKeyExtractor implements PartitionKeyExtractor<InternalRow> {
+import java.util.List;
+
+/** A {@link PartitionKeyExtractor} to {@link InternalRow} for format table. */
+public class FormatTableRowPartitionKeyExtractor implements PartitionKeyExtractor<InternalRow> {
 
     private final Projection partitionProjection;
-    private final Projection trimmedPrimaryKeyProjection;
 
-    public RowPartitionKeyExtractor(TableSchema schema) {
-        partitionProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.partitionKeys()));
-        trimmedPrimaryKeyProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.trimmedPrimaryKeys()));
+    public FormatTableRowPartitionKeyExtractor(RowType rowType, List<String> partitionKeys) {
+        partitionProjection = CodeGenUtils.newProjection(rowType, partitionKeys);
     }
 
     @Override
@@ -46,6 +42,6 @@ public class RowPartitionKeyExtractor implements PartitionKeyExtractor<InternalR
 
     @Override
     public BinaryRow trimmedPrimaryKey(InternalRow record) {
-        return trimmedPrimaryKeyProjection.apply(record);
+        throw new UnsupportedOperationException();
     }
 }

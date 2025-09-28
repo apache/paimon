@@ -35,8 +35,8 @@ import java.util.Map;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
 
-/** File write for format table. */
-public class FormatTableFileWrite {
+/** File writer for format table. */
+public class FormatTableFileWriter {
 
     private final FileIO fileIO;
     private RowType rowType;
@@ -45,7 +45,7 @@ public class FormatTableFileWrite {
     protected final Map<BinaryRow, FormatTableRecordWriter> writers;
     protected final CoreOptions options;
 
-    public FormatTableFileWrite(
+    public FormatTableFileWriter(
             FileIO fileIO, RowType rowType, CoreOptions options, RowType partitionType) {
         this.fileIO = fileIO;
         this.rowType = rowType;
@@ -72,18 +72,6 @@ public class FormatTableFileWrite {
         this.rowType = writeType;
     }
 
-    public List<CommitMessage> prepareCommit() throws Exception {
-        List<CommitMessage> commitMessages = new ArrayList<>();
-        for (FormatTableRecordWriter writer : writers.values()) {
-            List<TwoPhaseOutputStream.Committer> commiters = writer.closeAndGetCommitters();
-            for (TwoPhaseOutputStream.Committer committer : commiters) {
-                TwoPhaseCommitMessage twoPhaseCommitMessage = new TwoPhaseCommitMessage(committer);
-                commitMessages.add(twoPhaseCommitMessage);
-            }
-        }
-        return commitMessages;
-    }
-
     public void write(BinaryRow partition, InternalRow data) throws Exception {
         FormatTableRecordWriter writer = writers.get(partition);
         if (writer == null) {
@@ -95,6 +83,18 @@ public class FormatTableFileWrite {
 
     public void close() throws Exception {
         writers.clear();
+    }
+
+    public List<CommitMessage> prepareCommit() throws Exception {
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        for (FormatTableRecordWriter writer : writers.values()) {
+            List<TwoPhaseOutputStream.Committer> commiters = writer.closeAndGetCommitters();
+            for (TwoPhaseOutputStream.Committer committer : commiters) {
+                TwoPhaseCommitMessage twoPhaseCommitMessage = new TwoPhaseCommitMessage(committer);
+                commitMessages.add(twoPhaseCommitMessage);
+            }
+        }
+        return commitMessages;
     }
 
     private FormatTableRecordWriter createWriter(BinaryRow partition) {

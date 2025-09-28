@@ -29,7 +29,7 @@ import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
+import org.apache.paimon.table.sink.FormatTableRowPartitionKeyExtractor;
 import org.apache.paimon.table.sink.TableWrite;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -43,8 +43,8 @@ import java.util.stream.Collectors;
 public class FormatTableWrite implements BatchTableWrite {
 
     private RowType rowType;
-    private final FormatTableFileWrite write;
-    private final RowPartitionKeyExtractor partitionKeyExtractor;
+    private final FormatTableFileWriter write;
+    private final FormatTableRowPartitionKeyExtractor partitionKeyExtractor;
 
     private final int[] notNullFieldIndex;
     private final @Nullable DefaultValueRow defaultValueRow;
@@ -56,8 +56,9 @@ public class FormatTableWrite implements BatchTableWrite {
             RowType partitionType,
             List<String> partitionKeys) {
         this.rowType = rowType;
-        this.write = new FormatTableFileWrite(fileIO, rowType, options, partitionType);
-        this.partitionKeyExtractor = new RowPartitionKeyExtractor(rowType, partitionKeys);
+        this.write = new FormatTableFileWriter(fileIO, rowType, options, partitionType);
+        this.partitionKeyExtractor =
+                new FormatTableRowPartitionKeyExtractor(rowType, partitionKeys);
         List<String> notNullColumnNames =
                 rowType.getFields().stream()
                         .filter(field -> !field.type().isNullable())

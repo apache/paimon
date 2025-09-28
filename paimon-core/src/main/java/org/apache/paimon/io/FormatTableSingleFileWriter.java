@@ -59,7 +59,7 @@ public class FormatTableSingleFileWriter {
 
         try {
             if (factory instanceof SupportsDirectWrite) {
-                writer = ((SupportsDirectWrite) factory).create(fileIO, path, compression);
+                throw new UnsupportedOperationException("Does not support SupportsDirectWrite.");
             } else {
                 out = fileIO.newTwoPhaseOutputStream(path, false);
                 writer = factory.create(out, compression);
@@ -89,7 +89,7 @@ public class FormatTableSingleFileWriter {
         try {
             writer.addElement(record);
         } catch (Throwable e) {
-            LOG.warn("Exception occurs when writing file " + path + ". Cleaning up.", e);
+            LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
             abort();
             throw e;
         }
