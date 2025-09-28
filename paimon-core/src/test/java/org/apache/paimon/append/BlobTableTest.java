@@ -38,6 +38,7 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
+/** Tests for table with blob. */
 public class BlobTableTest extends TableTestBase {
 
     private final byte[] blobBytes = randomBytes();

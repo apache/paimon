@@ -373,6 +373,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         return fieldsFiles;
     }
 
+    /** Files for one field. */
     public static class FieldBunch {
         final Either<DataFileMeta, BlobBunch> fileOrBlob;
 
