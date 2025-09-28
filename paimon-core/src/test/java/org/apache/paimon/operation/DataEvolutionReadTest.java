@@ -42,7 +42,7 @@ public class DataEvolutionReadTest {
 
     @BeforeEach
     public void setUp() {
-        blobBunch = new DataEvolutionSplitRead.BlobBunch();
+        blobBunch = new DataEvolutionSplitRead.BlobBunch(Long.MAX_VALUE);
     }
 
     @Test
@@ -77,7 +77,7 @@ public class DataEvolutionReadTest {
 
     @Test
     public void testAddNonBlobFileThrowsException() {
-        DataFileMeta normalFile = createNormalFile("normal1", 0, 100, 1, 0L);
+        DataFileMeta normalFile = createNormalFile("normal1.parquet", 0, 100, 1, 0L);
 
         assertThatThrownBy(() -> blobBunch.add(normalFile))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -185,7 +185,7 @@ public class DataEvolutionReadTest {
 
         List<DataFileMeta> waited = new ArrayList<>();
 
-        waited.add(createNormalFile("others", 0, 1000, 1, 1));
+        waited.add(createNormalFile("others.parquet", 0, 1000, 1, 1));
         waited.add(createBlobFile("blob1", 0, 1000, 1));
         waited.add(createBlobFile("blob2", 0, 500, 2));
         waited.add(createBlobFile("blob3", 500, 250, 2));
@@ -228,7 +228,7 @@ public class DataEvolutionReadTest {
 
         List<DataFileMeta> waited = new ArrayList<>();
 
-        waited.add(createNormalFile("others", 0, 1000, 1, 1));
+        waited.add(createNormalFile("others.parquet", 0, 1000, 1, 1));
         waited.add(createBlobFile("blob1", 0, 1000, 1));
         waited.add(createBlobFile("blob2", 0, 500, 2));
         waited.add(createBlobFile("blob3", 500, 250, 2));
