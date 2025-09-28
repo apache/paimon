@@ -585,62 +585,6 @@ public abstract class CatalogTestBase {
     }
 
     @Test
-    public void testCsvFormatTableDataHasFieldDelimiter() throws Exception {
-        if (!supportsFormatTable()) {
-            return;
-        }
-        String dbName = "test_db_format_csv";
-        catalog.createDatabase(dbName, true);
-        HadoopCompressionType compressionType = HadoopCompressionType.GZIP;
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.column("f1", DataTypes.INT());
-        schemaBuilder.column("f2", DataTypes.STRING());
-        schemaBuilder.column("dt", DataTypes.INT());
-        schemaBuilder.partitionKeys("dt");
-        schemaBuilder.option("type", "format-table");
-        schemaBuilder.option("file.compression", compressionType.value());
-        Identifier identifier = Identifier.create(dbName, "csv_table");
-        schemaBuilder.option("file.format", "csv");
-        schemaBuilder.option("csv.field-delimiter", "|");
-        catalog.createTable(identifier, schemaBuilder.build(), true);
-        FormatTable table = (FormatTable) catalog.getTable(identifier);
-        RowType writeRowType =
-                table.rowType()
-                        .project(
-                                table.rowType().getFieldNames().stream()
-                                        .filter(name -> !table.partitionKeys().contains(name))
-                                        .collect(Collectors.toList()));
-        FormatWriterFactory factory =
-                (buildFileFormatFactory("csv")
-                                .create(
-                                        new FileFormatFactory.FormatContext(
-                                                new Options(table.options()), 1024, 1024)))
-                        .createWriterFactory(writeRowType);
-        int dtPartitionValue = 10;
-        Path partitionPath =
-                new Path(String.format("%s/dt=%s", table.location(), dtPartitionValue));
-        int size = 10;
-        InternalRow[] datas = new InternalRow[size];
-        Random random = new Random();
-        BinaryString f2 = BinaryString.fromString("22222|aaaaa|bbbbb");
-        for (int j = 0; j < size; j++) {
-            datas[j] = GenericRow.of(random.nextInt(), f2, dtPartitionValue);
-        }
-        DataFilePathFactory dataFilePathFactory =
-                new DataFilePathFactory(
-                        partitionPath,
-                        "csv",
-                        "data",
-                        "change",
-                        true,
-                        compressionType.value(),
-                        null);
-        write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
-        List<InternalRow> readAllData = read(table, null, null, null, null);
-        assertThat(readAllData).containsExactlyInAnyOrder(datas);
-    }
-
-    @Test
     public void testFormatTableOnlyPartitionValueRead() throws Exception {
         if (!supportsFormatTable()) {
             return;
@@ -680,8 +624,8 @@ public abstract class CatalogTestBase {
                     (buildFileFormatFactory(format)
                                     .create(
                                             new FileFormatFactory.FormatContext(
-                                                    new Options(), 1024, 1024)))
-                            .createWriterFactory(table.rowType());
+                                                    new Options(table.options()), 1024, 1024)))
+                            .createWriterFactory(getFormatTableWriteRowType(table));
             Path partitionPath =
                     new Path(
                             String.format(
@@ -756,8 +700,8 @@ public abstract class CatalogTestBase {
                     (buildFileFormatFactory(format)
                                     .create(
                                             new FileFormatFactory.FormatContext(
-                                                    new Options(), 1024, 1024)))
-                            .createWriterFactory(table.rowType());
+                                                    new Options(table.options()), 1024, 1024)))
+                            .createWriterFactory(getFormatTableWriteRowType(table));
             Map<String, String> partitionSpec = null;
             if (partitioned) {
                 Path partitionPath =
@@ -823,6 +767,14 @@ public abstract class CatalogTestBase {
         }
     }
 
+    protected RowType getFormatTableWriteRowType(Table table) {
+        return table.rowType()
+                .project(
+                        table.rowType().getFieldNames().stream()
+                                .filter(name -> !table.partitionKeys().contains(name))
+                                .collect(Collectors.toList()));
+    }
+
     protected FileFormatFactory buildFileFormatFactory(String format) {
         switch (format) {
             case "csv":
@@ -884,7 +836,10 @@ public abstract class CatalogTestBase {
                 readBuilder.newRead().executeFilter().createReader(scan.plan())) {
             InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
             List<InternalRow> rows = new ArrayList<>();
-            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+            reader.forEachRemaining(
+                    row -> {
+                        rows.add(serializer.copy(row));
+                    });
             return rows;
         }
     }

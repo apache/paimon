@@ -171,7 +171,7 @@ public class FormatReadBuilder implements ReadBuilder {
 
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
-                        table.partitionKeys(), table.rowType().getFields(), table.partitionType());
+                        table.partitionKeys(), readType().getFields(), table.partitionType());
 
         return new DataFileRecordReader(
                 readType(),

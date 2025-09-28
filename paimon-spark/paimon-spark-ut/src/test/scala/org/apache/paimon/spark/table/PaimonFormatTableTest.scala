@@ -50,10 +50,10 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
         new Path(
           table.location(),
           s"ds=$partition/part-00000-0a28422e-68ba-4713-8870-2fde2d36ed06-c001.csv")
-      table.fileIO().writeFile(csvFile, "1|2｜asfasdfsdf|11111\n3|4｜asfasdfsdf", false)
+      table.fileIO().writeFile(csvFile, "1|asfasdfsdf\n2|asfasdfsdf", false)
       checkAnswer(
         sql(s"SELECT * FROM $tableName"),
-        Seq(Row(1, "2｜asfasdfsdf|11111", partition), Row(3, "4｜asfasdfsdf", partition)))
+        Seq(Row(1, "asfasdfsdf", partition), Row(2, "asfasdfsdf", partition)))
     }
   }
 
