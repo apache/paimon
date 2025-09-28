@@ -62,7 +62,6 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
@@ -613,7 +612,8 @@ public class AppendOnlyWriterTest {
                                             generateCompactAfter(compactBefore));
                         },
                         null);
-        CoreOptions options = new CoreOptions(new HashMap<>());
+        CoreOptions options =
+                new CoreOptions(Collections.singletonMap("metadata.stats-mode", "truncate(16)"));
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),
@@ -633,10 +633,7 @@ public class AppendOnlyWriterTest {
                         spillable,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         CompressOptions.defaultOptions(),
-                        StatsCollectorFactories.createStatsFactories(
-                                "truncate(16)",
-                                options,
-                                AppendOnlyWriterTest.SCHEMA.getFieldNames()),
+                        new StatsCollectorFactories(options),
                         MemorySize.MAX_VALUE,
                         new FileIndexOptions(),
                         true,
