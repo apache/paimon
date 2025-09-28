@@ -257,7 +257,7 @@ public interface DataFileMeta {
     String fileName();
 
     default boolean isBlob() {
-        return fileFormat().equals("blob");
+        return fileName().endsWith(".blob");
     }
 
     long fileSize();
