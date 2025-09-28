@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
@@ -38,13 +39,17 @@ public class BucketedDvMaintainer {
     private final Map<String, DeletionVector> deletionVectors;
     protected final boolean bitmap64;
     private boolean modified;
+    @Nullable private IndexFileMeta beforeDvFile;
 
     private BucketedDvMaintainer(
-            DeletionVectorsIndexFile dvIndexFile, Map<String, DeletionVector> deletionVectors) {
+            DeletionVectorsIndexFile dvIndexFile,
+            Map<String, DeletionVector> deletionVectors,
+            @Nullable IndexFileMeta restoredDvFile) {
         this.dvIndexFile = dvIndexFile;
         this.deletionVectors = deletionVectors;
         this.bitmap64 = dvIndexFile.bitmap64();
         this.modified = false;
+        this.beforeDvFile = restoredDvFile;
     }
 
     private DeletionVector createNewDeletionVector() {
@@ -107,17 +112,18 @@ public class BucketedDvMaintainer {
     }
 
     /**
-     * Write new deletion vectors index file if any modifications have been made.
-     *
-     * @return None if no modifications have been made, otherwise the new deletion vectors index
-     *     file.
+     * Write before and new deletion vectors index file pair if any modifications have been made.
      */
-    public Optional<IndexFileMeta> writeDeletionVectorsIndex() {
+    public Pair<IndexFileMeta, IndexFileMeta> writeDeletionVectorsIndex() {
         if (modified) {
             modified = false;
-            return Optional.of(dvIndexFile.writeSingleFile(deletionVectors));
+            IndexFileMeta newIndexFile = dvIndexFile.writeSingleFile(deletionVectors);
+            IndexFileMeta toRemove = beforeDvFile;
+            beforeDvFile = newIndexFile;
+            return Pair.of(toRemove, newIndexFile);
+        } else {
+            return Pair.of(null, null);
         }
-        return Optional.empty();
     }
 
     /**
@@ -168,12 +174,13 @@ public class BucketedDvMaintainer {
             }
             Map<String, DeletionVector> deletionVectors =
                     new HashMap<>(handler.readAllDeletionVectors(partition, bucket, restoredFiles));
-            return create(partition, bucket, deletionVectors);
-        }
-
-        public BucketedDvMaintainer create(
-                BinaryRow partition, int bucket, Map<String, DeletionVector> deletionVectors) {
-            return new BucketedDvMaintainer(handler.dvIndex(partition, bucket), deletionVectors);
+            if (restoredFiles.size() > 1) {
+                throw new UnsupportedOperationException(
+                        "For bucket table, one bucket should only have one dv file at most.");
+            }
+            IndexFileMeta fileMeta = restoredFiles.isEmpty() ? null : restoredFiles.get(0);
+            return new BucketedDvMaintainer(
+                    handler.dvIndex(partition, bucket), deletionVectors, fileMeta);
         }
     }
 }

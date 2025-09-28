@@ -24,18 +24,18 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.IntHashSet;
 import org.apache.paimon.utils.IntIterator;
+import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.Collections;
-import java.util.List;
 
 /** An Index Maintainer for dynamic bucket to maintain key hashcode in a bucket. */
 public class DynamicBucketIndexMaintainer {
 
+    @Nullable private IndexFileMeta beforeFile;
     private final HashIndexFile indexFile;
     private final IntHashSet hashcode;
 
@@ -45,6 +45,7 @@ public class DynamicBucketIndexMaintainer {
             HashIndexFile indexFile, @Nullable IndexFileMeta restoredFile) {
         this.indexFile = indexFile;
         IntHashSet hashcode = new IntHashSet();
+        this.beforeFile = restoredFile;
         if (restoredFile != null) {
             hashcode = new IntHashSet((int) restoredFile.rowCount());
             restore(indexFile, hashcode, restoredFile);
@@ -78,7 +79,8 @@ public class DynamicBucketIndexMaintainer {
         }
     }
 
-    public List<IndexFileMeta> prepareCommit() {
+    /** Write before and new index file pair if any modifications have been made. */
+    public Pair<IndexFileMeta, IndexFileMeta> prepareCommit() {
         if (modified) {
             IndexFileMeta entry;
             try {
@@ -87,9 +89,11 @@ public class DynamicBucketIndexMaintainer {
                 throw new RuntimeException(e);
             }
             modified = false;
-            return Collections.singletonList(entry);
+            IndexFileMeta toRemove = beforeFile;
+            beforeFile = entry;
+            return Pair.of(toRemove, entry);
         }
-        return Collections.emptyList();
+        return Pair.of(null, null);
     }
 
     @VisibleForTesting

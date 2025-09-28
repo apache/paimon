@@ -21,15 +21,19 @@ package org.apache.paimon.compact;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
-
-import java.util.Optional;
 
 /** Deletion File from compaction. */
 public interface CompactDeletionFile {
 
-    Optional<IndexFileMeta> getOrCompute();
+    /**
+     * Get or compute the deletion file.
+     *
+     * @return Pair of deleted deletion file and new deletion file.
+     */
+    Pair<IndexFileMeta, IndexFileMeta> getOrCompute();
 
     CompactDeletionFile mergeOldFile(CompactDeletionFile old);
 
@@ -41,8 +45,8 @@ public interface CompactDeletionFile {
      * them).
      */
     static CompactDeletionFile generateFiles(BucketedDvMaintainer maintainer) {
-        Optional<IndexFileMeta> file = maintainer.writeDeletionVectorsIndex();
-        return new GeneratedDeletionFile(file.orElse(null), maintainer.dvIndexFile());
+        Pair<IndexFileMeta, IndexFileMeta> pair = maintainer.writeDeletionVectorsIndex();
+        return new GeneratedDeletionFile(pair.getLeft(), pair.getRight(), maintainer.dvIndexFile());
     }
 
     /** For sync compaction, only create deletion files when prepareCommit. */
@@ -53,21 +57,25 @@ public interface CompactDeletionFile {
     /** A generated files implementation of {@link CompactDeletionFile}. */
     class GeneratedDeletionFile implements CompactDeletionFile {
 
-        @Nullable private final IndexFileMeta deletionFile;
+        @Nullable private final IndexFileMeta deleteDeletionFile;
+        @Nullable private final IndexFileMeta newDeletionFile;
         private final DeletionVectorsIndexFile dvIndexFile;
 
         private boolean getInvoked = false;
 
         public GeneratedDeletionFile(
-                @Nullable IndexFileMeta deletionFile, DeletionVectorsIndexFile dvIndexFile) {
-            this.deletionFile = deletionFile;
+                @Nullable IndexFileMeta deletedDeletionFile,
+                @Nullable IndexFileMeta newDeletionFile,
+                DeletionVectorsIndexFile dvIndexFile) {
+            this.deleteDeletionFile = deletedDeletionFile;
+            this.newDeletionFile = newDeletionFile;
             this.dvIndexFile = dvIndexFile;
         }
 
         @Override
-        public Optional<IndexFileMeta> getOrCompute() {
+        public Pair<IndexFileMeta, IndexFileMeta> getOrCompute() {
             this.getInvoked = true;
-            return Optional.ofNullable(deletionFile);
+            return Pair.of(deleteDeletionFile, newDeletionFile);
         }
 
         @Override
@@ -81,7 +89,7 @@ public interface CompactDeletionFile {
                 throw new IllegalStateException("old should not be get, this is a bug.");
             }
 
-            if (deletionFile == null) {
+            if (newDeletionFile == null) {
                 return old;
             }
 
@@ -91,8 +99,8 @@ public interface CompactDeletionFile {
 
         @Override
         public void clean() {
-            if (deletionFile != null) {
-                dvIndexFile.delete(deletionFile);
+            if (newDeletionFile != null) {
+                dvIndexFile.delete(newDeletionFile);
             }
         }
     }
@@ -109,7 +117,7 @@ public interface CompactDeletionFile {
         }
 
         @Override
-        public Optional<IndexFileMeta> getOrCompute() {
+        public Pair<IndexFileMeta, IndexFileMeta> getOrCompute() {
             generated = true;
             return generateFiles(maintainer).getOrCompute();
         }

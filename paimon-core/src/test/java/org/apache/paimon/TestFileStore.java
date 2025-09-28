@@ -224,6 +224,7 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 watermark,
                 Collections.emptyList(),
+                Collections.emptyList(),
                 (commit, committable) -> commit.commit(committable, false));
     }
 
@@ -240,6 +241,7 @@ public class TestFileStore extends KeyValueFileStore {
                 false,
                 null,
                 null,
+                Collections.emptyList(),
                 Collections.emptyList(),
                 (commit, committable) -> {
                     logOffsets.forEach(
@@ -261,6 +263,7 @@ public class TestFileStore extends KeyValueFileStore {
                 true,
                 null,
                 null,
+                Collections.emptyList(),
                 Collections.emptyList(),
                 (commit, committable) ->
                         commit.overwritePartition(partition, committable, Collections.emptyMap()));
@@ -288,6 +291,7 @@ public class TestFileStore extends KeyValueFileStore {
             KeyValue kv,
             Function<KeyValue, BinaryRow> partitionCalculator,
             int bucket,
+            List<IndexFileMeta> deletedIndexFiles,
             IndexFileMeta... indexFiles)
             throws Exception {
         return commitDataImpl(
@@ -297,6 +301,7 @@ public class TestFileStore extends KeyValueFileStore {
                 false,
                 null,
                 null,
+                deletedIndexFiles,
                 Arrays.asList(indexFiles),
                 (commit, committable) -> commit.commit(committable, false));
     }
@@ -308,7 +313,8 @@ public class TestFileStore extends KeyValueFileStore {
             boolean ignorePreviousFiles,
             Long identifier,
             Long watermark,
-            List<IndexFileMeta> indexFiles,
+            List<IndexFileMeta> deletedIndexFiles,
+            List<IndexFileMeta> newIndexFiles,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
         AbstractFileStoreWrite<KeyValue> write = newWrite();
@@ -347,7 +353,8 @@ public class TestFileStore extends KeyValueFileStore {
                 CommitIncrement increment =
                         entryWithBucket.getValue().prepareCommit(ignorePreviousFiles);
                 DataIncrement dataIncrement = increment.newFilesIncrement();
-                dataIncrement.newIndexFiles().addAll(indexFiles);
+                dataIncrement.deletedIndexFiles().addAll(deletedIndexFiles);
+                dataIncrement.newIndexFiles().addAll(newIndexFiles);
                 committable.addFileCommittable(
                         new CommitMessageImpl(
                                 entryWithPartition.getKey(),

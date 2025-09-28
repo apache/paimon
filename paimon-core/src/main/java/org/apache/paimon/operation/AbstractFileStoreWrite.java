@@ -28,6 +28,7 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -39,6 +40,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -216,15 +218,24 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 DataIncrement newFilesIncrement = increment.newFilesIncrement();
                 CompactIncrement compactIncrement = increment.compactIncrement();
                 if (writerContainer.dynamicBucketMaintainer != null) {
-                    newFilesIncrement
-                            .newIndexFiles()
-                            .addAll(writerContainer.dynamicBucketMaintainer.prepareCommit());
+                    Pair<IndexFileMeta, IndexFileMeta> pair =
+                            writerContainer.dynamicBucketMaintainer.prepareCommit();
+                    if (pair.getLeft() != null) {
+                        newFilesIncrement.deletedIndexFiles().add(pair.getLeft());
+                    }
+                    if (pair.getRight() != null) {
+                        newFilesIncrement.newIndexFiles().add(pair.getRight());
+                    }
                 }
                 CompactDeletionFile compactDeletionFile = increment.compactDeletionFile();
                 if (compactDeletionFile != null) {
-                    compactDeletionFile
-                            .getOrCompute()
-                            .ifPresent(compactIncrement.newIndexFiles()::add);
+                    Pair<IndexFileMeta, IndexFileMeta> pair = compactDeletionFile.getOrCompute();
+                    if (pair.getLeft() != null) {
+                        compactIncrement.deletedIndexFiles().add(pair.getLeft());
+                    }
+                    if (pair.getRight() != null) {
+                        compactIncrement.newIndexFiles().add(pair.getRight());
+                    }
                 }
                 CommitMessageImpl committable =
                         new CommitMessageImpl(

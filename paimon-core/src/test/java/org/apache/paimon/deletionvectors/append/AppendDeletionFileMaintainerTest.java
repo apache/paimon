@@ -58,12 +58,13 @@ class AppendDeletionFileMaintainerTest {
         Map<String, List<Integer>> dvs = new HashMap<>();
         dvs.put("f1", Arrays.asList(1, 3, 5));
         dvs.put("f2", Arrays.asList(2, 4, 6));
-        CommitMessageImpl commitMessage1 = store.writeDVIndexFiles(BinaryRow.EMPTY_ROW, 0, dvs);
+        CommitMessageImpl commitMessage1 =
+                store.writeDVIndexFiles(BinaryRow.EMPTY_ROW, dvs, bitmap64);
         CommitMessageImpl commitMessage2 =
                 store.writeDVIndexFiles(
                         BinaryRow.EMPTY_ROW,
-                        1,
-                        Collections.singletonMap("f3", Arrays.asList(1, 2, 3)));
+                        Collections.singletonMap("f3", Arrays.asList(1, 2, 3)),
+                        bitmap64);
         store.commit(commitMessage1, commitMessage2);
 
         IndexPathFactory indexPathFactory =
@@ -101,22 +102,6 @@ class AppendDeletionFileMaintainerTest {
         IndexManifestEntry entry =
                 res.stream().filter(file -> file.kind() == FileKind.ADD).findAny().get();
         assertThat(entry.indexFile().dvRanges().containsKey("f2")).isTrue();
-        entry =
-                res.stream()
-                        .filter(file -> file.kind() == FileKind.DELETE)
-                        .filter(file -> file.bucket() == 0)
-                        .findAny()
-                        .get();
-        assertThat(entry.indexFile())
-                .isEqualTo(commitMessage1.newFilesIncrement().newIndexFiles().get(0));
-        entry =
-                res.stream()
-                        .filter(file -> file.kind() == FileKind.DELETE)
-                        .filter(file -> file.bucket() == 1)
-                        .findAny()
-                        .get();
-        assertThat(entry.indexFile())
-                .isEqualTo(commitMessage2.newFilesIncrement().newIndexFiles().get(0));
     }
 
     private Map<String, DeletionFile> createDeletionFileMapFromIndexFileMetas(

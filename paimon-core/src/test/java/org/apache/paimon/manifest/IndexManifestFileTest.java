@@ -21,7 +21,6 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.table.BucketMode;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -33,8 +32,8 @@ import java.util.List;
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomDeletionVectorIndexFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for IndexManifestFileHandler. */
-public class IndexManifestFileHandlerTest {
+/** Test for IndexManifestFile. */
+public class IndexManifestFileTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -51,20 +50,19 @@ public class IndexManifestFileHandlerTest {
                                 fileStore.pathFactory(),
                                 null)
                         .create();
-        IndexManifestFileHandler indexManifestFileHandler =
-                new IndexManifestFileHandler(indexManifestFile, BucketMode.BUCKET_UNAWARE);
 
         IndexManifestEntry entry1 =
                 new IndexManifestEntry(
                         FileKind.ADD, BinaryRow.EMPTY_ROW, 0, randomDeletionVectorIndexFile());
-        String indexManifestFile1 = indexManifestFileHandler.write(null, Arrays.asList(entry1));
+        String indexManifestFile1 = indexManifestFile.writeIndexFiles(null, Arrays.asList(entry1));
 
         IndexManifestEntry entry2 = entry1.toDeleteEntry();
         IndexManifestEntry entry3 =
                 new IndexManifestEntry(
                         FileKind.ADD, BinaryRow.EMPTY_ROW, 0, randomDeletionVectorIndexFile());
         String indexManifestFile2 =
-                indexManifestFileHandler.write(indexManifestFile1, Arrays.asList(entry2, entry3));
+                indexManifestFile.writeIndexFiles(
+                        indexManifestFile1, Arrays.asList(entry2, entry3));
 
         List<IndexManifestEntry> entries = indexManifestFile.read(indexManifestFile2);
         assertThat(entries.size()).isEqualTo(1);
@@ -86,8 +84,6 @@ public class IndexManifestFileHandlerTest {
                                 fileStore.pathFactory(),
                                 null)
                         .create();
-        IndexManifestFileHandler indexManifestFileHandler =
-                new IndexManifestFileHandler(indexManifestFile, BucketMode.HASH_FIXED);
 
         IndexManifestEntry entry1 =
                 new IndexManifestEntry(
@@ -96,7 +92,7 @@ public class IndexManifestFileHandlerTest {
                 new IndexManifestEntry(
                         FileKind.ADD, BinaryRow.EMPTY_ROW, 1, randomDeletionVectorIndexFile());
         String indexManifestFile1 =
-                indexManifestFileHandler.write(null, Arrays.asList(entry1, entry2));
+                indexManifestFile.writeIndexFiles(null, Arrays.asList(entry1, entry2));
 
         IndexManifestEntry entry3 =
                 new IndexManifestEntry(
@@ -104,8 +100,10 @@ public class IndexManifestFileHandlerTest {
         IndexManifestEntry entry4 =
                 new IndexManifestEntry(
                         FileKind.ADD, BinaryRow.EMPTY_ROW, 2, randomDeletionVectorIndexFile());
+        IndexManifestEntry entry5 = entry2.toDeleteEntry();
         String indexManifestFile2 =
-                indexManifestFileHandler.write(indexManifestFile1, Arrays.asList(entry3, entry4));
+                indexManifestFile.writeIndexFiles(
+                        indexManifestFile1, Arrays.asList(entry3, entry4, entry5));
 
         List<IndexManifestEntry> entries = indexManifestFile.read(indexManifestFile2);
         assertThat(entries.size()).isEqualTo(3);

@@ -143,7 +143,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private final Integer manifestReadParallelism;
     private final List<CommitCallback> commitCallbacks;
     private final StatsFileHandler statsFileHandler;
-    private final BucketMode bucketMode;
     private final long commitTimeout;
     private final long commitMinRetryWait;
     private final long commitMaxRetryWait;
@@ -179,7 +178,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Comparator<InternalRow> keyComparator,
             String branchName,
             StatsFileHandler statsFileHandler,
-            BucketMode bucketMode,
             @Nullable Integer manifestReadParallelism,
             List<CommitCallback> commitCallbacks,
             int commitMaxRetries,
@@ -229,7 +227,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.ignoreEmptyCommit = true;
         this.commitMetrics = null;
         this.statsFileHandler = statsFileHandler;
-        this.bucketMode = bucketMode;
         this.rowTrackingEnabled = rowTrackingEnabled;
     }
 
@@ -1096,8 +1093,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 changelogManifestList = manifestList.write(manifestFile.write(changelogFiles));
             }
 
-            indexManifest =
-                    indexManifestFile.writeIndexFiles(oldIndexManifest, indexFiles, bucketMode);
+            indexManifest = indexManifestFile.writeIndexFiles(oldIndexManifest, indexFiles);
 
             long latestSchemaId =
                     schemaManager

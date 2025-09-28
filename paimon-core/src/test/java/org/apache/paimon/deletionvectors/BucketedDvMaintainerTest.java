@@ -22,21 +22,18 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.compact.CompactDeletionFile;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-
-import javax.annotation.Nullable;
 
 import java.io.File;
 import java.io.IOException;
@@ -44,7 +41,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
@@ -71,7 +67,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
 
         assertThat(dvMaintainer.deletionVectorOf("f1")).isPresent();
         assertThat(dvMaintainer.deletionVectorOf("f3")).isEmpty();
-        IndexFileMeta file = dvMaintainer.writeDeletionVectorsIndex().get();
+        IndexFileMeta file = dvMaintainer.writeDeletionVectorsIndex().getRight();
 
         Map<String, DeletionVector> deletionVectors =
                 fileHandler.readAllDeletionVectors(EMPTY_ROW, 0, Collections.singletonList(file));
@@ -89,7 +85,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
 
         BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
 
-        BucketedDvMaintainer dvMaintainer = factory.create(EMPTY_ROW, 0, new HashMap<>());
+        BucketedDvMaintainer dvMaintainer = factory.create(EMPTY_ROW, 0, Collections.emptyList());
         DeletionVector deletionVector1 = createDeletionVector(bitmap64);
         deletionVector1.delete(1);
         deletionVector1.delete(3);
@@ -97,19 +93,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         dvMaintainer.notifyNewDeletion("f1", deletionVector1);
         assertThat(dvMaintainer.bitmap64()).isEqualTo(bitmap64);
 
-        IndexFileMeta file = dvMaintainer.writeDeletionVectorsIndex().get();
-        CommitMessage commitMessage =
-                new CommitMessageImpl(
-                        EMPTY_ROW,
-                        0,
-                        1,
-                        new DataIncrement(
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                Collections.singletonList(file),
-                                Collections.emptyList()),
-                        CompactIncrement.emptyIncrement());
+        CommitMessage commitMessage = buildCommitMessage(dvMaintainer.writeDeletionVectorsIndex());
         BatchTableCommit commit = table.newBatchWriteBuilder().newCommit();
         commit.commit(Collections.singletonList(commitMessage));
 
@@ -124,19 +108,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         deletionVector2.delete(2);
         dvMaintainer.notifyNewDeletion("f1", deletionVector2);
 
-        file = dvMaintainer.writeDeletionVectorsIndex().get();
-        commitMessage =
-                new CommitMessageImpl(
-                        EMPTY_ROW,
-                        0,
-                        1,
-                        new DataIncrement(
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                Collections.singletonList(file),
-                                Collections.emptyList()),
-                        CompactIncrement.emptyIncrement());
+        commitMessage = buildCommitMessage(dvMaintainer.writeDeletionVectorsIndex());
         commit = table.newBatchWriteBuilder().newCommit();
         commit.commit(Collections.singletonList(commitMessage));
 
@@ -195,26 +167,15 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         // write first kind dv
         initIndexHandler(bitmap64);
         BucketedDvMaintainer.Factory factory1 = BucketedDvMaintainer.factory(fileHandler);
-        BucketedDvMaintainer dvMaintainer1 = factory1.create(EMPTY_ROW, 0, new HashMap<>());
+        BucketedDvMaintainer dvMaintainer1 = factory1.create(EMPTY_ROW, 0, Collections.emptyList());
         dvMaintainer1.notifyNewDeletion("f1", 1);
         dvMaintainer1.notifyNewDeletion("f1", 3);
         dvMaintainer1.notifyNewDeletion("f2", 1);
         dvMaintainer1.notifyNewDeletion("f2", 3);
         assertThat(dvMaintainer1.bitmap64()).isEqualTo(bitmap64);
 
-        IndexFileMeta file = dvMaintainer1.writeDeletionVectorsIndex().get();
         CommitMessage commitMessage1 =
-                new CommitMessageImpl(
-                        EMPTY_ROW,
-                        0,
-                        1,
-                        DataIncrement.emptyIncrement(),
-                        new CompactIncrement(
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                Collections.singletonList(file),
-                                Collections.emptyList()));
+                buildCommitMessage(dvMaintainer1.writeDeletionVectorsIndex());
         BatchTableCommit commit1 = table.newBatchWriteBuilder().newCommit();
         commit1.commit(Collections.singletonList(commitMessage1));
 
@@ -239,19 +200,8 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(dvs.get("f3"))
                 .isInstanceOf(bitmap64 ? BitmapDeletionVector.class : Bitmap64DeletionVector.class);
 
-        file = dvMaintainer2.writeDeletionVectorsIndex().get();
         CommitMessage commitMessage2 =
-                new CommitMessageImpl(
-                        EMPTY_ROW,
-                        0,
-                        1,
-                        DataIncrement.emptyIncrement(),
-                        new CompactIncrement(
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                Collections.singletonList(file),
-                                Collections.emptyList()));
+                buildCommitMessage(dvMaintainer2.writeDeletionVectorsIndex());
         BatchTableCommit commit2 = table.newBatchWriteBuilder().newCommit();
         commit2.commit(Collections.singletonList(commitMessage2));
 
@@ -281,19 +231,21 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         fileHandler = table.store().newIndexFileHandler();
     }
 
-    public static BucketedDvMaintainer createOrRestore(
-            BucketedDvMaintainer.Factory factory,
-            @Nullable Snapshot snapshot,
-            BinaryRow partition) {
-        IndexFileHandler handler = factory.indexFileHandler();
-        List<IndexFileMeta> indexFiles =
-                snapshot == null
-                        ? Collections.emptyList()
-                        : handler.scanEntries(snapshot, DELETION_VECTORS_INDEX, partition).stream()
-                                .map(IndexManifestEntry::indexFile)
-                                .collect(Collectors.toList());
-        Map<String, DeletionVector> deletionVectors =
-                new HashMap<>(handler.readAllDeletionVectors(EMPTY_ROW, 0, indexFiles));
-        return factory.create(EMPTY_ROW, 0, deletionVectors);
+    private CommitMessageImpl buildCommitMessage(Pair<IndexFileMeta, IndexFileMeta> pair) {
+        return new CommitMessageImpl(
+                EMPTY_ROW,
+                0,
+                1,
+                DataIncrement.emptyIncrement(),
+                new CompactIncrement(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        pair.getRight() == null
+                                ? Collections.emptyList()
+                                : Collections.singletonList(pair.getRight()),
+                        pair.getLeft() == null
+                                ? Collections.emptyList()
+                                : Collections.singletonList(pair.getLeft())));
     }
 }

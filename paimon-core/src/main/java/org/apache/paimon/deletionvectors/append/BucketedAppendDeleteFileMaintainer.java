@@ -21,8 +21,10 @@ package org.apache.paimon.deletionvectors.append;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.utils.Pair;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -59,10 +61,13 @@ public class BucketedAppendDeleteFileMaintainer implements BaseAppendDeleteFileM
     @Override
     public List<IndexManifestEntry> persist() {
         List<IndexManifestEntry> result = new ArrayList<>();
-        maintainer
-                .writeDeletionVectorsIndex()
-                .map(fileMeta -> new IndexManifestEntry(FileKind.ADD, partition, bucket, fileMeta))
-                .ifPresent(result::add);
+        Pair<IndexFileMeta, IndexFileMeta> pair = maintainer.writeDeletionVectorsIndex();
+        if (pair.getLeft() != null) {
+            result.add(new IndexManifestEntry(FileKind.DELETE, partition, bucket, pair.getLeft()));
+        }
+        if (pair.getRight() != null) {
+            result.add(new IndexManifestEntry(FileKind.ADD, partition, bucket, pair.getRight()));
+        }
         return result;
     }
 }

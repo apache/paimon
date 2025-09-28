@@ -290,7 +290,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newKeyComparator(),
                 options.branch(),
                 newStatsFileHandler(),
-                bucketMode(),
                 options.scanManifestParallelism(),
                 createCommitCallbacks(commitUser, table),
                 options.commitMaxRetries(),

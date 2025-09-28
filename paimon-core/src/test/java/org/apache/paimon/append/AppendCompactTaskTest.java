@@ -85,7 +85,7 @@ public class AppendCompactTaskTest {
         dvs.put("data-1.orc", Arrays.asList(2, 4, 6));
 
         // Write deletion vectors for all files to simulate existing deletion vectors
-        CommitMessageImpl commitMessage = store.writeDVIndexFiles(BinaryRow.EMPTY_ROW, 0, dvs);
+        CommitMessageImpl commitMessage = store.writeDVIndexFiles(BinaryRow.EMPTY_ROW, dvs, true);
         store.commit(commitMessage);
 
         List<DataFileMeta> allFiles =

@@ -19,9 +19,12 @@
 package org.apache.paimon;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.deletionvectors.Bitmap64DeletionVector;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainerHelper;
+import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -30,6 +33,8 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.schema.Schema;
@@ -108,21 +113,6 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         newCommit().commit(committable, false);
     }
 
-    public CommitMessage removeIndexFiles(
-            BinaryRow partition, int bucket, List<IndexFileMeta> indexFileMetas) {
-        return new CommitMessageImpl(
-                partition,
-                bucket,
-                options().bucket(),
-                new DataIncrement(
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        indexFileMetas),
-                CompactIncrement.emptyIncrement());
-    }
-
     public List<IndexFileMeta> scanDVIndexFiles(BinaryRow partition, int bucket) {
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
         return fileHandler.scan(latestSnapshot, DELETION_VECTORS_INDEX, partition, bucket);
@@ -134,34 +124,44 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
                 fileHandler, partition, dataFileToDeletionFiles);
     }
 
-    public BucketedDvMaintainer createOrRestoreDVMaintainer(BinaryRow partition, int bucket) {
-        Snapshot latestSnapshot = snapshotManager().latestSnapshot();
-        BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
-        List<IndexFileMeta> indexFiles =
-                fileHandler.scan(latestSnapshot, DELETION_VECTORS_INDEX, partition, bucket);
-        return factory.create(partition, bucket, indexFiles);
+    public Map<String, DeletionVector> deletionVectors(BinaryRow partition, int bucket) {
+        return fileHandler.readAllDeletionVectors(
+                partition, bucket, scanDVIndexFiles(partition, bucket));
     }
 
     public CommitMessageImpl writeDVIndexFiles(
-            BinaryRow partition, int bucket, Map<String, List<Integer>> dataFileToPositions) {
-        BucketedDvMaintainer dvMaintainer = createOrRestoreDVMaintainer(partition, bucket);
+            BinaryRow partition, Map<String, List<Integer>> dataFileToPositions, boolean bitmap64) {
+        AppendDeleteFileMaintainer dvMaintainer =
+                BaseAppendDeleteFileMaintainer.forUnawareAppend(
+                        fileHandler, snapshotManager().latestSnapshot(), partition);
         for (Map.Entry<String, List<Integer>> entry : dataFileToPositions.entrySet()) {
-            for (Integer pos : entry.getValue()) {
-                dvMaintainer.notifyNewDeletion(entry.getKey(), pos);
+            DeletionVector dv =
+                    bitmap64 ? new Bitmap64DeletionVector() : new BitmapDeletionVector();
+            for (Integer i : entry.getValue()) {
+                dv.delete(i);
+            }
+            dvMaintainer.notifyNewDeletionVector(entry.getKey(), dv);
+        }
+        List<IndexManifestEntry> persist = dvMaintainer.persist();
+        List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+        List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
+        for (IndexManifestEntry indexManifestEntry : persist) {
+            if (indexManifestEntry.kind() == FileKind.ADD) {
+                newIndexFiles.add(indexManifestEntry.indexFile());
+            } else {
+                deletedIndexFiles.add(indexManifestEntry.indexFile());
             }
         }
-        List<IndexFileMeta> indexFiles = new ArrayList<>();
-        dvMaintainer.writeDeletionVectorsIndex().ifPresent(indexFiles::add);
         return new CommitMessageImpl(
                 partition,
-                bucket,
+                0,
                 options().bucket(),
                 new DataIncrement(
                         Collections.emptyList(),
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        indexFiles,
-                        Collections.emptyList()),
+                        newIndexFiles,
+                        deletedIndexFiles),
                 CompactIncrement.emptyIncrement());
     }
 

@@ -25,7 +25,6 @@ import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -534,6 +533,7 @@ public class FileStoreCommitTest {
                 null,
                 null,
                 Collections.emptyList(),
+                Collections.emptyList(),
                 (commit, committable) -> commit.commit(committable, false));
         assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id());
 
@@ -545,6 +545,7 @@ public class FileStoreCommitTest {
                 false,
                 null,
                 null,
+                Collections.emptyList(),
                 Collections.emptyList(),
                 (commit, committable) -> {
                     commit.ignoreEmptyCommit(false);
@@ -567,6 +568,7 @@ public class FileStoreCommitTest {
                     false,
                     (long) i,
                     null,
+                    Collections.emptyList(),
                     Collections.emptyList(),
                     (commit, committable) -> {
                         commit.commit(committable, false);
@@ -725,22 +727,21 @@ public class FileStoreCommitTest {
         }
 
         // init write
+        IndexFileMeta writtenPart1Index =
+                indexFileHandler.hashIndex(gen.getPartition(record1), 0).write(new int[] {1, 2, 5});
         store.commitDataIndex(
-                record1,
-                gen::getPartition,
-                0,
-                indexFileHandler
-                        .hashIndex(gen.getPartition(record1), 0)
-                        .write(new int[] {1, 2, 5}));
+                record1, gen::getPartition, 0, Collections.emptyList(), writtenPart1Index);
         store.commitDataIndex(
                 record1,
                 gen::getPartition,
                 1,
+                Collections.emptyList(),
                 indexFileHandler.hashIndex(gen.getPartition(record1), 1).write(new int[] {6, 8}));
         store.commitDataIndex(
                 record2,
                 gen::getPartition,
                 2,
+                Collections.emptyList(),
                 indexFileHandler.hashIndex(gen.getPartition(record2), 2).write(new int[] {3, 5}));
 
         Snapshot snapshot = store.snapshotManager().latestSnapshot();
@@ -773,6 +774,7 @@ public class FileStoreCommitTest {
                 record1,
                 gen::getPartition,
                 0,
+                Collections.singletonList(writtenPart1Index),
                 indexFileHandler.hashIndex(gen.getPartition(record1), 0).write(new int[] {1, 4}));
         snapshot = store.snapshotManager().latestSnapshot();
 
@@ -891,19 +893,18 @@ public class FileStoreCommitTest {
         CommitMessageImpl commitMessage1 =
                 store.writeDVIndexFiles(
                         BinaryRow.EMPTY_ROW,
-                        0,
-                        Collections.singletonMap("f1", Arrays.asList(1, 3)));
+                        Collections.singletonMap("f1", Arrays.asList(1, 3)),
+                        bitmap64);
         CommitMessageImpl commitMessage2 =
                 store.writeDVIndexFiles(
                         BinaryRow.EMPTY_ROW,
-                        0,
-                        Collections.singletonMap("f2", Arrays.asList(2, 4)));
+                        Collections.singletonMap("f2", Arrays.asList(2, 4)),
+                        bitmap64);
         store.commit(commitMessage1, commitMessage2);
 
         // assert 1
         assertThat(store.scanDVIndexFiles(BinaryRow.EMPTY_ROW, 0).size()).isEqualTo(2);
-        BucketedDvMaintainer maintainer = store.createOrRestoreDVMaintainer(BinaryRow.EMPTY_ROW, 0);
-        Map<String, DeletionVector> dvs = maintainer.deletionVectors();
+        Map<String, DeletionVector> dvs = store.deletionVectors(BinaryRow.EMPTY_ROW, 0);
         assertThat(dvs.size()).isEqualTo(2);
         assertThat(dvs.get("f2").isDeleted(2)).isTrue();
         assertThat(dvs.get("f2").isDeleted(3)).isFalse();
@@ -912,17 +913,14 @@ public class FileStoreCommitTest {
         // commit 2
         CommitMessage commitMessage3 =
                 store.writeDVIndexFiles(
-                        BinaryRow.EMPTY_ROW, 0, Collections.singletonMap("f2", Arrays.asList(3)));
-        List<IndexFileMeta> deleted =
-                new ArrayList<>(commitMessage1.newFilesIncrement().newIndexFiles());
-        deleted.addAll(commitMessage2.newFilesIncrement().newIndexFiles());
-        CommitMessage commitMessage4 = store.removeIndexFiles(BinaryRow.EMPTY_ROW, 0, deleted);
-        store.commit(commitMessage3, commitMessage4);
+                        BinaryRow.EMPTY_ROW,
+                        Collections.singletonMap("f2", Arrays.asList(3)),
+                        bitmap64);
+        store.commit(commitMessage3);
 
         // assert 2
-        assertThat(store.scanDVIndexFiles(BinaryRow.EMPTY_ROW, 0).size()).isEqualTo(1);
-        maintainer = store.createOrRestoreDVMaintainer(BinaryRow.EMPTY_ROW, 0);
-        dvs = maintainer.deletionVectors();
+        assertThat(store.scanDVIndexFiles(BinaryRow.EMPTY_ROW, 0).size()).isEqualTo(2);
+        dvs = store.deletionVectors(BinaryRow.EMPTY_ROW, 0);
         assertThat(dvs.size()).isEqualTo(2);
         assertThat(dvs.get("f1").isDeleted(3)).isTrue();
         assertThat(dvs.get("f2").isDeleted(3)).isTrue();

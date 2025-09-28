@@ -23,7 +23,6 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ObjectsFile;
@@ -34,7 +33,11 @@ import org.apache.paimon.utils.VersionedObjectSerializer;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Index manifest file. */
 public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
@@ -61,14 +64,32 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
     /** Write new index files to index manifest. */
     @Nullable
     public String writeIndexFiles(
-            @Nullable String previousIndexManifest,
-            List<IndexManifestEntry> newIndexFiles,
-            BucketMode bucketMode) {
+            @Nullable String previousIndexManifest, List<IndexManifestEntry> newIndexFiles) {
         if (newIndexFiles.isEmpty()) {
             return previousIndexManifest;
         }
-        IndexManifestFileHandler handler = new IndexManifestFileHandler(this, bucketMode);
-        return handler.write(previousIndexManifest, newIndexFiles);
+
+        List<IndexManifestEntry> baseEntries =
+                previousIndexManifest == null ? new ArrayList<>() : read(previousIndexManifest);
+        return writeWithoutRolling(combine(baseEntries, newIndexFiles));
+    }
+
+    private List<IndexManifestEntry> combine(
+            List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles) {
+        Map<String, IndexManifestEntry> indexEntries = new HashMap<>();
+        for (IndexManifestEntry entry : prevIndexFiles) {
+            checkArgument(entry.kind() == FileKind.ADD);
+            indexEntries.put(entry.indexFile().fileName(), entry);
+        }
+
+        for (IndexManifestEntry entry : newIndexFiles) {
+            if (entry.kind() == FileKind.ADD) {
+                indexEntries.put(entry.indexFile().fileName(), entry);
+            } else {
+                indexEntries.remove(entry.indexFile().fileName());
+            }
+        }
+        return new ArrayList<>(indexEntries.values());
     }
 
     /** Creator of {@link IndexManifestFile}. */
