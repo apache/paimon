@@ -25,6 +25,27 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 
+/**
+ * A record reader that merges all batches from a multi-batch reader into a single concatenated
+ * batch. This reader wraps another RecordReader that produces multiple batches and presents them as
+ * a single continuous stream of records.
+ *
+ * <p>The MergeAllBatchReader is particularly useful in scenarios where you need to process multiple
+ * batches as a unified data stream, such as when reading from multiple files or partitions that
+ * should be treated as a single logical dataset.
+ *
+ * <p>Key features:
+ *
+ * <ul>
+ *   <li>Concatenates all batches from the underlying reader into one continuous batch
+ *   <li>Automatically handles batch transitions and resource cleanup
+ *   <li>Provides a single readBatch() call that returns all data
+ *   <li>Properly manages memory by releasing batches after consumption
+ * </ul>
+ *
+ * <p>This reader is commonly used in data evolution scenarios where multiple file formats or
+ * schemas need to be read as a unified stream.
+ */
 public class MergeAllBatchReader implements RecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> multiBatchReader;

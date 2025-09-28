@@ -22,6 +22,36 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.function.Consumer;
 
+/**
+ * A functional programming utility class that represents a value of one of two possible types. This
+ * is a discriminated union type that can hold either a Left value (typically representing an error
+ * or failure case) or a Right value (typically representing a success or correct result).
+ *
+ * <p>The Either type is commonly used in functional programming to handle operations that can
+ * either succeed or fail, providing a type-safe alternative to exceptions or null values.
+ *
+ * <p>Usage examples:
+ *
+ * <pre>{@code
+ * // Create a Left (error case)
+ * Either<String, Integer> error = Either.left("Invalid input");
+ *
+ * // Create a Right (success case)
+ * Either<String, Integer> success = Either.right(42);
+ *
+ * // Check and handle the result
+ * if (result.isRight()) {
+ *     Integer value = result.getRight();
+ *     // Process successful result
+ * } else {
+ *     String error = result.getLeft();
+ *     // Handle error case
+ * }
+ * }</pre>
+ *
+ * @param <L> the type of the Left value (typically error/failure)
+ * @param <R> the type of the Right value (typically success/result)
+ */
 public abstract class Either<L, R> {
 
     /** Private constructor to prevent direct instantiation. */
