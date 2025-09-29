@@ -38,6 +38,8 @@ import java.util.TimeZone;
  */
 public class KafkaMetadataConverter {
 
+    public static String KAFKA_METADATA_COLUMN_PREFIX = "__kafka_";
+
     /** Converter for Kafka topic name. */
     public static class TopicConverter implements CdcMetadataConverter {
         private static final long serialVersionUID = 1L;
@@ -61,7 +63,7 @@ public class KafkaMetadataConverter {
 
         @Override
         public String columnName() {
-            return "topic";
+            return KAFKA_METADATA_COLUMN_PREFIX + "topic";
         }
     }
 
@@ -88,7 +90,7 @@ public class KafkaMetadataConverter {
 
         @Override
         public String columnName() {
-            return "partition";
+            return KAFKA_METADATA_COLUMN_PREFIX + "partition";
         }
     }
 
@@ -115,7 +117,7 @@ public class KafkaMetadataConverter {
 
         @Override
         public String columnName() {
-            return "offset";
+            return KAFKA_METADATA_COLUMN_PREFIX + "offset";
         }
     }
 
@@ -146,7 +148,7 @@ public class KafkaMetadataConverter {
 
         @Override
         public String columnName() {
-            return "timestamp";
+            return KAFKA_METADATA_COLUMN_PREFIX + "timestamp";
         }
     }
 
@@ -173,7 +175,7 @@ public class KafkaMetadataConverter {
 
         @Override
         public String columnName() {
-            return "timestamp_type";
+            return KAFKA_METADATA_COLUMN_PREFIX + "timestamp_type";
         }
     }
 }
