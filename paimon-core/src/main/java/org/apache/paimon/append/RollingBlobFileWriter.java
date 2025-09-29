@@ -156,7 +156,8 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
     }
 
     /** Creates a factory for normal data writers. */
-    private Supplier<PeojectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
+    private static Supplier<
+                    PeojectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
             createNormalWriterFactory(
                     FileIO fileIO,
                     long schemaId,
@@ -199,7 +200,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
     }
 
     /** Creates a blob writer for handling blob data. */
-    private PeojectedFileWriter<
+    private static PeojectedFileWriter<
                     RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
             createBlobWriter(
                     FileIO fileIO,
