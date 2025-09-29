@@ -21,6 +21,8 @@ package org.apache.paimon.operation;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.operation.DataEvolutionSplitRead.BlobBunch;
+import org.apache.paimon.operation.DataEvolutionSplitRead.FieldBunch;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
 
@@ -32,17 +34,18 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.operation.DataEvolutionSplitRead.splitFieldBunches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link DataEvolutionSplitRead.BlobBunch}. */
+/** Tests for {@link BlobBunch}. */
 public class DataEvolutionReadTest {
 
-    private DataEvolutionSplitRead.BlobBunch blobBunch;
+    private BlobBunch blobBunch;
 
     @BeforeEach
     public void setUp() {
-        blobBunch = new DataEvolutionSplitRead.BlobBunch(Long.MAX_VALUE);
+        blobBunch = new BlobBunch(Long.MAX_VALUE);
     }
 
     @Test
@@ -54,8 +57,8 @@ public class DataEvolutionReadTest {
         assertThat(blobBunch.files).hasSize(1);
         assertThat(blobBunch.files.get(0)).isEqualTo(blobEntry);
         assertThat(blobBunch.rowCount()).isEqualTo(100);
-        assertThat(blobBunch.firstRowId()).isEqualTo(0);
-        assertThat(blobBunch.writeCols()).isEqualTo(Arrays.asList("blob_col"));
+        assertThat(blobBunch.files.get(0).firstRowId()).isEqualTo(0);
+        assertThat(blobBunch.files.get(0).writeCols()).isEqualTo(Arrays.asList("blob_col"));
     }
 
     @Test
@@ -70,9 +73,9 @@ public class DataEvolutionReadTest {
         assertThat(blobBunch.files.get(0)).isEqualTo(blobEntry);
         assertThat(blobBunch.files.get(1)).isEqualTo(blobTail);
         assertThat(blobBunch.rowCount()).isEqualTo(300);
-        assertThat(blobBunch.firstRowId()).isEqualTo(0);
-        assertThat(blobBunch.writeCols()).isEqualTo(Arrays.asList("blob_col"));
-        assertThat(blobBunch.schemaId()).isEqualTo(0L);
+        assertThat(blobBunch.files.get(0).firstRowId()).isEqualTo(0);
+        assertThat(blobBunch.files.get(0).writeCols()).isEqualTo(Arrays.asList("blob_col"));
+        assertThat(blobBunch.files.get(0).schemaId()).isEqualTo(0L);
     }
 
     @Test
@@ -176,8 +179,8 @@ public class DataEvolutionReadTest {
 
         assertThat(blobBunch.files).hasSize(4);
         assertThat(blobBunch.rowCount()).isEqualTo(1000);
-        assertThat(blobBunch.firstRowId()).isEqualTo(0);
-        assertThat(blobBunch.writeCols()).isEqualTo(Arrays.asList("blob_col"));
+        assertThat(blobBunch.files.get(0).firstRowId()).isEqualTo(0);
+        assertThat(blobBunch.files.get(0).writeCols()).isEqualTo(Arrays.asList("blob_col"));
     }
 
     @Test
@@ -211,11 +214,10 @@ public class DataEvolutionReadTest {
         assertThat(batch.get(8).fileName()).contains("blob4"); // skip
         assertThat(batch.get(9).fileName()).contains("blob8"); // pick
 
-        List<DataEvolutionSplitRead.FieldBunch> fieldBunches =
-                DataEvolutionSplitRead.splitFieldBunch(batch, file -> 0);
+        List<FieldBunch> fieldBunches = splitFieldBunches(batch, file -> 0);
         assertThat(fieldBunches.size()).isEqualTo(2);
 
-        DataEvolutionSplitRead.BlobBunch blobBunch = fieldBunches.get(1).fileOrBlob.getRight();
+        BlobBunch blobBunch = (BlobBunch) fieldBunches.get(1);
         assertThat(blobBunch.files).hasSize(4);
         assertThat(blobBunch.files.get(0).fileName()).contains("blob5");
         assertThat(blobBunch.files.get(1).fileName()).contains("blob9");
@@ -262,19 +264,18 @@ public class DataEvolutionReadTest {
 
         List<DataFileMeta> batch = batches.get(0);
 
-        List<DataEvolutionSplitRead.FieldBunch> fieldBunches =
-                DataEvolutionSplitRead.splitFieldBunch(
-                        batch, file -> file.writeCols().get(0).hashCode());
+        List<FieldBunch> fieldBunches =
+                splitFieldBunches(batch, file -> file.writeCols().get(0).hashCode());
         assertThat(fieldBunches.size()).isEqualTo(3);
 
-        DataEvolutionSplitRead.BlobBunch blobBunch = fieldBunches.get(1).fileOrBlob.getRight();
+        BlobBunch blobBunch = (BlobBunch) fieldBunches.get(1);
         assertThat(blobBunch.files).hasSize(4);
         assertThat(blobBunch.files.get(0).fileName()).contains("blob5");
         assertThat(blobBunch.files.get(1).fileName()).contains("blob9");
         assertThat(blobBunch.files.get(2).fileName()).contains("blob7");
         assertThat(blobBunch.files.get(3).fileName()).contains("blob8");
 
-        blobBunch = fieldBunches.get(2).fileOrBlob.getRight();
+        blobBunch = (BlobBunch) fieldBunches.get(2);
         assertThat(blobBunch.files).hasSize(4);
         assertThat(blobBunch.files.get(0).fileName()).contains("blob15");
         assertThat(blobBunch.files.get(1).fileName()).contains("blob19");

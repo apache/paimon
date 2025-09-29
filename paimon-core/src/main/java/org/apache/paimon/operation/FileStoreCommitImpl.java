@@ -88,6 +88,7 @@ import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestEntry.recordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
@@ -1217,7 +1218,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     "This is a bug, file source field for row-tracking table must present.");
             if (entry.file().fileSource().get().equals(FileSource.APPEND)
                     && entry.file().firstRowId() == null) {
-                if (entry.file().isBlobFile()) {
+                if (isBlobFile(entry.file().fileName())) {
                     if (blobStart >= start) {
                         throw new IllegalStateException(
                                 String.format(

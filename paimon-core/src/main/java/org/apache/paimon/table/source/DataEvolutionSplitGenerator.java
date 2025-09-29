@@ -30,6 +30,7 @@ import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Append data evolution table split generator, which implementation of {@link SplitGenerator}. */
@@ -86,7 +87,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                                                 value.firstRowId() == null
                                                         ? Long.MIN_VALUE
                                                         : value.firstRowId())
-                        .thenComparingInt(f -> f.isBlobFile() ? 1 : 0)
+                        .thenComparingInt(f -> isBlobFile(f.fileName()) ? 1 : 0)
                         .thenComparing(
                                 (f1, f2) -> {
                                     // If firstRowId is the same, we should read the file with
@@ -106,7 +107,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                 splitByRowId.add(Collections.singletonList(file));
                 continue;
             }
-            if (!file.isBlobFile() && firstRowId != lastRowId) {
+            if (!isBlobFile(file.fileName()) && firstRowId != lastRowId) {
                 if (!currentSplit.isEmpty()) {
                     splitByRowId.add(currentSplit);
                 }
