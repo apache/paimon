@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.FlinkRowDataWithBlob;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
@@ -77,12 +78,13 @@ public class FileStoreSourceSplitReader
     public FileStoreSourceSplitReader(
             TableRead tableRead,
             @Nullable RecordLimiter limiter,
-            FileStoreSourceReaderMetrics metrics) {
+            FileStoreSourceReaderMetrics metrics,
+            @Nullable Integer blobField) {
         this.tableRead = tableRead;
         this.limiter = limiter;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
-        this.pool.add(new FileStoreRecordIterator());
+        this.pool.add(new FileStoreRecordIterator(blobField));
         this.paused = false;
         this.metrics = metrics;
         this.wakeup = new AtomicBoolean(false);
@@ -260,6 +262,11 @@ public class FileStoreSourceSplitReader
 
         private final MutableRecordAndPosition<RowData> recordAndPosition =
                 new MutableRecordAndPosition<>();
+        @Nullable private final Integer blobField;
+
+        private FileStoreRecordIterator(@Nullable Integer blobField) {
+            this.blobField = blobField;
+        }
 
         public FileStoreRecordIterator replace(RecordIterator<InternalRow> iterator) {
             this.iterator = iterator;
@@ -283,7 +290,10 @@ public class FileStoreSourceSplitReader
                 return null;
             }
 
-            recordAndPosition.setNext(new FlinkRowData(row));
+            recordAndPosition.setNext(
+                    blobField == null
+                            ? new FlinkRowData(row)
+                            : new FlinkRowDataWithBlob(row, blobField));
             currentNumRead++;
             if (limiter != null) {
                 limiter.increment();

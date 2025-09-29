@@ -60,8 +60,9 @@ public class AlignedSourceReader extends FileStoreSourceReader
             FileStoreSourceReaderMetrics metrics,
             IOManager ioManager,
             @Nullable Long limit,
-            @Nullable NestedProjectedRowData rowData) {
-        super(readerContext, tableRead, metrics, ioManager, limit, rowData);
+            @Nullable NestedProjectedRowData rowData,
+            @Nullable Integer blobField) {
+        super(readerContext, tableRead, metrics, ioManager, limit, rowData, blobField);
         this.nextCheckpointId = null;
         try {
             // In lower versions of Flink, the SplitFetcherManager does not provide the getQueue

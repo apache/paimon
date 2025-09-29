@@ -81,7 +81,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       entry =>
         entry.file().firstRowId() != null && (!entry
           .file()
-          .isBlob))
+          .isBlobFile))
     .plan()
     .files()
     .asScala
@@ -95,7 +95,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     val files = table
       .store()
       .newScan()
-      .withManifestEntryFilter(entry => entry.file().isBlob)
+      .withManifestEntryFilter(entry => entry.file().isBlobFile)
       .plan()
       .files()
       .asScala
