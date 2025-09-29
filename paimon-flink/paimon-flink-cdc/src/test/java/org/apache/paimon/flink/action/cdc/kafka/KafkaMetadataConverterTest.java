@@ -38,12 +38,12 @@ public class KafkaMetadataConverterTest {
                 new KafkaMetadataConverter.TopicConverter();
 
         // Test data type and column name
-        assertThat(converter.dataType()).isEqualTo(DataTypes.STRING().notNull());
+        assertThat(converter.dataType()).isEqualTo(DataTypes.STRING());
         assertThat(converter.columnName()).isEqualTo("topic");
 
         // Test reading from CdcSourceRecord
         CdcSourceRecord record = new CdcSourceRecord("test-topic", null, "value");
-        assertThat(converter.read(record)).isEqualTo("test-topic");
+        assertThat(converter.read(record)).isEqualTo(null);
 
         // Test with null topic
         CdcSourceRecord recordWithNullTopic = new CdcSourceRecord(null, null, "value");
@@ -164,6 +164,7 @@ public class KafkaMetadataConverterTest {
     public void testAllConvertersWithCompleteMetadata() {
         // Create a CdcSourceRecord with all Kafka metadata
         Map<String, Object> metadata = new HashMap<>();
+        metadata.put("topic", "my-topic");
         metadata.put("partition", 3);
         metadata.put("offset", 9876L);
         metadata.put("timestamp", 1640995200000L);

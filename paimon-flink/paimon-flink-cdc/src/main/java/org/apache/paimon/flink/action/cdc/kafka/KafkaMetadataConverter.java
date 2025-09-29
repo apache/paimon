@@ -50,8 +50,8 @@ public class KafkaMetadataConverter {
 
         @Override
         public String read(CdcSourceRecord record) {
-            Object partition = record.getMetadata("topic");
-            return partition != null ? partition.toString() : null;
+            Object topic = record.getMetadata("topic");
+            return topic != null ? topic.toString() : null;
         }
 
         @Override
