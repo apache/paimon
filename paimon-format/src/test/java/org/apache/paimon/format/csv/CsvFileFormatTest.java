@@ -53,6 +53,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link CsvFileFormat}. */
 public class CsvFileFormatTest extends FormatReadWriteTest {
@@ -444,6 +445,71 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         assertThat(result.get(3).isNullAt(3)).isTrue();
     }
 
+    @Test
+    public void testCsvModeWriteRead() throws IOException {
+        RowType rowType =
+                DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.DOUBLE());
+
+        // Test PERMISSIVE mode
+        Options permissiveOptions = new Options();
+        permissiveOptions.set(CsvOptions.MODE, CsvOptions.Mode.PERMISSIVE);
+        FileFormat format =
+                new CsvFileFormatFactory().create(new FormatContext(permissiveOptions, 1024, 1024));
+        Path testFile = new Path(parent, "test_mode_" + UUID.randomUUID() + ".csv");
+
+        fileIO.writeFile(testFile, "1,Alice,aaaa,100.23\n2,Bob,200.75", false);
+        List<InternalRow> permissiveResult = read(format, rowType, rowType, testFile);
+        assertThat(permissiveResult).hasSize(2);
+        assertThat(permissiveResult.get(0).getInt(0)).isEqualTo(1);
+        assertThat(permissiveResult.get(0).getString(1).toString()).isEqualTo("Alice");
+        assertThat(permissiveResult.get(0).isNullAt(2)).isTrue();
+        assertThat(permissiveResult.get(1).getInt(0)).isEqualTo(2);
+        assertThat(permissiveResult.get(1).getString(1).toString()).isEqualTo("Bob");
+        assertThat(permissiveResult.get(1).getDouble(2)).isEqualTo(200.75);
+
+        // Test DROPMALFORMED mode
+        Options dropMalformedOptions = new Options();
+        dropMalformedOptions.set(CsvOptions.MODE, CsvOptions.Mode.DROPMALFORMED);
+        format =
+                new CsvFileFormatFactory()
+                        .create(new FormatContext(dropMalformedOptions, 1024, 1024));
+        List<InternalRow> dropMalformedResult = read(format, rowType, rowType, testFile);
+        assertThat(dropMalformedResult).hasSize(1);
+        assertThat(dropMalformedResult.get(0).getInt(0)).isEqualTo(2);
+        assertThat(dropMalformedResult.get(0).getString(1).toString()).isEqualTo("Bob");
+        assertThat(dropMalformedResult.get(0).getDouble(2)).isEqualTo(200.75);
+
+        // Test FAILFAST mode
+        Options failFastOptions = new Options();
+        failFastOptions.set(CsvOptions.MODE, CsvOptions.Mode.FAILFAST);
+        assertThatThrownBy(
+                        () -> {
+                            read(
+                                    new CsvFileFormatFactory()
+                                            .create(new FormatContext(failFastOptions, 1024, 1024)),
+                                    rowType,
+                                    rowType,
+                                    testFile);
+                        })
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private List<InternalRow> read(
+            FileFormat format, RowType fullRowType, RowType readRowType, Path testFile)
+            throws IOException {
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(fullRowType, readRowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, testFile, fileIO.getFileSize(testFile)))) {
+
+            InternalRowSerializer serializer = new InternalRowSerializer(readRowType);
+            List<InternalRow> result = new ArrayList<>();
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+            return result;
+        }
+    }
+
     @Override
     protected RowType rowTypeForFullTypesTest() {
         RowType.Builder builder =
@@ -581,16 +647,6 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 writer.addElement(row);
             }
         }
-        try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(fullRowType, rowType, new ArrayList<>())
-                        .createReader(
-                                new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile)))) {
-
-            InternalRowSerializer serializer = new InternalRowSerializer(rowType);
-            List<InternalRow> result = new ArrayList<>();
-            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
-            return result;
-        }
+        return read(format, fullRowType, rowType, testFile);
     }
 }

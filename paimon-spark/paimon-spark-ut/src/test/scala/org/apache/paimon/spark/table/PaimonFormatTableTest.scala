@@ -35,6 +35,34 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     sql("USE test_db")
   }
 
+  test("PaimonFormatTableRead table: csv mode") {
+    val tableName = "paimon_format_test_csv_malformed"
+    withTable(tableName) {
+      sql(
+        s"CREATE TABLE $tableName (f0 INT, f1 string, f2 INT) USING CSV OPTIONS ('" +
+          s"file.compression'='none', 'seq'='|', 'lineSep'='\n', " +
+          s"'${CoreOptions.FORMAT_TABLE_IMPLEMENTATION
+              .key()}'='${CoreOptions.FormatTableImplementation.PAIMON.toString}') PARTITIONED BY (`ds` bigint)")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      val partition = 20250920
+      val csvFile =
+        new Path(
+          table.location(),
+          s"ds=$partition/part-00000-0a28422e-68ba-4713-8870-2fde2d36ed06-c001.csv")
+      table.fileIO().writeFile(csvFile, "1|asfasdfsdf|aaaa|10\n2|asfasdfsdf|11", false)
+      checkAnswer(
+        sql(s"SELECT * FROM $tableName"),
+        Seq(Row(1, "asfasdfsdf", null, partition), Row(2, "asfasdfsdf", 11, partition))
+      )
+      sql(s"Alter table $tableName SET TBLPROPERTIES ('mode'='dropmalformed')")
+      checkAnswer(
+        sql(s"SELECT * FROM $tableName"),
+        Seq(Row(2, "asfasdfsdf", 11, partition))
+      )
+    }
+  }
+
   test("PaimonFormatTableRead table: csv with field-delimiter") {
     val tableName = "paimon_format_test_csv_options"
     withTable(tableName) {
@@ -53,7 +81,8 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
       table.fileIO().writeFile(csvFile, "1|asfasdfsdf\n2|asfasdfsdf", false)
       checkAnswer(
         sql(s"SELECT * FROM $tableName"),
-        Seq(Row(1, "asfasdfsdf", partition), Row(2, "asfasdfsdf", partition)))
+        Seq(Row(1, "asfasdfsdf", partition), Row(2, "asfasdfsdf", partition))
+      )
     }
   }
 
