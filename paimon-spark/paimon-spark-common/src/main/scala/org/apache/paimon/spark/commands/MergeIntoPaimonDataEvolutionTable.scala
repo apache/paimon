@@ -311,6 +311,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       identifier: String): Array[Long] = {
     import sparkSession.implicits._
     val firstRowIdsFinal = firstRowIds
+    val firstRowIdToBlobFirstRowIdsFinal = firstRowIdToBlobFirstRowIds
     val firstRowIdUdf = udf((rowId: Long) => floorBinarySearch(firstRowIdsFinal, rowId))
     dataset
       .select(firstRowIdUdf(col(identifier)))
@@ -318,8 +319,8 @@ case class MergeIntoPaimonDataEvolutionTable(
       .as[Long]
       .flatMap(
         f => {
-          if (firstRowIdToBlobFirstRowIds.contains(f)) {
-            firstRowIdToBlobFirstRowIds(f)
+          if (firstRowIdToBlobFirstRowIdsFinal.contains(f)) {
+            firstRowIdToBlobFirstRowIdsFinal(f)
           } else {
             Seq(f)
           }
