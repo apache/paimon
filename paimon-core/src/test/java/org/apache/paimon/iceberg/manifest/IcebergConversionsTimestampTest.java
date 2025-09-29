@@ -44,16 +44,17 @@ class IcebergConversionsTimestampTest {
     }
 
     private static Stream<Arguments> provideTimestampConversionCases() {
-        Timestamp tsMillis = Timestamp.fromEpochMillis(1682164983524L); // 2023-04-22T13:03:03.524 (p=3)
-        Timestamp tsMicros = Timestamp.fromMicros(1683849603123456L);   // 2023-05-12T00:00:03.123456
+        Timestamp tsMillis =
+                Timestamp.fromEpochMillis(1682164983524L); // 2023-04-22T13:03:03.524 (p=3)
+        Timestamp tsMicros = Timestamp.fromMicros(1683849603123456L); // 2023-05-12T00:00:03.123456
 
         return Stream.of(
                 // For p=3..6 we encode microseconds per Iceberg spec
-                Arguments.of(3, tsMillis, 1682164983524000L),      // micros from millis
+                Arguments.of(3, tsMillis, 1682164983524000L), // micros from millis
                 Arguments.of(4, tsMillis, 1682164983524000L),
                 Arguments.of(5, tsMillis, 1682164983524000L),
                 Arguments.of(6, tsMillis, 1682164983524000L),
-                Arguments.of(6, tsMicros, 1683849603123456L));     // passthrough
+                Arguments.of(6, tsMicros, 1683849603123456L)); // passthrough
     }
 
     @ParameterizedTest
@@ -63,11 +64,12 @@ class IcebergConversionsTimestampTest {
         Timestamp timestamp = Timestamp.fromEpochMillis(1682164983524L);
 
         assertThatThrownBy(
-                () ->
-                        IcebergConversions.toByteBuffer(
-                                DataTypes.TIMESTAMP(precision), timestamp))
+                        () ->
+                                IcebergConversions.toByteBuffer(
+                                        DataTypes.TIMESTAMP(precision), timestamp))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("compatibility supports timestamp binary encoding for precisions 3..6");
+                .hasMessageContaining(
+                        "compatibility supports timestamp binary encoding for precisions 3..6");
     }
 
     private static Stream<Arguments> provideInvalidPrecisions() {
@@ -101,8 +103,8 @@ class IcebergConversionsTimestampTest {
         return Stream.of(
                 // Provide binary in micros; p=3..6 should all parse as micros
                 Arguments.of(3, -1356022717123000L, "1927-01-12T07:01:22.877"),
-                Arguments.of(3, 1713790983524000L,   "2024-04-22T13:03:03.524"),
-                Arguments.of(6, 1640690931207203L,   "2021-12-28T11:28:51.207203"));
+                Arguments.of(3, 1713790983524000L, "2024-04-22T13:03:03.524"),
+                Arguments.of(6, 1640690931207203L, "2021-12-28T11:28:51.207203"));
     }
 
     @ParameterizedTest
@@ -112,16 +114,15 @@ class IcebergConversionsTimestampTest {
         ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).putLong(serializedMicros);
 
         assertThatThrownBy(
-                () ->
-                        IcebergConversions.toPaimonObject(
-                                DataTypes.TIMESTAMP(precision), bytes))
+                        () ->
+                                IcebergConversions.toPaimonObject(
+                                        DataTypes.TIMESTAMP(precision), bytes))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("compatibility supports timestamp binary decoding for precisions 3..6");
+                .hasMessageContaining(
+                        "compatibility supports timestamp binary decoding for precisions 3..6");
     }
 
     private static Stream<Arguments> provideInvalidTimestampCases() {
-        return Stream.of(
-                Arguments.of(0, 1698686153L),
-                Arguments.of(9, 1698686153123456789L));
+        return Stream.of(Arguments.of(0, 1698686153L), Arguments.of(9, 1698686153123456789L));
     }
 }
