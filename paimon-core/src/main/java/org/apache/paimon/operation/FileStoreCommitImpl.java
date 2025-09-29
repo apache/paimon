@@ -1217,7 +1217,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     "This is a bug, file source field for row-tracking table must present.");
             if (entry.file().fileSource().get().equals(FileSource.APPEND)
                     && entry.file().firstRowId() == null) {
-                if (entry.file().isBlob()) {
+                if (entry.file().isBlobFile()) {
                     if (blobStart >= start) {
                         throw new IllegalStateException(
                                 String.format(

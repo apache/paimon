@@ -46,12 +46,12 @@ import java.io.IOException;
  * <p>This reader is commonly used in data evolution scenarios where multiple file formats or
  * schemas need to be read as a unified stream.
  */
-public class MergeAllBatchReader implements RecordReader<InternalRow> {
+public class ForceSingleBatchReader implements RecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> multiBatchReader;
     private ConcatBatch batch;
 
-    public MergeAllBatchReader(RecordReader<InternalRow> multiBatchReader) {
+    public ForceSingleBatchReader(RecordReader<InternalRow> multiBatchReader) {
         this.multiBatchReader = multiBatchReader;
         this.batch = new ConcatBatch(multiBatchReader);
     }

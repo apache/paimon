@@ -27,6 +27,8 @@ import org.apache.paimon.table.SpecialFields;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.STATS_MODE_SUFFIX;
@@ -36,13 +38,16 @@ import static org.apache.paimon.options.ConfigOptions.key;
 public class StatsCollectorFactories {
 
     private final CoreOptions options;
+    private final Map<List<String>, SimpleColStatsCollector.Factory[]> cache =
+            new ConcurrentHashMap<>();
 
     public StatsCollectorFactories(CoreOptions options) {
         this.options = options;
     }
 
     public SimpleColStatsCollector.Factory[] statsCollectors(List<String> fieldNames) {
-        return createStatsFactories(options.statsMode(), options, fieldNames);
+        return cache.computeIfAbsent(
+                fieldNames, k -> createStatsFactories(options.statsMode(), options, fieldNames));
     }
 
     public static SimpleColStatsCollector.Factory[] createStatsFactories(

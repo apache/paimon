@@ -40,7 +40,6 @@ import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BatchRecordWriter;
 import org.apache.paimon.utils.CommitIncrement;
@@ -60,6 +59,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
+
+import static org.apache.paimon.types.DataTypeRoot.BLOB;
 
 /**
  * A {@link RecordWriter} implementation that only accepts records which are always insert
@@ -292,7 +293,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
-        if (BlobType.containsBlobType(writeSchema)) {
+        if (writeSchema.getFieldTypes().stream().anyMatch(t -> t.is(BLOB))) {
             return new RollingBlobFileWriter(
                     fileIO,
                     schemaId,

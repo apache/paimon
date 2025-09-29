@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.format.blob.BlobFileFormatFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
@@ -256,8 +257,8 @@ public interface DataFileMeta {
 
     String fileName();
 
-    default boolean isBlob() {
-        return fileName().endsWith(".blob");
+    default boolean isBlobFile() {
+        return fileName().endsWith("." + BlobFileFormatFactory.IDENTIFIER);
     }
 
     long fileSize();

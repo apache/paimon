@@ -79,6 +79,7 @@ import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQ
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
+import static org.apache.paimon.types.DataTypeRoot.BLOB;
 import static org.apache.paimon.types.DataTypeRoot.MAP;
 import static org.apache.paimon.types.DataTypeRoot.MULTISET;
 import static org.apache.paimon.types.DataTypeRoot.ROW;
@@ -651,7 +652,7 @@ public class SchemaValidation {
                     "Data evolution config must disabled with deletion-vectors.enabled");
         }
 
-        if (BlobType.containsBlobType(schema.logicalRowType())) {
+        if (schema.fields().stream().map(DataField::type).anyMatch(t -> t.is(BLOB))) {
             checkArgument(
                     options.dataEvolutionEnabled(),
                     "Data evolution config must enabled for table with BLOB type column.");

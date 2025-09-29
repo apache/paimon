@@ -19,7 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.append.MergeAllBatchReader;
+import org.apache.paimon.append.ForceSingleBatchReader;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -176,7 +176,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         needMergeFiles,
                         file -> {
                             checkArgument(
-                                    file.isBlob(), "Only blob file need to call this method.");
+                                    file.isBlobFile(), "Only blob file need to call this method.");
                             return schemaFetcher
                                     .apply(file.schemaId())
                                     .logicalRowType()
@@ -254,7 +254,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                                 readFields,
                                                 false));
                 fileRecordReaders[i] =
-                        new MergeAllBatchReader(
+                        new ForceSingleBatchReader(
                                 createFileReader(
                                         partition, file, dataFilePathFactory, formatReaderMapping));
             }
@@ -356,7 +356,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         Map<Integer, BlobBunch> blobBunchMap = new HashMap<>();
         long rowCount = -1;
         for (DataFileMeta file : needMergeFiles) {
-            if (file.isBlob()) {
+            if (file.isBlobFile()) {
                 int fieldId = blobFileToFieldId.apply(file);
                 final long expectedRowCount = rowCount;
                 blobBunchMap
@@ -450,7 +450,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
 
         void add(DataFileMeta file) {
-            if (!file.isBlob()) {
+            if (!file.isBlobFile()) {
                 throw new IllegalArgumentException("Only blob file can be added to a blob bunch.");
             }
 
