@@ -1933,7 +1933,12 @@ public class CoreOptions implements Serializable {
                                     + "in 'clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
                                     + "and 'hilbert' for 5 or more columns.");
 
-    @Immutable
+    public static final ConfigOption<Boolean> CLUSTERING_INCREMENTAL =
+            key("clustering.incremental")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether enable incremental clustering.");
+
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
                     .booleanType()
@@ -2995,6 +3000,10 @@ public class CoreOptions implements Serializable {
 
     public List<String> clusteringColumns() {
         return clusteringColumns(options.get(CLUSTERING_COLUMNS));
+    }
+
+    public boolean clusteringIncrementalEnabled() {
+        return options.get(CLUSTERING_INCREMENTAL);
     }
 
     public OrderType clusteringStrategy(int columnSize) {
