@@ -30,6 +30,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
@@ -159,7 +160,7 @@ public class SchemaValidation {
 
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
-        fileFormat.validateDataFields(new RowType(schema.fields()));
+        fileFormat.validateDataFields(BlobType.splitBlob(new RowType(schema.fields())).getLeft());
 
         // Check column names in schema
         schema.fieldNames()
@@ -239,6 +240,8 @@ public class SchemaValidation {
         validateMergeFunctionFactory(schema);
 
         validateRowTracking(schema, options);
+
+        validateIncrementalClustering(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -646,6 +649,28 @@ public class SchemaValidation {
             checkArgument(
                     !options.deletionVectorsEnabled(),
                     "Data evolution config must disabled with deletion-vectors.enabled");
+        }
+
+        if (BlobType.containsBlobType(schema.logicalRowType())) {
+            checkArgument(
+                    options.dataEvolutionEnabled(),
+                    "Data evolution config must enabled for table with BLOB type column.");
+            checkArgument(
+                    BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldCount() == 1,
+                    "Table with BLOB type column only support one BLOB column.");
+        }
+    }
+
+    private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {
+        if (options.clusteringIncrementalEnabled()) {
+            checkArgument(
+                    options.bucket() == -1,
+                    "Cannot define %s for incremental clustering  table, it only support bucket = -1",
+                    CoreOptions.BUCKET.key());
+            checkArgument(
+                    schema.primaryKeys().isEmpty(),
+                    "Cannot define %s for incremental clustering table.",
+                    PRIMARY_KEY.key());
         }
     }
 }

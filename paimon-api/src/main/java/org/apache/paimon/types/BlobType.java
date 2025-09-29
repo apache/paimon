@@ -82,4 +82,14 @@ public final class BlobType extends DataType {
 
         return Pair.of(new RowType(normalFields), new RowType(blobFields));
     }
+
+    public static boolean containsBlobType(RowType rowType) {
+        for (DataField field : rowType.getFields()) {
+            DataTypeRoot type = field.type().getTypeRoot();
+            if (type == DataTypeRoot.BLOB) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

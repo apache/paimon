@@ -744,7 +744,10 @@ public abstract class CatalogTestBase {
                 readBuilder.newRead().executeFilter().createReader(scan.plan())) {
             InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
             List<InternalRow> rows = new ArrayList<>();
-            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+            reader.forEachRemaining(
+                    row -> {
+                        rows.add(serializer.copy(row));
+                    });
             return rows;
         }
     }

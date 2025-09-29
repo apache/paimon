@@ -47,6 +47,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
@@ -161,10 +162,12 @@ public class FormatReadBuilder implements ReadBuilder {
         List<Predicate> readFilters =
                 excludePredicateWithFields(
                         PredicateBuilder.splitAnd(filter), new HashSet<>(table.partitionKeys()));
+        RowType dataRowType = getRowTypeWithoutPartition(table.rowType(), table.partitionKeys());
+        RowType readRowType = getRowTypeWithoutPartition(readType(), table.partitionKeys());
         FormatReaderFactory readerFactory =
                 FileFormatDiscover.of(options)
                         .discover(options.formatType())
-                        .createReaderFactory(table.rowType(), readType(), readFilters);
+                        .createReaderFactory(dataRowType, readRowType, readFilters);
 
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
@@ -181,6 +184,13 @@ public class FormatReadBuilder implements ReadBuilder {
                 null,
                 0,
                 Collections.emptyMap());
+    }
+
+    private static RowType getRowTypeWithoutPartition(RowType rowType, List<String> partitionKeys) {
+        return rowType.project(
+                rowType.getFieldNames().stream()
+                        .filter(name -> !partitionKeys.contains(name))
+                        .collect(Collectors.toList()));
     }
 
     // ===================== Unsupported ===============================

@@ -580,12 +580,12 @@ public interface Catalog extends AutoCloseable {
     /**
      * Whether this catalog supports list objects paged. If not, corresponding methods will fall
      * back to listing all objects. For example, {@link #listTablesPaged(String, Integer, String,
-     * String)} would fall back to {@link #listTables(String)}.
+     * String, String)} would fall back to {@link #listTables(String)}.
      *
      * <ul>
      *   <li>{@link #listDatabasesPaged(Integer, String, String)}.
-     *   <li>{@link #listTablesPaged(String, Integer, String, String)}.
-     *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listTablesPaged(String, Integer, String, String, String)}.
+     *   <li>{@link #listTableDetailsPaged(String, Integer, String, String, String)}.
      *   <li>{@link #listViewsPaged(String, Integer, String, String)}.
      *   <li>{@link #listViewDetailsPaged(String, Integer, String, String)}.
      *   <li>{@link #listPartitionsPaged(Identifier, Integer, String, String)}.
@@ -599,8 +599,8 @@ public interface Catalog extends AutoCloseable {
      *
      * <ul>
      *   <li>{@link #listDatabasesPaged(Integer, String, String)}.
-     *   <li>{@link #listTablesPaged(String, Integer, String, String)}.
-     *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listTablesPaged(String, Integer, String, String, String)}.
+     *   <li>{@link #listTableDetailsPaged(String, Integer, String, String, String)}.
      *   <li>{@link #listViewsPaged(String, Integer, String, String)}.
      *   <li>{@link #listViewDetailsPaged(String, Integer, String, String)}.
      *   <li>{@link #listPartitionsPaged(Identifier, Integer, String, String)}.

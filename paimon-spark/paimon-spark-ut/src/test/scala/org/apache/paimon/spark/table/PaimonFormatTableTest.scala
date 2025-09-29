@@ -39,16 +39,21 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     val tableName = "paimon_format_test_csv_options"
     withTable(tableName) {
       sql(
-        s"CREATE TABLE $tableName (f0 INT, f1 INT) USING CSV OPTIONS ('" +
+        s"CREATE TABLE $tableName (f0 INT, f1 string) USING CSV OPTIONS ('" +
           s"file.compression'='none', 'seq'='|', 'lineSep'='\n', " +
           s"'${CoreOptions.FORMAT_TABLE_IMPLEMENTATION
-              .key()}'='${CoreOptions.FormatTableImplementation.PAIMON.toString}')")
+              .key()}'='${CoreOptions.FormatTableImplementation.PAIMON.toString}') PARTITIONED BY (`ds` bigint)")
       val table =
         paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      val partition = 20250920
       val csvFile =
-        new Path(table.location(), "part-00000-0a28422e-68ba-4713-8870-2fde2d36ed06-c001.csv")
-      table.fileIO().writeFile(csvFile, "1|2\n3|4", false)
-      checkAnswer(sql(s"SELECT * FROM $tableName"), Seq(Row(1, 2), Row(3, 4)))
+        new Path(
+          table.location(),
+          s"ds=$partition/part-00000-0a28422e-68ba-4713-8870-2fde2d36ed06-c001.csv")
+      table.fileIO().writeFile(csvFile, "1|asfasdfsdf\n2|asfasdfsdf", false)
+      checkAnswer(
+        sql(s"SELECT * FROM $tableName"),
+        Seq(Row(1, "asfasdfsdf", partition), Row(2, "asfasdfsdf", partition)))
     }
   }
 
