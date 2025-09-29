@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
@@ -79,9 +80,10 @@ case class MergeIntoPaimonDataEvolutionTable(
     .newScan()
     .withManifestEntryFilter(
       entry =>
-        entry.file().firstRowId() != null && (!entry
-          .file()
-          .isBlobFile))
+        entry.file().firstRowId() != null && (!isBlobFile(
+          entry
+            .file()
+            .fileName())))
     .plan()
     .files()
     .asScala
@@ -95,7 +97,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     val files = table
       .store()
       .newScan()
-      .withManifestEntryFilter(entry => entry.file().isBlobFile)
+      .withManifestEntryFilter(entry => isBlobFile(entry.file().fileName()))
       .plan()
       .files()
       .asScala
