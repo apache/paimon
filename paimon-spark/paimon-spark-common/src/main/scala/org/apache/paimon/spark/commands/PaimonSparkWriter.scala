@@ -258,7 +258,7 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
           }
         }
         val clusteringColumns = coreOptions.clusteringColumns()
-        if (!clusteringColumns.isEmpty) {
+        if ((!coreOptions.clusteringIncrementalEnabled()) && (!clusteringColumns.isEmpty)) {
           val strategy = coreOptions.clusteringStrategy(tableSchema.fields().size())
           val sorter = TableSorter.getSorter(table, strategy, clusteringColumns)
           input = sorter.sort(data)
