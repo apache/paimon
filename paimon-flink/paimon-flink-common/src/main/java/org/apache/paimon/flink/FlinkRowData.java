@@ -41,7 +41,7 @@ import static org.apache.paimon.flink.FlinkRowWrapper.fromFlinkRowKind;
 /** Convert to Flink row data. */
 public class FlinkRowData implements RowData {
 
-    private InternalRow row;
+    protected InternalRow row;
 
     public FlinkRowData(InternalRow row) {
         this.row = row;
