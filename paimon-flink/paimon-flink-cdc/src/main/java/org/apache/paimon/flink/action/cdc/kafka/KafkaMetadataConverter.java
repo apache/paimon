@@ -36,99 +36,74 @@ import java.util.TimeZone;
  * <p>These converters read from the generic metadata map in {@link CdcSourceRecord} to extract
  * Kafka-specific metadata like topic, partition, offset, timestamp, and timestamp type.
  */
-public class KafkaMetadataConverter {
+public class KafkaMetadataConverter implements CdcMetadataConverter {
 
-    public static String KAFKA_METADATA_COLUMN_PREFIX = "__kafka_";
+    protected static String KAFKA_METADATA_COLUMN_PREFIX = "__kafka_";
+    private static final long serialVersionUID = 1L;
+
+    private final String fieldName;
+    private final DataType dataType;
+
+    public KafkaMetadataConverter(String fieldName, DataType dataType) {
+        this.fieldName = fieldName;
+        this.dataType = dataType;
+    }
+
+    @Override
+    public String read(JsonNode source) {
+        throw new UnsupportedOperationException(
+                "Kafka metadata converters should be used with CdcSourceRecord, not JsonNode");
+    }
+
+    @Override
+    public String read(CdcSourceRecord record) {
+        Object metadata = record.getMetadata(this.fieldName);
+        return metadata != null ? metadata.toString() : null;
+    }
+
+    @Override
+    public DataType dataType() {
+        return this.dataType;
+    }
+
+    @Override
+    public String columnName() {
+        return KAFKA_METADATA_COLUMN_PREFIX + this.fieldName;
+    }
 
     /** Converter for Kafka topic name. */
-    public static class TopicConverter implements CdcMetadataConverter {
+    public static class TopicConverter extends KafkaMetadataConverter {
         private static final long serialVersionUID = 1L;
 
-        @Override
-        public String read(JsonNode source) {
-            throw new UnsupportedOperationException(
-                    "Kafka metadata converters should be used with CdcSourceRecord, not JsonNode");
-        }
-
-        @Override
-        public String read(CdcSourceRecord record) {
-            Object topic = record.getMetadata("topic");
-            return topic != null ? topic.toString() : null;
-        }
-
-        @Override
-        public DataType dataType() {
-            return DataTypes.STRING();
-        }
-
-        @Override
-        public String columnName() {
-            return KAFKA_METADATA_COLUMN_PREFIX + "topic";
+        public TopicConverter() {
+            super("topic", DataTypes.STRING());
         }
     }
 
     /** Converter for Kafka partition number. */
-    public static class PartitionConverter implements CdcMetadataConverter {
+    public static class PartitionConverter extends KafkaMetadataConverter {
         private static final long serialVersionUID = 1L;
 
-        @Override
-        public String read(JsonNode source) {
-            throw new UnsupportedOperationException(
-                    "Kafka metadata converters should be used with CdcSourceRecord, not JsonNode");
-        }
-
-        @Override
-        public String read(CdcSourceRecord record) {
-            Object partition = record.getMetadata("partition");
-            return partition != null ? partition.toString() : null;
-        }
-
-        @Override
-        public DataType dataType() {
-            return DataTypes.INT();
-        }
-
-        @Override
-        public String columnName() {
-            return KAFKA_METADATA_COLUMN_PREFIX + "partition";
+        public PartitionConverter() {
+            super("partition", DataTypes.INT());
         }
     }
 
     /** Converter for Kafka message offset. */
-    public static class OffsetConverter implements CdcMetadataConverter {
+    public static class OffsetConverter extends KafkaMetadataConverter {
         private static final long serialVersionUID = 1L;
 
-        @Override
-        public String read(JsonNode source) {
-            throw new UnsupportedOperationException(
-                    "Kafka metadata converters should be used with CdcSourceRecord, not JsonNode");
-        }
-
-        @Override
-        public String read(CdcSourceRecord record) {
-            Object offset = record.getMetadata("offset");
-            return offset != null ? offset.toString() : null;
-        }
-
-        @Override
-        public DataType dataType() {
-            return DataTypes.BIGINT();
-        }
-
-        @Override
-        public String columnName() {
-            return KAFKA_METADATA_COLUMN_PREFIX + "offset";
+        public OffsetConverter() {
+            super("offset", DataTypes.BIGINT());
         }
     }
 
     /** Converter for Kafka message timestamp. */
-    public static class TimestampConverter implements CdcMetadataConverter {
+    public static class TimestampConverter extends KafkaMetadataConverter {
         private static final long serialVersionUID = 1L;
 
-        @Override
-        public String read(JsonNode source) {
-            throw new UnsupportedOperationException(
-                    "Kafka metadata converters should be used with CdcSourceRecord, not JsonNode");
+        public TimestampConverter() {
+            super("timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3));
         }
 
         @Override
@@ -140,42 +115,14 @@ public class KafkaMetadataConverter {
             }
             return null;
         }
-
-        @Override
-        public DataType dataType() {
-            return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3);
-        }
-
-        @Override
-        public String columnName() {
-            return KAFKA_METADATA_COLUMN_PREFIX + "timestamp";
-        }
     }
 
     /** Converter for Kafka timestamp type. */
-    public static class TimestampTypeConverter implements CdcMetadataConverter {
+    public static class TimestampTypeConverter extends KafkaMetadataConverter {
         private static final long serialVersionUID = 1L;
 
-        @Override
-        public String read(JsonNode source) {
-            throw new UnsupportedOperationException(
-                    "Kafka metadata converters should be used with CdcSourceRecord, not JsonNode");
-        }
-
-        @Override
-        public String read(CdcSourceRecord record) {
-            Object timestampType = record.getMetadata("timestamp_type");
-            return timestampType != null ? timestampType.toString() : null;
-        }
-
-        @Override
-        public DataType dataType() {
-            return DataTypes.STRING();
-        }
-
-        @Override
-        public String columnName() {
-            return KAFKA_METADATA_COLUMN_PREFIX + "timestamp_type";
+        public TimestampTypeConverter() {
+            super("timestamp_type", DataTypes.STRING());
         }
     }
 }
