@@ -334,7 +334,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       sql(
         "CREATE TABLE t (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
       for (i <- 1 to 6) {
-        sql(s"INSERT INTO T VALUES ($i, $i)")
+        sql(s"INSERT INTO t VALUES ($i, $i)")
       }
       assert(
         intercept[RuntimeException] {
