@@ -128,7 +128,8 @@ public abstract class AbstractRecordParser
     }
 
     /** Extract metadata values using metadata converters. */
-    protected void evalMetadataColumns(Map<String, String> rowData, CdcSchema.Builder schemaBuilder) {
+    protected void evalMetadataColumns(
+            Map<String, String> rowData, CdcSchema.Builder schemaBuilder) {
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
             try {
                 String value = metadataConverter.read(currentRecord);
