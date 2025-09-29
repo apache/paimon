@@ -32,7 +32,6 @@ public class FlinkRowDataWithBlob extends FlinkRowData {
 
     @Override
     public byte[] getBinary(int pos) {
-
         return pos == blobField ? row.getBlob(pos).toData() : row.getBinary(pos);
     }
 }
