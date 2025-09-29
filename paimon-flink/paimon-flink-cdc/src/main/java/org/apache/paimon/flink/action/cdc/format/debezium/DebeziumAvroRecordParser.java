@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.format.debezium;
 
+import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
@@ -78,8 +79,16 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
         super(typeMapping, computedColumns);
     }
 
+    public DebeziumAvroRecordParser(
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            CdcMetadataConverter[] metadataConverters) {
+        super(typeMapping, computedColumns, metadataConverters);
+    }
+
     @Override
     protected void setRoot(CdcSourceRecord record) {
+        super.setRoot(record); // Store current record for metadata access
         keyRecord = (GenericRecord) record.getKey();
         valueRecord = (GenericRecord) record.getValue();
     }
@@ -159,6 +168,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
         }
 
         evalComputedColumns(resultMap, schemaBuilder);
+        extractMetadata(resultMap, schemaBuilder);
         return resultMap;
     }
 

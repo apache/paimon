@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.format;
 
+import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
@@ -55,10 +56,21 @@ public abstract class AbstractRecordParser
     protected static final String FIELD_DATABASE = "database";
     protected final TypeMapping typeMapping;
     protected final List<ComputedColumn> computedColumns;
+    protected final CdcMetadataConverter[] metadataConverters;
+    protected CdcSourceRecord currentRecord; // Store current record for metadata access
 
     public AbstractRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        this(typeMapping, computedColumns, new CdcMetadataConverter[0]);
+    }
+
+    public AbstractRecordParser(
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            CdcMetadataConverter[] metadataConverters) {
         this.typeMapping = typeMapping;
         this.computedColumns = computedColumns;
+        this.metadataConverters =
+                metadataConverters != null ? metadataConverters : new CdcMetadataConverter[0];
     }
 
     @Nullable
@@ -88,7 +100,11 @@ public abstract class AbstractRecordParser
         }
     }
 
-    protected abstract void setRoot(CdcSourceRecord record);
+    protected void setRoot(CdcSourceRecord record) {
+        this.currentRecord = record;
+        // Call the original setRoot method for backward compatibility
+        // Subclasses can override this method as they used to
+    }
 
     protected abstract List<RichCdcMultiplexRecord> extractRecords();
 
@@ -109,6 +125,24 @@ public abstract class AbstractRecordParser
                     rowData.put(computedColumn.columnName(), result);
                     schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
                 });
+    }
+
+    /** Extract metadata values using metadata converters. */
+    protected void extractMetadata(Map<String, String> rowData, CdcSchema.Builder schemaBuilder) {
+        for (CdcMetadataConverter metadataConverter : metadataConverters) {
+            try {
+                String value = metadataConverter.read(currentRecord);
+                if (value != null) {
+                    rowData.put(metadataConverter.columnName(), value);
+                }
+                schemaBuilder.column(metadataConverter.columnName(), metadataConverter.dataType());
+            } catch (UnsupportedOperationException e) {
+                // This converter doesn't support CdcSourceRecord, skip it
+                LOG.debug(
+                        "Metadata converter {} does not support CdcSourceRecord",
+                        metadataConverter.getClass().getSimpleName());
+            }
+        }
     }
 
     /** Handle case sensitivity here. */
