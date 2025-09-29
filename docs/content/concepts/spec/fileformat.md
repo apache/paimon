@@ -419,6 +419,18 @@ Format Options:
       <td>String</td>
       <td>Null literal string that is interpreted as a null value (disabled by default).</td>
     </tr>
+    <tr>
+      <td><h5>csv.mode</h5></td>
+      <td style="word-wrap: break-word;"><code>PERMISSIVE</code></td>
+      <td>String</td>
+      <td>Allows a mode for dealing with corrupt records during reading. Currently supported values are <code>'PERMISSIVE'</code>, <code>'DROPMALFORMED'</code> and <code>'FAILFAST'</code>:
+      <ul>
+      <li>Option <code>'PERMISSIVE'</code> sets malformed fields to null.</li>
+      <li>Option <code>'DROPMALFORMED'</code> ignores the whole corrupted records.</li>
+      <li>Option <code>'FAILFAST'</code> throws an exception when it meets corrupted records.</li>
+      </ul>
+      </td>
+    </tr>
     </tbody>
 </table>
 
