@@ -168,7 +168,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
         }
 
         evalComputedColumns(resultMap, schemaBuilder);
-        extractMetadata(resultMap, schemaBuilder);
+        evalMetadataColumns(resultMap, schemaBuilder);
         return resultMap;
     }
 
