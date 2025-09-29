@@ -44,7 +44,6 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
-import org.jetbrains.annotations.NotNull;
 
 import java.time.Duration;
 import java.util.Arrays;
@@ -322,7 +321,7 @@ public class KafkaActionUtils {
         }
     }
 
-    protected static @NotNull Map<String, Object> extractKafkaMetadata(
+    protected static Map<String, Object> extractKafkaMetadata(
             ConsumerRecord<byte[], byte[]> message) {
         // Add the Kafka message metadata that can be used with --metadata_column
         Map<String, Object> kafkaMetadata = new HashMap<>();
