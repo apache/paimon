@@ -57,7 +57,7 @@ public interface CompactDeletionFile {
     /** A generated files implementation of {@link CompactDeletionFile}. */
     class GeneratedDeletionFile implements CompactDeletionFile {
 
-        @Nullable private final IndexFileMeta deleteDeletionFile;
+        @Nullable private IndexFileMeta deleteDeletionFile;
         @Nullable private final IndexFileMeta newDeletionFile;
         private final DeletionVectorsIndexFile dvIndexFile;
 
@@ -94,6 +94,8 @@ public interface CompactDeletionFile {
             }
 
             old.clean();
+            // Keep the old deletion file.
+            deleteDeletionFile = ((GeneratedDeletionFile) old).deleteDeletionFile;
             return this;
         }
 

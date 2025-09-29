@@ -144,6 +144,9 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(indexDir.listFiles()).hasSize(1);
         FileIOUtils.deleteDirectory(indexDir);
 
+        Pair<IndexFileMeta, IndexFileMeta> pair2 = deletionFile2.getOrCompute();
+        assertThat(pair2.getLeft()).isEqualTo(null);
+
         // test lazyGeneration
 
         dvMaintainer.notifyNewDeletion("f1", 3);
@@ -159,6 +162,9 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
 
         deletionFile4.getOrCompute();
         assertThat(indexDir.listFiles()).hasSize(1);
+
+        Pair<IndexFileMeta, IndexFileMeta> pair4 = deletionFile4.getOrCompute();
+        assertThat(pair4.getLeft()).isEqualTo(null);
     }
 
     @ParameterizedTest
