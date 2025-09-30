@@ -164,6 +164,7 @@ public class FileStoreSourceReaderTest {
                 new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
                 IOManager.create(tempDir.toString()),
                 null,
+                null,
                 null);
     }
 

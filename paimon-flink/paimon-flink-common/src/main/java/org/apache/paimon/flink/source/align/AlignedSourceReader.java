@@ -25,6 +25,7 @@ import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.FileStoreSourceSplitState;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ReflectionUtils;
 
 import org.apache.flink.api.connector.source.ExternallyInducedSourceReader;
@@ -60,8 +61,9 @@ public class AlignedSourceReader extends FileStoreSourceReader
             FileStoreSourceReaderMetrics metrics,
             IOManager ioManager,
             @Nullable Long limit,
-            @Nullable NestedProjectedRowData rowData) {
-        super(readerContext, tableRead, metrics, ioManager, limit, rowData);
+            @Nullable NestedProjectedRowData rowData,
+            @Nullable RowType readType) {
+        super(readerContext, tableRead, metrics, ioManager, limit, rowData, readType);
         this.nextCheckpointId = null;
         try {
             // In lower versions of Flink, the SplitFetcherManager does not provide the getQueue

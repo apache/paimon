@@ -67,13 +67,15 @@ public abstract class FlinkSource
                 new FileStoreSourceReaderMetrics(metricGroup);
         TableRead tableRead =
                 readBuilder.newRead().withMetricRegistry(new FlinkMetricRegistry(metricGroup));
+
         return new FileStoreSourceReader(
                 context,
                 tableRead,
                 sourceReaderMetrics,
                 ioManager,
                 limit,
-                NestedProjectedRowData.copy(rowData));
+                NestedProjectedRowData.copy(rowData),
+                readBuilder.readType());
     }
 
     @Override

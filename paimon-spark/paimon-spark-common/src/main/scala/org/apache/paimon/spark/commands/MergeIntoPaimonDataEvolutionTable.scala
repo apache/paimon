@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
@@ -75,16 +76,43 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
   private val firstRowIds: Seq[Long] = table
-    .newSnapshotReader()
-    .withManifestEntryFilter(entry => entry.file().firstRowId() != null)
-    .read()
-    .splits()
+    .store()
+    .newScan()
+    .withManifestEntryFilter(
+      entry =>
+        entry.file().firstRowId() != null && (!isBlobFile(
+          entry
+            .file()
+            .fileName())))
+    .plan()
+    .files()
     .asScala
-    .map(_.asInstanceOf[DataSplit])
-    .flatMap(split => split.dataFiles().asScala.map(s => s.firstRowId().asInstanceOf[Long]))
+    .map(file => file.file().firstRowId().asInstanceOf[Long])
     .distinct
     .sorted
     .toSeq
+
+  private val firstRowIdToBlobFirstRowIds = {
+    val map = new mutable.HashMap[Long, List[Long]]()
+    val files = table
+      .store()
+      .newScan()
+      .withManifestEntryFilter(entry => isBlobFile(entry.file().fileName()))
+      .plan()
+      .files()
+      .asScala
+      .sortBy(f => f.file().firstRowId())
+
+    for (file <- files) {
+      val firstRowId = file.file().firstRowId().asInstanceOf[Long]
+      val firstIdInNormalFile = floorBinarySearch(firstRowIds, firstRowId)
+      map.update(
+        firstIdInNormalFile,
+        map.getOrElseUpdate(firstIdInNormalFile, List.empty[Long]) :+ firstRowId
+      )
+    }
+    map
+  }
 
   lazy val targetRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(targetTable)
   lazy val sourceRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(sourceTable)
@@ -283,11 +311,20 @@ case class MergeIntoPaimonDataEvolutionTable(
       identifier: String): Array[Long] = {
     import sparkSession.implicits._
     val firstRowIdsFinal = firstRowIds
+    val firstRowIdToBlobFirstRowIdsFinal = firstRowIdToBlobFirstRowIds
     val firstRowIdUdf = udf((rowId: Long) => floorBinarySearch(firstRowIdsFinal, rowId))
     dataset
       .select(firstRowIdUdf(col(identifier)))
       .distinct()
       .as[Long]
+      .flatMap(
+        f => {
+          if (firstRowIdToBlobFirstRowIdsFinal.contains(f)) {
+            firstRowIdToBlobFirstRowIdsFinal(f)
+          } else {
+            Seq(f)
+          }
+        })
       .collect()
   }
 
