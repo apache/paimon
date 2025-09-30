@@ -84,7 +84,7 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
         int pageSize = cache.pageSize();
         InternalRowSerializer formatSerializer = this.formatSerializer.get();
         Supplier<DataPagedOutputSerializer> outputSupplier =
-                () -> new DataPagedOutputSerializer(formatSerializer, 4096, pageSize);
+                () -> new DataPagedOutputSerializer(formatSerializer, 1024, pageSize);
         try (CloseableIterator<InternalRow> iterator = reader.apply(path, fileSize)) {
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
