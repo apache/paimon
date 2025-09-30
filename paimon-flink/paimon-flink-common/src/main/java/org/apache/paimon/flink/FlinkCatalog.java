@@ -1051,12 +1051,12 @@ public class FlinkCatalog extends AbstractCatalog {
         RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
-        String blobName = options.get(FlinkConnectorOptions.BLOB_FIELD.key());
+        String blobName = options.get(CoreOptions.BLOB_FIELD.key());
         if (blobName != null) {
             checkArgument(
                     options.containsKey(CoreOptions.DATA_EVOLUTION_ENABLED.key()),
                     "When setting '"
-                            + FlinkConnectorOptions.BLOB_FIELD.key()
+                            + CoreOptions.BLOB_FIELD.key()
                             + "', you must also set '"
                             + CoreOptions.DATA_EVOLUTION_ENABLED.key()
                             + "'");

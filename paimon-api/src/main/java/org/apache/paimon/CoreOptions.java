@@ -1989,6 +1989,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Format table file path only contain partition value.");
 
+    public static final ConfigOption<String> BLOB_FIELD =
+            key("blob.field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the blob field.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {

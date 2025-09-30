@@ -24,8 +24,6 @@ import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.types.DataTypeRoot;
-import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.SourceReader;
@@ -50,7 +48,6 @@ public abstract class FlinkSource
 
     @Nullable protected final Long limit;
     @Nullable protected final NestedProjectedRowData rowData;
-    @Nullable protected final Integer blobField;
 
     public FlinkSource(
             ReadBuilder readBuilder,
@@ -59,7 +56,6 @@ public abstract class FlinkSource
         this.readBuilder = readBuilder;
         this.limit = limit;
         this.rowData = rowData;
-        this.blobField = blobFieldIndex(readBuilder.readType());
     }
 
     @Override
@@ -79,16 +75,7 @@ public abstract class FlinkSource
                 ioManager,
                 limit,
                 NestedProjectedRowData.copy(rowData),
-                blobField);
-    }
-
-    private Integer blobFieldIndex(RowType rowType) {
-        for (int i = 0; i < rowType.getFieldCount(); i++) {
-            if (rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
-                return i;
-            }
-        }
-        return null;
+                readBuilder.readType());
     }
 
     @Override
