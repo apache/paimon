@@ -62,7 +62,7 @@ public class AlignedSourceReader extends FileStoreSourceReader
             IOManager ioManager,
             @Nullable Long limit,
             @Nullable NestedProjectedRowData rowData,
-            RowType readType) {
+            @Nullable RowType readType) {
         super(readerContext, tableRead, metrics, ioManager, limit, rowData, readType);
         this.nextCheckpointId = null;
         try {
