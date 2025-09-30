@@ -52,6 +52,13 @@ public class FlinkTableFactory extends AbstractFlinkTableFactory {
 
     @Override
     public DynamicTableSource createDynamicTableSource(Context context) {
+        CatalogTable table = context.getCatalogTable().getOrigin();
+        if (table instanceof FormatCatalogTable) {
+            CoreOptions options = new CoreOptions(((FormatCatalogTable) table).table().options());
+            if (!options.formatTableImplementationIsPaimon()) {
+                return ((FormatCatalogTable) table).createTableSource(context);
+            }
+        }
         createTableIfNeeded(context);
         return super.createDynamicTableSource(context);
     }
@@ -60,7 +67,13 @@ public class FlinkTableFactory extends AbstractFlinkTableFactory {
     public DynamicTableSink createDynamicTableSink(Context context) {
         CatalogTable table = context.getCatalogTable().getOrigin();
         if (table instanceof FormatCatalogTable) {
-            return ((FormatCatalogTable) table).createTableSink(context);
+            CoreOptions options = new CoreOptions(((FormatCatalogTable) table).table().options());
+            if (!options.formatTableImplementationIsPaimon()) {
+                return ((FormatCatalogTable) table).createTableSink(context);
+            } else {
+                throw new UnsupportedOperationException(
+                        "Format table's sink is not supported yet.");
+            }
         }
         createTableIfNeeded(context);
         return super.createDynamicTableSink(context);

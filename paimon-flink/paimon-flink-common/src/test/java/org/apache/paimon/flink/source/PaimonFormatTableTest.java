@@ -47,9 +47,10 @@ import java.io.IOException;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for format table. */
-public class FormatTableReadITCaseBase extends RESTCatalogITCaseBase {
+public class PaimonFormatTableTest extends RESTCatalogITCaseBase {
 
     @Test
     public void testParquetFileFormat() throws IOException {
@@ -69,7 +70,11 @@ public class FormatTableReadITCaseBase extends RESTCatalogITCaseBase {
         datas[1] = GenericRow.of(2, 2, 2);
         String tableName = "format_table_test";
         sql(
-                "CREATE TABLE %s (a INT, b INT, c INT) WITH ('file.format'='parquet', 'type'='format-table')",
+                "CREATE TABLE %s (a INT, b INT, c INT) WITH ("
+                        + "'file.format'='parquet',"
+                        + "'type'='format-table',"
+                        + "'format-table.implementation'='paimon'"
+                        + ")",
                 tableName);
         write(
                 factory,
@@ -84,6 +89,8 @@ public class FormatTableReadITCaseBase extends RESTCatalogITCaseBase {
         restCatalogServer.setDataToken(identifier, expiredDataToken);
         assertThat(sql("SELECT a FROM %s", tableName))
                 .containsExactlyInAnyOrder(Row.of(1), Row.of(2));
+        assertThatThrownBy(() -> sql("INSERT INTO %s VALUES (3, 3, 3)", tableName))
+                .isInstanceOf(RuntimeException.class);
         sql("Drop TABLE %s", tableName);
     }
 
