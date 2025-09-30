@@ -20,16 +20,14 @@ package org.apache.paimon.s3;
 
 import org.apache.paimon.fs.MultiPartUploadStore;
 
-import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
-import com.amazonaws.services.s3.model.PartETag;
-import com.amazonaws.services.s3.model.UploadPartRequest;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.apache.hadoop.fs.s3a.WriteOperationHelper;
-import org.apache.hadoop.fs.s3a.statistics.S3AStatisticsContext;
-import org.apache.hadoop.fs.store.audit.AuditSpan;
-import org.apache.hadoop.fs.store.audit.AuditSpanSource;
+import org.apache.hadoop.fs.s3a.impl.PutObjectOptions;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadResponse;
+import software.amazon.awssdk.services.s3.model.CompletedPart;
+import software.amazon.awssdk.services.s3.model.UploadPartRequest;
 
 import java.io.File;
 import java.io.IOException;
@@ -40,21 +38,15 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Provides the multipart upload by Amazon S3. */
 public class S3MultiPartUpload
-        implements MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> {
+        implements MultiPartUploadStore<CompletedPart, CompleteMultipartUploadResponse> {
 
     private final S3AFileSystem s3a;
 
-    private final InternalWriteOperationHelper s3accessHelper;
+    private final WriteOperationHelper s3accessHelper;
 
-    public S3MultiPartUpload(S3AFileSystem s3a, Configuration conf) {
+    public S3MultiPartUpload(S3AFileSystem s3a) {
         checkNotNull(s3a);
-        this.s3accessHelper =
-                new InternalWriteOperationHelper(
-                        s3a,
-                        checkNotNull(conf),
-                        s3a.createStoreContext().getInstrumentation(),
-                        s3a.getAuditSpanSource(),
-                        s3a.getActiveAuditSpan());
+        this.s3accessHelper = s3a.createWriteOperationHelper(s3a.getActiveAuditSpan());
         this.s3a = s3a;
     }
 
@@ -65,48 +57,49 @@ public class S3MultiPartUpload
 
     @Override
     public String startMultiPartUpload(String objectName) throws IOException {
-        return s3accessHelper.initiateMultiPartUpload(objectName);
+        return s3accessHelper.initiateMultiPartUpload(
+                objectName, PutObjectOptions.defaultOptions());
     }
 
     @Override
-    public CompleteMultipartUploadResult completeMultipartUpload(
-            String objectName, String uploadId, List<PartETag> partETags, long numBytesInParts)
+    public CompleteMultipartUploadResponse completeMultipartUpload(
+            String objectName, String uploadId, List<CompletedPart> partETags, long numBytesInParts)
             throws IOException {
         return s3accessHelper.completeMPUwithRetries(
-                objectName, uploadId, partETags, numBytesInParts, new AtomicInteger(0));
+                objectName,
+                uploadId,
+                partETags,
+                numBytesInParts,
+                new AtomicInteger(0),
+                PutObjectOptions.defaultOptions());
     }
 
     @Override
-    public PartETag uploadPart(
-            String objectName, String uploadId, int partNumber, File file, long byteLength)
+    public CompletedPart uploadPart(
+            String objectName,
+            String uploadId,
+            int partNumber,
+            boolean isLastPart,
+            File file,
+            long byteLength)
             throws IOException {
         final UploadPartRequest uploadRequest =
-                s3accessHelper.newUploadPartRequest(
-                        objectName,
-                        uploadId,
-                        partNumber,
-                        checkedDownCast(byteLength),
-                        null,
-                        file,
-                        0L);
-        return s3accessHelper.uploadPart(uploadRequest).getPartETag();
+                s3accessHelper
+                        .newUploadPartRequestBuilder(
+                                objectName,
+                                uploadId,
+                                partNumber,
+                                isLastPart,
+                                checkedDownCast(byteLength))
+                        .build();
+        final RequestBody requestBody = RequestBody.fromFile(file);
+        String eTag = s3accessHelper.uploadPart(uploadRequest, requestBody, null).eTag();
+        return CompletedPart.builder().partNumber(partNumber).eTag(eTag).build();
     }
 
     @Override
     public void abortMultipartUpload(String destKey, String uploadId) throws IOException {
         s3accessHelper.abortMultipartUpload(destKey, uploadId, false, null);
-    }
-
-    private static final class InternalWriteOperationHelper extends WriteOperationHelper {
-
-        InternalWriteOperationHelper(
-                S3AFileSystem owner,
-                Configuration conf,
-                S3AStatisticsContext statisticsContext,
-                AuditSpanSource auditSpanSource,
-                AuditSpan auditSpan) {
-            super(owner, conf, statisticsContext, auditSpanSource, auditSpan);
-        }
     }
 
     private static int checkedDownCast(long value) {
