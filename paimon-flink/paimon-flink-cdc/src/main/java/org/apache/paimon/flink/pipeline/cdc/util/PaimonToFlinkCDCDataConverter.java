@@ -21,6 +21,7 @@ package org.apache.paimon.flink.pipeline.cdc.util;
 import org.apache.paimon.data.InternalRow;
 
 import org.apache.flink.cdc.common.data.DecimalData;
+import org.apache.flink.cdc.common.data.LocalZonedTimestampData;
 import org.apache.flink.cdc.common.data.TimestampData;
 import org.apache.flink.cdc.common.data.binary.BinaryRecordData;
 import org.apache.flink.cdc.common.data.binary.BinaryStringData;
@@ -131,6 +132,15 @@ public class PaimonToFlinkCDCDataConverter {
                                                         fieldPos,
                                                         DataTypeChecks.getPrecision(fieldType))
                                                 .toSQLTimestamp());
+                break;
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                fieldGetter =
+                        row ->
+                                LocalZonedTimestampData.fromInstant(
+                                        row.getTimestamp(
+                                                        fieldPos,
+                                                        DataTypeChecks.getPrecision(fieldType))
+                                                .toInstant());
                 break;
             default:
                 throw new IllegalArgumentException(

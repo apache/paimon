@@ -39,7 +39,6 @@ import org.apache.flink.cdc.common.event.OperationType;
 import org.apache.flink.cdc.common.types.DataType;
 import org.apache.flink.cdc.common.types.DataTypeChecks;
 import org.apache.flink.cdc.common.types.DataTypeRoot;
-import org.apache.flink.cdc.common.types.DateType;
 import org.apache.flink.core.memory.MemorySegment;
 
 import java.nio.ByteBuffer;
@@ -67,7 +66,7 @@ public class FlinkCDCToPaimonDataConverter {
         return genericRow;
     }
 
-    public static List<RecordData.FieldGetter> createFieldGetters(List<DateType> fieldTypes) {
+    public static List<RecordData.FieldGetter> createFieldGetters(List<DataType> fieldTypes) {
         List<RecordData.FieldGetter> fieldGetters = new ArrayList<>();
         for (int i = 0; i < fieldTypes.size(); i++) {
             fieldGetters.add(createFieldGetter(fieldTypes.get(i), i));

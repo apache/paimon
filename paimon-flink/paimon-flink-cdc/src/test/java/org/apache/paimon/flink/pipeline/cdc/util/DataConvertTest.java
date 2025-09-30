@@ -18,14 +18,26 @@
 
 package org.apache.paimon.flink.pipeline.cdc.util;
 
+import org.apache.flink.cdc.common.data.DateData;
+import org.apache.flink.cdc.common.data.DecimalData;
+import org.apache.flink.cdc.common.data.LocalZonedTimestampData;
+import org.apache.flink.cdc.common.data.TimeData;
+import org.apache.flink.cdc.common.data.TimestampData;
+import org.apache.flink.cdc.common.data.binary.BinaryStringData;
+import org.apache.flink.cdc.common.event.DataChangeEvent;
+import org.apache.flink.cdc.common.event.TableId;
+import org.apache.flink.cdc.common.types.DataType;
+import org.apache.flink.cdc.runtime.typeutils.BinaryRecordDataGenerator;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
+
 /**
- * Type converter test for {@link FlinkCDCToPaimonTypeConverter} and {@link
- * PaimonToFlinkCDCTypeConverter}.
+ * Data convert test for {@link PaimonToFlinkCDCDataConverter} and {@link
+ * FlinkCDCToPaimonDataConverter}.
  */
-public class TypeConverterTest {
+public class DataConvertTest {
 
     @Test
     public void testFullTypesConverter() {
@@ -94,11 +106,52 @@ public class TypeConverterTest {
                         .primaryKey("pk_string")
                         .partitionKey("boolean")
                         .build();
+        TableId tableId = TableId.tableId("testDatabase", "testTable");
+        BinaryRecordDataGenerator recordDataGenerator =
+                new BinaryRecordDataGenerator(
+                        fullTypesSchema.getColumnDataTypes().toArray(new DataType[0]));
+        Object[] testData =
+                new Object[] {
+                    BinaryStringData.fromString("pk_string"),
+                    true,
+                    new byte[] {1, 2, 3},
+                    new byte[] {4, 5, 6},
+                    new byte[] {7, 8, 9},
+                    (byte) 1,
+                    (short) 2,
+                    3,
+                    4L,
+                    5.1f,
+                    6.2,
+                    DecimalData.fromBigDecimal(new BigDecimal("7.123"), 6, 3),
+                    BinaryStringData.fromString("test1"),
+                    BinaryStringData.fromString("test2"),
+                    BinaryStringData.fromString("test3"),
+                    DateData.fromEpochDay(1000),
+                    TimeData.fromMillisOfDay(200),
+                    TimeData.fromMillisOfDay(300).toMillisOfDay(),
+                    TimestampData.fromMillis(100, 1),
+                    TimestampData.fromMillis(200, 2),
+                    TimestampData.fromMillis(300, 3),
+                    TimestampData.fromMillis(400, 4),
+                    LocalZonedTimestampData.fromEpochMillis(300, 3),
+                    LocalZonedTimestampData.fromEpochMillis(400, 4),
+                    LocalZonedTimestampData.fromEpochMillis(500, 5),
+                    LocalZonedTimestampData.fromEpochMillis(600, 6),
+                };
+        org.apache.flink.cdc.common.event.DataChangeEvent dataChangeEvent =
+                DataChangeEvent.insertEvent(tableId, recordDataGenerator.generate(testData));
 
         Assertions.assertEquals(
-                fullTypesSchema,
-                PaimonToFlinkCDCTypeConverter.convertPaimonSchemaToFlinkCDCSchema(
-                        FlinkCDCToPaimonTypeConverter.convertFlinkCDCSchemaToPaimonSchema(
-                                fullTypesSchema)));
+                dataChangeEvent,
+                PaimonToFlinkCDCDataConverter.convertRowToDataChangeEvent(
+                        tableId,
+                        FlinkCDCToPaimonDataConverter.convertDataChangeEventToInternalRow(
+                                dataChangeEvent,
+                                FlinkCDCToPaimonDataConverter.createFieldGetters(
+                                        fullTypesSchema.getColumnDataTypes())),
+                        PaimonToFlinkCDCDataConverter.createFieldGetters(
+                                fullTypesSchema.getColumnDataTypes()),
+                        recordDataGenerator));
     }
 }
