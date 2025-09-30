@@ -69,7 +69,7 @@ class IcebergConversionsTimestampTest {
                                         DataTypes.TIMESTAMP(precision), timestamp))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
-                        "compatibility supports timestamp binary encoding for precisions 3..6");
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 6.");
     }
 
     private static Stream<Arguments> provideInvalidPrecisions() {
@@ -119,7 +119,7 @@ class IcebergConversionsTimestampTest {
                                         DataTypes.TIMESTAMP(precision), bytes))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
-                        "compatibility supports timestamp binary decoding for precisions 3..6");
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 6.");
     }
 
     private static Stream<Arguments> provideInvalidTimestampCases() {
