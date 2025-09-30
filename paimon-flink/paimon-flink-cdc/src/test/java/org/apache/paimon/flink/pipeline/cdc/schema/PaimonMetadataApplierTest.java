@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.FileSystemCatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.flink.pipeline.cdc.util.FlinkCDCToPaimonTypeConverter;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
@@ -588,14 +589,14 @@ class PaimonMetadataApplierTest {
                                 "created_time",
                                 org.apache.flink.cdc.common.types.DataTypes.TIMESTAMP(),
                                 null,
-                                SchemaChangeProvider.INVALID_OR_MISSING_DATATIME)));
+                                FlinkCDCToPaimonTypeConverter.INVALID_OR_MISSING_DATATIME)));
         addedColumns.add(
                 AddColumnEvent.last(
                         Column.physicalColumn(
                                 "updated_time",
                                 org.apache.flink.cdc.common.types.DataTypes.TIMESTAMP_LTZ(),
                                 null,
-                                SchemaChangeProvider.INVALID_OR_MISSING_DATATIME)));
+                                FlinkCDCToPaimonTypeConverter.INVALID_OR_MISSING_DATATIME)));
 
         AddColumnEvent addColumnEvent =
                 new AddColumnEvent(TableId.parse(tableId.identifier()), addedColumns);
