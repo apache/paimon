@@ -35,10 +35,25 @@ public class CdcSourceRecord implements Serializable {
     // TODO Use generics to support more scenarios.
     private final Object value;
 
-    public CdcSourceRecord(@Nullable String topic, @Nullable Object key, Object value) {
+    @Nullable private final Integer partition;
+
+    @Nullable private final Long offset;
+
+    public CdcSourceRecord(
+            @Nullable String topic,
+            @Nullable Object key,
+            Object value,
+            @Nullable Integer partition,
+            @Nullable Long offset) {
         this.topic = topic;
         this.key = key;
         this.value = value;
+        this.partition = partition;
+        this.offset = offset;
+    }
+
+    public CdcSourceRecord(@Nullable String topic, @Nullable Object key, Object value) {
+        this(topic, key, value, null, null);
     }
 
     public CdcSourceRecord(Object value) {
@@ -59,6 +74,16 @@ public class CdcSourceRecord implements Serializable {
         return value;
     }
 
+    @Nullable
+    public Integer getPartition() {
+        return partition;
+    }
+
+    @Nullable
+    public Long getOffset() {
+        return offset;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof CdcSourceRecord)) {
@@ -68,16 +93,30 @@ public class CdcSourceRecord implements Serializable {
         CdcSourceRecord that = (CdcSourceRecord) o;
         return Objects.equals(topic, that.topic)
                 && Objects.equals(key, that.key)
-                && Objects.equals(value, that.value);
+                && Objects.equals(value, that.value)
+                && Objects.equals(partition, that.partition)
+                && Objects.equals(offset, that.offset);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(topic, key, value);
+        return Objects.hash(topic, key, value, partition, offset);
     }
 
     @Override
     public String toString() {
-        return topic + ": " + key + " " + value;
+        StringBuilder sb = new StringBuilder();
+        if (topic != null) {
+            sb.append("topic=").append(topic);
+        }
+        if (partition != null) {
+            sb.append(", partition=").append(partition);
+        }
+        if (offset != null) {
+            sb.append(", offset=").append(offset);
+        }
+        sb.append("\nkey: ").append(key);
+        sb.append("\nvalue: ").append(value);
+        return sb.toString();
     }
 }

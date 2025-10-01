@@ -290,3 +290,63 @@ There are some useful options to build Flink Kafka Source, but they are not prov
         </tr>
     </tbody>
 </table>
+
+## Error Handling
+
+When consuming CDC data from Kafka, you may encounter corrupt or unparsable records due to schema mismatches, malformed data, or other issues. Paimon provides configuration options to handle such records gracefully without causing job failures.
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left">Key</th>
+        <th class="text-left">Default</th>
+        <th class="text-left">Type</th>
+        <th class="text-left">Description</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td>cdc.skip-corrupt-record</td>
+          <td>false</td>
+          <td>Boolean</td>
+          <td>Whether to skip corrupt or unparsable CDC records during parsing. When enabled, records that fail parsing will be skipped instead of causing the job to fail. The skipped records will be logged if cdc.log-corrupt-record is enabled.</td>
+        </tr>
+        <tr>
+          <td>cdc.log-corrupt-record</td>
+          <td>true</td>
+          <td>Boolean</td>
+          <td>Whether to log full details about corrupt records when they are encountered. This includes the topic, partition, offset, and record payload. When false, only topic-level metadata is logged without record details to prevent PII leakage. Set to true only for debugging purposes with appropriate log security measures in place.</td>
+        </tr>
+    </tbody>
+</table>
+
+{{< hint warning >}}
+**Security Warning:** When `cdc.log-corrupt-record=true`, the full record content will be logged, which may include Personally Identifiable Information (PII) or other sensitive data. Ensure your log storage and access controls comply with your organization's data privacy policies. Consider setting this to `false` in production environments or ensure logs are properly secured and have appropriate retention policies.
+{{< /hint >}}
+
+**Note:** These configurations apply to parsing-level errors (e.g., missing required fields, type mismatches). They should be specified via `--kafka_conf`.
+
+**Example:**
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    kafka_sync_table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --kafka_conf properties.bootstrap.servers=127.0.0.1:9020 \
+    --kafka_conf topic=orders \
+    --kafka_conf value.format=debezium-avro \
+    --kafka_conf schema.registry.url=http://localhost:8081 \
+    --kafka_conf cdc.skip-corrupt-record=true
+```
+
+When `cdc.skip-corrupt-record=true`, the synchronization job will continue processing even if it encounters records that cannot be parsed. By default, only topic-level metadata (topic name) is logged to prevent PII leakage. Corrupt records are logged as warnings with messages like "Corrupt record detected during record processing from topic: orders".
+
+To enable full record payload logging for debugging (not recommended for production), add:
+```bash
+    --kafka_conf cdc.log-corrupt-record=true
+```
+
+This will log the complete record details including partition, offset, and record content, which may contain sensitive data.
