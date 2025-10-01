@@ -288,5 +288,34 @@ There are some useful options to build Flink Kafka Source, but they are not prov
           <td>String</td>
           <td>When configuring "value.format=debezium-avro" which requires using the Confluence schema registry model for Apache Avro serialization, you need to provide the schema registry URL.</td>
         </tr>
+        <tr>
+          <td>cdc.skip-corrupt-record</td>
+          <td>false</td>
+          <td>Boolean</td>
+          <td>Whether to skip corrupt or unparsable CDC records during parsing. When enabled, records that fail parsing will be skipped instead of causing the job to fail. The skipped records will be logged if cdc.log-corrupt-record is enabled.</td>
+        </tr>
+        <tr>
+          <td>cdc.log-corrupt-record</td>
+          <td>true</td>
+          <td>Boolean</td>
+          <td>Whether to log full details about corrupt records when they are encountered. This includes the topic, partition, offset, and record payload. When false, only topic-level metadata is logged without record details to prevent PII leakage. <strong>Security Warning:</strong> When set to true, the full record content will be logged, which may include Personally Identifiable Information (PII) or other sensitive data. Ensure your log storage and access controls comply with your organization's data privacy policies. Set to true only for debugging purposes with appropriate security measures in place.</td>
+        </tr>
     </tbody>
 </table>
+
+**Example - Skip corrupt records with PII-safe logging:**
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    kafka_sync_table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --kafka_conf properties.bootstrap.servers=127.0.0.1:9020 \
+    --kafka_conf topic=orders \
+    --kafka_conf value.format=debezium-avro \
+    --kafka_conf schema.registry.url=http://localhost:8081 \
+    --kafka_conf cdc.skip-corrupt-record=true \
+    --kafka_conf cdc.log-corrupt-record=false
+```
