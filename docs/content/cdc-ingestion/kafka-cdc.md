@@ -288,23 +288,6 @@ There are some useful options to build Flink Kafka Source, but they are not prov
           <td>String</td>
           <td>When configuring "value.format=debezium-avro" which requires using the Confluence schema registry model for Apache Avro serialization, you need to provide the schema registry URL.</td>
         </tr>
-    </tbody>
-</table>
-
-## Error Handling
-
-When consuming CDC data from Kafka, you may encounter corrupt or unparsable records due to schema mismatches, malformed data, or other issues. Paimon provides configuration options to handle such records gracefully without causing job failures.
-
-<table class="table table-bordered">
-    <thead>
-      <tr>
-        <th class="text-left">Key</th>
-        <th class="text-left">Default</th>
-        <th class="text-left">Type</th>
-        <th class="text-left">Description</th>
-      </tr>
-    </thead>
-    <tbody>
         <tr>
           <td>cdc.skip-corrupt-record</td>
           <td>false</td>
@@ -315,18 +298,12 @@ When consuming CDC data from Kafka, you may encounter corrupt or unparsable reco
           <td>cdc.log-corrupt-record</td>
           <td>true</td>
           <td>Boolean</td>
-          <td>Whether to log full details about corrupt records when they are encountered. This includes the topic, partition, offset, and record payload. When false, only topic-level metadata is logged without record details to prevent PII leakage. Set to true only for debugging purposes with appropriate log security measures in place.</td>
+          <td>Whether to log full details about corrupt records when they are encountered. This includes the topic, partition, offset, and record payload. When false, only topic-level metadata is logged without record details to prevent PII leakage. <strong>Security Warning:</strong> When set to true, the full record content will be logged, which may include Personally Identifiable Information (PII) or other sensitive data. Ensure your log storage and access controls comply with your organization's data privacy policies. Set to true only for debugging purposes with appropriate security measures in place.</td>
         </tr>
     </tbody>
 </table>
 
-{{< hint warning >}}
-**Security Warning:** When `cdc.log-corrupt-record=true`, the full record content will be logged, which may include Personally Identifiable Information (PII) or other sensitive data. Ensure your log storage and access controls comply with your organization's data privacy policies. Consider setting this to `false` in production environments or ensure logs are properly secured and have appropriate retention policies.
-{{< /hint >}}
-
-**Note:** These configurations apply to parsing-level errors (e.g., missing required fields, type mismatches). They should be specified via `--kafka_conf`.
-
-**Example:**
+**Example - Skip corrupt records with PII-safe logging:**
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -339,14 +316,6 @@ When consuming CDC data from Kafka, you may encounter corrupt or unparsable reco
     --kafka_conf topic=orders \
     --kafka_conf value.format=debezium-avro \
     --kafka_conf schema.registry.url=http://localhost:8081 \
-    --kafka_conf cdc.skip-corrupt-record=true
+    --kafka_conf cdc.skip-corrupt-record=true \
+    --kafka_conf cdc.log-corrupt-record=false
 ```
-
-When `cdc.skip-corrupt-record=true`, the synchronization job will continue processing even if it encounters records that cannot be parsed. By default, only topic-level metadata (topic name) is logged to prevent PII leakage. Corrupt records are logged as warnings with messages like "Corrupt record detected during record processing from topic: orders".
-
-To enable full record payload logging for debugging (not recommended for production), add:
-```bash
-    --kafka_conf cdc.log-corrupt-record=true
-```
-
-This will log the complete record details including partition, offset, and record content, which may contain sensitive data.
