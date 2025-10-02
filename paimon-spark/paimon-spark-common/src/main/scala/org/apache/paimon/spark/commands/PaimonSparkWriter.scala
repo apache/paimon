@@ -88,7 +88,7 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
 
     val withInitBucketCol = bucketMode match {
       case BUCKET_UNAWARE => data
-      case CROSS_PARTITION if !data.schema.fieldNames.contains(ROW_KIND_COL) =>
+      case KEY_DYNAMIC if !data.schema.fieldNames.contains(ROW_KIND_COL) =>
         data
           .withColumn(ROW_KIND_COL, lit(RowKind.INSERT.toByteValue))
           .withColumn(BUCKET_COL, lit(-1))
@@ -165,7 +165,7 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
     }
 
     val written: Dataset[Array[Byte]] = bucketMode match {
-      case CROSS_PARTITION =>
+      case KEY_DYNAMIC =>
         // Topology: input -> bootstrap -> shuffle by key hash -> bucket-assigner -> shuffle by partition & bucket
         val rowType = SparkTypeUtils.toPaimonType(withInitBucketCol.schema).asInstanceOf[RowType]
         val assignerParallelism = Option(coreOptions.dynamicBucketAssignerParallelism)
@@ -258,7 +258,7 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
           }
         }
         val clusteringColumns = coreOptions.clusteringColumns()
-        if (!clusteringColumns.isEmpty) {
+        if ((!coreOptions.clusteringIncrementalEnabled()) && (!clusteringColumns.isEmpty)) {
           val strategy = coreOptions.clusteringStrategy(tableSchema.fields().size())
           val sorter = TableSorter.getSorter(table, strategy, clusteringColumns)
           input = sorter.sort(data)

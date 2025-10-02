@@ -33,13 +33,13 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BatchRecordWriter;
 import org.apache.paimon.utils.CommitIncrement;
@@ -50,6 +50,7 @@ import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SinkWriter;
 import org.apache.paimon.utils.SinkWriter.BufferedSinkWriter;
 import org.apache.paimon.utils.SinkWriter.DirectSinkWriter;
+import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
 
@@ -58,6 +59,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
+
+import static org.apache.paimon.types.DataTypeRoot.BLOB;
 
 /**
  * A {@link RecordWriter} implementation that only accepts records which are always insert
@@ -84,7 +87,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final LongCounter seqNumCounter;
     private final String fileCompression;
     private final CompressOptions spillCompression;
-    private final SimpleColStatsCollector.Factory[] statsCollectors;
+    private final StatsCollectorFactories statsCollectorFactories;
     @Nullable private final IOManager ioManager;
     private final FileIndexOptions fileIndexOptions;
     private final MemorySize maxDiskSize;
@@ -111,7 +114,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             boolean spillable,
             String fileCompression,
             CompressOptions spillCompression,
-            SimpleColStatsCollector.Factory[] statsCollectors,
+            StatsCollectorFactories statsCollectorFactories,
             MemorySize maxDiskSize,
             FileIndexOptions fileIndexOptions,
             boolean asyncFileWrite,
@@ -136,7 +139,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.fileCompression = fileCompression;
         this.spillCompression = spillCompression;
         this.ioManager = ioManager;
-        this.statsCollectors = statsCollectors;
+        this.statsCollectorFactories = statsCollectorFactories;
         this.maxDiskSize = maxDiskSize;
         this.fileIndexOptions = fileIndexOptions;
 
@@ -289,7 +292,23 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         }
     }
 
-    private RowDataRollingFileWriter createRollingRowWriter() {
+    private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
+        if (writeSchema.getFieldTypes().stream().anyMatch(t -> t.is(BLOB))) {
+            return new RollingBlobFileWriter(
+                    fileIO,
+                    schemaId,
+                    fileFormat,
+                    targetFileSize,
+                    writeSchema,
+                    pathFactory,
+                    seqNumCounter,
+                    fileCompression,
+                    statsCollectorFactories,
+                    fileIndexOptions,
+                    FileSource.APPEND,
+                    asyncFileWrite,
+                    statsDenseStore);
+        }
         return new RowDataRollingFileWriter(
                 fileIO,
                 schemaId,
@@ -299,7 +318,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 pathFactory,
                 seqNumCounter,
                 fileCompression,
-                statsCollectors,
+                statsCollectorFactories.statsCollectors(writeSchema.getFieldNames()),
                 fileIndexOptions,
                 FileSource.APPEND,
                 asyncFileWrite,

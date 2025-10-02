@@ -19,14 +19,18 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
+import pyarrow
+from packaging.version import parse
+
 from pypaimon.api.api_response import GetTableResponse, PagedList
 from pypaimon.api.options import Options
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.api.rest_exception import NoSuchResourceException
+from pypaimon.api.rest_exception import NoSuchResourceException, AlreadyExistsException
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.catalog.catalog_exception import TableNotExistException
+from pypaimon.catalog.catalog_exception import TableNotExistException, DatabaseAlreadyExistException, \
+    TableAlreadyExistException, DatabaseNotExistException
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
@@ -107,7 +111,12 @@ class RESTCatalog(Catalog):
         return self.rest_api.list_databases_paged(max_results, page_token, database_name_pattern)
 
     def create_database(self, name: str, ignore_if_exists: bool, properties: Dict[str, str] = None):
-        self.rest_api.create_database(name, properties)
+        try:
+            self.rest_api.create_database(name, properties)
+        except AlreadyExistsException as e:
+            if not ignore_if_exists:
+                # Convert REST API exception to catalog exception
+                raise DatabaseAlreadyExistException(name) from e
 
     def get_database(self, name: str) -> Database:
         response = self.rest_api.get_database(name)
@@ -117,8 +126,13 @@ class RESTCatalog(Catalog):
         if response is not None:
             return Database(name, options)
 
-    def drop_database(self, name: str):
-        self.rest_api.drop_database(name)
+    def drop_database(self, name: str, ignore_if_exists: bool = False):
+        try:
+            self.rest_api.drop_database(name)
+        except NoSuchResourceException as e:
+            if not ignore_if_exists:
+                # Convert REST API exception to catalog exception
+                raise DatabaseNotExistException(name) from e
 
     def alter_database(self, name: str, changes: List[PropertyChange]):
         set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
@@ -154,12 +168,20 @@ class RESTCatalog(Catalog):
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
-        self.rest_api.create_table(identifier, schema)
+        try:
+            self.rest_api.create_table(identifier, schema)
+        except AlreadyExistsException as e:
+            if not ignore_if_exists:
+                raise TableAlreadyExistException(identifier) from e
 
-    def drop_table(self, identifier: Union[str, Identifier]):
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_exists: bool = False):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
-        self.rest_api.drop_table(identifier)
+        try:
+            self.rest_api.drop_table(identifier)
+        except NoSuchResourceException as e:
+            if not ignore_if_exists:
+                raise TableNotExistException(identifier) from e
 
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
         response = self.rest_api.get_table(identifier)
@@ -181,17 +203,17 @@ class RESTCatalog(Catalog):
             uuid=response.get_id()
         )
 
-    def file_io_from_options(self, table_path: Path) -> FileIO:
-        return FileIO(str(table_path), self.context.options.data)
+    def file_io_from_options(self, table_path: str) -> FileIO:
+        return FileIO(table_path, self.context.options.data)
 
-    def file_io_for_data(self, table_path: Path, identifier: Identifier):
+    def file_io_for_data(self, table_path: str, identifier: Identifier):
         return RESTTokenFileIO(identifier, table_path, self.context.options.data) \
             if self.data_token_enabled else self.file_io_from_options(table_path)
 
     def load_table(self,
                    identifier: Identifier,
-                   internal_file_io: Callable[[Path], Any],
-                   external_file_io: Callable[[Path], Any],
+                   internal_file_io: Callable[[str], Any],
+                   external_file_io: Callable[[str], Any],
                    metadata_loader: Callable[[Identifier], TableMetadata],
                    ) -> FileStoreTable:
         metadata = metadata_loader(identifier)
@@ -204,9 +226,12 @@ class RESTCatalog(Catalog):
             supports_version_management=True  # REST catalogs support version management
         )
         path_parsed = urlparse(schema.options.get(CoreOptions.PATH))
-        path = Path(path_parsed.path) if path_parsed.scheme is None else Path(schema.options.get(CoreOptions.PATH))
-        table_path = path_parsed.netloc + "/" + path_parsed.path \
-            if path_parsed.scheme == "file" else path_parsed.path[1:]
+        path = path_parsed.path if path_parsed.scheme is None else schema.options.get(CoreOptions.PATH)
+        if path_parsed.scheme == "file":
+            table_path = path_parsed.path
+        else:
+            table_path = path_parsed.netloc + path_parsed.path \
+                if parse(pyarrow.__version__) >= parse("7.0.0") else path_parsed.path[1:]
         table = self.create(data_file_io(path),
                             Path(table_path),
                             schema,

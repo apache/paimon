@@ -81,6 +81,8 @@ public class CoreOptions implements Serializable {
 
     public static final String NESTED_KEY = "nested-key";
 
+    public static final String COUNT_LIMIT = "count-limit";
+
     public static final String DISTINCT = "distinct";
 
     public static final String LIST_AGG_DELIMITER = "list-agg-delimiter";
@@ -1767,12 +1769,13 @@ public class CoreOptions implements Serializable {
                                     + "a forced lookup compaction will be performed to flush L0 files to higher level. "
                                     + "This option is only valid when lookup-compact mode is gentle.");
 
-    public static final ConfigOption<Integer> DELETE_FILE_THREAD_NUM =
-            key("delete-file.thread-num")
+    public static final ConfigOption<Integer> FILE_OPERATION_THREAD_NUM =
+            key("file-operation.thread-num")
                     .intType()
                     .noDefaultValue()
+                    .withFallbackKeys("delete-file.thread-num")
                     .withDescription(
-                            "The maximum number of concurrent deleting files. "
+                            "The maximum number of concurrent file operations. "
                                     + "By default is the number of processors available to the Java virtual machine.");
 
     public static final ConfigOption<String> SCAN_FALLBACK_BRANCH =
@@ -1930,7 +1933,12 @@ public class CoreOptions implements Serializable {
                                     + "in 'clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
                                     + "and 'hilbert' for 5 or more columns.");
 
-    @Immutable
+    public static final ConfigOption<Boolean> CLUSTERING_INCREMENTAL =
+            key("clustering.incremental")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether enable incremental clustering.");
+
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
                     .booleanType()
@@ -1968,6 +1976,24 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(1024)
                     .withDescription("Threshold for merging records to binary buffer in lookup.");
+
+    public static final ConfigOption<FormatTableImplementation> FORMAT_TABLE_IMPLEMENTATION =
+            key("format-table.implementation")
+                    .enumType(FormatTableImplementation.class)
+                    .defaultValue(FormatTableImplementation.ENGINE)
+                    .withDescription("Format table uses paimon or engine.");
+
+    public static final ConfigOption<Boolean> FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH =
+            ConfigOptions.key("format-table.partition-path-only-value")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Format table file path only contain partition value.");
+
+    public static final ConfigOption<String> BLOB_FIELD =
+            key("blob.field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the blob field.");
 
     private final Options options;
 
@@ -2189,6 +2215,13 @@ public class CoreOptions implements Serializable {
         return Arrays.stream(keyString.split(",")).map(String::trim).collect(Collectors.toList());
     }
 
+    public int fieldNestedUpdateAggCountLimit(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + COUNT_LIMIT)
+                        .intType()
+                        .defaultValue(Integer.MAX_VALUE));
+    }
+
     public boolean fieldCollectAggDistinct(String fieldName) {
         return options.get(
                 key(FIELDS_PREFIX + "." + fieldName + "." + DISTINCT)
@@ -2257,8 +2290,8 @@ public class CoreOptions implements Serializable {
         return options.get(SNAPSHOT_CLEAN_EMPTY_DIRECTORIES);
     }
 
-    public int deleteFileThreadNum() {
-        return options.getOptional(DELETE_FILE_THREAD_NUM)
+    public int fileOperationThreadNum() {
+        return options.getOptional(FILE_OPERATION_THREAD_NUM)
                 .orElseGet(() -> Runtime.getRuntime().availableProcessors());
     }
 
@@ -2987,6 +3020,10 @@ public class CoreOptions implements Serializable {
         return clusteringColumns(options.get(CLUSTERING_COLUMNS));
     }
 
+    public boolean clusteringIncrementalEnabled() {
+        return options.get(CLUSTERING_INCREMENTAL);
+    }
+
     public OrderType clusteringStrategy(int columnSize) {
         return clusteringStrategy(options.get(CLUSTERING_STRATEGY), columnSize);
     }
@@ -3018,6 +3055,14 @@ public class CoreOptions implements Serializable {
 
     public int lookupMergeRecordsThreshold() {
         return options.get(LOOKUP_MERGE_RECORDS_THRESHOLD);
+    }
+
+    public boolean formatTableImplementationIsPaimon() {
+        return options.get(FORMAT_TABLE_IMPLEMENTATION) == FormatTableImplementation.PAIMON;
+    }
+
+    public boolean formatTablePartitionOnlyValueInPath() {
+        return options.get(FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -3808,5 +3853,30 @@ public class CoreOptions implements Serializable {
         NONE,
         HASH
         // TODO : Supports range-partition strategy.
+    }
+
+    /** Specifies the implementation of format table. */
+    public enum FormatTableImplementation implements DescribedEnum {
+        PAIMON("paimon", "Paimon format table implementation."),
+        ENGINE("engine", "Engine format table implementation.");
+
+        private final String value;
+
+        private final String description;
+
+        FormatTableImplementation(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 }

@@ -44,8 +44,13 @@ public class BlobData implements Blob, Serializable {
     }
 
     @Override
-    public byte[] toBytes() {
+    public byte[] toData() {
         return data;
+    }
+
+    @Override
+    public BlobDescriptor toDescriptor() {
+        throw new RuntimeException("Blob data can not convert to descriptor.");
     }
 
     @Override

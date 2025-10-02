@@ -20,25 +20,24 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 
 /** Loader to create {@link FileSystemCatalog}. */
 public class FileSystemCatalogLoader implements CatalogLoader {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private final FileIO fileIO;
     private final Path warehouse;
-    private final Options options;
+    private final CatalogContext context;
 
-    public FileSystemCatalogLoader(FileIO fileIO, Path warehouse, Options options) {
+    public FileSystemCatalogLoader(FileIO fileIO, Path warehouse, CatalogContext context) {
         this.fileIO = fileIO;
         this.warehouse = warehouse;
-        this.options = options;
+        this.context = context;
     }
 
     @Override
     public Catalog load() {
-        return new FileSystemCatalog(fileIO, warehouse, options);
+        return new FileSystemCatalog(fileIO, warehouse, context);
     }
 }

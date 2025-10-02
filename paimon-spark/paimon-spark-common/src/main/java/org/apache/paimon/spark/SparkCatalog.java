@@ -60,6 +60,7 @@ import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
+import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
@@ -67,6 +68,7 @@ import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.execution.PaimonFormatTable;
 import org.apache.spark.sql.execution.PartitionedCSVTable;
 import org.apache.spark.sql.execution.PartitionedJsonTable;
 import org.apache.spark.sql.execution.PartitionedOrcTable;
@@ -524,34 +526,33 @@ public class SparkCatalog extends SparkBaseCatalog
 
     @Override
     public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
-        if (isFunctionNamespace(namespace)) {
-            List<Identifier> functionIdentifiers = new ArrayList<>();
-            PaimonFunctions.names()
-                    .forEach(name -> functionIdentifiers.add(Identifier.of(namespace, name)));
-            if (namespace.length > 0) {
-                String databaseName = getDatabaseNameFromNamespace(namespace);
-                try {
-                    catalog.listFunctions(databaseName)
-                            .forEach(
-                                    name ->
-                                            functionIdentifiers.add(
-                                                    Identifier.of(namespace, name)));
-                } catch (Catalog.DatabaseNotExistException e) {
-                    throw new NoSuchNamespaceException(namespace);
-                }
+        if (isSystemFunctionNamespace(namespace)) {
+            List<Identifier> result = new ArrayList<>();
+            PaimonFunctions.names().forEach(name -> result.add(Identifier.of(namespace, name)));
+            return result.toArray(new Identifier[0]);
+        } else if (isDatabaseFunctionNamespace(namespace)) {
+            List<Identifier> result = new ArrayList<>();
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            try {
+                catalog.listFunctions(databaseName)
+                        .forEach(name -> result.add(Identifier.of(namespace, name)));
+            } catch (Catalog.DatabaseNotExistException e) {
+                throw new NoSuchNamespaceException(namespace);
             }
-            return functionIdentifiers.toArray(new Identifier[0]);
+            return result.toArray(new Identifier[0]);
         }
         throw new NoSuchNamespaceException(namespace);
     }
 
     @Override
     public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
-        if (isFunctionNamespace(ident.namespace())) {
+        String[] namespace = ident.namespace();
+        if (isSystemFunctionNamespace(namespace)) {
             UnboundFunction func = PaimonFunctions.load(ident.name());
             if (func != null) {
                 return func;
             }
+        } else if (isDatabaseFunctionNamespace(namespace)) {
             try {
                 Function paimonFunction = catalog.getFunction(toIdentifier(ident));
                 FunctionDefinition functionDefinition =
@@ -582,11 +583,14 @@ public class SparkCatalog extends SparkBaseCatalog
         throw new NoSuchFunctionException(ident);
     }
 
-    private boolean isFunctionNamespace(String[] namespace) {
+    private boolean isSystemFunctionNamespace(String[] namespace) {
         // Allow for empty namespace, as Spark's bucket join will use `bucket` function with empty
         // namespace to generate transforms for partitioning.
-        // Otherwise, check if it is paimon namespace.
-        return namespace.length == 0 || (namespace.length == 1 && namespaceExists(namespace));
+        return namespace.length == 0 || isSystemNamespace(namespace);
+    }
+
+    private boolean isDatabaseFunctionNamespace(String[] namespace) {
+        return namespace.length == 1 && namespaceExists(namespace);
     }
 
     private PaimonV1FunctionRegistry v1FunctionRegistry() {
@@ -640,7 +644,7 @@ public class SparkCatalog extends SparkBaseCatalog
         try {
             org.apache.paimon.table.Table paimonTable = catalog.getTable(toIdentifier(ident));
             if (paimonTable instanceof FormatTable) {
-                return convertToFileTable(ident, (FormatTable) paimonTable);
+                return toSparkFormatTable(ident, (FormatTable) paimonTable);
             } else {
                 return new SparkTable(
                         copyWithSQLConf(
@@ -651,7 +655,7 @@ public class SparkCatalog extends SparkBaseCatalog
         }
     }
 
-    private static FileTable convertToFileTable(Identifier ident, FormatTable formatTable) {
+    private static Table toSparkFormatTable(Identifier ident, FormatTable formatTable) {
         SparkSession spark = PaimonSparkSession$.MODULE$.active();
         StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
         StructType partitionSchema =
@@ -659,7 +663,31 @@ public class SparkCatalog extends SparkBaseCatalog
                         TypeUtils.project(formatTable.rowType(), formatTable.partitionKeys()));
         List<String> pathList = new ArrayList<>();
         pathList.add(formatTable.location());
+        Map<String, String> optionsMap = formatTable.options();
+        CoreOptions coreOptions = new CoreOptions(optionsMap);
+        if (coreOptions.formatTableImplementationIsPaimon()) {
+            return new PaimonFormatTable(
+                    spark,
+                    new CaseInsensitiveStringMap(optionsMap),
+                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
+                    schema,
+                    partitionSchema,
+                    formatTable,
+                    ident.name());
+        }
         Options options = Options.fromMap(formatTable.options());
+        return convertToFileTable(
+                formatTable, ident, pathList, options, spark, schema, partitionSchema);
+    }
+
+    private static FileTable convertToFileTable(
+            FormatTable formatTable,
+            Identifier ident,
+            List<String> pathList,
+            Options options,
+            SparkSession spark,
+            StructType schema,
+            StructType partitionSchema) {
         CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(options.toMap());
         if (formatTable.format() == FormatTable.Format.CSV) {
             options.set("sep", options.get(CsvOptions.FIELD_DELIMITER));

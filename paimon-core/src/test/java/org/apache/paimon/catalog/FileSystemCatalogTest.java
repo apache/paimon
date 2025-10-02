@@ -36,8 +36,9 @@ public class FileSystemCatalogTest extends CatalogTestBase {
     @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
-        Options catalogOptions = new Options();
-        catalog = new FileSystemCatalog(fileIO, new Path(warehouse), catalogOptions);
+        catalog =
+                new FileSystemCatalog(
+                        fileIO, new Path(warehouse), CatalogContext.create(new Options()));
     }
 
     @Test

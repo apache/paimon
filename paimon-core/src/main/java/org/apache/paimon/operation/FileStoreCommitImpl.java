@@ -88,6 +88,7 @@ import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestEntry.recordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
@@ -1210,15 +1211,29 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
         // assign row id for new files
         long start = firstRowIdStart;
+        long blobStart = firstRowIdStart;
         for (ManifestEntry entry : deltaFiles) {
             checkArgument(
                     entry.file().fileSource().isPresent(),
                     "This is a bug, file source field for row-tracking table must present.");
             if (entry.file().fileSource().get().equals(FileSource.APPEND)
                     && entry.file().firstRowId() == null) {
-                long rowCount = entry.file().rowCount();
-                rowIdAssigned.add(entry.assignFirstRowId(start));
-                start += rowCount;
+                if (isBlobFile(entry.file().fileName())) {
+                    if (blobStart >= start) {
+                        throw new IllegalStateException(
+                                String.format(
+                                        "This is a bug, blobStart %d should be less than start %d when assigning a blob entry file.",
+                                        blobStart, start));
+                    }
+                    long rowCount = entry.file().rowCount();
+                    rowIdAssigned.add(entry.assignFirstRowId(blobStart));
+                    blobStart += rowCount;
+                } else {
+                    long rowCount = entry.file().rowCount();
+                    rowIdAssigned.add(entry.assignFirstRowId(start));
+                    blobStart = start;
+                    start += rowCount;
+                }
             } else {
                 // for compact file, do not assign first row id.
                 rowIdAssigned.add(entry);

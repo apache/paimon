@@ -44,6 +44,7 @@ public class CsvFileReader extends BaseTextFileReader {
 
     private static final Base64.Decoder BASE64_DECODER = Base64.getDecoder();
     private static final CsvMapper CSV_MAPPER = new CsvMapper();
+    private static final InternalRow DROP_ROW = new GenericRow(1);
 
     // Performance optimization: Cache frequently used cast executors
     private static final Map<String, CastExecutor<?, ?>> CAST_EXECUTOR_CACHE =
@@ -98,8 +99,25 @@ public class CsvFileReader extends BaseTextFileReader {
     }
 
     private class CsvRecordIterator extends BaseTextRecordIterator {
-        // Inherits all functionality from BaseTextRecordIterator
-        // No additional CSV-specific iterator logic needed
+        @Override
+        public InternalRow next() throws IOException {
+            while (true) {
+                if (readerClosed) {
+                    return null;
+                }
+                String nextLine = bufferedReader.readLine();
+                if (nextLine == null) {
+                    end = true;
+                    return null;
+                }
+
+                currentPosition++;
+                InternalRow row = parseLine(nextLine);
+                if (row != DROP_ROW) {
+                    return row;
+                }
+            }
+        }
     }
 
     protected static String[] parseCsvLineToArray(String line, CsvSchema schema)
@@ -148,8 +166,21 @@ public class CsvFileReader extends BaseTextFileReader {
                 }
 
                 // Optimized field parsing with cached cast executors
-                projectedValues[i] =
-                        parseFieldOptimized(field.trim(), dataSchemaRowType.getTypeAt(readIndex));
+                try {
+                    projectedValues[i] =
+                            parseFieldOptimized(
+                                    field.trim(), dataSchemaRowType.getTypeAt(readIndex));
+                } catch (Exception e) {
+                    switch (formatOptions.mode()) {
+                        case PERMISSIVE:
+                            projectedValues[i] = null;
+                            break;
+                        case DROPMALFORMED:
+                            return DROP_ROW;
+                        case FAILFAST:
+                            throw e;
+                    }
+                }
             } else {
                 projectedValues[i] = null; // Field not present in the CSV line
             }

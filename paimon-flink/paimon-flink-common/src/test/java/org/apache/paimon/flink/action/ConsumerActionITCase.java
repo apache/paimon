@@ -28,6 +28,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.runtime.client.JobExecutionException;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Timeout;
@@ -50,7 +51,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @Timeout(60)
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testResetConsumer(String invoker) throws Exception {
         init(warehouse);
 
@@ -108,10 +109,13 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         "--consumer_id",
                         "myid",
                         "--next_snapshot",
-                        "1");
+                        "1",
+                        "--force_start_flink_job",
+                        Boolean.toString(invoker.equals("action_job")));
         // reset consumer
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(ResetConsumerAction.class, args).run();
                 break;
             case "procedure_indexed":
@@ -136,6 +140,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         // delete consumer
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
                 break;
             case "procedure_indexed":
@@ -168,11 +173,18 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         "--consumer_id",
                         "myid",
                         "--next_snapshot",
-                        "10");
+                        "10",
+                        "--force_start_flink_job",
+                        Boolean.toString(invoker.equals("action_job")));
         switch (invoker) {
             case "action":
                 assertThrows(
                         RuntimeException.class,
+                        () -> createAction(ResetConsumerAction.class, args1).run());
+                break;
+            case "action_job":
+                assertThrows(
+                        JobExecutionException.class,
                         () -> createAction(ResetConsumerAction.class, args1).run());
                 break;
             case "procedure_indexed":
@@ -200,7 +212,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @Timeout(60)
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testResetBranchConsumer(String invoker) throws Exception {
         init(warehouse);
 
@@ -263,11 +275,14 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         branchTableName,
                         "--consumer_id",
                         "myid",
+                        "--force_start_flink_job",
+                        Boolean.toString(invoker.equals("action_job")),
                         "--next_snapshot",
                         "3");
         // reset consumer
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(ResetConsumerAction.class, args).run();
                 break;
             case "procedure_indexed":
@@ -292,7 +307,8 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         // delete consumer
         switch (invoker) {
             case "action":
-                createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
+            case "action_job":
+                createAction(ResetConsumerAction.class, args.subList(0, 11)).run();
                 break;
             case "procedure_indexed":
                 executeSQL(
@@ -315,7 +331,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @Timeout(120)
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testClearConsumers(String invoker) throws Exception {
         init(warehouse);
 
@@ -408,11 +424,14 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         "--including_consumers",
                         "",
                         "--excluding_consumers",
-                        "myid1.+");
+                        "myid1.+",
+                        "--force_start_flink_job",
+                        Boolean.toString(invoker.equals("action_job")));
 
         // clear all consumers except the excluding_consumers in the table
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(ClearConsumerAction.class, args).run();
                 break;
             case "procedure_indexed":
@@ -447,12 +466,15 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         database,
                         "--table",
                         tableName,
+                        "--force_start_flink_job",
+                        Boolean.toString(invoker.equals("action_job")),
                         "--including_consumers",
                         "myid1_1");
 
         // clear consumers in the table that meet the including_consumers expression
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(ClearConsumerAction.class, args).run();
                 break;
             case "procedure_indexed":
@@ -481,7 +503,8 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         // clear all consumers in the table
         switch (invoker) {
             case "action":
-                createAction(ClearConsumerAction.class, args.subList(0, 7)).run();
+            case "action_job":
+                createAction(ClearConsumerAction.class, args.subList(0, 9)).run();
                 break;
             case "procedure_indexed":
                 executeSQL(String.format("CALL sys.clear_consumers('%s.%s')", database, tableName));

@@ -305,7 +305,8 @@ public abstract class CatalogTestBase {
         // List tables paged returns an empty list when there are no tables in the database
         String databaseName = "tables_paged_db";
         catalog.createDatabase(databaseName, false);
-        PagedList<String> pagedTables = catalog.listTablesPaged(databaseName, null, null, null);
+        PagedList<String> pagedTables =
+                catalog.listTablesPaged(databaseName, null, null, null, null);
         assertThat(pagedTables.getElements()).isEmpty();
         assertNull(pagedTables.getNextPageToken());
 
@@ -318,22 +319,22 @@ public abstract class CatalogTestBase {
         // List tables paged returns a list with the names of all tables in the database in all
         // catalogs except RestCatalog
         // even if the maxResults or pageToken is not null
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         int maxResults = 2;
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         String pageToken = "table1";
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         maxResults = 8;
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null, null);
         assertPagedTables(pagedTables, tableNames);
 
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         // List tables throws DatabaseNotExistException when the database does not exist
@@ -342,7 +343,7 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.listTablesPaged(
-                                        "non_existing_db", finalMaxResults, pageToken, null));
+                                        "non_existing_db", finalMaxResults, pageToken, null, null));
     }
 
     @Test
@@ -351,7 +352,7 @@ public abstract class CatalogTestBase {
         String databaseName = "table_details_paged_db";
         catalog.createDatabase(databaseName, false);
         PagedList<Table> pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, null, null, null);
+                catalog.listTableDetailsPaged(databaseName, null, null, null, null);
         assertThat(pagedTableDetails.getElements()).isEmpty();
         assertNull(pagedTableDetails.getNextPageToken());
 
@@ -364,28 +365,30 @@ public abstract class CatalogTestBase {
                     Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
         }
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, null);
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         int maxResults = 2;
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null, null);
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, maxResults, null, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         String pageToken = "table1";
         pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null);
+                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         maxResults = 8;
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null, null);
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, maxResults, null, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null);
+                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
@@ -395,7 +398,7 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.listTableDetailsPaged(
-                                        "non_existing_db", finalMaxResults, pageToken, null));
+                                        "non_existing_db", finalMaxResults, pageToken, null, null));
     }
 
     @Test
@@ -581,6 +584,74 @@ public abstract class CatalogTestBase {
                 .isInstanceOf(RuntimeException.class);
     }
 
+    @Test
+    public void testFormatTableOnlyPartitionValueRead() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        Random random = new Random();
+        String dbName = "test_db";
+        catalog.createDatabase(dbName, true);
+        HadoopCompressionType compressionType = HadoopCompressionType.GZIP;
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.column("f2", DataTypes.INT());
+        schemaBuilder.column("dt", DataTypes.INT());
+        schemaBuilder.column("dt2", DataTypes.VARCHAR(64));
+        schemaBuilder.partitionKeys("dt", "dt2");
+        schemaBuilder.option("type", "format-table");
+        schemaBuilder.option("file.compression", compressionType.value());
+        schemaBuilder.option("format-table.partition-path-only-value", "true");
+        String[] formats = {"csv", "parquet", "json"};
+        int dtPartitionValue = 10;
+        String dt2PartitionValue = "2022-01-01";
+        for (String format : formats) {
+            Identifier identifier = Identifier.create(dbName, "partition_table_" + format);
+            schemaBuilder.option("file.format", format);
+            catalog.createTable(identifier, schemaBuilder.build(), true);
+            FormatTable table = (FormatTable) catalog.getTable(identifier);
+            int size = 5;
+            InternalRow[] datas = new InternalRow[size];
+            for (int j = 0; j < size; j++) {
+                datas[j] =
+                        GenericRow.of(
+                                random.nextInt(),
+                                random.nextInt(),
+                                dtPartitionValue,
+                                BinaryString.fromString(dt2PartitionValue));
+            }
+            FormatWriterFactory factory =
+                    (buildFileFormatFactory(format)
+                                    .create(
+                                            new FileFormatFactory.FormatContext(
+                                                    new Options(table.options()), 1024, 1024)))
+                            .createWriterFactory(getFormatTableWriteRowType(table));
+            Path partitionPath =
+                    new Path(
+                            String.format(
+                                    "%s/%s/%s",
+                                    table.location(), dtPartitionValue, dt2PartitionValue));
+            DataFilePathFactory dataFilePathFactory =
+                    new DataFilePathFactory(
+                            partitionPath,
+                            format,
+                            "data",
+                            "change",
+                            true,
+                            compressionType.value(),
+                            null);
+            write(factory, dataFilePathFactory.newPath(), compressionType.value(), datas);
+            List<InternalRow> readAllData = read(table, null, null, null, null);
+            assertThat(readAllData).containsExactlyInAnyOrder(datas);
+            Map<String, String> partitionSpec = new HashMap<>();
+            partitionSpec.put("dt", "" + dtPartitionValue + 1);
+            partitionSpec.put("dt2", dt2PartitionValue + 1);
+            List<InternalRow> readFilterData = read(table, null, null, partitionSpec, null);
+            assertThat(readFilterData).isEmpty();
+            catalog.dropTable(Identifier.create(dbName, format), true);
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testFormatTableRead(boolean partitioned) throws Exception {
@@ -629,8 +700,8 @@ public abstract class CatalogTestBase {
                     (buildFileFormatFactory(format)
                                     .create(
                                             new FileFormatFactory.FormatContext(
-                                                    new Options(), 1024, 1024)))
-                            .createWriterFactory(table.rowType());
+                                                    new Options(table.options()), 1024, 1024)))
+                            .createWriterFactory(getFormatTableWriteRowType(table));
             Map<String, String> partitionSpec = null;
             if (partitioned) {
                 Path partitionPath =
@@ -696,6 +767,14 @@ public abstract class CatalogTestBase {
         }
     }
 
+    protected RowType getFormatTableWriteRowType(Table table) {
+        return table.rowType()
+                .project(
+                        table.rowType().getFieldNames().stream()
+                                .filter(name -> !table.partitionKeys().contains(name))
+                                .collect(Collectors.toList()));
+    }
+
     protected FileFormatFactory buildFileFormatFactory(String format) {
         switch (format) {
             case "csv":
@@ -757,7 +836,10 @@ public abstract class CatalogTestBase {
                 readBuilder.newRead().executeFilter().createReader(scan.plan())) {
             InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
             List<InternalRow> rows = new ArrayList<>();
-            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+            reader.forEachRemaining(
+                    row -> {
+                        rows.add(serializer.copy(row));
+                    });
             return rows;
         }
     }

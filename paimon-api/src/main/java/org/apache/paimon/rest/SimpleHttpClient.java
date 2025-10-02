@@ -24,9 +24,7 @@ import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.core5.http.Header;
-import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicHeader;
 
@@ -80,19 +78,24 @@ public class SimpleHttpClient implements Closeable {
     }
 
     private String exec(HttpUriRequestBase request) {
-        try (CloseableHttpResponse response = client.execute(request)) {
-            String responseBodyStr = RESTUtil.extractResponseBodyAsString(response);
+        try {
+            return client.execute(
+                    request,
+                    response -> {
+                        String responseBodyStr = RESTUtil.extractResponseBodyAsString(response);
 
-            if (StringUtils.isNullOrWhitespaceOnly(responseBodyStr)
-                    || !RESTUtil.isSuccessful(response)) {
-                throw new RuntimeException(
-                        RESTUtil.isSuccessful(response)
-                                ? "ResponseBody is null or empty."
-                                : String.format(
-                                        "Response is not successful, response is %s", response));
-            }
-            return responseBodyStr;
-        } catch (IOException | ParseException e) {
+                        if (StringUtils.isNullOrWhitespaceOnly(responseBodyStr)
+                                || !RESTUtil.isSuccessful(response)) {
+                            throw new RuntimeException(
+                                    RESTUtil.isSuccessful(response)
+                                            ? "ResponseBody is null or empty."
+                                            : String.format(
+                                                    "Response is not successful, response is %s",
+                                                    response));
+                        }
+                        return responseBodyStr;
+                    });
+        } catch (IOException e) {
             throw new RuntimeException(
                     "Failed to convert HTTP response body to string, error : " + e.getMessage());
         }

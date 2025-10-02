@@ -36,6 +36,7 @@ import java.util.Map;
 
 import static org.apache.paimon.codegen.CodeGenUtils.newProjection;
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
+import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -51,7 +52,10 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
     @Nullable private final Projection keyProjection;
     @Nullable private final RecordEqualiser elementEqualiser;
 
-    public FieldNestedUpdateAgg(String name, ArrayType dataType, List<String> nestedKey) {
+    private final int countLimit;
+
+    public FieldNestedUpdateAgg(
+            String name, ArrayType dataType, List<String> nestedKey, int countLimit) {
         super(name, dataType);
         RowType nestedType = (RowType) dataType.getElementType();
         this.nestedFields = nestedType.getFieldCount();
@@ -62,6 +66,9 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
             this.keyProjection = newProjection(nestedType, nestedKey);
             this.elementEqualiser = null;
         }
+
+        // If deduplicate key is set, we don't guarantee that the result is exactly right
+        this.countLimit = countLimit;
     }
 
     @Override
@@ -73,9 +80,15 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
         InternalArray acc = (InternalArray) accumulator;
         InternalArray input = (InternalArray) inputField;
 
+        if (acc.size() >= countLimit) {
+            return accumulator;
+        }
+
+        int remainCount = countLimit - acc.size();
+
         List<InternalRow> rows = new ArrayList<>(acc.size() + input.size());
         addNonNullRows(acc, rows);
-        addNonNullRows(input, rows);
+        addNonNullRows(input, rows, remainCount);
 
         if (keyProjection != null) {
             Map<BinaryRow, InternalRow> map = new HashMap<>();
@@ -139,6 +152,20 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
                 continue;
             }
             rows.add(array.getRow(i, nestedFields));
+        }
+    }
+
+    private void addNonNullRows(InternalArray array, List<InternalRow> rows, int remainSize) {
+        int count = 0;
+        for (int i = 0; i < array.size(); i++) {
+            if (count >= remainSize) {
+                return;
+            }
+            if (array.isNullAt(i)) {
+                continue;
+            }
+            rows.add(array.getRow(i, nestedFields));
+            count++;
         }
     }
 }

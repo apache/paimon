@@ -238,7 +238,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             case HASH_FIXED:
                 return new FixedBucketRowKeyExtractor(schema());
             case HASH_DYNAMIC:
-            case CROSS_PARTITION:
+            case KEY_DYNAMIC:
                 return new DynamicBucketRowKeyExtractor(schema());
             case BUCKET_UNAWARE:
                 return new AppendTableRowKeyExtractor(schema());
@@ -455,7 +455,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 new ConsumerManager(fileIO, path, snapshotManager().branch()),
                 options.snapshotExpireExecutionMode(),
                 name(),
-                options.forceCreatingSnapshot());
+                options.forceCreatingSnapshot(),
+                options.fileOperationThreadNum());
     }
 
     @Override

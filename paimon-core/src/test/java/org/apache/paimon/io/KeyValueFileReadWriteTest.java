@@ -101,8 +101,9 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        RollingFileWriterImpl<KeyValue, DataFileMeta> writer =
+                (RollingFileWriterImpl<KeyValue, DataFileMeta>)
+                        writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
         List<DataFileMeta> actualMetas = writer.result();

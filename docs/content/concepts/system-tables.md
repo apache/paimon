@@ -414,13 +414,57 @@ SELECT * FROM my_table$table_indexes;
 
 Global system tables contain the statistical information of all the tables exists in paimon. For convenient of searching, we create a reference system database called `sys`.
 We can display all the global system tables by sql in flink:
+
 ```sql
 USE sys;
 SHOW TABLES;
 ```
 
+### All Tables Table
+
+Shows all the tables in all database.
+
+```sql
+SELECT * FROM sys.tables;
+
+/*
++---------------+------------+------------+-------------+-------------+-------------+-------------+-------------+-------------+-------------+-------------+------------------+-------------+-------------------------+
+| database_name | table_name | table_type | partitioned | primary_key |    owner    |  created_at |  created_by |  updated_at |  updated_by | record_count|file_size_in_bytes| file_count  | last_file_creation_time |
++---------------+------------+------------+-------------+-------------+-------------+-------------+-------------+-------------+-------------+-------------+------------------+-------------+-------------------------+
+|         my_db | Orders_orc |    table   |     false   |    false    |    *****    |    *****    |    *****    |    *****    |    *****    |    *****    |    *****         |    *****    |    *****                |
+|         my_db |  Orders2   |    table   |     true    |     true    |    *****    |     ****    |     ****    |     ****    |     ****    |     ****    |     ****         |     ****    |     ****                |
+|         my_db2|  OrdersSum |    table   |     false   |     false   |     *****   |     *****   |     *****   |     *****   |     *****   |     *****   |     *****        |     *****   |     *****               |
++---------------+------------+------------+-------------+-------------+-------------+-------------+-------------+-------------+-------------+-------------+------------------+-------------+-------------------------+
+3 rows in set
+*/
+```
+
+This table also displays various information from REST Server, such as owner, created_at, updated_at.
+
+### All Partitions Table
+
+Shows all the partitions in all database.
+
+```sql
+SELECT * FROM sys.partitions;
+
+/*
++---------------+------------+----------------+-------------+------------------+-------------+-------------------------+-------------+
+| database_name | table_name | partition_name | record_count|file_size_in_bytes| file_count  | last_file_creation_time |    done     |
++---------------+------------+----------------+-------------+------------------+-------------+-------------------------+-------------+
+|         my_db | Orders_orc |      dt=1      |    *****    |    *****         |    *****    |    *****                |    *****    |
+|         my_db |  Orders2   |      dt=1      |     ****    |     ****         |     ****    |     ****                |    ****     |
+|         my_db2|  OrdersSum |      dt=1      |     *****   |     *****        |     *****   |     *****               |   *****     |
++---------------+------------+----------------+-------------+------------------+-------------+-------------------------+-------------+
+3 rows in set
+*/
+```
+
+This table also displays various statistics information of partition.
+
 ### ALL Options Table
-This table is similar to [Options Table]({{< ref "#options-table" >}}), but it shows all the table options is all database.
+
+This table is similar to [Options Table]({{< ref "#options-table" >}}), but it shows all the table options in all database.
 
 ```sql
 SELECT * FROM sys.all_table_options;
@@ -439,6 +483,7 @@ SELECT * FROM sys.all_table_options;
 ```
 
 ### Catalog Options Table
+
 You can query the catalog's option information through catalog options table. The options not shown will be the default value. You can take reference to [Configuration]({{< ref "maintenance/configurations#coreoptions" >}}).
 
 ```sql

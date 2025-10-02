@@ -339,10 +339,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 new IcebergSnapshot(
                         snapshotId,
                         snapshotId,
+                        null,
                         System.currentTimeMillis(),
                         IcebergSnapshotSummary.APPEND,
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
-                        schemaId);
+                        schemaId,
+                        null,
+                        null);
 
         // Tags can only be included in Iceberg if they point to an Iceberg snapshot that
         // exists. Otherwise an Iceberg client fails to parse the metadata and all reads fail.
@@ -599,10 +602,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 new IcebergSnapshot(
                         snapshotId,
                         snapshotId,
+                        snapshotId - 1,
                         System.currentTimeMillis(),
                         snapshotSummary,
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
-                        schemaId));
+                        schemaId,
+                        null,
+                        null));
 
         // all snapshots in this list, except the last one, need to expire
         List<IcebergSnapshot> toExpireExceptLast = new ArrayList<>();

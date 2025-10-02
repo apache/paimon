@@ -44,11 +44,15 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
+import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
+import static org.apache.paimon.predicate.PredicateBuilder.fieldIdxToPartitionIdx;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAndByPartition;
 
 /** {@link ReadBuilder} for {@link FormatTable}. */
@@ -133,11 +137,8 @@ public class FormatReadBuilder implements ReadBuilder {
     public TableScan newScan() {
         PartitionPredicate partitionFilter = this.partitionFilter;
         if (partitionFilter == null && this.filter != null && !table.partitionKeys().isEmpty()) {
-            int[] fieldIdxToPartitionIdx =
-                    PredicateBuilder.fieldIdxToPartitionIdx(table.rowType(), table.partitionKeys());
-            Pair<List<Predicate>, List<Predicate>> partitionAndNonPartitionFilter =
-                    splitAndByPartition(filter, fieldIdxToPartitionIdx);
-            List<Predicate> partitionFilters = partitionAndNonPartitionFilter.getLeft();
+            int[] partitionIdx = fieldIdxToPartitionIdx(table.rowType(), table.partitionKeys());
+            List<Predicate> partitionFilters = splitAndByPartition(filter, partitionIdx).getLeft();
             if (!partitionFilters.isEmpty()) {
                 RowType partitionType = table.rowType().project(table.partitionKeys());
                 partitionFilter =
@@ -157,11 +158,16 @@ public class FormatReadBuilder implements ReadBuilder {
         Path filePath = dataSplit.dataPath();
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
+        // Skip pushing down partition filters to reader.
+        List<Predicate> readFilters =
+                excludePredicateWithFields(
+                        PredicateBuilder.splitAnd(filter), new HashSet<>(table.partitionKeys()));
+        RowType dataRowType = getRowTypeWithoutPartition(table.rowType(), table.partitionKeys());
+        RowType readRowType = getRowTypeWithoutPartition(readType(), table.partitionKeys());
         FormatReaderFactory readerFactory =
                 FileFormatDiscover.of(options)
                         .discover(options.formatType())
-                        .createReaderFactory(
-                                table.rowType(), readType(), PredicateBuilder.splitAnd(filter));
+                        .createReaderFactory(dataRowType, readRowType, readFilters);
 
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
@@ -178,6 +184,13 @@ public class FormatReadBuilder implements ReadBuilder {
                 null,
                 0,
                 Collections.emptyMap());
+    }
+
+    private static RowType getRowTypeWithoutPartition(RowType rowType, List<String> partitionKeys) {
+        return rowType.project(
+                rowType.getFieldNames().stream()
+                        .filter(name -> !partitionKeys.contains(name))
+                        .collect(Collectors.toList()));
     }
 
     // ===================== Unsupported ===============================

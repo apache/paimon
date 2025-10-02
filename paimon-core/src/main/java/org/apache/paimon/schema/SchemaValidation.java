@@ -30,6 +30,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
@@ -78,6 +79,7 @@ import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQ
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
+import static org.apache.paimon.types.DataTypeRoot.BLOB;
 import static org.apache.paimon.types.DataTypeRoot.MAP;
 import static org.apache.paimon.types.DataTypeRoot.MULTISET;
 import static org.apache.paimon.types.DataTypeRoot.ROW;
@@ -159,7 +161,7 @@ public class SchemaValidation {
 
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
-        fileFormat.validateDataFields(new RowType(schema.fields()));
+        fileFormat.validateDataFields(BlobType.splitBlob(new RowType(schema.fields())).getLeft());
 
         // Check column names in schema
         schema.fieldNames()
@@ -239,6 +241,8 @@ public class SchemaValidation {
         validateMergeFunctionFactory(schema);
 
         validateRowTracking(schema, options);
+
+        validateIncrementalClustering(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -567,14 +571,6 @@ public class SchemaValidation {
         } else if (bucket < 1 && !isPostponeBucketTable(schema, bucket)) {
             throw new RuntimeException("The number of buckets needs to be greater than 0.");
         } else {
-            if (schema.crossPartitionUpdate()) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
-                                        + "(Primary key constraint %s not include all partition fields %s).",
-                                schema.primaryKeys(), schema.partitionKeys()));
-            }
-
             if (schema.primaryKeys().isEmpty() && schema.bucketKeys().isEmpty()) {
                 throw new RuntimeException(
                         "You should define a 'bucket-key' for bucketed append mode.");
@@ -654,6 +650,28 @@ public class SchemaValidation {
             checkArgument(
                     !options.deletionVectorsEnabled(),
                     "Data evolution config must disabled with deletion-vectors.enabled");
+        }
+
+        if (schema.fields().stream().map(DataField::type).anyMatch(t -> t.is(BLOB))) {
+            checkArgument(
+                    options.dataEvolutionEnabled(),
+                    "Data evolution config must enabled for table with BLOB type column.");
+            checkArgument(
+                    BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldCount() == 1,
+                    "Table with BLOB type column only support one BLOB column.");
+        }
+    }
+
+    private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {
+        if (options.clusteringIncrementalEnabled()) {
+            checkArgument(
+                    options.bucket() == -1,
+                    "Cannot define %s for incremental clustering  table, it only support bucket = -1",
+                    CoreOptions.BUCKET.key());
+            checkArgument(
+                    schema.primaryKeys().isEmpty(),
+                    "Cannot define %s for incremental clustering table.",
+                    PRIMARY_KEY.key());
         }
     }
 }

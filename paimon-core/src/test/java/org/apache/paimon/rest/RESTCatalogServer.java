@@ -143,6 +143,7 @@ import static org.apache.paimon.rest.RESTApi.MAX_RESULTS;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTApi.PARTITION_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.TABLE_NAME_PATTERN;
+import static org.apache.paimon.rest.RESTApi.TABLE_TYPE;
 import static org.apache.paimon.rest.RESTApi.VIEW_NAME_PATTERN;
 import static org.apache.paimon.rest.ResourcePaths.FUNCTIONS;
 import static org.apache.paimon.rest.ResourcePaths.FUNCTION_DETAILS;
@@ -160,6 +161,7 @@ public class RESTCatalogServer {
 
     private final String databaseUri;
 
+    private final CatalogContext catalogContext;
     private final FileSystemCatalog catalog;
     private final MockWebServer server;
 
@@ -189,7 +191,7 @@ public class RESTCatalogServer {
         Options conf = new Options();
         this.configResponse.getDefaults().forEach(conf::setString);
         conf.setString(WAREHOUSE.key(), dataPath);
-        CatalogContext context = CatalogContext.create(conf);
+        this.catalogContext = CatalogContext.create(conf);
         Path warehousePath = new Path(dataPath);
         FileIO fileIO;
         try {
@@ -198,7 +200,7 @@ public class RESTCatalogServer {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        this.catalog = new FileSystemCatalog(fileIO, warehousePath, context.options());
+        this.catalog = new FileSystemCatalog(fileIO, warehousePath, catalogContext);
         Dispatcher dispatcher = initDispatcher(authProvider);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
@@ -1296,12 +1298,30 @@ public class RESTCatalogServer {
 
     private List<String> listTables(String databaseName, Map<String, String> parameters) {
         String tableNamePattern = parameters.get(TABLE_NAME_PATTERN);
+        String tableType = parameters.get(TABLE_TYPE);
         List<String> tables = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
             if (databaseName.equals(identifier.getDatabaseName())
                     && (Objects.isNull(tableNamePattern)
                             || matchNamePattern(identifier.getTableName(), tableNamePattern))) {
+
+                // Check table type filter if specified
+                if (StringUtils.isNotEmpty(tableType)) {
+                    String actualTableType = entry.getValue().schema().options().get(TYPE.key());
+                    if (StringUtils.equals(tableType, "table")) {
+                        // When filtering by "table" type, return tables with null or "table" type
+                        if (actualTableType != null && !"table".equals(actualTableType)) {
+                            continue;
+                        }
+                    } else {
+                        // For other table types, return exact matches
+                        if (!StringUtils.equals(tableType, actualTableType)) {
+                            continue;
+                        }
+                    }
+                }
+
                 tables.add(identifier.getTableName());
             }
         }
@@ -1361,12 +1381,30 @@ public class RESTCatalogServer {
     private List<GetTableResponse> listTableDetails(
             String databaseName, Map<String, String> parameters) {
         String tableNamePattern = parameters.get(TABLE_NAME_PATTERN);
+        String tableType = parameters.get(TABLE_TYPE);
         List<GetTableResponse> tableDetails = new ArrayList<>();
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             Identifier identifier = Identifier.fromString(entry.getKey());
             if (databaseName.equals(identifier.getDatabaseName())
                     && (Objects.isNull(tableNamePattern)
                             || matchNamePattern(identifier.getTableName(), tableNamePattern))) {
+
+                // Check table type filter if specified
+                if (StringUtils.isNotEmpty(tableType)) {
+                    String actualTableType = entry.getValue().schema().options().get(TYPE.key());
+                    if (StringUtils.equals(tableType, "table")) {
+                        // When filtering by "table" type, return tables with null or "table" type
+                        if (actualTableType != null && !"table".equals(actualTableType)) {
+                            continue;
+                        }
+                    } else {
+                        // For other table types, return exact matches
+                        if (!StringUtils.equals(tableType, actualTableType)) {
+                            continue;
+                        }
+                    }
+                }
+
                 GetTableResponse getTableResponse =
                         new GetTableResponse(
                                 entry.getValue().uuid(),
@@ -2073,9 +2111,9 @@ public class RESTCatalogServer {
                                 return new TableSnapshot(
                                         snapshot,
                                         recordCount,
+                                        fileSizeInBytes,
                                         fileCount,
-                                        lastFileCreationTime,
-                                        fileSizeInBytes);
+                                        lastFileCreationTime);
                             });
             tableWithSnapshotId2SnapshotStore.put(
                     geTableFullNameWithSnapshotId(identifier, snapshot.id()), tableSnapshot);
@@ -2233,6 +2271,7 @@ public class RESTCatalogServer {
                             catalog.catalogLoader(),
                             catalog.lockFactory().orElse(null),
                             catalog.lockContext().orElse(null),
+                            catalogContext,
                             false);
             Path path = new Path(schema.options().get(PATH.key()));
             FileIO dataFileIO = catalog.fileIO();

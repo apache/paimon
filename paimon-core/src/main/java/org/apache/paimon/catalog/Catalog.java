@@ -186,7 +186,8 @@ public interface Catalog extends AutoCloseable {
             String databaseName,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String tableNamePattern)
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException;
 
     /**
@@ -203,6 +204,8 @@ public interface Catalog extends AutoCloseable {
      *     from a specific point.
      * @param tableNamePattern A sql LIKE pattern (%) for table names. All table details will be
      *     returned if not set or empty. Currently, only prefix matching is supported.
+     * @param tableType Optional parameter to filter tables by table type. All table types will be
+     *     returned if not set or empty.
      * @return a list of the table details with provided page size in this database and next page
      *     token, or a list of the details of all tables in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
@@ -213,7 +216,8 @@ public interface Catalog extends AutoCloseable {
             String databaseName,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String tableNamePattern)
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException;
 
     /**
@@ -576,12 +580,12 @@ public interface Catalog extends AutoCloseable {
     /**
      * Whether this catalog supports list objects paged. If not, corresponding methods will fall
      * back to listing all objects. For example, {@link #listTablesPaged(String, Integer, String,
-     * String)} would fall back to {@link #listTables(String)}.
+     * String, String)} would fall back to {@link #listTables(String)}.
      *
      * <ul>
      *   <li>{@link #listDatabasesPaged(Integer, String, String)}.
-     *   <li>{@link #listTablesPaged(String, Integer, String, String)}.
-     *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listTablesPaged(String, Integer, String, String, String)}.
+     *   <li>{@link #listTableDetailsPaged(String, Integer, String, String, String)}.
      *   <li>{@link #listViewsPaged(String, Integer, String, String)}.
      *   <li>{@link #listViewDetailsPaged(String, Integer, String, String)}.
      *   <li>{@link #listPartitionsPaged(Identifier, Integer, String, String)}.
@@ -595,14 +599,18 @@ public interface Catalog extends AutoCloseable {
      *
      * <ul>
      *   <li>{@link #listDatabasesPaged(Integer, String, String)}.
-     *   <li>{@link #listTablesPaged(String, Integer, String, String)}.
-     *   <li>{@link #listTableDetailsPaged(String, Integer, String, String)}.
+     *   <li>{@link #listTablesPaged(String, Integer, String, String, String)}.
+     *   <li>{@link #listTableDetailsPaged(String, Integer, String, String, String)}.
      *   <li>{@link #listViewsPaged(String, Integer, String, String)}.
      *   <li>{@link #listViewDetailsPaged(String, Integer, String, String)}.
      *   <li>{@link #listPartitionsPaged(Identifier, Integer, String, String)}.
      * </ul>
      */
     default boolean supportsListByPattern() {
+        return false;
+    }
+
+    default boolean supportsListTableByType() {
         return false;
     }
 

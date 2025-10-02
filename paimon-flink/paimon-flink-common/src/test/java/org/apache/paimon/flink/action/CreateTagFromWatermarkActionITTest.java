@@ -22,7 +22,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
@@ -36,8 +37,9 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
         init(warehouse);
     }
 
-    @Test
-    public void testCreateTagsFromSnapshotsWatermark() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testCreateTagsFromSnapshotsWatermark(boolean forceStartFlinkJob) throws Exception {
         bEnv.executeSql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -77,7 +79,9 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
                         "--tag",
                         "tag2",
                         "--watermark",
-                        Long.toString(watermark2 - 1))
+                        Long.toString(watermark2 - 1),
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .run();
         assertThat(table.tagManager().tagExists("tag2")).isTrue();
         assertThat(table.tagManager().getOrThrow("tag2").watermark()).isEqualTo(watermark2);
@@ -95,15 +99,18 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
                         "--tag",
                         "tag3",
                         "--watermark",
-                        Long.toString(watermark2 + 1))
+                        Long.toString(watermark2 + 1),
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .run();
         assertThat(table.tagManager().tagExists("tag3")).isTrue();
         assertThat(table.tagManager().getOrThrow("tag3").watermark()).isEqualTo(watermark3);
         assertThat(table.tagManager().getOrThrow("tag3").timeMillis()).isEqualTo(commitTime3);
     }
 
-    @Test
-    public void testCreateTagsFromTagsWatermark() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testCreateTagsFromTagsWatermark(boolean forceStartFlinkJob) throws Exception {
         bEnv.executeSql(
                 "CREATE TABLE T ("
                         + " k STRING,"
@@ -155,7 +162,9 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
                         "--tag",
                         "tag2",
                         "--watermark",
-                        Long.toString(tagsWatermark - 1))
+                        Long.toString(tagsWatermark - 1),
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .run();
         assertThat(table.tagManager().tagExists("tag2")).isTrue();
         assertThat(table.tagManager().getOrThrow("tag2").watermark()).isEqualTo(tagsWatermark);
@@ -173,7 +182,9 @@ public class CreateTagFromWatermarkActionITTest extends ActionITCaseBase {
                         "--tag",
                         "tag3",
                         "--watermark",
-                        Long.toString(watermark2 - 1))
+                        Long.toString(watermark2 - 1),
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .run();
         assertThat(table.tagManager().tagExists("tag3")).isTrue();
         assertThat(table.tagManager().getOrThrow("tag3").watermark()).isEqualTo(watermark2);

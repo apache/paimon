@@ -19,7 +19,9 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{SparkInternalRowWrapper, SparkUtils}
+import org.apache.paimon.spark.commands.SchemaHelper
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessage, CommitMessageSerializer}
 
@@ -36,21 +38,24 @@ import scala.collection.JavaConverters._
 import scala.util.{Failure, Success, Try}
 
 class PaimonV2Write(
-    storeTable: FileStoreTable,
+    override val originTable: FileStoreTable,
     overwriteDynamic: Boolean,
     overwritePartitions: Option[Map[String, String]],
-    writeSchema: StructType
+    dataSchema: StructType,
+    options: Options
 ) extends Write
   with RequiresDistributionAndOrdering
+  with SchemaHelper
   with Logging {
 
   assert(
     !(overwriteDynamic && overwritePartitions.exists(_.nonEmpty)),
     "Cannot overwrite dynamically and by filter both")
 
-  private val table =
-    storeTable.copy(
-      Map(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key -> overwriteDynamic.toString).asJava)
+  private val writeSchema = mergeSchema(dataSchema, options)
+
+  updateTableWithOptions(
+    Map(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key -> overwriteDynamic.toString))
 
   private val writeRequirement = PaimonWriteRequirement(table)
 
@@ -66,7 +71,8 @@ class PaimonV2Write(
     ordering
   }
 
-  override def toBatch: BatchWrite = PaimonBatchWrite(table, writeSchema, overwritePartitions)
+  override def toBatch: BatchWrite =
+    PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions)
 
   override def toString: String = {
     val overwriteDynamicStr = if (overwriteDynamic) {
@@ -86,6 +92,7 @@ class PaimonV2Write(
 private case class PaimonBatchWrite(
     table: FileStoreTable,
     writeSchema: StructType,
+    dataSchema: StructType,
     overwritePartitions: Option[Map[String, String]])
   extends BatchWrite
   with WriteHelper {
@@ -97,7 +104,7 @@ private case class PaimonBatchWrite(
   }
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
-    WriterFactory(writeSchema, batchWriteBuilder)
+    WriterFactory(writeSchema, dataSchema, batchWriteBuilder)
 
   override def useCommitCoordinator(): Boolean = false
 
@@ -129,16 +136,22 @@ private case class PaimonBatchWrite(
   }
 }
 
-private case class WriterFactory(writeSchema: StructType, batchWriteBuilder: BatchWriteBuilder)
+private case class WriterFactory(
+    writeSchema: StructType,
+    dataSchema: StructType,
+    batchWriteBuilder: BatchWriteBuilder)
   extends DataWriterFactory {
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
     val batchTableWrite = batchWriteBuilder.newWrite()
-    new PaimonDataWriter(batchTableWrite, writeSchema)
+    new PaimonDataWriter(batchTableWrite, writeSchema, dataSchema)
   }
 }
 
-private class PaimonDataWriter(batchTableWrite: BatchTableWrite, writeSchema: StructType)
+private class PaimonDataWriter(
+    batchTableWrite: BatchTableWrite,
+    writeSchema: StructType,
+    dataSchema: StructType)
   extends DataWriter[InternalRow] {
 
   private val ioManager = SparkUtils.createIOManager()
@@ -146,7 +159,7 @@ private class PaimonDataWriter(batchTableWrite: BatchTableWrite, writeSchema: St
 
   private val rowConverter: InternalRow => SparkInternalRowWrapper = {
     val numFields = writeSchema.fields.length
-    val reusableWrapper = new SparkInternalRowWrapper(-1, writeSchema, numFields)
+    val reusableWrapper = new SparkInternalRowWrapper(-1, writeSchema, dataSchema, numFields)
     record => reusableWrapper.replace(record)
   }
 

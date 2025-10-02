@@ -93,8 +93,12 @@ public class LanceRecordsReader implements FileRecordReader<InternalRow> {
                 @Nullable
                 @Override
                 public InternalRow next() {
+                    if (!rows.hasNext()) {
+                        return null;
+                    }
+
                     positionGenerator.next();
-                    return rows.hasNext() ? rows.next() : null;
+                    return rows.next();
                 }
 
                 @Override

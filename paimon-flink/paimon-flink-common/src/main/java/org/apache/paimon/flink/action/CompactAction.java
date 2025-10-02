@@ -53,6 +53,7 @@ import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -100,6 +101,10 @@ public class CompactAction extends TableActionBase {
         checkArgument(
                 !((FileStoreTable) table).coreOptions().dataEvolutionEnabled(),
                 "Compact action does not support data evolution table yet. ");
+        checkArgument(
+                !(((FileStoreTable) table).bucketMode() == BucketMode.BUCKET_UNAWARE
+                        && ((FileStoreTable) table).coreOptions().clusteringIncrementalEnabled()),
+                "The table has enabled incremental clustering, and do not support compact in flink yet.");
         HashMap<String, String> dynamicOptions = new HashMap<>(tableConf);
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
         table = table.copy(dynamicOptions);
@@ -282,7 +287,14 @@ public class CompactAction extends TableActionBase {
                         .withBucket(BucketMode.POSTPONE_BUCKET)
                         .partitions();
         if (partitions.isEmpty()) {
-            return false;
+            if (this.forceStartFlinkJob) {
+                env.fromSequence(0, 0)
+                        .name("Nothing to Compact Source")
+                        .sinkTo(new DiscardingSink<>());
+                return true;
+            } else {
+                return false;
+            }
         }
 
         InternalRowPartitionComputer partitionComputer =

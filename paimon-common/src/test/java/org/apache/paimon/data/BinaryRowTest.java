@@ -974,7 +974,7 @@ public class BinaryRowTest {
 
         Blob blob0 = row.getBlob(0);
         assertThat(blob0).isInstanceOf(BlobData.class);
-        assertThat(blob0.toBytes()).isEqualTo(new byte[] {1, 3, 1});
+        assertThat(blob0.toData()).isEqualTo(new byte[] {1, 3, 1});
         assertThat(row.isNullAt(1)).isTrue();
     }
 }

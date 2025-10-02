@@ -224,10 +224,12 @@ public class RESTCatalog implements Catalog {
             String databaseName,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String tableNamePattern)
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException {
         try {
-            return api.listTablesPaged(databaseName, maxResults, pageToken, tableNamePattern);
+            return api.listTablesPaged(
+                    databaseName, maxResults, pageToken, tableNamePattern, tableType);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
         }
@@ -238,11 +240,13 @@ public class RESTCatalog implements Catalog {
             String db,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String tableNamePattern)
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException {
         try {
             PagedList<GetTableResponse> tables =
-                    api.listTableDetailsPaged(db, maxResults, pageToken, tableNamePattern);
+                    api.listTableDetailsPaged(
+                            db, maxResults, pageToken, tableNamePattern, tableType);
             return new PagedList<>(
                     tables.getElements().stream()
                             .map(t -> toTable(db, t))
@@ -274,7 +278,8 @@ public class RESTCatalog implements Catalog {
                 this::fileIOFromOptions,
                 this::loadTableMetadata,
                 null,
-                null);
+                null,
+                context);
     }
 
     @Override
@@ -327,6 +332,11 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public boolean supportsListByPattern() {
+        return true;
+    }
+
+    @Override
+    public boolean supportsListTableByType() {
         return true;
     }
 
@@ -417,7 +427,8 @@ public class RESTCatalog implements Catalog {
                     this::fileIOFromOptions,
                     i -> toTableMetadata(db, response),
                     null,
-                    null);
+                    null,
+                    context);
         } catch (TableNotExistException e) {
             throw new RuntimeException(e);
         }
