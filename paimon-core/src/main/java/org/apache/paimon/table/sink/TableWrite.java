@@ -29,6 +29,8 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 /**
  * Write of {@link Table} to provide {@link InternalRow} writing.
  *
@@ -57,10 +59,12 @@ public interface TableWrite extends AutoCloseable {
     int getBucket(InternalRow row);
 
     /** Write a row to the writer. */
-    void write(InternalRow row) throws Exception;
+    @Nullable
+    SinkRecord write(InternalRow row) throws Exception;
 
     /** Write a row with bucket. */
-    void write(InternalRow row, int bucket) throws Exception;
+    @Nullable
+    SinkRecord write(InternalRow row, int bucket) throws Exception;
 
     /** Write a bundle records directly, not per row. */
     void writeBundle(BinaryRow partition, int bucket, BundleRecords bundle) throws Exception;

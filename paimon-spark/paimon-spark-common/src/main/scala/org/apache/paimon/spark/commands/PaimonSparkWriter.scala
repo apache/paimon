@@ -51,12 +51,18 @@ import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
 
-case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = false)
+case class PaimonSparkWriter(
+    table: FileStoreTable,
+    writeRowTracking: Boolean = false,
+    batchId: Long = -1)
   extends WriteHelper {
 
   private lazy val tableSchema = table.schema
 
   private lazy val bucketMode = table.bucketMode
+
+  private val fullCompactionDeltaCommits: Option[Int] =
+    Option.apply(coreOptions.fullCompactionDeltaCommits())
 
   @transient private lazy val serializer = new CommitMessageSerializer
 
@@ -98,7 +104,13 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
     val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
-    def newWrite() = SparkTableWrite(writeBuilder, writeType, rowKindColIdx, writeRowTracking)
+    def newWrite() = SparkTableWrite(
+      writeBuilder,
+      writeType,
+      rowKindColIdx,
+      writeRowTracking,
+      fullCompactionDeltaCommits,
+      batchId)
 
     def sparkParallelism = {
       val defaultParallelism = sparkSession.sparkContext.defaultParallelism

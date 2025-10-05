@@ -20,11 +20,11 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.spark.util.SparkRowUtils
+import org.apache.paimon.spark.write.DataWriteHelper
 import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessageImpl, CommitMessageSerializer}
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.TaskContext
-import org.apache.spark.sql.{PaimonUtils, Row}
+import org.apache.spark.sql.Row
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
@@ -33,12 +33,15 @@ case class SparkTableWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
     rowKindColIdx: Int = -1,
-    writeRowTracking: Boolean = false)
-  extends SparkTableWriteTrait {
+    writeRowTracking: Boolean = false,
+    fullCompactionDeltaCommits: Option[Int],
+    batchId: Long)
+  extends SparkTableWriteTrait
+  with DataWriteHelper {
 
   private val ioManager: IOManager = SparkUtils.createIOManager
 
-  private val write: BatchTableWrite = {
+  val write: BatchTableWrite = {
     val _write = writeBuilder.newWrite()
     _write.withIOManager(ioManager)
     if (writeRowTracking) {
@@ -52,14 +55,15 @@ case class SparkTableWrite(
   }
 
   def write(row: Row): Unit = {
-    write.write(toPaimonRow(row))
+    postWrite(write.write(toPaimonRow(row)))
   }
 
   def write(row: Row, bucket: Int): Unit = {
-    write.write(toPaimonRow(row), bucket)
+    postWrite(write.write(toPaimonRow(row), bucket))
   }
 
   def finish(): Iterator[Array[Byte]] = {
+    preFinish()
     var bytesWritten = 0L
     var recordsWritten = 0L
     val commitMessages = new ListBuffer[Array[Byte]]()

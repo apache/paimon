@@ -103,8 +103,11 @@ private case class PaimonBatchWrite(
     builder
   }
 
-  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
-    WriterFactory(writeSchema, dataSchema, batchWriteBuilder)
+  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
+    val fullCompactionDeltaCommits: Option[Int] =
+      Option.apply(coreOptions.fullCompactionDeltaCommits())
+    WriterFactory(writeSchema, dataSchema, batchWriteBuilder, fullCompactionDeltaCommits)
+  }
 
   override def useCommitCoordinator(): Boolean = false
 
@@ -139,23 +142,27 @@ private case class PaimonBatchWrite(
 private case class WriterFactory(
     writeSchema: StructType,
     dataSchema: StructType,
-    batchWriteBuilder: BatchWriteBuilder)
+    batchWriteBuilder: BatchWriteBuilder,
+    fullCompactionDeltaCommits: Option[Int])
   extends DataWriterFactory {
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
     val batchTableWrite = batchWriteBuilder.newWrite()
-    new PaimonDataWriter(batchTableWrite, writeSchema, dataSchema)
+    PaimonDataWriter(batchTableWrite, writeSchema, dataSchema, fullCompactionDeltaCommits)
   }
 }
 
-private class PaimonDataWriter(
-    batchTableWrite: BatchTableWrite,
+private case class PaimonDataWriter(
+    write: BatchTableWrite,
     writeSchema: StructType,
-    dataSchema: StructType)
-  extends DataWriter[InternalRow] {
+    dataSchema: StructType,
+    fullCompactionDeltaCommits: Option[Int],
+    batchId: Long = -1)
+  extends DataWriter[InternalRow]
+  with DataWriteHelper {
 
   private val ioManager = SparkUtils.createIOManager()
-  batchTableWrite.withIOManager(ioManager)
+  write.withIOManager(ioManager)
 
   private val rowConverter: InternalRow => SparkInternalRowWrapper = {
     val numFields = writeSchema.fields.length
@@ -164,12 +171,13 @@ private class PaimonDataWriter(
   }
 
   override def write(record: InternalRow): Unit = {
-    batchTableWrite.write(rowConverter.apply(record))
+    postWrite(write.write(rowConverter.apply(record)))
   }
 
   override def commit(): WriterCommitMessage = {
     try {
-      val commitMessages = batchTableWrite.prepareCommit().asScala.toSeq
+      preFinish()
+      val commitMessages = write.prepareCommit().asScala.toSeq
       TaskCommit(commitMessages)
     } finally {
       close()
@@ -180,7 +188,7 @@ private class PaimonDataWriter(
 
   override def close(): Unit = {
     try {
-      batchTableWrite.close()
+      write.close()
       ioManager.close()
     } catch {
       case e: Exception => throw new RuntimeException(e)
