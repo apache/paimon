@@ -100,7 +100,7 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
             for (Map.Entry<Triple<BinaryRow, Integer, Integer>, DataPagedOutputSerializer> entry :
                     segments.entrySet()) {
                 Triple<BinaryRow, Integer, Integer> key = entry.getKey();
-                SimpleCollectingOutputView view = entry.getValue().result();
+                SimpleCollectingOutputView view = entry.getValue().close();
                 Segments seg =
                         Segments.create(view.fullSegments(), view.getCurrentPositionInSegment());
                 result.add(new RichSegments(key.f0, key.f1, key.f2, seg));

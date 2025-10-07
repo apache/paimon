@@ -58,7 +58,7 @@ class DataPagedOutputSerializerTest {
         assertThat(output.pagedOut()).isNull();
 
         // assert result
-        SimpleCollectingOutputView result = output.result();
+        SimpleCollectingOutputView result = output.close();
         assertEqual(result, pagedView);
     }
 
@@ -83,7 +83,7 @@ class DataPagedOutputSerializerTest {
         assertThat(output.pagedOut()).isNotNull();
 
         // assert result
-        SimpleCollectingOutputView result = output.result();
+        SimpleCollectingOutputView result = output.close();
         assertEqual(result, pagedView);
     }
 

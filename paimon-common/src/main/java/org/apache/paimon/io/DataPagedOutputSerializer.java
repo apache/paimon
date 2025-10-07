@@ -52,9 +52,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class DataPagedOutputSerializer {
 
     private final InternalRowSerializer serializer;
-    private final DataOutputSerializer initialOut;
     private final int pageSize;
 
+    private DataOutputSerializer initialOut;
     private SimpleCollectingOutputView pagedOut;
 
     /**
@@ -67,8 +67,8 @@ public class DataPagedOutputSerializer {
     public DataPagedOutputSerializer(
             InternalRowSerializer serializer, int startSize, int pageSize) {
         this.serializer = serializer;
-        this.initialOut = new DataOutputSerializer(startSize);
         this.pageSize = pageSize;
+        this.initialOut = new DataOutputSerializer(startSize);
     }
 
     @VisibleForTesting
@@ -97,6 +97,7 @@ public class DataPagedOutputSerializer {
             int serializedSize = getSerializedRowLength(binaryRow);
             if (initialOut.length() + serializedSize > pageSize) {
                 pagedOut = toPagedOutput(initialOut, pageSize);
+                initialOut = null;
                 serializer.serializeToPages(row, pagedOut);
             } else {
                 initialOut.writeInt(binaryRow.getSizeInBytes());
@@ -117,7 +118,7 @@ public class DataPagedOutputSerializer {
         return pagedOut;
     }
 
-    public SimpleCollectingOutputView result() throws IOException {
+    public SimpleCollectingOutputView close() throws IOException {
         if (pagedOut != null) {
             return pagedOut;
         }
