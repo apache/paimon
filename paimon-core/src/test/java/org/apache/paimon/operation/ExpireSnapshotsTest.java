@@ -38,6 +38,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
@@ -68,6 +69,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_TIME_RETAINED;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -659,6 +662,47 @@ public class ExpireSnapshotsTest {
 
         int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
         assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+    }
+
+    @Test
+    public void testExpireSnapshotsWithChangedConfig() throws Exception {
+        store.options().toConfiguration().set(CoreOptions.DETECT_EXPIRATION_SETTING_ENABLED, true);
+
+        ExpireConfig.Builder builder = ExpireConfig.builder();
+        builder.snapshotRetainMin(10)
+                .snapshotRetainMax(Integer.MAX_VALUE)
+                .snapshotTimeRetain(Duration.ofMillis(60 * 1000));
+        ExpireSnapshots expire = store.newExpire(builder.build());
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(20, allData, snapshotPositions);
+
+        expire.expire();
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            assertThat((snapshotManager.snapshotExists(i))).isTrue();
+        }
+
+        int maxRetained = 15;
+        SchemaManager schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
+        schemaManager.commitChanges(
+                SchemaChange.setOption(
+                        SNAPSHOT_NUM_RETAINED_MAX.key(), String.valueOf(maxRetained)));
+
+        expire.expire();
+        for (int i = 1; i <= latestSnapshotId - maxRetained; i++) {
+            assertThat((snapshotManager.snapshotExists(i))).isFalse();
+        }
+
+        schemaManager.commitChanges(SchemaChange.setOption(SNAPSHOT_TIME_RETAINED.key(), "1s"));
+        Thread.sleep(1500);
+        expire.expire();
+        for (int i = 1; i <= latestSnapshotId - 10; i++) {
+            assertThat((snapshotManager.snapshotExists(i))).isFalse();
+        }
+
+        store.assertCleaned();
     }
 
     private TestFileStore createStore() {
