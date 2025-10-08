@@ -316,7 +316,7 @@ public class TableCommitImpl implements InnerTableCommit {
         Predicate<Path> nonExists =
                 p -> {
                     try {
-                        return !commit.fileIO().exists(p);
+                        return !commit.fileIO().fileExists(p);
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
