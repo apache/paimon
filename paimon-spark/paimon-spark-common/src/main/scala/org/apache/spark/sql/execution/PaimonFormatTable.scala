@@ -320,18 +320,14 @@ private case class FormatTableBatchWrite(table: FormatTable, writeSchema: Struct
   extends BatchWrite
   with Logging {
 
-  private val batchWriteBuilder = table.newBatchWriteBuilder().asInstanceOf[FormatBatchWriteBuilder]
-
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
-    FormatTableWriterFactory(table, writeSchema, batchWriteBuilder)
+    FormatTableWriterFactory(table, writeSchema)
 
   override def useCommitCoordinator(): Boolean = false
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
     logInfo(s"Committing to FormatTable ${table.name()}")
 
-    // For FormatTable, we don't use the batch commit mechanism from the builder
-    // Instead, we directly execute the committers
     val committers = messages
       .collect {
         case taskCommit: FormatTableTaskCommit => taskCommit.committers()
@@ -369,17 +365,11 @@ private case class FormatTableBatchWrite(table: FormatTable, writeSchema: Struct
   }
 }
 
-private case class FormatTableWriterFactory(
-    table: FormatTable,
-    writeSchema: StructType,
-    batchWriteBuilder: FormatBatchWriteBuilder)
+private case class FormatTableWriterFactory(table: FormatTable, writeSchema: StructType)
   extends DataWriterFactory {
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
-    val formatTableWrite =
-      batchWriteBuilder
-        .newWrite()
-        .asInstanceOf[BatchTableWrite]
+    val formatTableWrite = table.newBatchWriteBuilder().newWrite()
     new FormatTableDataWriter(table, formatTableWrite, writeSchema)
   }
 }
@@ -410,7 +400,9 @@ private class FormatTableDataWriter(
         .asScala
         .map {
           case committer: TwoPhaseCommitMessage => committer.getCommitter
-          case _ => throw new IllegalArgumentException("Unsupported commit message")
+          case other =>
+            throw new IllegalArgumentException(
+              "Unsupported commit message type: " + other.getClass.getSimpleName)
         }
         .toSeq
       FormatTableTaskCommit(committers)
