@@ -58,6 +58,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link BucketedDvMaintainer}. */
 public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
+
     private IndexFileHandler fileHandler;
     private final BinaryRow partition = BinaryRow.singleColumn(1);
 

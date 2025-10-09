@@ -35,6 +35,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** IndexManifestFile Handler. */
 public class IndexManifestFileHandler {
@@ -120,10 +121,15 @@ public class IndexManifestFileHandler {
             }
 
             for (IndexManifestEntry entry : newIndexFiles) {
+                String fileName = entry.indexFile().fileName();
                 if (entry.kind() == FileKind.ADD) {
-                    indexEntries.put(entry.indexFile().fileName(), entry);
+                    indexEntries.put(fileName, entry);
                 } else {
-                    indexEntries.remove(entry.indexFile().fileName());
+                    checkState(
+                            indexEntries.containsKey(fileName),
+                            "Trying to delete file %s which is not exists.",
+                            fileName);
+                    indexEntries.remove(fileName);
                 }
             }
             return new ArrayList<>(indexEntries.values());

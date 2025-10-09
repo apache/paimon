@@ -81,21 +81,6 @@ public class SimpleFileEntry implements FileEntry {
                 entry.externalPath());
     }
 
-    public SimpleFileEntry toDelete() {
-        return new SimpleFileEntry(
-                FileKind.DELETE,
-                partition,
-                bucket,
-                totalBuckets,
-                level,
-                fileName,
-                extraFiles,
-                embeddedIndex,
-                minKey,
-                maxKey,
-                externalPath);
-    }
-
     public static List<SimpleFileEntry> from(List<ManifestEntry> entries) {
         return entries.stream().map(SimpleFileEntry::from).collect(Collectors.toList());
     }
