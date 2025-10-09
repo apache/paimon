@@ -22,7 +22,7 @@ import org.apache.paimon.spark.AbstractSparkInternalRow
 import org.apache.paimon.types.RowType
 
 class Spark3InternalRowWithBlob(rowType: RowType, blobFieldIndex: Int)
-  extends AbstractSparkInternalRow(rowType) {
+  extends Spark3InternalRow(rowType) {
 
   override def getBinary(ordinal: Int): Array[Byte] = {
     if (ordinal == blobFieldIndex) {
