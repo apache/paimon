@@ -55,7 +55,9 @@ class Spark4Shim extends SparkShim {
     new Spark4InternalRow(rowType)
   }
 
-  override def createSparkInternalRowWithBlob(rowType: RowType, blobFieldIndex: Int): SparkInternalRow = {
+  override def createSparkInternalRowWithBlob(
+      rowType: RowType,
+      blobFieldIndex: Int): SparkInternalRow = {
     new Spark4InternalRowWithBlob(rowType, blobFieldIndex)
   }
 
