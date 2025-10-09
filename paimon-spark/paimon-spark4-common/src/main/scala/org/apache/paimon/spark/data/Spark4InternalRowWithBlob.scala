@@ -23,7 +23,8 @@ import org.apache.paimon.types.RowType
 
 import org.apache.spark.unsafe.types.VariantVal
 
-class Spark4InternalRow(rowType: RowType, blobFieldIndex: Int) extends Spark4InternalRow(rowType) {
+class Spark4InternalRowWithBlob(rowType: RowType, blobFieldIndex: Int)
+  extends Spark4InternalRow(rowType) {
 
   override def getBinary(ordinal: Int): Array[Byte] = {
     if (ordinal == blobFieldIndex) {
