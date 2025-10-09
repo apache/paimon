@@ -60,7 +60,7 @@ case class PaimonDescribeTableExec(
       addTableDetails(rows)
     }
 
-    rows
+    rows.toSeq
   }
 
   private def addTableDetails(rows: ArrayBuffer[InternalRow]): Unit = {
