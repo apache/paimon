@@ -1990,10 +1990,17 @@ public class CoreOptions implements Serializable {
                     .withDescription("Format table file path only contain partition value.");
 
     public static final ConfigOption<String> BLOB_FIELD =
-            key("blob.field")
+            key("blob-field")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("Specify the blob field.");
+
+    public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
+            key("blob-as-descriptor")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Write blob field using blob descriptor rather than blob bytes.");
 
     private final Options options;
 
@@ -3063,6 +3070,10 @@ public class CoreOptions implements Serializable {
 
     public boolean formatTablePartitionOnlyValueInPath() {
         return options.get(FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH);
+    }
+
+    public boolean blobAsDescriptor() {
+        return options.get(BLOB_AS_DESCRIPTOR);
     }
 
     /** Specifies the merge engine for table with primary key. */

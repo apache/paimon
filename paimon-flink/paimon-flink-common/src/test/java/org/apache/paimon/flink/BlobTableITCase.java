@@ -18,21 +18,33 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.local.LocalFileIO;
+
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
-import java.util.Collections;
+import java.io.OutputStream;
+import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test write and read table with blob type. */
 public class BlobTableITCase extends CatalogITCaseBase {
 
+    private static final Random RANDOM = new Random();
+    @TempDir public Path warehouse;
+
     @Override
     protected List<String> ddl() {
-        return Collections.singletonList(
-                "CREATE TABLE IF NOT EXISTS blob_table (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob.field'='picture')");
+        return Arrays.asList(
+                "CREATE TABLE IF NOT EXISTS blob_table (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')",
+                "CREATE TABLE IF NOT EXISTS blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')");
     }
 
     @Test
@@ -43,5 +55,37 @@ public class BlobTableITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(
                         Row.of(1, "paimon", new byte[] {72, 101, 108, 108, 111}));
         assertThat(batchSql("SELECT file_path FROM `blob_table$files`").size()).isEqualTo(2);
+    }
+
+    @Test
+    public void testWriteBlobAsDescriptor() throws Exception {
+        byte[] blobData = new byte[1024 * 1024];
+        RANDOM.nextBytes(blobData);
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + warehouse.toString() + "/external_blob";
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(blobData);
+        }
+
+        BlobDescriptor blobDescriptor = new BlobDescriptor(uri, 0, blobData.length);
+        batchSql(
+                "INSERT INTO blob_table_descriptor VALUES (1, 'paimon', X'"
+                        + bytesToHex(blobDescriptor.serialize())
+                        + "')");
+        assertThat(batchSql("SELECT * FROM blob_table_descriptor"))
+                .containsExactlyInAnyOrder(Row.of(1, "paimon", blobData));
+    }
+
+    private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
+
+    public static String bytesToHex(byte[] bytes) {
+        char[] hexChars = new char[bytes.length * 2];
+        for (int j = 0; j < bytes.length; j++) {
+            int v = bytes[j] & 0xFF;
+            hexChars[j * 2] = HEX_ARRAY[v >>> 4];
+            hexChars[j * 2 + 1] = HEX_ARRAY[v & 0x0F];
+        }
+        return new String(hexChars);
     }
 }
