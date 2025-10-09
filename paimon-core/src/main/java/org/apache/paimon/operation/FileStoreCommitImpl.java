@@ -154,7 +154,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private Long strictModeLastSafeSnapshot;
     private final InternalRowPartitionComputer partitionComputer;
     private final boolean rowTrackingEnabled;
-    private final boolean isPkTable;
     private final boolean deletionVectorsEnabled;
     private final IndexFileHandler indexFileHandler;
 
@@ -194,7 +193,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long commitMaxRetryWait,
             @Nullable Long strictModeLastSafeSnapshot,
             boolean rowTrackingEnabled,
-            boolean isPkTable,
             boolean deletionVectorsEnabled,
             IndexFileHandler indexFileHandler) {
         this.snapshotCommit = snapshotCommit;
@@ -240,7 +238,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
         this.rowTrackingEnabled = rowTrackingEnabled;
-        this.isPkTable = isPkTable;
         this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.indexFileHandler = indexFileHandler;
     }
@@ -728,23 +725,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     .forEach(m -> appendChangelog.add(makeEntry(FileKind.ADD, commitMessage, m)));
             commitMessage
                     .newFilesIncrement()
-                    .newIndexFiles()
-                    .forEach(
-                            m ->
-                                    appendIndexFiles.add(
-                                            new IndexManifestEntry(
-                                                    FileKind.ADD,
-                                                    commitMessage.partition(),
-                                                    commitMessage.bucket(),
-                                                    m)));
-            commitMessage
-                    .newFilesIncrement()
                     .deletedIndexFiles()
                     .forEach(
                             m ->
                                     appendIndexFiles.add(
                                             new IndexManifestEntry(
                                                     FileKind.DELETE,
+                                                    commitMessage.partition(),
+                                                    commitMessage.bucket(),
+                                                    m)));
+            commitMessage
+                    .newFilesIncrement()
+                    .newIndexFiles()
+                    .forEach(
+                            m ->
+                                    appendIndexFiles.add(
+                                            new IndexManifestEntry(
+                                                    FileKind.ADD,
                                                     commitMessage.partition(),
                                                     commitMessage.bucket(),
                                                     m)));
@@ -766,23 +763,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     .forEach(m -> compactChangelog.add(makeEntry(FileKind.ADD, commitMessage, m)));
             commitMessage
                     .compactIncrement()
-                    .newIndexFiles()
-                    .forEach(
-                            m ->
-                                    compactIndexFiles.add(
-                                            new IndexManifestEntry(
-                                                    FileKind.ADD,
-                                                    commitMessage.partition(),
-                                                    commitMessage.bucket(),
-                                                    m)));
-            commitMessage
-                    .compactIncrement()
                     .deletedIndexFiles()
                     .forEach(
                             m ->
                                     compactIndexFiles.add(
                                             new IndexManifestEntry(
                                                     FileKind.DELETE,
+                                                    commitMessage.partition(),
+                                                    commitMessage.bucket(),
+                                                    m)));
+            commitMessage
+                    .compactIncrement()
+                    .newIndexFiles()
+                    .forEach(
+                            m ->
+                                    compactIndexFiles.add(
+                                            new IndexManifestEntry(
+                                                    FileKind.ADD,
                                                     commitMessage.partition(),
                                                     commitMessage.bucket(),
                                                     m)));
@@ -1419,7 +1416,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<IndexManifestEntry> deltaIndexEntries,
             CommitKind commitKind) {
         String baseCommitUser = snapshot.commitUser();
-        if (checkForDeletionVector(commitKind)) {
+        if (checkForDeletionVector()) {
             // Enrich dvName in fileEntry to checker for base ADD dv and delta DELETE dv.
             // For example:
             // If the base file is <ADD baseFile1, ADD dv1>,
@@ -1443,52 +1440,72 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<SimpleFileEntry> allEntries = new ArrayList<>(baseEntries);
         allEntries.addAll(deltaEntries);
 
-        if (commitKind != CommitKind.OVERWRITE) {
-            // total buckets within the same partition should remain the same
-            Map<BinaryRow, Integer> totalBuckets = new HashMap<>();
-            for (SimpleFileEntry entry : allEntries) {
-                if (entry.totalBuckets() <= 0) {
-                    continue;
-                }
+        checkBucketKeepSame(baseEntries, deltaEntries, commitKind, allEntries, baseCommitUser);
 
-                if (!totalBuckets.containsKey(entry.partition())) {
-                    totalBuckets.put(entry.partition(), entry.totalBuckets());
-                    continue;
-                }
-
-                int old = totalBuckets.get(entry.partition());
-                if (old == entry.totalBuckets()) {
-                    continue;
-                }
-
-                Pair<RuntimeException, RuntimeException> conflictException =
-                        createConflictException(
-                                "Total buckets of partition "
-                                        + entry.partition()
-                                        + " changed from "
-                                        + old
-                                        + " to "
-                                        + entry.totalBuckets()
-                                        + " without overwrite. Give up committing.",
-                                baseCommitUser,
-                                baseEntries,
-                                deltaEntries,
-                                null);
-                LOG.warn("", conflictException.getLeft());
-                throw conflictException.getRight();
-            }
-        }
-
+        Function<Throwable, RuntimeException> conflictException =
+                conflictException(baseCommitUser, baseEntries, deltaEntries);
         Collection<SimpleFileEntry> mergedEntries;
         try {
             // merge manifest entries and also check if the files we want to delete are still there
             mergedEntries = FileEntry.mergeEntries(allEntries);
         } catch (Throwable e) {
-            throw conflictException(commitUser, baseEntries, deltaEntries).apply(e);
+            throw conflictException.apply(e);
         }
 
-        assertNoDelete(mergedEntries, conflictException(commitUser, baseEntries, deltaEntries));
+        checkNoDeleteInMergedEntries(mergedEntries, conflictException);
+        checkKeyRangeNoConflicts(baseEntries, deltaEntries, mergedEntries, baseCommitUser);
+    }
 
+    private void checkBucketKeepSame(
+            List<SimpleFileEntry> baseEntries,
+            List<SimpleFileEntry> deltaEntries,
+            CommitKind commitKind,
+            List<SimpleFileEntry> allEntries,
+            String baseCommitUser) {
+        if (commitKind == CommitKind.OVERWRITE) {
+            return;
+        }
+
+        // total buckets within the same partition should remain the same
+        Map<BinaryRow, Integer> totalBuckets = new HashMap<>();
+        for (SimpleFileEntry entry : allEntries) {
+            if (entry.totalBuckets() <= 0) {
+                continue;
+            }
+
+            if (!totalBuckets.containsKey(entry.partition())) {
+                totalBuckets.put(entry.partition(), entry.totalBuckets());
+                continue;
+            }
+
+            int old = totalBuckets.get(entry.partition());
+            if (old == entry.totalBuckets()) {
+                continue;
+            }
+
+            Pair<RuntimeException, RuntimeException> conflictException =
+                    createConflictException(
+                            "Total buckets of partition "
+                                    + entry.partition()
+                                    + " changed from "
+                                    + old
+                                    + " to "
+                                    + entry.totalBuckets()
+                                    + " without overwrite. Give up committing.",
+                            baseCommitUser,
+                            baseEntries,
+                            deltaEntries,
+                            null);
+            LOG.warn("", conflictException.getLeft());
+            throw conflictException.getRight();
+        }
+    }
+
+    private void checkKeyRangeNoConflicts(
+            List<SimpleFileEntry> baseEntries,
+            List<SimpleFileEntry> deltaEntries,
+            Collection<SimpleFileEntry> mergedEntries,
+            String baseCommitUser) {
         // fast exit for file store without keys
         if (keyComparator == null) {
             return;
@@ -1548,26 +1565,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         };
     }
 
-    private boolean checkForDeletionVector(CommitKind commitKind) {
-        if (!deletionVectorsEnabled) {
-            return false;
-        }
-
-        // todo: Add them once contains DELETE type.
-        // PK table's compact dv index only contains ADD type, skip conflict detection.
-        if (isPkTable && commitKind == CommitKind.COMPACT) {
-            return false;
-        }
-
-        // Non-PK table's hash fixed bucket mode only contains ADD type, skip conflict detection.
-        if (!isPkTable && bucketMode.equals(BucketMode.HASH_FIXED)) {
-            return false;
-        }
-
-        return true;
+    private boolean checkForDeletionVector() {
+        return deletionVectorsEnabled && bucketMode.equals(BucketMode.BUCKET_UNAWARE);
     }
 
-    private void assertNoDelete(
+    private void checkNoDeleteInMergedEntries(
             Collection<SimpleFileEntry> mergedEntries,
             Function<Throwable, RuntimeException> exceptionFunction) {
         try {
