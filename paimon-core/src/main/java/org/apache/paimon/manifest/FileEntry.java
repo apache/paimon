@@ -22,7 +22,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -40,6 +39,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Entry representing a file. */
 public interface FileEntry {
@@ -77,7 +77,7 @@ public interface FileEntry {
         public final int level;
         public final String fileName;
         public final List<String> extraFiles;
-        @Nullable private final byte[] embeddedIndex;
+        @Nullable public final byte[] embeddedIndex;
         @Nullable public final String externalPath;
 
         /* Cache the hash code for the string */
@@ -190,7 +190,7 @@ public interface FileEntry {
             Identifier identifier = entry.identifier();
             switch (entry.kind()) {
                 case ADD:
-                    Preconditions.checkState(
+                    checkState(
                             !map.containsKey(identifier),
                             "Trying to add file %s which is already added.",
                             identifier);
