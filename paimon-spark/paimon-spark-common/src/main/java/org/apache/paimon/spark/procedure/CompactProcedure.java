@@ -263,7 +263,7 @@ public class CompactProcedure extends BaseProcedure {
         }
         boolean fullCompact = compactStrategy.equalsIgnoreCase(FULL);
         RowType partitionType = table.schema().logicalPartitionType();
-        Predicate filter =
+        Predicate partitionFilter =
                 condition == null
                         ? null
                         : ExpressionUtils.convertConditionToPaimonPredicate(
@@ -273,7 +273,7 @@ public class CompactProcedure extends BaseProcedure {
                                         false)
                                 .getOrElse(null);
         PartitionPredicate partitionPredicate =
-                PartitionPredicate.fromPredicate(partitionType, filter);
+                PartitionPredicate.fromPredicate(partitionType, partitionFilter);
 
         if (orderType.equals(OrderType.NONE)) {
             JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
@@ -302,7 +302,8 @@ public class CompactProcedure extends BaseProcedure {
         } else {
             switch (bucketMode) {
                 case BUCKET_UNAWARE:
-                    sortCompactUnAwareBucketTable(table, orderType, sortColumns, relation, filter);
+                    sortCompactUnAwareBucketTable(
+                            table, orderType, sortColumns, relation, partitionFilter);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -521,10 +522,10 @@ public class CompactProcedure extends BaseProcedure {
             OrderType orderType,
             List<String> sortColumns,
             DataSourceV2Relation relation,
-            @Nullable Predicate filter) {
+            @Nullable Predicate partitionFilter) {
         SnapshotReader snapshotReader = table.newSnapshotReader();
-        if (filter != null) {
-            snapshotReader.withPartitionFilter(filter);
+        if (partitionFilter != null) {
+            snapshotReader.withPartitionFilter(partitionFilter);
         }
         Map<BinaryRow, DataSplit[]> packedSplits = packForSort(snapshotReader.read().dataSplits());
         TableSorter sorter = TableSorter.getSorter(table, orderType, sortColumns);
