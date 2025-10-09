@@ -147,13 +147,13 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     @Override
-    public SinkRecord write(InternalRow row) throws Exception {
-        return writeAndReturn(row);
+    public void write(InternalRow row) throws Exception {
+        writeAndReturn(row);
     }
 
     @Override
-    public SinkRecord write(InternalRow row, int bucket) throws Exception {
-        return writeAndReturn(row, bucket);
+    public void write(InternalRow row, int bucket) throws Exception {
+        writeAndReturn(row, bucket);
     }
 
     @Override

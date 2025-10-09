@@ -23,7 +23,7 @@ import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{SparkInternalRowWrapper, SparkUtils}
 import org.apache.paimon.spark.commands.SchemaHelper
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessage, CommitMessageSerializer}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageSerializer, TableWriteImpl}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
@@ -147,13 +147,13 @@ private case class WriterFactory(
   extends DataWriterFactory {
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
-    val batchTableWrite = batchWriteBuilder.newWrite()
+    val batchTableWrite = batchWriteBuilder.newWrite().asInstanceOf[TableWriteImpl[InternalRow]]
     PaimonDataWriter(batchTableWrite, writeSchema, dataSchema, fullCompactionDeltaCommits)
   }
 }
 
 private case class PaimonDataWriter(
-    write: BatchTableWrite,
+    write: TableWriteImpl[InternalRow],
     writeSchema: StructType,
     dataSchema: StructType,
     fullCompactionDeltaCommits: Option[Int],
@@ -171,7 +171,7 @@ private case class PaimonDataWriter(
   }
 
   override def write(record: InternalRow): Unit = {
-    postWrite(write.write(rowConverter.apply(record)))
+    postWrite(write.writeAndReturn(rowConverter.apply(record)))
   }
 
   override def commit(): WriterCommitMessage = {

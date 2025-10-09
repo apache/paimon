@@ -21,7 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.spark.write.DataWriteHelper
-import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessageImpl, CommitMessageSerializer}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageImpl, CommitMessageSerializer, TableWriteImpl}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.Row
@@ -41,13 +41,13 @@ case class SparkTableWrite(
 
   private val ioManager: IOManager = SparkUtils.createIOManager
 
-  val write: BatchTableWrite = {
+  val write: TableWriteImpl[Row] = {
     val _write = writeBuilder.newWrite()
     _write.withIOManager(ioManager)
     if (writeRowTracking) {
       _write.withWriteType(writeType)
     }
-    _write
+    _write.asInstanceOf[TableWriteImpl[Row]]
   }
 
   private val toPaimonRow = {
@@ -55,11 +55,11 @@ case class SparkTableWrite(
   }
 
   def write(row: Row): Unit = {
-    postWrite(write.write(toPaimonRow(row)))
+    postWrite(write.writeAndReturn(toPaimonRow(row)))
   }
 
   def write(row: Row, bucket: Int): Unit = {
-    postWrite(write.write(toPaimonRow(row), bucket))
+    postWrite(write.writeAndReturn(toPaimonRow(row), bucket))
   }
 
   def finish(): Iterator[Array[Byte]] = {
