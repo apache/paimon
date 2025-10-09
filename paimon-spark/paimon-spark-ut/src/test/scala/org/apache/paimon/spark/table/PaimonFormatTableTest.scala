@@ -140,9 +140,9 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
   test("PaimonFormatTableRead: read partitioned table") {
     for {
       (format, compression) <- Seq(
-//        ("csv", "gzip"),
-//        ("json", "gzip"),
-//        ("parquet", "zstd"),
+        ("csv", "gzip"),
+        ("json", "gzip"),
+        ("parquet", "zstd"),
         ("orc", "zstd"))
     } {
       val tableName = s"format_test_partitioned_$format"
