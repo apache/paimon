@@ -534,7 +534,7 @@ under the License.
             <td><h5>full-compaction.delta-commits</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
-            <td>Full compaction will be constantly triggered after delta commits.</td>
+            <td>For streaming write, full compaction will be constantly triggered after delta commits. For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.</td>
         </tr>
         <tr>
             <td><h5>ignore-delete</h5></td>

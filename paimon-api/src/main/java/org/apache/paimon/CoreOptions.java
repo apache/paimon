@@ -1204,7 +1204,8 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .noDefaultValue()
                     .withDescription(
-                            "Full compaction will be constantly triggered after delta commits.");
+                            "For streaming write, full compaction will be constantly triggered after delta commits. "
+                                    + "For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.");
 
     @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<StreamScanMode> STREAM_SCAN_MODE =
@@ -2786,6 +2787,11 @@ public class CoreOptions implements Serializable {
             throw new RuntimeException("consumer id cannot be empty string.");
         }
         return consumerId;
+    }
+
+    @Nullable
+    public Integer fullCompactionDeltaCommits() {
+        return options.get(FULL_COMPACTION_DELTA_COMMITS);
     }
 
     public static StreamingReadMode streamReadType(Options options) {
