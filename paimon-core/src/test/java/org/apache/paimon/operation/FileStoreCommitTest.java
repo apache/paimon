@@ -912,13 +912,13 @@ public class FileStoreCommitTest {
         assertThat(dvs.get("f2").isDeleted(4)).isTrue();
 
         // commit 2
-        CommitMessage commitMessage3 =
-                store.writeDVIndexFiles(
-                        partition, 0, Collections.singletonMap("f2", Arrays.asList(3)));
         List<IndexFileMeta> deleted =
                 new ArrayList<>(commitMessage1.newFilesIncrement().newIndexFiles());
         deleted.addAll(commitMessage2.newFilesIncrement().newIndexFiles());
-        CommitMessage commitMessage4 = store.removeIndexFiles(partition, 0, deleted);
+        CommitMessage commitMessage3 = store.removeIndexFiles(partition, 0, deleted);
+        CommitMessageImpl commitMessage4 =
+                store.writeDVIndexFiles(
+                        partition, 0, Collections.singletonMap("f2", Arrays.asList(3)));
         store.commit(commitMessage3, commitMessage4);
 
         // assert 2
