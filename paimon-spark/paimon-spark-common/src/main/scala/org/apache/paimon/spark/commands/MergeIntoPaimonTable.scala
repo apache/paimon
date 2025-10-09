@@ -88,6 +88,8 @@ case class MergeIntoPaimonTable(
   }
 
   private def performMergeForNonPkTable(sparkSession: SparkSession): Seq[CommitMessage] = {
+    // todo: find a more universal way to make read snapshot consistent.
+    val readSnapshot = table.snapshotManager().latestSnapshot()
     val targetDS = createDataset(sparkSession, filteredTargetPlan)
     val sourceDS = createDataset(sparkSession, sourceTable)
 
@@ -113,7 +115,7 @@ case class MergeIntoPaimonTable(
         val dvDS = ds.where(
           s"$ROW_KIND_COL = ${RowKind.DELETE.toByteValue} or $ROW_KIND_COL = ${RowKind.UPDATE_AFTER.toByteValue}")
         val deletionVectors = collectDeletionVectors(dataFilePathToMeta, dvDS, sparkSession)
-        val indexCommitMsg = writer.persistDeletionVectors(deletionVectors)
+        val indexCommitMsg = writer.persistDeletionVectors(deletionVectors, readSnapshot)
 
         // Step4: filter rows that should be written as the inserted/updated data.
         val toWriteDS = ds
