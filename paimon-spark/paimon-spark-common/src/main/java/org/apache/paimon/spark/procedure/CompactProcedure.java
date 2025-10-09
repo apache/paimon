@@ -524,7 +524,7 @@ public class CompactProcedure extends BaseProcedure {
             @Nullable Predicate filter) {
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (filter != null) {
-            snapshotReader.withFilter(filter);
+            snapshotReader.withPartitionFilter(filter);
         }
         Map<BinaryRow, DataSplit[]> packedSplits = packForSort(snapshotReader.read().dataSplits());
         TableSorter sorter = TableSorter.getSorter(table, orderType, sortColumns);
