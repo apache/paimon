@@ -726,23 +726,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     .forEach(m -> appendChangelog.add(makeEntry(FileKind.ADD, commitMessage, m)));
             commitMessage
                     .newFilesIncrement()
-                    .newIndexFiles()
-                    .forEach(
-                            m ->
-                                    appendIndexFiles.add(
-                                            new IndexManifestEntry(
-                                                    FileKind.ADD,
-                                                    commitMessage.partition(),
-                                                    commitMessage.bucket(),
-                                                    m)));
-            commitMessage
-                    .newFilesIncrement()
                     .deletedIndexFiles()
                     .forEach(
                             m ->
                                     appendIndexFiles.add(
                                             new IndexManifestEntry(
                                                     FileKind.DELETE,
+                                                    commitMessage.partition(),
+                                                    commitMessage.bucket(),
+                                                    m)));
+            commitMessage
+                    .newFilesIncrement()
+                    .newIndexFiles()
+                    .forEach(
+                            m ->
+                                    appendIndexFiles.add(
+                                            new IndexManifestEntry(
+                                                    FileKind.ADD,
                                                     commitMessage.partition(),
                                                     commitMessage.bucket(),
                                                     m)));
@@ -764,23 +764,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     .forEach(m -> compactChangelog.add(makeEntry(FileKind.ADD, commitMessage, m)));
             commitMessage
                     .compactIncrement()
-                    .newIndexFiles()
-                    .forEach(
-                            m ->
-                                    compactIndexFiles.add(
-                                            new IndexManifestEntry(
-                                                    FileKind.ADD,
-                                                    commitMessage.partition(),
-                                                    commitMessage.bucket(),
-                                                    m)));
-            commitMessage
-                    .compactIncrement()
                     .deletedIndexFiles()
                     .forEach(
                             m ->
                                     compactIndexFiles.add(
                                             new IndexManifestEntry(
                                                     FileKind.DELETE,
+                                                    commitMessage.partition(),
+                                                    commitMessage.bucket(),
+                                                    m)));
+            commitMessage
+                    .compactIncrement()
+                    .newIndexFiles()
+                    .forEach(
+                            m ->
+                                    compactIndexFiles.add(
+                                            new IndexManifestEntry(
+                                                    FileKind.ADD,
                                                     commitMessage.partition(),
                                                     commitMessage.bucket(),
                                                     m)));
