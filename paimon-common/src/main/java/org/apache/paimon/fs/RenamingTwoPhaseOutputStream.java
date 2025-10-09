@@ -21,6 +21,7 @@ package org.apache.paimon.fs;
 import org.apache.paimon.annotation.Public;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.UUID;
 
 /**
@@ -94,7 +95,9 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
     }
 
     /** Committer implementation that renames temporary file to target path. */
-    private static class TempFileCommitter implements Committer {
+    private static class TempFileCommitter implements Committer, Serializable {
+
+        private static final long serialVersionUID = 1L;
 
         private final FileIO fileIO;
         private final Path tempPath;

@@ -603,7 +603,7 @@ public abstract class CatalogTestBase {
             Identifier identifier =
                     Identifier.create(dbName, "partition_table_" + format2Compression.getKey());
             schemaBuilder.option("file.compression", format2Compression.getValue().value());
-            schemaBuilder.option("file.format", format2Compression.getKey().toString());
+            schemaBuilder.option("file.format", format2Compression.getKey());
             catalog.createTable(identifier, schemaBuilder.build(), true);
             FormatTable table = (FormatTable) catalog.getTable(identifier);
             int size = 5;

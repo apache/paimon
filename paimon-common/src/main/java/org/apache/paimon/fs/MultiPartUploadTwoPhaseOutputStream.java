@@ -25,6 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.Serializable;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
@@ -161,7 +162,9 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         }
     }
 
-    private static class MultiPartUploadCommitter<T, C> implements Committer {
+    private static class MultiPartUploadCommitter<T, C> implements Committer, Serializable {
+
+        private static final long serialVersionUID = 1L;
 
         private final MultiPartUploadStore<T, C> multiPartUploadStore;
         private final String uploadId;

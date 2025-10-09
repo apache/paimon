@@ -354,7 +354,18 @@ private case class FormatTableBatchWrite(table: FormatTable, writeSchema: Struct
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {
     logInfo(s"Aborting write to FormatTable ${table.name()}")
-    // FormatTable doesn't have specific cleanup requirements for now
+    val committers = messages.collect {
+      case taskCommit: FormatTableTaskCommit => taskCommit.committers()
+    }.flatten
+
+    committers.foreach {
+      committer =>
+        try {
+          committer.discard()
+        } catch {
+          case e: Exception => logWarning(s"Failed to abort committer: ${e.getMessage}")
+        }
+    }
   }
 }
 
@@ -394,14 +405,15 @@ private class FormatTableDataWriter(
 
   override def commit(): WriterCommitMessage = {
     try {
-      val committers = formatTableWrite.prepareCommit().asScala.map {
-        case committer: TwoPhaseCommitMessage => committer.getCommitter
-        case _ => throw new IllegalArgumentException("Unsupported commit message")
-      }
-      // Execute committers immediately to avoid serialization issues
-      committers.foreach(_.commit())
-      // Return empty commit message since we already committed
-      FormatTableTaskCommit(Seq.empty)
+      val committers = formatTableWrite
+        .prepareCommit()
+        .asScala
+        .map {
+          case committer: TwoPhaseCommitMessage => committer.getCommitter
+          case _ => throw new IllegalArgumentException("Unsupported commit message")
+        }
+        .toSeq
+      FormatTableTaskCommit(committers)
     } finally {
       close()
     }
