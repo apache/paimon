@@ -1416,14 +1416,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<SimpleFileEntry> deltaEntries,
             List<IndexManifestEntry> deltaIndexEntries,
             CommitKind commitKind) {
-        Function<Throwable, RuntimeException> conflictException =
-                conflictException(commitUser, baseEntries, deltaEntries);
         String baseCommitUser = snapshot.commitUser();
         List<SimpleFileEntry> allEntries = new ArrayList<>(baseEntries);
         allEntries.addAll(deltaEntries);
 
         checkBucketKeepSame(baseEntries, deltaEntries, commitKind, allEntries, baseCommitUser);
 
+        Function<Throwable, RuntimeException> conflictException =
+                conflictException(baseCommitUser, baseEntries, deltaEntries);
         Collection<SimpleFileEntry> mergedEntries;
         try {
             // merge manifest entries and also check if the files we want to delete are still there

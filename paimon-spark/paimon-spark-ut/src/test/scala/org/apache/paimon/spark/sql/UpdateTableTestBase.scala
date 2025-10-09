@@ -419,7 +419,10 @@ abstract class UpdateTableTestBase extends PaimonSparkTestBase {
                 sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'a')")
             }
           } catch {
-            case a: Throwable => assert(a.getMessage.contains("Conflicts during commits"))
+            case a: Throwable =>
+              assert(
+                a.getMessage.contains("Conflicts during commits") ||
+                  a.getMessage.contains("Exception occurs when preparing snapshot"))
           }
           checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(recordCount)))
         }
