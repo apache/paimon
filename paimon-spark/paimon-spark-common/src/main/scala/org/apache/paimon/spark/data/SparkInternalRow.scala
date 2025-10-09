@@ -18,10 +18,12 @@
 
 package org.apache.paimon.spark.data
 
-import org.apache.paimon.types.RowType
+import org.apache.paimon.types.{DataTypeRoot, RowType}
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
+
+import java.util.OptionalInt
 
 abstract class SparkInternalRow extends InternalRow {
   def replace(row: org.apache.paimon.data.InternalRow): SparkInternalRow
@@ -30,7 +32,23 @@ abstract class SparkInternalRow extends InternalRow {
 object SparkInternalRow {
 
   def create(rowType: RowType): SparkInternalRow = {
-    SparkShimLoader.shim.createSparkInternalRow(rowType)
+    val fieldIndex = blobFieldIndex(rowType)
+    if (fieldIndex.isPresent) {
+      SparkShimLoader.shim.createSparkInternalRowWithBlob(rowType, fieldIndex.getAsInt)
+    } else {
+      SparkShimLoader.shim.createSparkInternalRow(rowType)
+    }
+  }
+
+  private def blobFieldIndex(rowType: RowType): OptionalInt = {
+    var i: Int = 0
+    while (i < rowType.getFieldCount) {
+      if (rowType.getTypeAt(i).getTypeRoot.equals(DataTypeRoot.BLOB)) {
+        return OptionalInt.of(i)
+      }
+      i += 1
+    }
+    OptionalInt.empty()
   }
 
 }

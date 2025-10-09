@@ -39,6 +39,7 @@ import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
 import org.apache.paimon.spark.catalog.functions.V1FunctionConverter;
 import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.ExceptionUtils;
@@ -92,6 +93,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -109,6 +111,7 @@ import static org.apache.paimon.spark.utils.CatalogUtils.isUpdateColumnDefaultVa
 import static org.apache.paimon.spark.utils.CatalogUtils.removeCatalogName;
 import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
 import static org.apache.paimon.spark.utils.CatalogUtils.toUpdateColumnDefaultValue;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Spark {@link TableCatalog} for paimon. */
 public class SparkCatalog extends SparkBaseCatalog
@@ -456,6 +459,7 @@ public class SparkCatalog extends SparkBaseCatalog
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Map<String, String> normalizedProperties = new HashMap<>(properties);
+        String blobFieldName = properties.get(CoreOptions.BLOB_FIELD.key());
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
         if (!usePaimon(provider)) {
             if (isFormatTable(provider)) {
@@ -488,7 +492,15 @@ public class SparkCatalog extends SparkBaseCatalog
 
         for (StructField field : schema.fields()) {
             String name = field.name();
-            DataType type = toPaimonType(field.dataType()).copy(field.nullable());
+            DataType type;
+            if (Objects.equals(blobFieldName, name)) {
+                checkArgument(
+                        field.dataType() instanceof org.apache.spark.sql.types.BinaryType,
+                        "The type of blob field must be binary");
+                type = new BlobType();
+            } else {
+                type = toPaimonType(field.dataType()).copy(field.nullable());
+            }
             String comment = field.getComment().getOrElse(() -> null);
             if (field.metadata().contains(CURRENT_DEFAULT_COLUMN_METADATA_KEY)) {
                 String defaultValue =

@@ -21,7 +21,7 @@ package org.apache.spark.sql.paimon.shims
 import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.spark.catalyst.analysis.Spark3ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark3SqlExtensionsParser
-import org.apache.paimon.spark.data.{Spark3ArrayData, Spark3InternalRow, SparkArrayData, SparkInternalRow}
+import org.apache.paimon.spark.data.{Spark3ArrayData, Spark3InternalRow, Spark3InternalRowWithBlob, SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.spark.sql.SparkSession
@@ -52,6 +52,12 @@ class Spark3Shim extends SparkShim {
 
   override def createSparkInternalRow(rowType: RowType): SparkInternalRow = {
     new Spark3InternalRow(rowType)
+  }
+
+  override def createSparkInternalRowWithBlob(
+      rowType: RowType,
+      blobFieldIndex: Int): SparkInternalRow = {
+    new Spark3InternalRowWithBlob(rowType, blobFieldIndex)
   }
 
   override def createSparkArrayData(elementType: DataType): SparkArrayData = {
