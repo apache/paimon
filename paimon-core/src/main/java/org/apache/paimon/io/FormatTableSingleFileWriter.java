@@ -19,63 +19,49 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.BundleFormatWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SupportsDirectWrite;
-import org.apache.paimon.fs.AsyncPositionOutputStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.utils.IOUtils;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.function.Function;
+import java.util.List;
 
-/**
- * A {@link FileWriter} to produce a single file.
- *
- * @param <T> type of records to write.
- * @param <R> type of result to produce after writing a file.
- */
-public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
+/** Format table's writer to produce a single file. */
+public class FormatTableSingleFileWriter {
 
-    private static final Logger LOG = LoggerFactory.getLogger(SingleFileWriter.class);
+    private static final Logger LOG = LoggerFactory.getLogger(FormatTableSingleFileWriter.class);
 
     protected final FileIO fileIO;
     protected final Path path;
-    private final Function<T, InternalRow> converter;
 
     private FormatWriter writer;
     private PositionOutputStream out;
+    private TwoPhaseOutputStream.Committer committer;
 
     protected long outputBytes;
-    private long recordCount;
     protected boolean closed;
 
-    public SingleFileWriter(
-            FileIO fileIO,
-            FormatWriterFactory factory,
-            Path path,
-            Function<T, InternalRow> converter,
-            String compression,
-            boolean asyncWrite) {
+    public FormatTableSingleFileWriter(
+            FileIO fileIO, FormatWriterFactory factory, Path path, String compression) {
         this.fileIO = fileIO;
         this.path = path;
-        this.converter = converter;
 
         try {
             if (factory instanceof SupportsDirectWrite) {
-                writer = ((SupportsDirectWrite) factory).create(fileIO, path, compression);
+                throw new UnsupportedOperationException("Does not support SupportsDirectWrite.");
             } else {
-                out = fileIO.newOutputStream(path, false);
-                if (asyncWrite) {
-                    out = new AsyncPositionOutputStream(out);
-                }
+                out = fileIO.newTwoPhaseOutputStream(path, false);
                 writer = factory.create(out, compression);
             }
         } catch (IOException e) {
@@ -88,7 +74,6 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             throw new UncheckedIOException(e);
         }
 
-        this.recordCount = 0;
         this.closed = false;
     }
 
@@ -96,69 +81,52 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         return path;
     }
 
-    @Override
-    public void write(T record) throws IOException {
-        writeImpl(record);
-    }
-
-    public void writeBundle(BundleRecords bundle) throws IOException {
+    public void write(InternalRow record) throws IOException {
         if (closed) {
             throw new RuntimeException("Writer has already closed!");
         }
 
         try {
-            if (writer instanceof BundleFormatWriter) {
-                ((BundleFormatWriter) writer).writeBundle(bundle);
-            } else {
-                for (InternalRow row : bundle) {
-                    writer.addElement(row);
-                }
-            }
-            recordCount += bundle.rowCount();
+            writer.addElement(record);
         } catch (Throwable e) {
-            LOG.warn("Exception occurs when writing file " + path + ". Cleaning up.", e);
+            LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
             abort();
             throw e;
         }
-    }
-
-    protected InternalRow writeImpl(T record) throws IOException {
-        if (closed) {
-            throw new RuntimeException("Writer has already closed!");
-        }
-
-        try {
-            InternalRow rowData = converter.apply(record);
-            writer.addElement(rowData);
-            recordCount++;
-            return rowData;
-        } catch (Throwable e) {
-            LOG.warn("Exception occurs when writing file " + path + ". Cleaning up.", e);
-            abort();
-            throw e;
-        }
-    }
-
-    @Override
-    public long recordCount() {
-        return recordCount;
     }
 
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
         return writer.reachTargetSize(suggestedCheck, targetSize);
     }
 
-    @Override
     public void abort() {
         if (writer != null) {
             IOUtils.closeQuietly(writer);
             writer = null;
         }
         if (out != null) {
-            IOUtils.closeQuietly(out);
+            try {
+                committer = ((TwoPhaseOutputStream) out).closeForCommit();
+            } catch (Throwable e) {
+                LOG.warn("Exception occurs when close for commit out {}", committer, e);
+            }
             out = null;
         }
+        if (committer != null) {
+            try {
+                committer.discard();
+            } catch (Throwable e) {
+                LOG.warn("Exception occurs when close out {}", committer, e);
+            }
+        }
         fileIO.deleteQuietly(path);
+    }
+
+    public List<TwoPhaseOutputStream.Committer> committers() {
+        if (!closed) {
+            throw new RuntimeException("Writer should be closed before getting committer!");
+        }
+        return Lists.newArrayList(committer);
     }
 
     public FileWriterAbortExecutor abortExecutor() {
@@ -169,7 +137,6 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         return new FileWriterAbortExecutor(fileIO, path);
     }
 
-    @Override
     public void close() throws IOException {
         if (closed) {
             return;
@@ -187,7 +154,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             if (out != null) {
                 out.flush();
                 outputBytes = out.getPos();
-                out.close();
+                committer = ((TwoPhaseOutputStream) out).closeForCommit();
                 out = null;
             }
         } catch (IOException e) {

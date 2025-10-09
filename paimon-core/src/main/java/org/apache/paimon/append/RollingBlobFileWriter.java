@@ -26,11 +26,11 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.FileWriterAbortExecutor;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.RowDataFileWriter;
 import org.apache.paimon.io.SingleFileWriter;
-import org.apache.paimon.io.SingleFileWriter.AbortExecutor;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -91,7 +91,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
     private final long targetFileSize;
 
     // State management
-    private final List<AbortExecutor> closedWriters;
+    private final List<FileWriterAbortExecutor> closedWriters;
     private final List<DataFileMeta> results;
     private PeojectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>
             currentWriter;
@@ -316,7 +316,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             currentWriter.abort();
             currentWriter = null;
         }
-        for (AbortExecutor abortExecutor : closedWriters) {
+        for (FileWriterAbortExecutor abortExecutor : closedWriters) {
             abortExecutor.abort();
         }
         blobWriter.abort();
