@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.PartitionSinkStrategy;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowWrapper;
@@ -204,7 +205,13 @@ public class FlinkSinkBuilder {
     public DataStreamSink<?> build() {
         setParallelismIfAdaptiveConflict();
         input = trySortInput(input);
-        DataStream<InternalRow> input = mapToInternalRow(this.input, table.rowType());
+        boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
+        DataStream<InternalRow> input =
+                mapToInternalRow(
+                        this.input,
+                        table.rowType(),
+                        blobAsDescriptor,
+                        table.catalogEnvironment().catalogContext());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
@@ -234,9 +241,16 @@ public class FlinkSinkBuilder {
     }
 
     public static DataStream<InternalRow> mapToInternalRow(
-            DataStream<RowData> input, org.apache.paimon.types.RowType rowType) {
+            DataStream<RowData> input,
+            org.apache.paimon.types.RowType rowType,
+            boolean blobAsDescriptor,
+            CatalogContext catalogContext) {
         SingleOutputStreamOperator<InternalRow> result =
-                input.map((MapFunction<RowData, InternalRow>) FlinkRowWrapper::new)
+                input.map(
+                                (MapFunction<RowData, InternalRow>)
+                                        r ->
+                                                new FlinkRowWrapper(
+                                                        r, blobAsDescriptor, catalogContext))
                         .returns(
                                 org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(
                                         rowType));
