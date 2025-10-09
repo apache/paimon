@@ -24,7 +24,6 @@ import org.apache.paimon.spark.catalog.SparkBaseCatalog
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.spark.utils.CatalogUtils.{checkNamespace, toIdentifier}
 
-import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.catalog.{CatalogStatistics, CatalogStorageFormat, CatalogTablePartition, CatalogTableType}
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
@@ -164,7 +163,7 @@ case class PaimonDescribeTableExec(
       table.partitionSchema.fieldNames.length != partitionSpec.size
       || partitionSpec.keys.exists(!table.partitionSchema.fieldNames.contains(_))
     ) {
-      throw new AnalysisException(
+      throw new UnsupportedOperationException(
         "DESCRIBE partition must specify all the correct partition columns")
     }
 
