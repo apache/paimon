@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.table
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
