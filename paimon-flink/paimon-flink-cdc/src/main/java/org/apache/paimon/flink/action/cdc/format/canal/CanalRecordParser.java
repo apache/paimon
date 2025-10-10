@@ -169,8 +169,8 @@ public class CanalRecordParser extends AbstractJsonRecordParser {
                                 typeInfo.f0, typeInfo.f1, typeInfo.f2, typeMapping);
                 schemaBuilder.column(originalName, paimonDataType);
 
-                String filedValue = Objects.toString(recordMap.get(originalName), null);
-                String newValue = transformValue(filedValue, typeInfo.f0, originalType);
+                String fieldValue = Objects.toString(recordMap.get(originalName), null);
+                String newValue = transformValue(fieldValue, typeInfo.f0, originalType);
                 rowData.put(originalName, newValue);
             }
         } else {
