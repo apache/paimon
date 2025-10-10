@@ -100,12 +100,9 @@ case class PaimonDescribeTableExec(
   }
 
   private def addSchema(rows: ArrayBuffer[InternalRow]): Unit = {
-    rows ++= table.columns().map {
+    rows ++= table.schema.map {
       column =>
-        toCatalystRow(
-          column.name,
-          column.dataType.simpleString,
-          Option(column.comment()).getOrElse(""))
+        toCatalystRow(column.name, column.dataType.simpleString, column.getComment().getOrElse(""))
     }
   }
 
