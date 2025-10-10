@@ -158,6 +158,8 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
 
     private static class MultiPartUploadCommitter<T, C> implements Committer {
 
+        private static final long serialVersionUID = 1L;
+
         private final MultiPartUploadStore<T, C> multiPartUploadStore;
         private final String uploadId;
         private final String objectName;

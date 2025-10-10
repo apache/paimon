@@ -583,7 +583,6 @@ public abstract class CatalogTestBase {
         Random random = new Random();
         String dbName = "test_db";
         catalog.createDatabase(dbName, true);
-        HadoopCompressionType compressionType = HadoopCompressionType.GZIP;
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f1", DataTypes.INT());
         schemaBuilder.column("f2", DataTypes.INT());
@@ -591,14 +590,20 @@ public abstract class CatalogTestBase {
         schemaBuilder.column("dt2", DataTypes.VARCHAR(64));
         schemaBuilder.partitionKeys("dt", "dt2");
         schemaBuilder.option("type", "format-table");
-        schemaBuilder.option("file.compression", compressionType.value());
         schemaBuilder.option("format-table.partition-path-only-value", "true");
-        String[] formats = {"csv", "parquet", "json"};
+        Pair[] format2Compressions = {
+            Pair.of("csv", HadoopCompressionType.GZIP),
+            Pair.of("parquet", HadoopCompressionType.ZSTD),
+            Pair.of("json", HadoopCompressionType.GZIP),
+            Pair.of("orc", HadoopCompressionType.ZSTD)
+        };
         int dtPartitionValue = 10;
         String dt2PartitionValue = "2022-01-01";
-        for (String format : formats) {
-            Identifier identifier = Identifier.create(dbName, "partition_table_" + format);
-            schemaBuilder.option("file.format", format);
+        for (Pair<String, HadoopCompressionType> format2Compression : format2Compressions) {
+            Identifier identifier =
+                    Identifier.create(dbName, "partition_table_" + format2Compression.getKey());
+            schemaBuilder.option("file.compression", format2Compression.getValue().value());
+            schemaBuilder.option("file.format", format2Compression.getKey());
             catalog.createTable(identifier, schemaBuilder.build(), true);
             FormatTable table = (FormatTable) catalog.getTable(identifier);
             int size = 5;
@@ -619,7 +624,7 @@ public abstract class CatalogTestBase {
             partitionSpec.put("dt2", dt2PartitionValue + 1);
             List<InternalRow> readFilterData = read(table, null, null, partitionSpec, null);
             assertThat(readFilterData).isEmpty();
-            catalog.dropTable(Identifier.create(dbName, format), true);
+            catalog.dropTable(identifier, true);
         }
     }
 
@@ -633,21 +638,26 @@ public abstract class CatalogTestBase {
         String dbName = "test_db";
         catalog.createDatabase(dbName, true);
         int partitionValue = 10;
-        HadoopCompressionType compressionType = HadoopCompressionType.GZIP;
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f1", DataTypes.INT());
         schemaBuilder.column("f2", DataTypes.INT());
         schemaBuilder.column("dt", DataTypes.INT());
         schemaBuilder.option("type", "format-table");
         schemaBuilder.option("target-file-size", "1 kb");
-        schemaBuilder.option("file.compression", compressionType.value());
-        String[] formats = {"csv", "parquet", "json"};
-        for (String format : formats) {
+        Pair[] format2Compressions = {
+            Pair.of("csv", HadoopCompressionType.GZIP),
+            Pair.of("parquet", HadoopCompressionType.ZSTD),
+            Pair.of("json", HadoopCompressionType.GZIP),
+            Pair.of("orc", HadoopCompressionType.ZSTD)
+        };
+        for (Pair<String, HadoopCompressionType> format2Compression : format2Compressions) {
             if (partitioned) {
                 schemaBuilder.partitionKeys("dt");
             }
-            Identifier identifier = Identifier.create(dbName, "table_" + format);
-            schemaBuilder.option("file.format", format);
+            Identifier identifier =
+                    Identifier.create(dbName, "table_" + format2Compression.getKey());
+            schemaBuilder.option("file.format", format2Compression.getKey());
+            schemaBuilder.option("file.compression", format2Compression.getValue().value());
             catalog.createTable(identifier, schemaBuilder.build(), true);
             FormatTable table = (FormatTable) catalog.getTable(identifier);
             int[] projection = new int[] {1, 2};
@@ -696,7 +706,7 @@ public abstract class CatalogTestBase {
                         read(table, partitionFilterPredicate, projection, null, null);
                 assertThat(readPartitionAndNoPartitionFilterData).hasSize(size);
             }
-            catalog.dropTable(Identifier.create(dbName, format), true);
+            catalog.dropTable(identifier, true);
         }
     }
 

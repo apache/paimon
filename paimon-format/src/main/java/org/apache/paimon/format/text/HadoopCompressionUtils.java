@@ -23,6 +23,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 
+import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.compress.CompressionCodec;
 import org.apache.hadoop.io.compress.CompressionCodecFactory;
@@ -101,6 +102,12 @@ public class HadoopCompressionUtils {
             Class<?> codecClass = Class.forName(codecName);
             CompressionCodec codec =
                     (CompressionCodec) codecClass.getDeclaredConstructor().newInstance();
+
+            // Set configuration for the codec if it implements Configurable
+            if (codec instanceof Configurable) {
+                ((Configurable) codec).setConf(new Configuration());
+            }
+
             codec.createOutputStream(new java.io.ByteArrayOutputStream());
             return Optional.of(codec);
         } catch (Exception | UnsatisfiedLinkError e) {
