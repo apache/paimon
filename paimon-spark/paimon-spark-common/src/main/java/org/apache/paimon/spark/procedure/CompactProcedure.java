@@ -192,6 +192,9 @@ public class CompactProcedure extends BaseProcedure {
                 table -> {
                     checkArgument(table instanceof FileStoreTable);
                     checkArgument(
+                            !((FileStoreTable) table).coreOptions().dataEvolutionEnabled(),
+                            "Compact operation is not supported when data evolution is enabled yet.");
+                    checkArgument(
                             sortColumns.stream().noneMatch(table.partitionKeys()::contains),
                             "order_by should not contain partition cols, because it is meaningless, your order_by cols are %s, and partition cols are %s",
                             sortColumns,

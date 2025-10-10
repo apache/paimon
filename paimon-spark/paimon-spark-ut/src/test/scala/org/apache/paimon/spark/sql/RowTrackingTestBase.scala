@@ -340,6 +340,21 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Data Evolution: compact table throws exception") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      for (i <- 1 to 6) {
+        sql(s"INSERT INTO t VALUES ($i, $i)")
+      }
+      assert(
+        intercept[RuntimeException] {
+          sql("CALL sys.compact(table => 't')")
+        }.getMessage
+          .contains("Compact operation is not supported when data evolution is enabled yet."))
+    }
+  }
+
   test("Data Evolution: delete table throws exception") {
     withTable("t") {
       sql(
