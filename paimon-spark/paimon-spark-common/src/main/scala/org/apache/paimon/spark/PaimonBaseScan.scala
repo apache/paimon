@@ -150,18 +150,14 @@ abstract class PaimonBaseScan(
 
     val currentSnapshot =
       try {
-        val dataTable = table match {
-          case dt: DataTable => dt
-          case _ => null
-        }
-
-        if (dataTable != null) {
-          TimeTravelUtil.tryTravelToSnapshot(
-            coreOptions.toConfiguration,
-            dataTable.snapshotManager(),
-            dataTable.tagManager())
-        } else {
-          Optional.empty()
+        table match {
+          case dataTable: DataTable =>
+            TimeTravelUtil.tryTravelToSnapshot(
+              coreOptions.toConfiguration,
+              dataTable.snapshotManager(),
+              dataTable.tagManager())
+          case _ =>
+            Optional.empty()
         }
       } catch {
         case _: Exception => Optional.empty()
