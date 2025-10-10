@@ -657,6 +657,9 @@ public class SchemaValidation {
             checkArgument(
                     BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldCount() == 1,
                     "Table with BLOB type column only support one BLOB column.");
+            checkArgument(
+                    schema.fields().size() > 1,
+                    "Table with BLOB type column must have other normal columns.");
         }
     }
 
