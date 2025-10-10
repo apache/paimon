@@ -165,7 +165,8 @@ public class FileStoreSourceReaderTest {
                 IOManager.create(tempDir.toString()),
                 null,
                 null,
-                null);
+                null,
+                false);
     }
 
     protected static FileStoreSourceSplit createTestFileSplit(String id) {

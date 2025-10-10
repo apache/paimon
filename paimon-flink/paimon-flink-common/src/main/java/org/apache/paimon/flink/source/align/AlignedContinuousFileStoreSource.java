@@ -71,7 +71,8 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
                 ioManager,
                 limit,
                 rowData,
-                readBuilder.readType());
+                readBuilder.readType(),
+                blobAsDescriptor);
     }
 
     @Override
