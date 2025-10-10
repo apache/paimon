@@ -225,7 +225,8 @@ public class FlinkSourceBuilder {
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
                         dynamicPartitionFilteringInfo,
-                        outerProject()));
+                        outerProject(),
+                        options.get(CoreOptions.BLOB_AS_DESCRIPTOR)));
     }
 
     private DataStream<RowData> buildContinuousFileSource() {

@@ -18,9 +18,13 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
@@ -54,6 +58,8 @@ public class BlobTableITCase extends CatalogITCaseBase {
         assertThat(batchSql("SELECT * FROM blob_table"))
                 .containsExactlyInAnyOrder(
                         Row.of(1, "paimon", new byte[] {72, 101, 108, 108, 111}));
+        assertThat(batchSql("SELECT picture FROM blob_table"))
+                .containsExactlyInAnyOrder(Row.of(new byte[] {72, 101, 108, 108, 111}));
         assertThat(batchSql("SELECT file_path FROM `blob_table$files`").size()).isEqualTo(2);
     }
 
@@ -73,6 +79,18 @@ public class BlobTableITCase extends CatalogITCaseBase {
                 "INSERT INTO blob_table_descriptor VALUES (1, 'paimon', X'"
                         + bytesToHex(blobDescriptor.serialize())
                         + "')");
+        byte[] newDescriptorBytes =
+                (byte[]) batchSql("SELECT picture FROM blob_table_descriptor").get(0).getField(0);
+        BlobDescriptor newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes);
+        Options options = new Options();
+        options.set("warehouse", warehouse.toString());
+        CatalogContext catalogContext = CatalogContext.create(options);
+        UriReaderFactory uriReaderFactory = new UriReaderFactory(catalogContext);
+        Blob blob =
+                Blob.fromDescriptor(
+                        uriReaderFactory.create(newBlobDescriptor.uri()), blobDescriptor);
+        assertThat(blob.toData()).isEqualTo(blobData);
+        batchSql("ALTER TABLE blob_table_descriptor SET ('blob-as-descriptor'='false')");
         assertThat(batchSql("SELECT * FROM blob_table_descriptor"))
                 .containsExactlyInAnyOrder(Row.of(1, "paimon", blobData));
     }

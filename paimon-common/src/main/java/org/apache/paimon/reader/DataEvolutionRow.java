@@ -34,6 +34,7 @@ public class DataEvolutionRow implements InternalRow {
     private final InternalRow[] rows;
     private final int[] rowOffsets;
     private final int[] fieldOffsets;
+    private RowKind rowKind;
 
     public DataEvolutionRow(int rowNumber, int[] rowOffsets, int[] fieldOffsets) {
         this.rows = new InternalRow[rowNumber];
@@ -50,6 +51,9 @@ public class DataEvolutionRow implements InternalRow {
             throw new IndexOutOfBoundsException(
                     "Position " + pos + " is out of bounds for rows size " + rows.length);
         } else {
+            if (rowKind == null) {
+                this.rowKind = row.getRowKind();
+            }
             rows[pos] = row;
         }
     }
@@ -69,12 +73,12 @@ public class DataEvolutionRow implements InternalRow {
 
     @Override
     public RowKind getRowKind() {
-        return rows[0].getRowKind();
+        return rowKind;
     }
 
     @Override
     public void setRowKind(RowKind kind) {
-        rows[0].setRowKind(kind);
+        this.rowKind = kind;
     }
 
     @Override

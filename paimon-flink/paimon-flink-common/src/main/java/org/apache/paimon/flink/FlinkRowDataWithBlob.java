@@ -18,20 +18,28 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.InternalRow;
 
 /** Convert to Flink row data with blob. */
 public class FlinkRowDataWithBlob extends FlinkRowData {
 
     private final int blobField;
+    private final boolean blobAsDescriptor;
 
-    public FlinkRowDataWithBlob(InternalRow row, int blobField) {
+    public FlinkRowDataWithBlob(InternalRow row, int blobField, boolean blobAsDescriptor) {
         super(row);
         this.blobField = blobField;
+        this.blobAsDescriptor = blobAsDescriptor;
     }
 
     @Override
     public byte[] getBinary(int pos) {
-        return pos == blobField ? row.getBlob(pos).toData() : row.getBinary(pos);
+        if (pos == blobField) {
+            Blob blob = row.getBlob(pos);
+            return blobAsDescriptor ? blob.toDescriptor().serialize() : blob.toData();
+        } else {
+            return row.getBinary(pos);
+        }
     }
 }

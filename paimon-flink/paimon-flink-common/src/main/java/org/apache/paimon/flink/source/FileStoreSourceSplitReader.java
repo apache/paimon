@@ -76,12 +76,14 @@ public class FileStoreSourceSplitReader
     private boolean paused;
     private final AtomicBoolean wakeup;
     private final FileStoreSourceReaderMetrics metrics;
+    private final boolean blobAsDescriptor;
 
     public FileStoreSourceSplitReader(
             TableRead tableRead,
             @Nullable RecordLimiter limiter,
             FileStoreSourceReaderMetrics metrics,
-            @Nullable RowType readType) {
+            @Nullable RowType readType,
+            boolean blobAsDescriptor) {
         this.tableRead = tableRead;
         this.limiter = limiter;
         this.splits = new LinkedList<>();
@@ -90,6 +92,7 @@ public class FileStoreSourceSplitReader
         this.paused = false;
         this.metrics = metrics;
         this.wakeup = new AtomicBoolean(false);
+        this.blobAsDescriptor = blobAsDescriptor;
     }
 
     @Override
@@ -304,7 +307,7 @@ public class FileStoreSourceSplitReader
             recordAndPosition.setNext(
                     blobField == null
                             ? new FlinkRowData(row)
-                            : new FlinkRowDataWithBlob(row, blobField));
+                            : new FlinkRowDataWithBlob(row, blobField, blobAsDescriptor));
             currentNumRead++;
             if (limiter != null) {
                 limiter.increment();
