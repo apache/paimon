@@ -28,7 +28,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.catalog.{CatalogStatistics, CatalogStorageFormat, CatalogTablePartition, CatalogTableType}
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.catalyst.expressions.Attribute
-import org.apache.spark.sql.catalyst.util.{quoteIfNeeded, ResolveDefaultColumns}
+import org.apache.spark.sql.catalyst.util.quoteIfNeeded
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, SupportsMetadataColumns, TableCatalog}
 import org.apache.spark.sql.connector.expressions.IdentityTransform
 import org.apache.spark.sql.types.StructType
@@ -92,11 +92,29 @@ case class PaimonDescribeTableExec(
     rows += toCatalystRow("Table Properties", properties, "")
 
     // If any columns have default values, append them to the result.
-    ResolveDefaultColumns.getDescribeMetadata(table.schema).foreach {
+    getDescribeMetadata(table.schema).foreach {
       row => rows += toCatalystRow(row._1, row._2, row._3)
     }
 
     addNotNullMetadata(table.schema, rows)
+  }
+
+  def getDescribeMetadata(schema: StructType): Seq[(String, String, String)] = {
+    val rows = new ArrayBuffer[(String, String, String)]()
+    if (
+      schema.fields.exists(
+        _.metadata.contains(PaimonDescribeTableExec.CURRENT_DEFAULT_COLUMN_METADATA_KEY))
+    ) {
+      rows.append(("", "", ""))
+      rows.append(("# Column Default Values", "", ""))
+      schema.foreach {
+        column =>
+          column.getCurrentDefaultValue().map {
+            value => rows.append((column.name, column.dataType.simpleString, value))
+          }
+      }
+    }
+    rows.toSeq
   }
 
   private def addSchema(rows: ArrayBuffer[InternalRow]): Unit = {
@@ -218,4 +236,13 @@ case class PaimonDescribeTableExec(
   }
 
   private def emptyRow(): InternalRow = toCatalystRow("", "", "")
+}
+
+object PaimonDescribeTableExec {
+  // This column metadata indicates the default value associated with a particular table column that
+  // is in effect at any given time. Its value begins at the time of the initial CREATE/REPLACE
+  // TABLE statement with DEFAULT column definition(s), if any. It then changes whenever an ALTER
+  // TABLE statement SETs the DEFAULT. The intent is for this "current default" to be used by
+  // UPDATE, INSERT and MERGE, which evaluate each default expression for each row.
+  val CURRENT_DEFAULT_COLUMN_METADATA_KEY = "CURRENT_DEFAULT"
 }

@@ -21,7 +21,7 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.partition.PartitionStatistics
 import org.apache.paimon.spark.PaimonSparkTestBase
 
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{DataFrame, Row}
 import org.junit.jupiter.api.Assertions
 
 import java.util.Objects
@@ -158,7 +158,7 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertTrue(Objects.equals(comment, loadTable(tableName).schema().comment()))
   }
 
-  test("Paimon describe: describe table partition") {
+  protected def describeTablePartitionCreateTable(): Unit = {
     spark.sql("""
                 |CREATE TABLE T (
                 |  id INT NOT NULL,
@@ -166,6 +166,19 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
                 |  age INT COMMENT 'Age')
                 |  PARTITIONED BY (year INT COMMENT 'Year', month INT, day INT)
                 |""".stripMargin)
+  }
+
+  protected def describeTablePartitionCheckDefaultValue(res: DataFrame): Unit = {
+    checkAnswer(
+      res
+        .filter("col_name = 'name' AND comment != ''")
+        .select("col_name", "data_type", "comment"),
+      Row("name", "string", "'Bob'") :: Nil
+    )
+  }
+
+  test("Paimon describe: describe table partition") {
+    describeTablePartitionCreateTable()
     spark.sql("""
                 |INSERT INTO T VALUES (1, 'a', 16, 2025, 9, 20),
                 |                     (2, 'b', 17, 2025, 9, 21),
@@ -189,12 +202,8 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
       Row("age", "int", "Age") :: Nil
     )
     // Check default value.
-    checkAnswer(
-      res
-        .filter("col_name = 'name' AND comment != ''")
-        .select("col_name", "data_type", "comment"),
-      Row("name", "string", "'Bob'") :: Nil
-    )
+    describeTablePartitionCheckDefaultValue(res)
+
     // Check column not null.
     checkAnswer(
       res
