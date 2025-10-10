@@ -71,7 +71,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         buffer.write(b);
         position++;
         if (buffer.size() >= partSizeThreshold()) {
-            uploadPart(false);
+            uploadPart();
         }
     }
 
@@ -88,7 +88,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         buffer.write(b, off, len);
         position += len;
         if (buffer.size() >= partSizeThreshold()) {
-            uploadPart(false);
+            uploadPart();
         }
     }
 
@@ -115,14 +115,14 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         closed = true;
 
         if (buffer.size() > 0) {
-            uploadPart(true);
+            uploadPart();
         }
 
         return new MultiPartUploadCommitter(
                 multiPartUploadStore, uploadId, uploadedParts, objectName, position);
     }
 
-    private void uploadPart(boolean isLastPart) throws IOException {
+    private void uploadPart() throws IOException {
         if (buffer.size() == 0) {
             return;
         }
@@ -137,12 +137,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             }
             T partETag =
                     multiPartUploadStore.uploadPart(
-                            objectName,
-                            uploadId,
-                            uploadedParts.size() + 1,
-                            isLastPart,
-                            tempFile,
-                            data.length);
+                            objectName, uploadId, uploadedParts.size() + 1, tempFile, data.length);
             uploadedParts.add(partETag);
             buffer.reset();
         } catch (Exception e) {

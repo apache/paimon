@@ -178,11 +178,6 @@
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-reload4j</artifactId>
                 </exclusion>
-                <!-- Exclude jeysey-json because of incompatible license -->
-                <exclusion>
-                    <groupId>com.github.pjfanning</groupId>
-                    <artifactId>jersey-json</artifactId>
-                </exclusion>
             </exclusions>
         </dependency>
     </dependencies>
