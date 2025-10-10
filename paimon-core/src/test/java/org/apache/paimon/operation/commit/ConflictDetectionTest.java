@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.operation.commit;
 
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -41,12 +41,11 @@ import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.manifest.FileKind.ADD;
 import static org.apache.paimon.manifest.FileKind.DELETE;
-import static org.apache.paimon.utils.ConflictDeletionUtils.buildBaseEntriesWithDV;
-import static org.apache.paimon.utils.ConflictDeletionUtils.buildDeltaEntriesWithDV;
+import static org.apache.paimon.operation.commit.ConflictDetection.buildBaseEntriesWithDV;
+import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEntriesWithDV;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link ConflictDeletionUtils}. */
-public class ConflictDeletionUtilsTest {
+class ConflictDetectionTest {
 
     @Test
     public void testBuildBaseEntriesWithDV() {
