@@ -22,6 +22,7 @@ import org.apache.paimon.spark.AbstractSparkInternalRow
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.unsafe.types.VariantVal
+import org.apache.spark.sql.catalyst.InternalRow
 
 class Spark4InternalRowWithBlob(rowType: RowType, blobFieldIndex: Int, blobAsDescriptor: Boolean)
   extends Spark4InternalRow(rowType) {

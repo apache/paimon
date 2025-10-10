@@ -18,8 +18,6 @@
 
 package org.apache.paimon.spark.data
 
-import org.apache.paimon.data.BlobDescriptor
-import org.apache.paimon.spark.AbstractSparkInternalRow
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.InternalRowUtils.copyInternalRow
 
