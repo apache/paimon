@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class BlobTableITCase extends CatalogITCaseBase {
 
     private static final Random RANDOM = new Random();
-    @TempDir public Path warehouse;
+    @TempDir private Path warehouse;
 
     @Override
     protected List<String> ddl() {
@@ -62,7 +62,7 @@ public class BlobTableITCase extends CatalogITCaseBase {
         byte[] blobData = new byte[1024 * 1024];
         RANDOM.nextBytes(blobData);
         FileIO fileIO = new LocalFileIO();
-        String uri = "file://" + warehouse.toString() + "/external_blob";
+        String uri = "file://" + warehouse + "/external_blob";
         try (OutputStream outputStream =
                 fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
             outputStream.write(blobData);

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.spark.write.DataWriteHelper
@@ -35,7 +36,9 @@ case class SparkTableWrite(
     rowKindColIdx: Int = -1,
     writeRowTracking: Boolean = false,
     fullCompactionDeltaCommits: Option[Int],
-    batchId: Long)
+    batchId: Long,
+    blobAsDescriptor: Boolean,
+    catalogContext: CatalogContext)
   extends SparkTableWriteTrait
   with DataWriteHelper {
 
@@ -51,7 +54,7 @@ case class SparkTableWrite(
   }
 
   private val toPaimonRow = {
-    SparkRowUtils.toPaimonRow(writeType, rowKindColIdx)
+    SparkRowUtils.toPaimonRow(writeType, rowKindColIdx, blobAsDescriptor, catalogContext)
   }
 
   def write(row: Row): Unit = {

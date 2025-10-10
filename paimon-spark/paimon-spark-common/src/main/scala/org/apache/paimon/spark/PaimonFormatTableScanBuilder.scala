@@ -61,7 +61,11 @@ case class PaimonFormatTableScan(
   }
 
   override def toBatch: Batch = {
-    PaimonBatch(getInputPartitions(getOriginSplits), readBuilder, metadataColumns)
+    PaimonBatch(
+      getInputPartitions(getOriginSplits),
+      readBuilder,
+      coreOptions.blobAsDescriptor(),
+      metadataColumns)
   }
 
   override def supportedCustomMetrics: Array[CustomMetric] = {

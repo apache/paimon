@@ -32,9 +32,16 @@ abstract class SparkInternalRow extends InternalRow {
 object SparkInternalRow {
 
   def create(rowType: RowType): SparkInternalRow = {
+    create(rowType, blobAsDescriptor = false)
+  }
+
+  def create(rowType: RowType, blobAsDescriptor: Boolean): SparkInternalRow = {
     val fieldIndex = blobFieldIndex(rowType)
     if (fieldIndex.isPresent) {
-      SparkShimLoader.shim.createSparkInternalRowWithBlob(rowType, fieldIndex.getAsInt)
+      SparkShimLoader.shim.createSparkInternalRowWithBlob(
+        rowType,
+        fieldIndex.getAsInt,
+        blobAsDescriptor)
     } else {
       SparkShimLoader.shim.createSparkInternalRow(rowType)
     }

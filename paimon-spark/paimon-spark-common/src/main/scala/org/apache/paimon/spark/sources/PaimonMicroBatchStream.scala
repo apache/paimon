@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sources
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{PaimonImplicits, PaimonInputPartition, PaimonPartitionReaderFactory, SparkConnectorOptions}
 import org.apache.paimon.table.DataTable
@@ -90,6 +91,8 @@ class PaimonMicroBatchStream(
       .getOrElse(ReadLimit.allAvailable())
   }
 
+  private lazy val blobAsDescriptor: Boolean = options.get(CoreOptions.BLOB_AS_DESCRIPTOR)
+
   override def getDefaultReadLimit: ReadLimit = defaultReadLimit
 
   override def prepareForTriggerAvailableNow(): Unit = {
@@ -127,7 +130,7 @@ class PaimonMicroBatchStream(
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {
-    PaimonPartitionReaderFactory(readBuilder)
+    PaimonPartitionReaderFactory(readBuilder, blobAsDescriptor = blobAsDescriptor)
   }
 
   override def initialOffset(): Offset = {

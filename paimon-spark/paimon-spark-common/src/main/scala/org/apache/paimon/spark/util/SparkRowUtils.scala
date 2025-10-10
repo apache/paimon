@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.util
 
+import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.types.{RowKind, RowType}
 
@@ -26,10 +27,20 @@ import org.apache.spark.sql.types.StructType
 
 object SparkRowUtils {
 
-  def toPaimonRow(writeType: RowType, rowkindColIdx: Int): Row => SparkRow = {
+  def toPaimonRow(
+      writeType: RowType,
+      rowkindColIdx: Int,
+      blobAsDescriptor: Boolean,
+      catalogContext: CatalogContext): Row => SparkRow = {
     if (rowkindColIdx != -1) {
-      row => new SparkRow(writeType, row, RowKind.fromByteValue(row.getByte(rowkindColIdx)))
-    } else { row => new SparkRow(writeType, row) }
+      row =>
+        new SparkRow(
+          writeType,
+          row,
+          RowKind.fromByteValue(row.getByte(rowkindColIdx)),
+          blobAsDescriptor,
+          catalogContext)
+    } else { row => new SparkRow(writeType, row, RowKind.INSERT, blobAsDescriptor, catalogContext) }
   }
 
   def getFieldIndex(schema: StructType, colName: String): Int = {

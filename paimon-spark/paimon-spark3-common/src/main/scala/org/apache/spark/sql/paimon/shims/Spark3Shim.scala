@@ -56,8 +56,9 @@ class Spark3Shim extends SparkShim {
 
   override def createSparkInternalRowWithBlob(
       rowType: RowType,
-      blobFieldIndex: Int): SparkInternalRow = {
-    new Spark3InternalRowWithBlob(rowType, blobFieldIndex)
+      blobFieldIndex: Int,
+      blobAsDescriptor: Boolean): SparkInternalRow = {
+    new Spark3InternalRowWithBlob(rowType, blobFieldIndex, blobAsDescriptor)
   }
 
   override def createSparkArrayData(elementType: DataType): SparkArrayData = {
