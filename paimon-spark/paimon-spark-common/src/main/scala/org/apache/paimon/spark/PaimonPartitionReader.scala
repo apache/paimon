@@ -39,7 +39,8 @@ import scala.collection.JavaConverters._
 case class PaimonPartitionReader(
     readBuilder: ReadBuilder,
     partition: PaimonInputPartition,
-    metadataColumns: Seq[PaimonMetadataColumn]
+    metadataColumns: Seq[PaimonMetadataColumn],
+    blobAsDescriptor: Boolean
 ) extends PartitionReader[InternalRow] {
 
   private val splits: Iterator[Split] = partition.splits.toIterator
@@ -51,7 +52,7 @@ case class PaimonPartitionReader(
     val dataFields = new JList(readBuilder.readType().getFields)
     dataFields.addAll(metadataColumns.map(_.toPaimonDataField).asJava)
     val rowType = new RowType(dataFields)
-    SparkInternalRow.create(rowType)
+    SparkInternalRow.create(rowType, blobAsDescriptor)
   }
 
   private lazy val read = readBuilder.newRead().withIOManager(ioManager)

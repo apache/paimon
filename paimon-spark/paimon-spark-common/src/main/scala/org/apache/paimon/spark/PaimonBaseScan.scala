@@ -88,7 +88,7 @@ abstract class PaimonBaseScan(
   }
 
   override def toBatch: Batch = {
-    PaimonBatch(lazyInputPartitions, readBuilder, metadataColumns)
+    PaimonBatch(lazyInputPartitions, readBuilder, coreOptions.blobAsDescriptor(), metadataColumns)
   }
 
   override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream = {

@@ -18,13 +18,18 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.CatalogContext
+import org.apache.paimon.data.Blob
 import org.apache.paimon.data.BlobDescriptor
 import org.apache.paimon.fs.Path
 import org.apache.paimon.fs.local.LocalFileIO
+import org.apache.paimon.options.Options
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.sql.Row
 
+import java.util
 import java.util.Random
 
 class BlobTestBase extends PaimonSparkTestBase {
@@ -62,6 +67,17 @@ class BlobTestBase extends PaimonSparkTestBase {
         "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')")
       sql("INSERT INTO t VALUES (1, 'paimon', X'" + bytesToHex(blobDescriptor.serialize()) + "')")
 
+      val newDescriptorBytes =
+        sql("SELECT picture FROM t").collect()(0).get(0).asInstanceOf[Array[Byte]]
+      val newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes)
+      val options = new Options()
+      options.set("warehouse", tempDBDir.toString)
+      val catalogContext = CatalogContext.create(options)
+      val uriReaderFactory = new UriReaderFactory(catalogContext)
+      val blob = Blob.fromDescriptor(uriReaderFactory.create(newBlobDescriptor.uri), blobDescriptor)
+      assert(util.Arrays.equals(blobData, blob.toData))
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
         Seq(Row(1, "paimon", blobData, 0, 1))

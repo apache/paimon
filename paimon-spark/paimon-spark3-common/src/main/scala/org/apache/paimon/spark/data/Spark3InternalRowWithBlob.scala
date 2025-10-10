@@ -18,17 +18,28 @@
 
 package org.apache.paimon.spark.data
 
+import org.apache.paimon.data.BlobDescriptor
 import org.apache.paimon.spark.AbstractSparkInternalRow
 import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.InternalRowUtils.copyInternalRow
 
-class Spark3InternalRowWithBlob(rowType: RowType, blobFieldIndex: Int)
+import org.apache.spark.sql.catalyst.InternalRow
+
+class Spark3InternalRowWithBlob(rowType: RowType, blobFieldIndex: Int, blobAsDescriptor: Boolean)
   extends Spark3InternalRow(rowType) {
 
   override def getBinary(ordinal: Int): Array[Byte] = {
     if (ordinal == blobFieldIndex) {
-      row.getBlob(ordinal).toData
+      if (blobAsDescriptor) {
+        row.getBlob(ordinal).toDescriptor.serialize()
+      } else {
+        row.getBlob(ordinal).toData
+      }
     } else {
       super.getBinary(ordinal)
     }
   }
+
+  override def copy: InternalRow =
+    SparkInternalRow.create(rowType, blobAsDescriptor).replace(copyInternalRow(row, rowType))
 }
