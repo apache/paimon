@@ -33,7 +33,6 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests for {@link DataEvolutionRow}. */
@@ -53,7 +52,9 @@ public class DataEvolutionRowTest {
         int[] fieldOffsets = new int[] {0, 0, -1, 1};
 
         dataEvolutionRow = new DataEvolutionRow(2, rowOffsets, fieldOffsets);
+        when(row1.getRowKind()).thenReturn(RowKind.INSERT);
         dataEvolutionRow.setRow(0, row1);
+        when(row2.getRowKind()).thenReturn(RowKind.INSERT);
         dataEvolutionRow.setRow(1, row2);
     }
 
@@ -71,10 +72,8 @@ public class DataEvolutionRowTest {
 
     @Test
     public void testRowKind() {
-        dataEvolutionRow.setRowKind(RowKind.INSERT);
-        verify(row1).setRowKind(RowKind.INSERT);
-
-        when(row1.getRowKind()).thenReturn(RowKind.DELETE);
+        assertThat(dataEvolutionRow.getRowKind()).isEqualTo(RowKind.INSERT);
+        dataEvolutionRow.setRowKind(RowKind.DELETE);
         assertThat(dataEvolutionRow.getRowKind()).isEqualTo(RowKind.DELETE);
     }
 
