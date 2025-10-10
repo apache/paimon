@@ -20,6 +20,7 @@ package org.apache.paimon.spark.data
 
 import org.apache.paimon.spark.AbstractSparkInternalRow
 import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.InternalRowUtils.copyInternalRow
 
 import org.apache.spark.unsafe.types.VariantVal
 import org.apache.spark.sql.catalyst.InternalRow
