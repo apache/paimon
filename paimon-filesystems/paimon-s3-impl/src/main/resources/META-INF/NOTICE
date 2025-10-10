@@ -6,13 +6,12 @@ The Apache Software Foundation (http://www.apache.org/).
 
 This project bundles the following dependencies under the Apache Software License 2.0 (http://www.apache.org/licenses/LICENSE-2.0.txt)
 
-- software.amazon.awssdk:core:2.29.52
-- software.amazon.awssdk:dynamodb:2.29.52
-- software.amazon.awssdk:kms:2.29.52
-- software.amazon.awssdk:s3:2.29.52
-- software.amazon.awssdk:sts:2.29.52
-- software.amazon.awssdk:jmespath:2.29.52
-- software.amazon.s3.analyticsaccelerator:analyticsaccelerator-s3:1.2.1
+- com.amazonaws:aws-java-sdk-core:1.12.319
+- com.amazonaws:aws-java-sdk-dynamodb:1.12.319
+- com.amazonaws:aws-java-sdk-kms:1.12.319
+- com.amazonaws:aws-java-sdk-s3:1.12.319
+- com.amazonaws:aws-java-sdk-sts:1.12.319
+- com.amazonaws:jmespath-java:1.12.319
 - com.fasterxml.jackson.core:jackson-annotations:2.14.2
 - com.fasterxml.jackson.core:jackson-core:2.14.2
 - com.fasterxml.jackson.core:jackson-databind:2.14.2
@@ -96,7 +95,3 @@ This project bundles the following dependencies under the Eclipse Distribution L
 You find it under licenses/LICENSE.jakarta
 
 - jakarta.activation:jakarta.activation-api:1.2.1
-
-NOTICE file for software developed by Amazon Web Services, Inc:
-
-Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.

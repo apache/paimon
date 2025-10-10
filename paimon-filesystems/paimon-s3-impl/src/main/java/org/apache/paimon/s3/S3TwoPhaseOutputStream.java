@@ -21,19 +21,17 @@ package org.apache.paimon.s3;
 import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
 
-import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadResponse;
-import software.amazon.awssdk.services.s3.model.CompletedPart;
+import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
+import com.amazonaws.services.s3.model.PartETag;
 
 import java.io.IOException;
 
 /** S3 implementation of TwoPhaseOutputStream using multipart upload. */
 public class S3TwoPhaseOutputStream
-        extends MultiPartUploadTwoPhaseOutputStream<
-                CompletedPart, CompleteMultipartUploadResponse> {
+        extends MultiPartUploadTwoPhaseOutputStream<PartETag, CompleteMultipartUploadResult> {
 
     public S3TwoPhaseOutputStream(
-            MultiPartUploadStore<CompletedPart, CompleteMultipartUploadResponse>
-                    multiPartUploadStore,
+            MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore,
             org.apache.hadoop.fs.Path hadoopPath)
             throws IOException {
         super(multiPartUploadStore, hadoopPath);

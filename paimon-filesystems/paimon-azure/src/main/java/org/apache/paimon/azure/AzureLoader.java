@@ -25,6 +25,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.plugin.PluginLoader;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** Azure Blob Storage {@link FileIOLoader}. */
 public class AzureLoader implements FileIOLoader {
 
@@ -46,6 +49,14 @@ public class AzureLoader implements FileIOLoader {
     @Override
     public String getScheme() {
         return "abfs";
+    }
+
+    @Override
+    public List<String[]> requiredOptions() {
+        List<String[]> options = new ArrayList<>();
+        options.add(new String[] {"azure.account-name", "fs.azure.account.name"});
+        options.add(new String[] {"azure.account-key", "fs.azure.account.key"});
+        return options;
     }
 
     @Override
