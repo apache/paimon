@@ -110,7 +110,10 @@ case class PaimonSparkWriter(
       rowKindColIdx,
       writeRowTracking,
       fullCompactionDeltaCommits,
-      batchId)
+      batchId,
+      coreOptions.blobAsDescriptor(),
+      table.catalogEnvironment().catalogContext()
+    )
 
     def sparkParallelism = {
       val defaultParallelism = sparkSession.sparkContext.defaultParallelism
@@ -407,7 +410,11 @@ case class PaimonSparkWriter(
               .bootstrap(numSparkPartitions, sparkPartitionId)
               .toCloseableIterator
             TaskContext.get().addTaskCompletionListener[Unit](_ => bootstrapIterator.close())
-            val toPaimonRow = SparkRowUtils.toPaimonRow(rowType, rowKindColIdx)
+            val toPaimonRow = SparkRowUtils.toPaimonRow(
+              rowType,
+              rowKindColIdx,
+              table.coreOptions().blobAsDescriptor(),
+              table.catalogEnvironment().catalogContext())
 
             bootstrapIterator.asScala
               .map(

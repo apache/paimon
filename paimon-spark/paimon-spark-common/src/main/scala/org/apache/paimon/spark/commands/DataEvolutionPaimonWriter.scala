@@ -75,7 +75,9 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteH
             val write = DataEvolutionSparkTableWrite(
               table.newBatchWriteBuilder(),
               writeType,
-              firstRowIdToPartitionMap)
+              firstRowIdToPartitionMap,
+              coreOptions.blobAsDescriptor(),
+              table.catalogEnvironment().catalogContext())
             try {
               iter.foreach(row => write.write(row))
               write.finish()
