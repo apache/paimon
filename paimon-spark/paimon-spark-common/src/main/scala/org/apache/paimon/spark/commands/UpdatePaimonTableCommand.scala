@@ -143,31 +143,32 @@ case class UpdatePaimonTableCommand(
   private def writeUpdatedAndUnchangedData(
       sparkSession: SparkSession,
       toUpdateScanRelation: LogicalPlan): Seq[CommitMessage] = {
+
+    def rowIdCol = col(ROW_ID_COLUMN)
+
+    def sequenceNumberCol = toColumn(
+      optimizedIf(
+        condition,
+        Literal(null),
+        toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
+      .as(SEQUENCE_NUMBER_COLUMN)
+
     var updateColumns = updateExpressions.zip(relation.output).map {
-      case (_, origin) if origin.name == ROW_ID_COLUMN =>
-        col(ROW_ID_COLUMN)
-      case (_, origin) if origin.name == SEQUENCE_NUMBER_COLUMN =>
-        toColumn(
-          optimizedIf(
-            condition,
-            Literal(null),
-            toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
-          .as(SEQUENCE_NUMBER_COLUMN)
+      case (_, origin) if origin.name == ROW_ID_COLUMN => rowIdCol
+      case (_, origin) if origin.name == SEQUENCE_NUMBER_COLUMN => sequenceNumberCol
       case (update, origin) =>
         val updated = optimizedIf(condition, update, origin)
         toColumn(updated).as(origin.name, origin.metadata)
     }
 
-    if (coreOptions.rowTrackingEnabled() && !relation.outputSet.exists(_.name == ROW_ID_COLUMN)) {
-      updateColumns ++= Seq(
-        col(ROW_ID_COLUMN),
-        toColumn(
-          optimizedIf(
-            condition,
-            Literal(null),
-            toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
-          .as(SEQUENCE_NUMBER_COLUMN)
-      )
+    if (coreOptions.rowTrackingEnabled()) {
+      val outputSet = relation.outputSet
+      if (!outputSet.exists(_.name == ROW_ID_COLUMN)) {
+        updateColumns ++= Seq(rowIdCol)
+      }
+      if (!outputSet.exists(_.name == SEQUENCE_NUMBER_COLUMN)) {
+        updateColumns ++= Seq(sequenceNumberCol)
+      }
     }
 
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
