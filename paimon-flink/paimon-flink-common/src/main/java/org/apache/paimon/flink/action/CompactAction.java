@@ -19,9 +19,13 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.cluster.IncrementalClusterManager;
+import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.cluster.IncrementalClusterSplitSource;
+import org.apache.paimon.flink.cluster.RewriteIncrementalClusterCommittableOperator;
 import org.apache.paimon.flink.compact.AppendTableCompactBuilder;
 import org.apache.paimon.flink.postpone.PostponeBucketCompactSplitSource;
 import org.apache.paimon.flink.postpone.RewritePostponeBucketCommittableOperator;
@@ -32,7 +36,10 @@ import org.apache.paimon.flink.sink.CompactorSinkBuilder;
 import org.apache.paimon.flink.sink.FixedBucketSink;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
+import org.apache.paimon.flink.sink.RowAppendTableSink;
 import org.apache.paimon.flink.sink.RowDataChannelComputer;
+import org.apache.paimon.flink.sorter.TableSortInfo;
+import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
@@ -43,6 +50,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
@@ -68,6 +76,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
@@ -148,7 +157,11 @@ public class CompactAction extends TableActionBase {
         if (fileStoreTable.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
             return buildForPostponeBucketCompaction(env, fileStoreTable, isStreaming);
         } else if (fileStoreTable.bucketMode() == BucketMode.BUCKET_UNAWARE) {
-            buildForAppendTableCompact(env, fileStoreTable, isStreaming);
+            if (fileStoreTable.coreOptions().clusteringIncrementalEnabled()) {
+                buildForIncrementalClustering(env, fileStoreTable, isStreaming);
+            } else {
+                buildForAppendTableCompact(env, fileStoreTable, isStreaming);
+            }
             return true;
         } else {
             buildForBucketedTableCompact(env, fileStoreTable, isStreaming);
@@ -201,6 +214,109 @@ public class CompactAction extends TableActionBase {
         builder.withContinuousMode(isStreaming);
         builder.withPartitionIdleTime(partitionIdleTime);
         builder.build();
+    }
+
+    private void buildForIncrementalClustering(
+            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming) {
+        checkArgument(
+                !isStreaming, "Postpone bucket compaction currently only supports batch mode");
+        checkArgument(
+                partitions == null,
+                "Postpone bucket compaction currently does not support specifying partitions");
+        checkArgument(
+                whereSql == null,
+                "Postpone bucket compaction currently does not support predicates");
+
+        IncrementalClusterManager incrementalClusterManager = new IncrementalClusterManager(table);
+
+        // incremental cluster config
+        if (fullCompaction == null) {
+            fullCompaction = false;
+        }
+        Options options = new Options(table.options());
+        Integer sinkParallelism = options.get(FlinkConnectorOptions.SINK_PARALLELISM);
+        int localSampleMagnification = table.coreOptions().getLocalSampleMagnification();
+        if (localSampleMagnification < 20) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "the config '%s=%d' should not be set too small, greater than or equal to 20 is needed.",
+                            CoreOptions.SORT_COMPACTION_SAMPLE_MAGNIFICATION.key(),
+                            localSampleMagnification));
+        }
+        TableSortInfo sortInfo =
+                new TableSortInfo.Builder()
+                        .setSortColumns(incrementalClusterManager.clusterKeys())
+                        .setSortStrategy(incrementalClusterManager.clusterCurve())
+                        .setSinkParallelism(sinkParallelism)
+                        .setLocalSampleSize(sinkParallelism * localSampleMagnification)
+                        .setGlobalSampleSize(sinkParallelism * 1000)
+                        .setRangeNumber(sinkParallelism * 10)
+                        .build();
+        String commitUser = CoreOptions.createCommitUser(options);
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        table.coreOptions().partitionDefaultName(),
+                        table.store().partitionType(),
+                        table.partitionKeys().toArray(new String[0]),
+                        table.coreOptions().legacyPartitionName());
+
+        // 1. pick cluster files for each partition
+        Map<BinaryRow, CompactUnit> compactUnits =
+                incrementalClusterManager.prepareForCluster(fullCompaction);
+        Map<BinaryRow, DataSplit[]> partitionSplits =
+                compactUnits.entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        Map.Entry::getKey,
+                                        entry ->
+                                                incrementalClusterManager
+                                                        .toSplits(
+                                                                entry.getKey(),
+                                                                entry.getValue().files())
+                                                        .toArray(new DataSplit[0])));
+
+        // 2. handle in partition
+        List<DataStream<Committable>> dataStreams = new ArrayList<>();
+
+        for (Map.Entry<BinaryRow, DataSplit[]> entry : partitionSplits.entrySet()) {
+            DataSplit[] splits = entry.getValue();
+            LinkedHashMap<String, String> partitionSpec =
+                    partitionComputer.generatePartValues(entry.getKey());
+            Pair<DataStream<RowData>, DataStream<Committable>> sourcePair =
+                    IncrementalClusterSplitSource.buildSource(
+                            env,
+                            table,
+                            partitionSpec,
+                            splits,
+                            options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
+
+            // cluster in partition
+            DataStream<RowData> sorted =
+                    TableSorter.getSorter(env, sourcePair.getLeft(), table, sortInfo).sort();
+
+            // rewrite
+            RowAppendTableSink sink = new RowAppendTableSink(table, null, null, sinkParallelism);
+            DataStream<Committable> clusterCommittable =
+                    sink.doWrite(
+                                    FlinkSinkBuilder.mapToInternalRow(sorted, table.rowType()),
+                                    commitUser,
+                                    sinkParallelism)
+                            .forward()
+                            .transform(
+                                    "Rewrite compact committable",
+                                    new CommittableTypeInfo(),
+                                    new RewriteIncrementalClusterCommittableOperator(
+                                            table, compactUnits));
+            dataStreams.add(clusterCommittable);
+        }
+
+        // 3. commit
+        RowAppendTableSink sink = new RowAppendTableSink(table, null, null, sinkParallelism);
+        DataStream<Committable> dataStream = dataStreams.get(0);
+        for (int i = 1; i < dataStreams.size(); i++) {
+            dataStream = dataStream.union(dataStreams.get(i));
+        }
+        sink.doCommit(dataStream, commitUser);
     }
 
     protected PartitionPredicate getPartitionPredicate() throws Exception {
