@@ -151,7 +151,7 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public TableRead newRead() {
-        return new FormatTableRead(readType(), this, filter, limit);
+        return new FormatTableRead(readType(), table.rowType(), this, filter, limit);
     }
 
     protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {

@@ -651,8 +651,8 @@ public abstract class CatalogTestBase {
             catalog.createTable(identifier, schemaBuilder.build(), true);
             FormatTable table = (FormatTable) catalog.getTable(identifier);
             int[] projection = new int[] {1, 2};
-            PredicateBuilder builder = new PredicateBuilder(table.rowType().project(projection));
-            Predicate predicate = builder.greaterOrEqual(0, 10);
+            PredicateBuilder builder = new PredicateBuilder(table.rowType());
+            Predicate predicate = builder.greaterOrEqual(1, 10);
             int size = 2000;
             int checkSize = 3;
             InternalRow[] datas = new InternalRow[size];
