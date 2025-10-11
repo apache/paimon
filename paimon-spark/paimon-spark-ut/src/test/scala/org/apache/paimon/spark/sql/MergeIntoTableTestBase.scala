@@ -537,7 +537,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
                      |THEN INSERT (a, b, c) values (a, b, c)
                      |""".stripMargin)
       }.getMessage
-      assert(error.contains("match more then one source rows"))
+      assert(error.contains("match more than one source rows"))
     }
   }
 
