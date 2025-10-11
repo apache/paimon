@@ -29,11 +29,11 @@ import java.util.function.Supplier;
 /** Metrics for writer buffer. */
 public class WriterBufferMetric {
 
-    private static final String GROUP_NAME = "writerBuffer";
-    private static final String NUM_WRITERS = "numWriters";
-    private static final String BUFFER_PREEMPT_COUNT = "bufferPreemptCount";
-    private static final String USED_WRITE_BUFFER_SIZE = "usedWriteBufferSizeByte";
-    private static final String TOTAL_WRITE_BUFFER_SIZE = "totalWriteBufferSizeByte";
+    public static final String GROUP_NAME = "writerBuffer";
+    public static final String NUM_WRITERS = "numWriters";
+    public static final String BUFFER_PREEMPT_COUNT = "bufferPreemptCount";
+    public static final String USED_WRITE_BUFFER_SIZE = "usedWriteBufferSizeByte";
+    public static final String TOTAL_WRITE_BUFFER_SIZE = "totalWriteBufferSizeByte";
 
     private final MetricGroup metricGroup;
     private final AtomicInteger numWriters;

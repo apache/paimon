@@ -26,6 +26,7 @@ import org.apache.paimon.table.source.DataSplit
 import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
+import org.apache.spark.sql.execution.CommandResultExec
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.junit.jupiter.api.Assertions
 
@@ -108,6 +109,24 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
 
     Assertions.assertEquals(3, recordsWritten)
     Assertions.assertTrue(bytesWritten > 0)
+  }
+
+  test(s"Paimon Metric: v2 write metric") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+      sql("CREATE TABLE T (id INT, name STRING, pt STRING) PARTITIONED BY (pt)")
+      val df = sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p2')")
+      val metrics =
+        df.queryExecution.executedPlan.asInstanceOf[CommandResultExec].commandPhysicalPlan.metrics
+      val statusStore = spark.sharedState.statusStore
+      val lastExecId = statusStore.executionsList().last.executionId
+      val executionMetrics = statusStore.executionMetrics(lastExecId)
+
+      assert(executionMetrics(metrics("appendedTableFiles").id) == "2")
+      assert(executionMetrics(metrics("appendedRecords").id) == "2")
+      assert(executionMetrics(metrics("appendedChangelogFiles").id) == "0")
+      assert(executionMetrics(metrics("partitionsWritten").id) == "2")
+      assert(executionMetrics(metrics("bucketsWritten").id) == "2")
+    }
   }
 
   def metric(metrics: Array[CustomTaskMetric], name: String): Long = {

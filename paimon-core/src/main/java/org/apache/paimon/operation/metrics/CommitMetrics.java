@@ -27,7 +27,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 public class CommitMetrics {
 
     private static final int HISTOGRAM_WINDOW_SIZE = 100;
-    private static final String GROUP_NAME = "commit";
+    public static final String GROUP_NAME = "commit";
 
     private final MetricGroup metricGroup;
 
@@ -44,40 +44,36 @@ public class CommitMetrics {
     private Histogram durationHistogram;
     private CommitStats latestCommit;
 
-    @VisibleForTesting static final String LAST_COMMIT_DURATION = "lastCommitDuration";
-    @VisibleForTesting static final String COMMIT_DURATION = "commitDuration";
-    @VisibleForTesting static final String LAST_COMMIT_ATTEMPTS = "lastCommitAttempts";
-    @VisibleForTesting static final String LAST_TABLE_FILES_ADDED = "lastTableFilesAdded";
-    @VisibleForTesting static final String LAST_TABLE_FILES_DELETED = "lastTableFilesDeleted";
-    @VisibleForTesting static final String LAST_TABLE_FILES_APPENDED = "lastTableFilesAppended";
+    public static final String LAST_COMMIT_DURATION = "lastCommitDuration";
+    public static final String COMMIT_DURATION = "commitDuration";
+    public static final String LAST_COMMIT_ATTEMPTS = "lastCommitAttempts";
+    public static final String LAST_TABLE_FILES_ADDED = "lastTableFilesAdded";
+    public static final String LAST_TABLE_FILES_DELETED = "lastTableFilesDeleted";
+    public static final String LAST_TABLE_FILES_APPENDED = "lastTableFilesAppended";
 
-    @VisibleForTesting
-    static final String LAST_TABLE_FILES_COMMIT_COMPACTED = "lastTableFilesCommitCompacted";
+    public static final String LAST_TABLE_FILES_COMMIT_COMPACTED = "lastTableFilesCommitCompacted";
 
-    @VisibleForTesting
-    static final String LAST_CHANGELOG_FILES_APPENDED = "lastChangelogFilesAppended";
+    public static final String LAST_CHANGELOG_FILES_APPENDED = "lastChangelogFilesAppended";
 
-    @VisibleForTesting
-    static final String LAST_CHANGELOG_FILES_COMMIT_COMPACTED = "lastChangelogFileCommitCompacted";
+    public static final String LAST_CHANGELOG_FILES_COMMIT_COMPACTED =
+            "lastChangelogFileCommitCompacted";
 
-    @VisibleForTesting static final String LAST_GENERATED_SNAPSHOTS = "lastGeneratedSnapshots";
-    @VisibleForTesting static final String LAST_DELTA_RECORDS_APPENDED = "lastDeltaRecordsAppended";
+    public static final String LAST_GENERATED_SNAPSHOTS = "lastGeneratedSnapshots";
+    public static final String LAST_DELTA_RECORDS_APPENDED = "lastDeltaRecordsAppended";
 
-    @VisibleForTesting
-    static final String LAST_CHANGELOG_RECORDS_APPENDED = "lastChangelogRecordsAppended";
+    public static final String LAST_CHANGELOG_RECORDS_APPENDED = "lastChangelogRecordsAppended";
 
-    @VisibleForTesting
-    static final String LAST_DELTA_RECORDS_COMMIT_COMPACTED = "lastDeltaRecordsCommitCompacted";
+    public static final String LAST_DELTA_RECORDS_COMMIT_COMPACTED =
+            "lastDeltaRecordsCommitCompacted";
 
-    @VisibleForTesting
-    static final String LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED =
+    public static final String LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED =
             "lastChangelogRecordsCommitCompacted";
 
-    @VisibleForTesting static final String LAST_PARTITIONS_WRITTEN = "lastPartitionsWritten";
-    @VisibleForTesting static final String LAST_BUCKETS_WRITTEN = "lastBucketsWritten";
+    public static final String LAST_PARTITIONS_WRITTEN = "lastPartitionsWritten";
+    public static final String LAST_BUCKETS_WRITTEN = "lastBucketsWritten";
 
-    static final String LAST_COMPACTION_INPUT_FILE_SIZE = "lastCompactionInputFileSize";
-    static final String LAST_COMPACTION_OUTPUT_FILE_SIZE = "lastCompactionOutputFileSize";
+    public static final String LAST_COMPACTION_INPUT_FILE_SIZE = "lastCompactionInputFileSize";
+    public static final String LAST_COMPACTION_OUTPUT_FILE_SIZE = "lastCompactionOutputFileSize";
 
     private void registerGenericCommitMetrics() {
         metricGroup.gauge(
