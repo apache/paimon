@@ -34,6 +34,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.function.IntPredicate;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
@@ -54,10 +56,18 @@ public class PartitionIndex {
 
     public long lastAccessedCommitIdentifier;
 
+    public final IndexFileHandler indexFileHandler;
+
+    public final BinaryRow partition;
+
+    private volatile CompletableFuture<Void> refreshFuture;
+
     public PartitionIndex(
             Int2ShortHashMap hash2Bucket,
             Map<Integer, Long> bucketInformation,
-            long targetBucketRowNumber) {
+            long targetBucketRowNumber,
+            IndexFileHandler indexFileHandler,
+            BinaryRow partition) {
         this.hash2Bucket = hash2Bucket;
         this.nonFullBucketInformation = bucketInformation;
         this.totalBucketSet = new LinkedHashSet<>(bucketInformation.keySet());
@@ -65,6 +75,8 @@ public class PartitionIndex {
         this.targetBucketRowNumber = targetBucketRowNumber;
         this.lastAccessedCommitIdentifier = Long.MIN_VALUE;
         this.accessed = true;
+        this.indexFileHandler = indexFileHandler;
+        this.partition = partition;
     }
 
     public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum, int maxBucketId) {
@@ -73,6 +85,16 @@ public class PartitionIndex {
         // 1. is it a key that has appeared before
         if (hash2Bucket.containsKey(hash)) {
             return hash2Bucket.get(hash);
+        }
+
+        //activate this property
+        //parameter to check nonfullbuckletinformation
+        //solo quiero que lo haga de forma asyncrona una vez
+        //caso hay pocos buckets
+        //caso se acaban de crear buckets
+        //funciona junto algún parámetro mas
+        if (nonFullBucketInformation.size() == maxBucketsNum - 2){
+            refreshBucketsFromDisk();
         }
 
         // 2. find bucket from existing buckets
@@ -91,6 +113,7 @@ public class PartitionIndex {
             }
         }
 
+        //from onwards is to create new bucket
         int globalMaxBucketId = (maxBucketsNum == -1 ? Short.MAX_VALUE : maxBucketsNum) - 1;
         if (totalBucketSet.isEmpty() || maxBucketId < globalMaxBucketId) {
             // 3. create a new bucket
@@ -110,7 +133,7 @@ public class PartitionIndex {
                                 maxBucketId, targetBucketRowNumber));
             }
         }
-
+        //esto no se si lo necesitaremos
         // 4. exceed buckets upper bound
         int bucket = ListUtils.pickRandomly(totalBucketArray);
         hash2Bucket.put(hash, (short) bucket);
@@ -150,6 +173,35 @@ public class PartitionIndex {
                 throw new UncheckedIOException(e);
             }
         }
-        return new PartitionIndex(mapBuilder.build(), buckets, targetBucketRowNumber);
+        return new PartitionIndex(mapBuilder.build(), buckets, targetBucketRowNumber,indexFileHandler,partition);
     }
+
+    //no debo actualizat otras propiedades aquí lo que hago es solo rellenar el bucket de nuevo de forma asyncrona
+    private void refreshBucketsFromDisk() {
+        // Only start refresh if not already in progress
+        if (refreshFuture == null || refreshFuture.isDone()) {
+            refreshFuture = CompletableFuture.runAsync(() -> {
+                try {
+                    List<IndexManifestEntry> files = indexFileHandler.scanEntries(HASH_INDEX, partition);
+                    Map<Integer, Long> refreshedBuckets = new HashMap<>();
+
+                    for (IndexManifestEntry file : files) {
+                        long currentNumberOfRows = file.indexFile().rowCount();
+                        if (currentNumberOfRows < targetBucketRowNumber) {
+                            refreshedBuckets.put(file.bucket(), currentNumberOfRows);
+                        }
+                    }
+                    // Thread-safe update
+                    synchronized (nonFullBucketInformation) {
+                        nonFullBucketInformation.putAll(refreshedBuckets);
+                    }
+                } catch (Exception e) {
+                    // Log error instead of throwing
+                    System.err.println("Error refreshing buckets from disk: " + e.getMessage());
+                }
+            });
+        }
+    }
+
+
 }
