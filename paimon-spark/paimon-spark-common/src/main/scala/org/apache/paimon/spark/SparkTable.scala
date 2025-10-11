@@ -68,7 +68,7 @@ case class SparkTable(table: Table)
 
         case _ => false
       }
-    }
+    } && coreOptions.clusteringColumns().isEmpty
   }
 
   def getTable: Table = table
