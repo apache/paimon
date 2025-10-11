@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.function.IntPredicate;
 
@@ -45,7 +46,7 @@ public class PartitionIndex {
 
     public final Int2ShortHashMap hash2Bucket;
 
-    public final Map<Integer, Long> nonFullBucketInformation;
+    public final ConcurrentHashMap<Integer, Long> nonFullBucketInformation;
 
     public final Set<Integer> totalBucketSet;
     public final List<Integer> totalBucketArray;
@@ -64,7 +65,7 @@ public class PartitionIndex {
 
     public PartitionIndex(
             Int2ShortHashMap hash2Bucket,
-            Map<Integer, Long> bucketInformation,
+            ConcurrentHashMap<Integer, Long> bucketInformation,
             long targetBucketRowNumber,
             IndexFileHandler indexFileHandler,
             BinaryRow partition) {
@@ -148,7 +149,7 @@ public class PartitionIndex {
             IntPredicate bucketFilter) {
         List<IndexManifestEntry> files = indexFileHandler.scanEntries(HASH_INDEX, partition);
         Int2ShortHashMap.Builder mapBuilder = Int2ShortHashMap.builder();
-        Map<Integer, Long> buckets = new HashMap<>();
+        ConcurrentHashMap<Integer, Long> buckets = new ConcurrentHashMap<>();
         for (IndexManifestEntry file : files) {
             try (IntIterator iterator =
                     indexFileHandler
@@ -183,17 +184,12 @@ public class PartitionIndex {
             refreshFuture = CompletableFuture.runAsync(() -> {
                 try {
                     List<IndexManifestEntry> files = indexFileHandler.scanEntries(HASH_INDEX, partition);
-                    Map<Integer, Long> refreshedBuckets = new HashMap<>();
 
                     for (IndexManifestEntry file : files) {
                         long currentNumberOfRows = file.indexFile().rowCount();
                         if (currentNumberOfRows < targetBucketRowNumber) {
-                            refreshedBuckets.put(file.bucket(), currentNumberOfRows);
+                            nonFullBucketInformation.put(file.bucket(), currentNumberOfRows);
                         }
-                    }
-                    // Thread-safe update
-                    synchronized (nonFullBucketInformation) {
-                        nonFullBucketInformation.putAll(refreshedBuckets);
                     }
                 } catch (Exception e) {
                     // Log error instead of throwing
