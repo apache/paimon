@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Collections;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.PATH;
@@ -92,6 +93,13 @@ public class FileStoreTableFactory {
             TableSchema tableSchema,
             Options dynamicOptions,
             CatalogEnvironment catalogEnvironment) {
+        // Check if chain table is enabled
+        CoreOptions coreOptions = new CoreOptions(tableSchema.options());
+        if (coreOptions.chainTableEnabled()) {
+            return createChainTable(
+                    fileIO, tablePath, tableSchema, dynamicOptions, catalogEnvironment);
+        }
+
         FileStoreTable table =
                 createWithoutFallbackBranch(
                         fileIO, tablePath, tableSchema, dynamicOptions, catalogEnvironment);
@@ -128,6 +136,36 @@ public class FileStoreTableFactory {
         }
 
         return table;
+    }
+
+    private static FileStoreTable createChainTable(
+            FileIO fileIO,
+            Path tablePath,
+            TableSchema tableSchema,
+            Options dynamicOptions,
+            CatalogEnvironment catalogEnvironment) {
+
+        CoreOptions coreOptions = new CoreOptions(tableSchema.options());
+        String snapshotBranch = coreOptions.scanFallbackSnapshotBranch();
+        String deltaBranch = coreOptions.scanFallbackDeltaBranch();
+
+        // Create snapshot branch table
+        TableSchema snapshotSchema =
+                tableSchema.copy(
+                        Collections.singletonMap(CoreOptions.BRANCH.key(), snapshotBranch));
+        FileStoreTable snapshotTable =
+                createWithoutFallbackBranch(
+                        fileIO, tablePath, snapshotSchema, dynamicOptions, catalogEnvironment);
+
+        // Create delta branch table
+        TableSchema deltaSchema =
+                tableSchema.copy(Collections.singletonMap(CoreOptions.BRANCH.key(), deltaBranch));
+        FileStoreTable deltaTable =
+                createWithoutFallbackBranch(
+                        fileIO, tablePath, deltaSchema, dynamicOptions, catalogEnvironment);
+
+        // Create chain table instance
+        return new ChainFileStoreTable(snapshotTable, deltaTable);
     }
 
     public static FileStoreTable createWithoutFallbackBranch(

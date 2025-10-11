@@ -1787,6 +1787,26 @@ public class CoreOptions implements Serializable {
                             "When a batch job queries from a table, if a partition does not exist in the current branch, "
                                     + "the reader will try to get this partition from this fallback branch.");
 
+    public static final ConfigOption<Boolean> CHAIN_TABLE_ENABLED =
+            key("chain-table.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to enable chain table");
+
+    public static final ConfigOption<String> SCAN_FALLBACK_SNAPSHOT_BRANCH =
+            key("scan.fallback-snapshot-branch")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Snapshot branch when fallback to chain read as partition does not exist in the main branch");
+
+    public static final ConfigOption<String> SCAN_FALLBACK_DELTA_BRANCH =
+            key("scan.fallback-delta-branch")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Delta branch when fallback to chain as partition does not exist in the main branch");
+
     public static final ConfigOption<Boolean> ASYNC_FILE_WRITE =
             key("async-file-write")
                     .booleanType()
@@ -2647,6 +2667,18 @@ public class CoreOptions implements Serializable {
 
     public String scanVersion() {
         return options.get(SCAN_VERSION);
+    }
+
+    public boolean chainTableEnabled() {
+        return options.get(CHAIN_TABLE_ENABLED);
+    }
+
+    public String scanFallbackSnapshotBranch() {
+        return options.get(SCAN_FALLBACK_SNAPSHOT_BRANCH);
+    }
+
+    public String scanFallbackDeltaBranch() {
+        return options.get(SCAN_FALLBACK_DELTA_BRANCH);
     }
 
     public Pair<String, String> incrementalBetween() {
