@@ -33,23 +33,15 @@ abstract class PaimonBaseScanBuilder(table: InnerTable)
 
   protected var requiredSchema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
 
-  protected var pushedPaimonPredicates: Array[Predicate] = Array.empty
-
-  protected var reservedFilters: Array[Filter] = Array.empty
-
-  protected var hasPostScanPredicates = false
-
-  protected var pushDownLimit: Option[Int] = None
-
   protected var pushDownTopN: Option[TopN] = None
 
   override def build(): Scan = {
     PaimonScan(
       table,
       requiredSchema,
-      pushedPaimonPredicates,
-      reservedFilters,
-      pushDownLimit,
+      Array.empty[Predicate],
+      Array.empty[Filter],
+      None,
       pushDownTopN)
   }
 
