@@ -1317,6 +1317,13 @@ public class CoreOptions implements Serializable {
                                     + "If the tag doesn't exist or the earlier tag doesn't exist, return empty. "
                                     + "This option requires 'tag.creation-period' and 'tag.period-formatter' configured.");
 
+    public static final ConfigOption<Boolean> INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT =
+            key("incremental-between-tag-to-snapshot")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to read incremental changes between the snapshot corresponding to the tag.");
+
     public static final ConfigOption<Boolean> END_INPUT_CHECK_PARTITION_EXPIRE =
             key("end-input.check-partition-expire")
                     .booleanType()
@@ -2671,6 +2678,10 @@ public class CoreOptions implements Serializable {
 
     public String incrementalToAutoTag() {
         return options.get(INCREMENTAL_TO_AUTO_TAG);
+    }
+
+    public boolean incrementalBetweenTagToSnapshot() {
+        return options.get(INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT);
     }
 
     public Integer scanManifestParallelism() {

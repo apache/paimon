@@ -567,6 +567,12 @@ under the License.
             <td>Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot (inclusive). <br /><br />Possible values:<ul><li>"auto": Scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files.</li><li>"delta": Scan newly changed files between snapshots.</li><li>"changelog": Scan changelog files between snapshots.</li><li>"diff": Get diff by comparing data of end snapshot with data of start snapshot.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>incremental-between-tag-to-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to read incremental changes between the snapshot corresponding to the tag.</td>
+        </tr>
+        <tr>
             <td><h5>incremental-between-timestamp</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
