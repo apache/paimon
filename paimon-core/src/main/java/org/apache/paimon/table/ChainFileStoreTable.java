@@ -167,10 +167,6 @@ public class ChainFileStoreTable extends FallbackReadFileStoreTable {
         private final DataTableScan snapshotScan;
         private final DataTableScan deltaScan;
 
-        // Cache for partition existence check to avoid repeated scans
-        private Set<BinaryRow> snapshotPartitionsCache;
-        private boolean partitionsCacheInitialized = false;
-
         public ChainTableBatchScan(DataTableScan snapshotScan, DataTableScan deltaScan) {
             this.snapshotScan = snapshotScan;
             this.deltaScan = deltaScan;
@@ -272,35 +268,52 @@ public class ChainFileStoreTable extends FallbackReadFileStoreTable {
             long startTime = System.nanoTime();
 
             // Optimized: Use cached partitions if available
-            Set<BinaryRow> completePartitions = getSnapshotPartitions();
-
-            // First, get all splits from snapshot branch
+            Set<BinaryRow> completePartitions = new HashSet<>();
             List<DataSplit> snapshotSplits = new ArrayList<>();
-            List<Split> snapshotPlanSplits = snapshotScan.plan().splits();
 
-            // Pre-allocate with estimated size for better performance
-            snapshotSplits.ensureCapacity(snapshotPlanSplits.size());
+            // First, try to get splits from snapshot branch
+            try {
+                List<Split> snapshotPlanSplits = snapshotScan.plan().splits();
 
-            for (Split split : snapshotPlanSplits) {
-                DataSplit dataSplit = (DataSplit) split;
-                snapshotSplits.add(new ChainDataSplit(dataSplit, true));
+                // Pre-allocate with estimated size for better performance
+                snapshotSplits = new ArrayList<>(snapshotPlanSplits.size());
+
+                for (Split split : snapshotPlanSplits) {
+                    DataSplit dataSplit = (DataSplit) split;
+                    snapshotSplits.add(new ChainDataSplit(dataSplit, true));
+                    completePartitions.add(dataSplit.partition());
+                }
+            } catch (Exception e) {
+                // If snapshot scan fails (e.g., no data), continue with delta only
+                LOG.debug("Snapshot scan returned no data, will use delta branch only", e);
             }
 
-            // Optimized: Get remaining partitions from delta branch with caching
-            List<BinaryRow> remainingPartitions =
-                    deltaScan.listPartitions().stream()
-                            .filter(p -> !completePartitions.contains(p))
-                            .collect(Collectors.toList());
+            // Optimized: Get remaining partitions from delta branch
+            List<BinaryRow> remainingPartitions = new ArrayList<>();
+            try {
+                remainingPartitions =
+                        deltaScan.listPartitions().stream()
+                                .filter(p -> !completePartitions.contains(p))
+                                .collect(Collectors.toList());
+            } catch (Exception e) {
+                // If delta scan fails, continue with snapshot only
+                LOG.debug("Delta scan returned no partitions", e);
+            }
 
             List<DataSplit> deltaSplits = new ArrayList<>();
             if (!remainingPartitions.isEmpty()) {
-                // Optimized: Batch process delta partitions
-                deltaScan.withPartitionFilter(remainingPartitions);
-                List<Split> deltaPlanSplits = deltaScan.plan().splits();
-                deltaSplits.ensureCapacity(deltaPlanSplits.size());
+                try {
+                    // Optimized: Batch process delta partitions
+                    deltaScan.withPartitionFilter(remainingPartitions);
+                    List<Split> deltaPlanSplits = deltaScan.plan().splits();
+                    deltaSplits = new ArrayList<>(deltaPlanSplits.size());
 
-                for (Split split : deltaPlanSplits) {
-                    deltaSplits.add(new ChainDataSplit((DataSplit) split, false));
+                    for (Split split : deltaPlanSplits) {
+                        deltaSplits.add(new ChainDataSplit((DataSplit) split, false));
+                    }
+                } catch (Exception e) {
+                    // If delta scan fails, continue with snapshot only
+                    LOG.debug("Delta scan returned no data", e);
                 }
             }
 
@@ -320,22 +333,6 @@ public class ChainFileStoreTable extends FallbackReadFileStoreTable {
             }
 
             return new DataFilePlan(allSplits);
-        }
-
-        /**
-         * Get snapshot partitions with caching for performance optimization. This method caches the
-         * snapshot partitions to avoid repeated expensive operations.
-         */
-        private Set<BinaryRow> getSnapshotPartitions() {
-            if (!partitionsCacheInitialized) {
-                snapshotPartitionsCache = new HashSet<>();
-                for (Split split : snapshotScan.plan().splits()) {
-                    DataSplit dataSplit = (DataSplit) split;
-                    snapshotPartitionsCache.add(dataSplit.partition());
-                }
-                partitionsCacheInitialized = true;
-            }
-            return snapshotPartitionsCache;
         }
 
         @Override
@@ -445,7 +442,7 @@ public class ChainFileStoreTable extends FallbackReadFileStoreTable {
             // Track read time
             long duration = System.nanoTime() - startTime;
             totalReadTime += duration;
-            
+
             // Log performance warning if reader creation is slow
             if (duration > 100_000_000L) { // Log if creation takes more than 100ms
                 LOG.warn(
