@@ -18,9 +18,10 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.partition.PartitionStatistics
 import org.apache.paimon.spark.PaimonSparkTestBase
 
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{DataFrame, Row}
 import org.junit.jupiter.api.Assertions
 
 import java.util.Objects
@@ -155,5 +156,72 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
 
     // check comment in schema
     Assertions.assertTrue(Objects.equals(comment, loadTable(tableName).schema().comment()))
+  }
+
+  protected def describeTablePartitionCreateTable(): Unit = {
+    spark.sql("""
+                |CREATE TABLE T (
+                |  id INT NOT NULL,
+                |  name STRING DEFAULT 'Bob',
+                |  age INT COMMENT 'Age')
+                |  PARTITIONED BY (year INT COMMENT 'Year', month INT, day INT)
+                |""".stripMargin)
+  }
+
+  protected def describeTablePartitionCheckDefaultValue(res: DataFrame): Unit = {
+    checkAnswer(
+      res
+        .filter("col_name = 'name' AND comment != ''")
+        .select("col_name", "data_type", "comment"),
+      Row("name", "string", "'Bob'") :: Nil
+    )
+  }
+
+  test("Paimon describe: describe table partition") {
+    describeTablePartitionCreateTable()
+    spark.sql("""
+                |INSERT INTO T VALUES (1, 'a', 16, 2025, 9, 20),
+                |                     (2, 'b', 17, 2025, 9, 21),
+                |                     (3, 'c', 18, 2025, 9, 21)
+                |""".stripMargin)
+    val res = spark
+      .sql("""
+             |DESCRIBE FORMATTED T PARTITION (year=2025, month=9, day=21)
+             |""".stripMargin)
+    checkAnswer(
+      res
+        .filter("col_name = 'Partition Values'")
+        .select("col_name", "data_type"),
+      Row("Partition Values", "[year=2025, month=9, day=21]") :: Nil
+    )
+    // Check comment.
+    checkAnswer(
+      res
+        .filter("col_name = 'age' AND comment != ''")
+        .select("col_name", "data_type", "comment"),
+      Row("age", "int", "Age") :: Nil
+    )
+    // Check default value.
+    describeTablePartitionCheckDefaultValue(res)
+
+    // Check column not null.
+    checkAnswer(
+      res
+        .filter("col_name = 'id' AND comment != ''")
+        .select("col_name", "data_type", "comment"),
+      Row("id", "int", "NOT NULL") :: Nil
+    )
+    // Check partition parameters.
+    val parameters = res
+      .filter("col_name = 'Partition Parameters'")
+      .select("data_type")
+      .collect()
+      .map(_.getString(0))
+    Assertions.assertEquals(parameters.length, 1)
+    Assertions.assertTrue(parameters.head.contains(PartitionStatistics.FIELD_FILE_COUNT))
+    Assertions.assertTrue(parameters.head.contains(PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES))
+    Assertions.assertTrue(
+      parameters.head.contains(PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME))
+    Assertions.assertTrue(parameters.head.contains(PartitionStatistics.FIELD_RECORD_COUNT))
   }
 }
