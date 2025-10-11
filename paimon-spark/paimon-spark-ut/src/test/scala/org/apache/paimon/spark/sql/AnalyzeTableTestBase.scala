@@ -529,6 +529,18 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     assert(withColStat == noColStat)
   }
 
+  test("Query a non-existent catalog") {
+    assert(intercept[Exception] {
+      sql("SELECT * FROM paimon1.default.t")
+    }.getMessage.contains("Current catalog is paimon, catalog paimon1 does not exist"))
+  }
+
+  test("Query a table with multiple namespaces") {
+    assert(intercept[Exception] {
+      sql("SELECT * FROM paimon.x.default.t")
+    }.getMessage.contains("Paimon only support single namespace"))
+  }
+
   protected def statsFileCount(tableLocation: Path, fileIO: FileIO): Int = {
     fileIO.listStatus(new Path(tableLocation, "statistics")).length
   }
