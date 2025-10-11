@@ -93,6 +93,10 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         return this.sparkCatalog.paimonCatalog();
     }
 
+    @Override
+    public String paimonCatalogName() {
+        return catalogName;
+    }
     // ======================= database methods ===============================
 
     @Override
