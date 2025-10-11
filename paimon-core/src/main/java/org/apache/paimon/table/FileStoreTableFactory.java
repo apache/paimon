@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.Collections;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.PATH;
@@ -150,19 +149,44 @@ public class FileStoreTableFactory {
         String deltaBranch = coreOptions.scanFallbackDeltaBranch();
 
         // Create snapshot branch table
-        TableSchema snapshotSchema =
-                tableSchema.copy(
-                        Collections.singletonMap(CoreOptions.BRANCH.key(), snapshotBranch));
+        Options snapshotBranchOptions = new Options(dynamicOptions.toMap());
+        snapshotBranchOptions.set(CoreOptions.BRANCH, snapshotBranch);
+        Optional<TableSchema> snapshotSchema =
+                new SchemaManager(fileIO, tablePath, snapshotBranch).latest();
         FileStoreTable snapshotTable =
-                createWithoutFallbackBranch(
-                        fileIO, tablePath, snapshotSchema, dynamicOptions, catalogEnvironment);
+                snapshotSchema.isPresent()
+                        ? createWithoutFallbackBranch(
+                                fileIO,
+                                tablePath,
+                                snapshotSchema.get(),
+                                snapshotBranchOptions,
+                                catalogEnvironment)
+                        : createWithoutFallbackBranch(
+                                fileIO,
+                                tablePath,
+                                tableSchema,
+                                snapshotBranchOptions,
+                                catalogEnvironment);
 
         // Create delta branch table
-        TableSchema deltaSchema =
-                tableSchema.copy(Collections.singletonMap(CoreOptions.BRANCH.key(), deltaBranch));
+        Options deltaBranchOptions = new Options(dynamicOptions.toMap());
+        deltaBranchOptions.set(CoreOptions.BRANCH, deltaBranch);
+        Optional<TableSchema> deltaSchema =
+                new SchemaManager(fileIO, tablePath, deltaBranch).latest();
         FileStoreTable deltaTable =
-                createWithoutFallbackBranch(
-                        fileIO, tablePath, deltaSchema, dynamicOptions, catalogEnvironment);
+                deltaSchema.isPresent()
+                        ? createWithoutFallbackBranch(
+                                fileIO,
+                                tablePath,
+                                deltaSchema.get(),
+                                deltaBranchOptions,
+                                catalogEnvironment)
+                        : createWithoutFallbackBranch(
+                                fileIO,
+                                tablePath,
+                                tableSchema,
+                                deltaBranchOptions,
+                                catalogEnvironment);
 
         // Create chain table instance
         return new ChainFileStoreTable(snapshotTable, deltaTable);
