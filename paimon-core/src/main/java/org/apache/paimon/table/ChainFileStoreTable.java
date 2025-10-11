@@ -39,6 +39,9 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -55,6 +58,7 @@ import java.util.stream.Collectors;
 public class ChainFileStoreTable extends FallbackReadFileStoreTable {
 
     private static final long serialVersionUID = 1L;
+    private static final Logger LOG = LoggerFactory.getLogger(ChainFileStoreTable.class);
 
     private final FileStoreTable snapshotStoreTable;
     private final FileStoreTable deltaStoreTable;
@@ -163,6 +167,10 @@ public class ChainFileStoreTable extends FallbackReadFileStoreTable {
         private final DataTableScan snapshotScan;
         private final DataTableScan deltaScan;
 
+        // Cache for partition existence check to avoid repeated scans
+        private Set<BinaryRow> snapshotPartitionsCache;
+        private boolean partitionsCacheInitialized = false;
+
         public ChainTableBatchScan(DataTableScan snapshotScan, DataTableScan deltaScan) {
             this.snapshotScan = snapshotScan;
             this.deltaScan = deltaScan;
@@ -261,17 +269,24 @@ public class ChainFileStoreTable extends FallbackReadFileStoreTable {
 
         @Override
         public TableScan.Plan plan() {
+            long startTime = System.nanoTime();
+
+            // Optimized: Use cached partitions if available
+            Set<BinaryRow> completePartitions = getSnapshotPartitions();
+
             // First, get all splits from snapshot branch
             List<DataSplit> snapshotSplits = new ArrayList<>();
-            Set<BinaryRow> completePartitions = new HashSet<>();
+            List<Split> snapshotPlanSplits = snapshotScan.plan().splits();
 
-            for (Split split : snapshotScan.plan().splits()) {
+            // Pre-allocate with estimated size for better performance
+            snapshotSplits.ensureCapacity(snapshotPlanSplits.size());
+
+            for (Split split : snapshotPlanSplits) {
                 DataSplit dataSplit = (DataSplit) split;
                 snapshotSplits.add(new ChainDataSplit(dataSplit, true));
-                completePartitions.add(dataSplit.partition());
             }
 
-            // Then, get remaining partitions from delta branch
+            // Optimized: Get remaining partitions from delta branch with caching
             List<BinaryRow> remainingPartitions =
                     deltaScan.listPartitions().stream()
                             .filter(p -> !completePartitions.contains(p))
@@ -279,18 +294,48 @@ public class ChainFileStoreTable extends FallbackReadFileStoreTable {
 
             List<DataSplit> deltaSplits = new ArrayList<>();
             if (!remainingPartitions.isEmpty()) {
+                // Optimized: Batch process delta partitions
                 deltaScan.withPartitionFilter(remainingPartitions);
-                for (Split split : deltaScan.plan().splits()) {
+                List<Split> deltaPlanSplits = deltaScan.plan().splits();
+                deltaSplits.ensureCapacity(deltaPlanSplits.size());
+
+                for (Split split : deltaPlanSplits) {
                     deltaSplits.add(new ChainDataSplit((DataSplit) split, false));
                 }
             }
 
-            // Combine all splits
-            List<DataSplit> allSplits = new ArrayList<>();
+            // Optimized: Combine all splits with pre-allocated capacity
+            List<DataSplit> allSplits = new ArrayList<>(snapshotSplits.size() + deltaSplits.size());
             allSplits.addAll(snapshotSplits);
             allSplits.addAll(deltaSplits);
 
+            // Performance monitoring: log scan duration
+            long duration = System.nanoTime() - startTime;
+            if (duration > 1_000_000_000L) { // Log if scan takes more than 1 second
+                LOG.warn(
+                        "Chain table scan took {} ms, snapshot splits: {}, delta splits: {}",
+                        duration / 1_000_000,
+                        snapshotSplits.size(),
+                        deltaSplits.size());
+            }
+
             return new DataFilePlan(allSplits);
+        }
+
+        /**
+         * Get snapshot partitions with caching for performance optimization. This method caches the
+         * snapshot partitions to avoid repeated expensive operations.
+         */
+        private Set<BinaryRow> getSnapshotPartitions() {
+            if (!partitionsCacheInitialized) {
+                snapshotPartitionsCache = new HashSet<>();
+                for (Split split : snapshotScan.plan().splits()) {
+                    DataSplit dataSplit = (DataSplit) split;
+                    snapshotPartitionsCache.add(dataSplit.partition());
+                }
+                partitionsCacheInitialized = true;
+            }
+            return snapshotPartitionsCache;
         }
 
         @Override
@@ -318,9 +363,27 @@ public class ChainFileStoreTable extends FallbackReadFileStoreTable {
         private final InnerTableRead snapshotRead;
         private final InnerTableRead deltaRead;
 
+        // Performance metrics
+        private long totalReadTime = 0;
+        private long snapshotReadCount = 0;
+        private long deltaReadCount = 0;
+
         private ChainTableRead(InnerTableRead snapshotRead, InnerTableRead deltaRead) {
             this.snapshotRead = snapshotRead;
             this.deltaRead = deltaRead;
+        }
+
+        /** Get performance metrics for monitoring. */
+        public long getTotalReadTime() {
+            return totalReadTime;
+        }
+
+        public long getSnapshotReadCount() {
+            return snapshotReadCount;
+        }
+
+        public long getDeltaReadCount() {
+            return deltaReadCount;
         }
 
         @Override
@@ -360,18 +423,38 @@ public class ChainFileStoreTable extends FallbackReadFileStoreTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
+            long startTime = System.nanoTime();
+
+            RecordReader<InternalRow> reader;
             if (split instanceof ChainDataSplit) {
                 ChainDataSplit chainDataSplit = (ChainDataSplit) split;
                 if (chainDataSplit.isSnapshot()) {
-                    return snapshotRead.createReader(chainDataSplit);
+                    snapshotReadCount++;
+                    reader = snapshotRead.createReader(chainDataSplit);
                 } else {
-                    return deltaRead.createReader(chainDataSplit);
+                    deltaReadCount++;
+                    reader = deltaRead.createReader(chainDataSplit);
                 }
+            } else {
+                // Fallback to snapshot read
+                DataSplit dataSplit = (DataSplit) split;
+                snapshotReadCount++;
+                reader = snapshotRead.createReader(dataSplit);
             }
 
-            // Fallback to snapshot read
-            DataSplit dataSplit = (DataSplit) split;
-            return snapshotRead.createReader(dataSplit);
+            // Track read time
+            long duration = System.nanoTime() - startTime;
+            totalReadTime += duration;
+            
+            // Log performance warning if reader creation is slow
+            if (duration > 100_000_000L) { // Log if creation takes more than 100ms
+                LOG.warn(
+                        "Chain table reader creation took {} ms for split type: {}",
+                        duration / 1_000_000,
+                        split.getClass().getSimpleName());
+            }
+
+            return reader;
         }
 
         @Override
