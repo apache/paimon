@@ -80,7 +80,7 @@ public class PartitionIndex {
         this.partition = partition;
     }
 
-    public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum, int maxBucketId) {
+    public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum, int maxBucketId, int minEmptyBucketsBeforeAsyncCheck) {
         accessed = true;
 
         // 1. is it a key that has appeared before

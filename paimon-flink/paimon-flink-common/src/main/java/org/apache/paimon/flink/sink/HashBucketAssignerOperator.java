@@ -79,6 +79,7 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
         int taskId = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
         long targetRowNum = table.coreOptions().dynamicBucketTargetRowNum();
         Integer maxBucketsNum = table.coreOptions().dynamicBucketMaxBuckets();
+        Integer minEmptyBucketsBeforeAsyncCheck = table.coreOptions().dynamicBucketEmptyBucketThreshold();
         this.assigner =
                 overwrite
                         ? new SimpleHashBucketAssigner(
@@ -91,7 +92,8 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
                                 MathUtils.min(numAssigners, numberTasks),
                                 taskId,
                                 targetRowNum,
-                                maxBucketsNum);
+                                maxBucketsNum,
+                                minEmptyBucketsBeforeAsyncCheck);
         this.extractor = extractorFunction.apply(table.schema());
     }
 
