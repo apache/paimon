@@ -1285,14 +1285,24 @@ public class CoreOptions implements Serializable {
                                     + " insufficient processing speed of assigner.");
 
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_EMPTY_BUCKET_THRESHOLD =
-            key(" dynamic-bucket.empty-bucket-threshold")
+            key("dynamic-bucket.empty-bucket-threshold")
                     .intType()
-                    .noDefaultValue()
+                    .defaultValue(-1)
                     .withDescription(
                             "Threshold for triggering asynchronous refresh of empty bucket information. "
                                     + "When the number of available empty buckets drops below this value, "
                                     + "the assigner will asynchronously check for newly emptied buckets. "
                                     + "Higher values improve responsiveness but may increase overhead.");
+
+
+    public static final ConfigOption<Duration> DYNAMIC_BUCKET_MIN_REFRESH_INTERVAL =
+            key("dynamic-bucket.min-refresh-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription(
+                            "Minimum time between bucket refresh checks. Too short will cause excessive "
+                                    + "overhead from scanning bucket table, too long may delay discovery of "
+                                    + "available buckets.");
 
 
     public static final ConfigOption<String> INCREMENTAL_BETWEEN =
@@ -2698,6 +2708,10 @@ public class CoreOptions implements Serializable {
 
     public Integer dynamicBucketEmptyBucketThreshold() {
         return options.get(DYNAMIC_BUCKET_EMPTY_BUCKET_THRESHOLD);
+    }
+
+    public Duration dynamicBucketMinRefreshInterval() {
+        return options.get(DYNAMIC_BUCKET_MIN_REFRESH_INTERVAL);
     }
 
     public List<String> sequenceField() {

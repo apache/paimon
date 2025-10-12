@@ -27,6 +27,7 @@ import org.apache.paimon.utils.ListUtils;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -80,7 +81,7 @@ public class PartitionIndex {
         this.partition = partition;
     }
 
-    public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum, int maxBucketId, int minEmptyBucketsBeforeAsyncCheck) {
+    public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum, int maxBucketId, int minEmptyBucketsBeforeAsyncCheck, Duration minRefreshInterval) {
         accessed = true;
 
         // 1. is it a key that has appeared before
@@ -88,13 +89,7 @@ public class PartitionIndex {
             return hash2Bucket.get(hash);
         }
 
-        //activate this property
-        //parameter to check nonfullbuckletinformation
-        //solo quiero que lo haga de forma asyncrona una vez
-        //caso hay pocos buckets
-        //caso se acaban de crear buckets
-        //funciona junto algún parámetro mas
-        if (nonFullBucketInformation.size() == maxBucketsNum - 2){
+        if (shouldRefreshEmptyBuckets(maxBucketId, minEmptyBucketsBeforeAsyncCheck)) {
             refreshBucketsFromDisk();
         }
 
@@ -177,6 +172,10 @@ public class PartitionIndex {
         return new PartitionIndex(mapBuilder.build(), buckets, targetBucketRowNumber,indexFileHandler,partition);
     }
 
+    private boolean shouldRefreshEmptyBuckets(int maxBucketId, int minEmptyBucketsBeforeAsyncCheck) {
+        return maxBucketId != -1 && minEmptyBucketsBeforeAsyncCheck != -1 && (nonFullBucketInformation.size() == maxBucketId - minEmptyBucketsBeforeAsyncCheck);
+    }
+
     //no debo actualizat otras propiedades aquí lo que hago es solo rellenar el bucket de nuevo de forma asyncrona
     private void refreshBucketsFromDisk() {
         // Only start refresh if not already in progress
@@ -184,13 +183,17 @@ public class PartitionIndex {
             refreshFuture = CompletableFuture.runAsync(() -> {
                 try {
                     List<IndexManifestEntry> files = indexFileHandler.scanEntries(HASH_INDEX, partition);
+                    Map<Integer, Long> tempBucketInfo = new HashMap<>();
 
                     for (IndexManifestEntry file : files) {
                         long currentNumberOfRows = file.indexFile().rowCount();
                         if (currentNumberOfRows < targetBucketRowNumber) {
-                            nonFullBucketInformation.put(file.bucket(), currentNumberOfRows);
+                            tempBucketInfo.put(file.bucket(), currentNumberOfRows);
                         }
                     }
+
+                    nonFullBucketInformation.putAll(tempBucketInfo);
+
                 } catch (Exception e) {
                     // Log error instead of throwing
                     System.err.println("Error refreshing buckets from disk: " + e.getMessage());

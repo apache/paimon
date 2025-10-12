@@ -35,6 +35,8 @@ import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+import java.time.Duration;
+
 /** Assign bucket for the input record, output record with bucket. */
 public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, Integer>>
         implements OneInputStreamOperator<T, Tuple2<T, Integer>> {
@@ -80,6 +82,7 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
         long targetRowNum = table.coreOptions().dynamicBucketTargetRowNum();
         Integer maxBucketsNum = table.coreOptions().dynamicBucketMaxBuckets();
         Integer minEmptyBucketsBeforeAsyncCheck = table.coreOptions().dynamicBucketEmptyBucketThreshold();
+        Duration minRefreshInterval = table.coreOptions().dynamicBucketMinRefreshInterval();
         this.assigner =
                 overwrite
                         ? new SimpleHashBucketAssigner(
@@ -93,7 +96,8 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
                                 taskId,
                                 targetRowNum,
                                 maxBucketsNum,
-                                minEmptyBucketsBeforeAsyncCheck);
+                        minEmptyBucketsBeforeAsyncCheck,
+                        minRefreshInterval);
         this.extractor = extractorFunction.apply(table.schema());
     }
 

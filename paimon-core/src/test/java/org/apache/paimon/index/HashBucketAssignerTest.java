@@ -67,7 +67,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 assignId,
                 5,
                 -1,
-                -1);
+                -1,
+                null);
     }
 
     private HashBucketAssigner createAssigner(
@@ -81,7 +82,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 assignId,
                 5,
                 maxBucketsNum,
-                -1);
+                -1,
+                null);
     }
 
     @Test
