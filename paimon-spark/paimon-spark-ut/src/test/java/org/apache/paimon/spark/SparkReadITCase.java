@@ -359,7 +359,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                         + "PARTITIONED BY (a)\n");
         assertThat(spark.sql("DESCRIBE PartitionedTable").collectAsList().toString())
                 .isEqualTo(
-                        "[[a,bigint,], [b,string,], [# Partition Information,,], [# col_name,data_type,comment], [a,bigint,]]");
+                        "[[a,bigint,null], [b,string,null], [# Partition Information,,], [# col_name,data_type,comment], [a,bigint,null]]");
     }
 
     @Test
