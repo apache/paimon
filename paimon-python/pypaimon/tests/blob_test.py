@@ -125,7 +125,7 @@ class BlobTest(unittest.TestCase):
 
     def test_blob_ref_interface_compliance(self):
         """Test that BlobRef properly implements Blob interface."""
-        blob_ref = BlobRef.from_local_file(self.file)
+        blob_ref = Blob.from_local(self.file)
 
         # Test that it's a Blob
         self.assertIsInstance(blob_ref, Blob)
@@ -156,8 +156,8 @@ class BlobTest(unittest.TestCase):
         self.assertEqual(hash(data1), hash(data2))
 
         # Test BlobRef equality
-        ref1 = BlobRef.from_local_file(self.file)
-        ref2 = BlobRef.from_local_file(self.file)
+        ref1 = Blob.from_local(self.file)
+        ref2 = Blob.from_local(self.file)
 
         self.assertEqual(ref1, ref2)
         self.assertEqual(hash(ref1), hash(ref2))

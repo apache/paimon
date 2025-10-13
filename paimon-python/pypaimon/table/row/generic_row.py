@@ -275,11 +275,7 @@ class GenericRowSerializer:
                 if any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING']):
                     value_bytes = str(value).encode('utf-8')
                 elif type_name == 'BLOB':
-                    # Handle BlobData objects
-                    if hasattr(value, 'to_data'):
-                        value_bytes = value.to_data()
-                    else:
-                        value_bytes = bytes(value)
+                    value_bytes = value.to_data()
                 else:
                     value_bytes = bytes(value)
 

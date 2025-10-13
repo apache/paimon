@@ -142,16 +142,18 @@ class Blob(ABC):
         return BlobData(data)
 
     @staticmethod
-    def from_local(file_path: str) -> 'Blob':
-        return BlobRef.from_local_file(file_path)
+    def from_local(file: str) -> 'Blob':
+        return Blob.from_file(file)
 
     @staticmethod
     def from_http(uri: str) -> 'Blob':
-        return BlobRef.from_http_uri(uri)
+        descriptor = BlobDescriptor(uri, 0, -1)
+        return BlobRef(descriptor)
 
     @staticmethod
-    def from_file(file_path: str, offset: int = 0, length: int = -1) -> 'Blob':
-        return BlobRef.from_file(file_path, offset, length)
+    def from_file(file: str, offset: int = 0, length: int = -1) -> 'Blob':
+        descriptor = BlobDescriptor(file, offset, length)
+        return BlobRef(descriptor)
 
     @staticmethod
     def from_descriptor(descriptor: BlobDescriptor) -> 'Blob':
@@ -234,21 +236,6 @@ class BlobRef(Blob):
                 raise IOError(f"Failed to read file {file_path}: {e}")
         else:
             raise ValueError(f"Unsupported URI scheme: {uri}")
-
-    @classmethod
-    def from_local_file(cls, file_path: str) -> 'BlobRef':
-        descriptor = BlobDescriptor(file_path, 0, -1)
-        return cls(descriptor)
-
-    @classmethod
-    def from_http_uri(cls, uri: str) -> 'BlobRef':
-        descriptor = BlobDescriptor(uri, 0, -1)
-        return cls(descriptor)
-
-    @classmethod
-    def from_file(cls, file_path: str, offset: int = 0, length: int = -1) -> 'BlobRef':
-        descriptor = BlobDescriptor(file_path, offset, length)
-        return cls(descriptor)
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, BlobRef):
