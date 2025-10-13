@@ -27,6 +27,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.hadoop.SerializableConfiguration;
+import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ReflectionUtils;
@@ -43,6 +44,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -58,15 +60,21 @@ public class HadoopFileIO implements FileIO {
 
     protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
 
+    private final org.apache.hadoop.fs.Path path;
+
+    public HadoopFileIO(Path path) {
+        this.path = path(path);
+    }
+
     @VisibleForTesting
-    public void setFileSystem(Path path, FileSystem fs) throws IOException {
-        org.apache.hadoop.fs.Path hadoopPath = path(path);
-        getFileSystem(hadoopPath, p -> fs);
+    public void setFileSystem(FileSystem fs) throws IOException {
+        getFileSystem(path, p -> fs);
     }
 
     @Override
     public boolean isObjectStore() {
-        return false;
+        String scheme = path.toUri().getScheme().toLowerCase(Locale.US);
+        return FileIOUtils.isObjectStore(scheme);
     }
 
     @Override

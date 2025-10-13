@@ -62,8 +62,8 @@ class HdfsBehaviorTest extends FileIOBehaviorTestBase {
         org.apache.hadoop.fs.FileSystem hdfs = hdfsCluster.getFileSystem();
 
         basePath = new Path(hdfs.getUri().toString() + "/tests");
-        fs = new HadoopFileIO();
-        fs.setFileSystem(basePath, hdfs);
+        fs = new HadoopFileIO(basePath);
+        fs.setFileSystem(hdfs);
     }
 
     @AfterAll
