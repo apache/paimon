@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.cluster;
 
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
-import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
@@ -48,14 +47,14 @@ public class RewriteIncrementalClusterCommittableOperator
     private static final long serialVersionUID = 1L;
 
     private final FileStoreTable table;
-    private final Map<BinaryRow, CompactUnit> compactUnits;
+    private final Map<BinaryRow, Integer> outputLevels;
 
     private transient Map<BinaryRow, List<DataFileMeta>> partitionFiles;
 
     public RewriteIncrementalClusterCommittableOperator(
-            FileStoreTable table, Map<BinaryRow, CompactUnit> compactUnits) {
+            FileStoreTable table, Map<BinaryRow, Integer> outputLevels) {
         this.table = table;
-        this.compactUnits = compactUnits;
+        this.outputLevels = outputLevels;
     }
 
     @Override
@@ -86,17 +85,17 @@ public class RewriteIncrementalClusterCommittableOperator
     protected void emitAll(long checkpointId) {
         for (Map.Entry<BinaryRow, List<DataFileMeta>> partitionEntry : partitionFiles.entrySet()) {
             BinaryRow partition = partitionEntry.getKey();
-            List<DataFileMeta> clusterBefore = compactUnits.get(partition).files();
             // upgrade the clustered file to outputLevel
             List<DataFileMeta> clusterAfter =
                     IncrementalClusterManager.upgrade(
-                            partitionEntry.getValue(), compactUnits.get(partition).outputLevel());
+                            partitionEntry.getValue(), outputLevels.get(partition));
             LOG.info(
                     "Partition {}: upgrade file level to {}",
                     partition,
-                    compactUnits.get(partition).outputLevel());
+                    outputLevels.get(partition));
             CompactIncrement compactIncrement =
-                    new CompactIncrement(clusterBefore, clusterAfter, Collections.emptyList());
+                    new CompactIncrement(
+                            Collections.emptyList(), clusterAfter, Collections.emptyList());
             CommitMessageImpl clusterMessage =
                     new CommitMessageImpl(
                             partition,

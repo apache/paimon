@@ -110,10 +110,6 @@ public class CompactAction extends TableActionBase {
         checkArgument(
                 !((FileStoreTable) table).coreOptions().dataEvolutionEnabled(),
                 "Compact action does not support data evolution table yet. ");
-        checkArgument(
-                !(((FileStoreTable) table).bucketMode() == BucketMode.BUCKET_UNAWARE
-                        && ((FileStoreTable) table).coreOptions().clusteringIncrementalEnabled()),
-                "The table has enabled incremental clustering, and do not support compact in flink yet.");
         HashMap<String, String> dynamicOptions = new HashMap<>(tableConf);
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
         table = table.copy(dynamicOptions);
@@ -158,11 +154,11 @@ public class CompactAction extends TableActionBase {
             return buildForPostponeBucketCompaction(env, fileStoreTable, isStreaming);
         } else if (fileStoreTable.bucketMode() == BucketMode.BUCKET_UNAWARE) {
             if (fileStoreTable.coreOptions().clusteringIncrementalEnabled()) {
-                buildForIncrementalClustering(env, fileStoreTable, isStreaming);
+                return buildForIncrementalClustering(env, fileStoreTable, isStreaming);
             } else {
                 buildForAppendTableCompact(env, fileStoreTable, isStreaming);
+                return true;
             }
-            return true;
         } else {
             buildForBucketedTableCompact(env, fileStoreTable, isStreaming);
             return true;
@@ -216,20 +212,18 @@ public class CompactAction extends TableActionBase {
         builder.build();
     }
 
-    private void buildForIncrementalClustering(
+    private boolean buildForIncrementalClustering(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming) {
-        checkArgument(
-                !isStreaming, "Postpone bucket compaction currently only supports batch mode");
+        checkArgument(!isStreaming, "Incremental clustering currently only supports batch mode");
         checkArgument(
                 partitions == null,
-                "Postpone bucket compaction currently does not support specifying partitions");
+                "Incremental clustering currently does not support specifying partitions");
         checkArgument(
-                whereSql == null,
-                "Postpone bucket compaction currently does not support predicates");
+                whereSql == null, "Incremental clustering currently does not support predicates");
 
         IncrementalClusterManager incrementalClusterManager = new IncrementalClusterManager(table);
 
-        // incremental cluster config
+        // non-full strategy as default for incremental clustering
         if (fullCompaction == null) {
             fullCompaction = false;
         }
@@ -263,6 +257,16 @@ public class CompactAction extends TableActionBase {
         // 1. pick cluster files for each partition
         Map<BinaryRow, CompactUnit> compactUnits =
                 incrementalClusterManager.prepareForCluster(fullCompaction);
+        if (compactUnits.isEmpty()) {
+            LOGGER.info(
+                    "No partition needs to be incrementally clustered. "
+                            + "Please set '--compact_strategy full' if you need to forcibly trigger the cluster.");
+            return false;
+            //            throw new RuntimeException(
+            //                    "No partition needs to be incrementally clustered. "
+            //                            + "Please set '--compact_strategy full' if you need to
+            // forcibly trigger the cluster.");
+        }
         Map<BinaryRow, DataSplit[]> partitionSplits =
                 compactUnits.entrySet().stream()
                         .collect(
@@ -275,13 +279,14 @@ public class CompactAction extends TableActionBase {
                                                                 entry.getValue().files())
                                                         .toArray(new DataSplit[0])));
 
-        // 2. handle in partition
+        // 2. read，sort and write in partition
         List<DataStream<Committable>> dataStreams = new ArrayList<>();
 
         for (Map.Entry<BinaryRow, DataSplit[]> entry : partitionSplits.entrySet()) {
             DataSplit[] splits = entry.getValue();
             LinkedHashMap<String, String> partitionSpec =
                     partitionComputer.generatePartValues(entry.getKey());
+            // 2.1 generate source for current partition
             Pair<DataStream<RowData>, DataStream<Committable>> sourcePair =
                     IncrementalClusterSplitSource.buildSource(
                             env,
@@ -290,24 +295,34 @@ public class CompactAction extends TableActionBase {
                             splits,
                             options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
-            // cluster in partition
+            // 2.2 cluster in partition
             DataStream<RowData> sorted =
                     TableSorter.getSorter(env, sourcePair.getLeft(), table, sortInfo).sort();
 
-            // rewrite
+            // 2.3 write and then reorganize the committable
             RowAppendTableSink sink = new RowAppendTableSink(table, null, null, sinkParallelism);
             DataStream<Committable> clusterCommittable =
                     sink.doWrite(
                                     FlinkSinkBuilder.mapToInternalRow(sorted, table.rowType()),
                                     commitUser,
-                                    sinkParallelism)
-                            .forward()
+                                    null)
                             .transform(
-                                    "Rewrite compact committable",
+                                    "Rewrite cluster committable",
                                     new CommittableTypeInfo(),
                                     new RewriteIncrementalClusterCommittableOperator(
-                                            table, compactUnits));
+                                            table,
+                                            compactUnits.entrySet().stream()
+                                                    .collect(
+                                                            Collectors.toMap(
+                                                                    Map.Entry
+                                                                            ::getKey, // 保持原有的BinaryRow键
+                                                                    unit ->
+                                                                            unit.getValue()
+                                                                                    .outputLevel() // 提取CompactUnit中的level值
+                                                                    ))))
+                            .forceNonParallel();
             dataStreams.add(clusterCommittable);
+            dataStreams.add(sourcePair.getRight());
         }
 
         // 3. commit
@@ -317,6 +332,7 @@ public class CompactAction extends TableActionBase {
             dataStream = dataStream.union(dataStreams.get(i));
         }
         sink.doCommit(dataStream, commitUser);
+        return true;
     }
 
     protected PartitionPredicate getPartitionPredicate() throws Exception {
