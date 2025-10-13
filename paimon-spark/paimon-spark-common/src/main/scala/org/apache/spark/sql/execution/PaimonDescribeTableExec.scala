@@ -25,12 +25,11 @@ import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.spark.utils.CatalogUtils.{checkNamespace, toIdentifier}
 
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.catalog.{CatalogStatistics, CatalogStorageFormat, CatalogTablePartition, CatalogTableType}
+import org.apache.spark.sql.catalyst.catalog.{CatalogStatistics, CatalogStorageFormat, CatalogTablePartition}
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.catalyst.expressions.Attribute
-import org.apache.spark.sql.catalyst.util.quoteIfNeeded
-import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, SupportsMetadataColumns, TableCatalog}
-import org.apache.spark.sql.connector.expressions.IdentityTransform
+import org.apache.spark.sql.connector.catalog.Identifier
+import org.apache.spark.sql.execution.datasources.v2.DescribeTableExec
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
@@ -46,131 +45,18 @@ case class PaimonDescribeTableExec(
   extends PaimonLeafV2CommandExec {
 
   override protected def run(): Seq[InternalRow] = {
-    val rows = new ArrayBuffer[InternalRow]()
-    addSchema(rows)
-    addPartitioning(rows)
+    val rows =
+      ArrayBuffer.empty ++= DescribeTableExec(output, table, isExtended).executeCollect()
 
     if (partitionSpec.nonEmpty) {
       describeDetailedPartitionInfo(rows)
     }
 
     if (isExtended) {
-      addMetadataColumns(rows)
-      addTableDetails(rows)
+      addNotNullMetadata(table.schema, rows)
     }
 
     rows.toSeq
-  }
-
-  private def addTableDetails(rows: ArrayBuffer[InternalRow]): Unit = {
-    rows += emptyRow()
-    rows += toCatalystRow("# Detailed Table Information", "", "")
-    rows += toCatalystRow("Name", table.name(), "")
-
-    val tableType = if (table.properties().containsKey(TableCatalog.PROP_EXTERNAL)) {
-      CatalogTableType.EXTERNAL.name
-    } else {
-      CatalogTableType.MANAGED.name
-    }
-    rows += toCatalystRow("Type", tableType, "")
-    CatalogV2Util.TABLE_RESERVED_PROPERTIES
-      .filterNot(_ == TableCatalog.PROP_EXTERNAL)
-      .foreach(
-        propKey => {
-          if (table.properties.containsKey(propKey)) {
-            rows += toCatalystRow(propKey.capitalize, table.properties.get(propKey), "")
-          }
-        })
-    val properties =
-      conf
-        .redactOptions(table.properties.asScala.toMap)
-        .toList
-        .filter(kv => !CatalogV2Util.TABLE_RESERVED_PROPERTIES.contains(kv._1))
-        .sortBy(_._1)
-        .map { case (key, value) => key + "=" + value }
-        .mkString("[", ",", "]")
-    rows += toCatalystRow("Table Properties", properties, "")
-
-    // If any columns have default values, append them to the result.
-    getDescribeMetadata(table.schema).foreach {
-      row => rows += toCatalystRow(row._1, row._2, row._3)
-    }
-
-    addNotNullMetadata(table.schema, rows)
-  }
-
-  def getDescribeMetadata(schema: StructType): Seq[(String, String, String)] = {
-    val rows = new ArrayBuffer[(String, String, String)]()
-    if (
-      schema.fields.exists(
-        _.metadata.contains(PaimonDescribeTableExec.CURRENT_DEFAULT_COLUMN_METADATA_KEY))
-    ) {
-      rows.append(("", "", ""))
-      rows.append(("# Column Default Values", "", ""))
-      schema.foreach {
-        column =>
-          column.getCurrentDefaultValue().map {
-            value => rows.append((column.name, column.dataType.simpleString, value))
-          }
-      }
-    }
-    rows.toSeq
-  }
-
-  private def addSchema(rows: ArrayBuffer[InternalRow]): Unit = {
-    rows ++= table.schema.map {
-      column =>
-        toCatalystRow(column.name, column.dataType.simpleString, column.getComment().getOrElse(""))
-    }
-  }
-
-  private def addMetadataColumns(rows: ArrayBuffer[InternalRow]): Unit = table match {
-    case hasMeta: SupportsMetadataColumns if hasMeta.metadataColumns.nonEmpty =>
-      rows += emptyRow()
-      rows += toCatalystRow("# Metadata Columns", "", "")
-      rows ++= hasMeta.metadataColumns.map {
-        column =>
-          toCatalystRow(
-            column.name,
-            column.dataType.simpleString,
-            Option(column.comment()).getOrElse(""))
-      }
-    case _ =>
-  }
-
-  private def addPartitioning(rows: ArrayBuffer[InternalRow]): Unit = {
-    if (table.partitioning.nonEmpty) {
-      val partitionColumnsOnly = table.partitioning.forall(t => t.isInstanceOf[IdentityTransform])
-      if (partitionColumnsOnly) {
-        rows += toCatalystRow("# Partition Information", "", "")
-        rows += toCatalystRow(s"# ${output(0).name}", output(1).name, output(2).name)
-        rows ++= table.partitioning
-          .map(_.asInstanceOf[IdentityTransform].ref.fieldNames())
-          .map {
-            fieldNames =>
-              val nestedField = table.schema.findNestedField(fieldNames)
-              assert(
-                nestedField.isDefined,
-                s"Not found the partition column ${fieldNames.map(quoteIfNeeded).mkString(".")} " +
-                  s"in the table schema ${table.schema.catalogString}."
-              )
-              nestedField.get
-          }
-          .map {
-            case (path, field) =>
-              toCatalystRow(
-                (path :+ field.name).map(quoteIfNeeded).mkString("."),
-                field.dataType.simpleString,
-                field.getComment().getOrElse(""))
-          }
-      } else {
-        rows += emptyRow()
-        rows += toCatalystRow("# Partitioning", "", "")
-        rows ++= table.partitioning.zipWithIndex.map {
-          case (transform, index) => toCatalystRow(s"Part $index", transform.describe(), "")
-        }
-      }
-    }
   }
 
   private def describeDetailedPartitionInfo(rows: ArrayBuffer[InternalRow]): Unit = {
@@ -227,7 +113,6 @@ case class PaimonDescribeTableExec(
 
   private def addNotNullMetadata(schema: StructType, rows: ArrayBuffer[InternalRow]): Unit = {
     if (schema.fields.exists(!_.nullable)) {
-      rows += emptyRow()
       rows += toCatalystRow("# Column Not Null", "", "")
       schema.fields.filter(!_.nullable).foreach {
         column => rows += toCatalystRow(column.name, column.dataType.simpleString, "NOT NULL")
