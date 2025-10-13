@@ -24,6 +24,7 @@ import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.DataEvolutionSplitRead;
@@ -86,7 +87,8 @@ public class BlobTableTest extends TableTestBase {
         GenericRow genericRow = new GenericRow(3);
         genericRow.setField(0, 0);
         genericRow.setField(1, BinaryString.fromString("nice"));
-        genericRow.setField(2, Blob.fromInputStream(byteArrayInputStream));
+        genericRow.setField(
+                2, Blob.fromInputStream(() -> SeekableInputStream.wrap(byteArrayInputStream)));
 
         writeDataDefault(Collections.singletonList(genericRow));
 

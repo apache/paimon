@@ -25,7 +25,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.UriReader;
 
 import java.io.IOException;
-import java.io.InputStream;
+import java.util.function.Supplier;
 
 /**
  * Blob interface, provides bytes and input stream methods.
@@ -65,11 +65,7 @@ public interface Blob {
         return new BlobRef(reader, descriptor);
     }
 
-    static Blob fromInputStream(InputStream inputStream) {
-        if (inputStream instanceof SeekableInputStream) {
-            return new BlobStream(() -> (SeekableInputStream) inputStream);
-        } else {
-            return new BlobStream(() -> SeekableInputStream.wrap(inputStream));
-        }
+    static Blob fromInputStream(Supplier<SeekableInputStream> supplier) {
+        return new BlobStream(supplier);
     }
 }
