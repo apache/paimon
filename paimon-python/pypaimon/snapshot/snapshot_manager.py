@@ -59,3 +59,60 @@ class SnapshotManager:
             Path to the snapshot file
         """
         return self.snapshot_dir / f"snapshot-{snapshot_id}"
+
+    def get_earliest_snapshot(self) -> Optional[Snapshot]:
+        """
+        Get the earliest snapshot.
+
+        Returns:
+            The earliest snapshot, or None if no snapshots exist
+        """
+        # TODO implement EARLIEST file
+        return self.get_snapshot_by_id(1)
+
+    def earlier_or_equal_time_mills(self, timestamp: int) -> Optional[Snapshot]:
+        """
+        Find the latest snapshot with time_millis <= the given timestamp.
+
+        Args:
+            timestamp: The timestamp to compare against
+
+        Returns:
+            The latest snapshot with time_millis <= timestamp, or None if no such snapshot exists
+        """
+        earliest = 1
+        latest = self.get_latest_snapshot().id
+        final_snapshot = None
+
+        while earliest <= latest:
+            mid = earliest + (latest - earliest) // 2
+            snapshot = self.get_snapshot_by_id(mid)
+            commit_time = snapshot.time_millis
+
+            if commit_time > timestamp:
+                latest = mid - 1
+            elif commit_time < timestamp:
+                earliest = mid + 1
+                final_snapshot = snapshot
+            else:
+                final_snapshot = snapshot
+                break
+
+        return final_snapshot
+
+    def get_snapshot_by_id(self, snapshot_id: int) -> Optional[Snapshot]:
+        """
+        Get a snapshot by its ID.
+
+        Args:
+            snapshot_id: The snapshot ID
+
+        Returns:
+            The snapshot with the specified ID, or None if not found
+        """
+        snapshot_file = self.get_snapshot_path(snapshot_id)
+        if not self.file_io.exists(snapshot_file):
+            return None
+
+        snapshot_content = self.file_io.read_file_utf8(snapshot_file)
+        return JSON.from_json(snapshot_content, Snapshot)

@@ -29,7 +29,7 @@ from fsspec import AbstractFileSystem
 from fsspec.implementations.local import LocalFileSystem
 from readerwriterlock import rwlock
 
-from pypaimon.api.api_response import GetTableTokenResponse, GetTableResponse
+from pypaimon.api.api_response import GetTableResponse, GetTableTokenResponse
 from pypaimon.api.client import AlreadyExistsException, NoSuchResourceException
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.common.config import CatalogOptions, OssOptions, PVFSOptions

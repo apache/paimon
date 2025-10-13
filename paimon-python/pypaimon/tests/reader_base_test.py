@@ -16,29 +16,28 @@
 # limitations under the License.
 ################################################################################
 
-import os
 import glob
+import os
 import shutil
 import tempfile
 import unittest
-from datetime import datetime, date, time
+from datetime import date, datetime, time
 from decimal import Decimal
 from unittest.mock import Mock
 
 import pandas as pd
 import pyarrow as pa
 
-from pypaimon.table.row.generic_row import GenericRow
-
+from pypaimon import CatalogFactory, Schema
+from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, PyarrowFieldParser)
 from pypaimon.schema.table_schema import TableSchema
-from pypaimon import CatalogFactory
-from pypaimon import Schema
-from pypaimon.manifest.manifest_file_manager import ManifestFileManager
-from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.file_store_commit import FileStoreCommit
 
 
@@ -215,10 +214,10 @@ class ReaderBasicTest(unittest.TestCase):
         self.assertEqual(actual_data, expect_data)
 
         # to test GenericRow ability
-        latest_snapshot = table_scan.snapshot_manager.get_latest_snapshot()
-        manifest_files = table_scan.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.manifest_file_manager.read(manifest_files[0].file_name,
-                                                                 lambda row: table_scan._bucket_filter(row))
+        latest_snapshot = SnapshotManager(table).get_latest_snapshot()
+        manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
+            manifest_files[0].file_name, lambda row: table_scan.starting_scanner._bucket_filter(row))
         min_value_stats = manifest_entries[0].file.value_stats.min_values.values
         max_value_stats = manifest_entries[0].file.value_stats.max_values.values
         expected_min_values = [col[0].as_py() for col in expect_data]
