@@ -20,28 +20,9 @@ from typing import List
 
 
 class DeltaVarintCompressor:
-    """
-    Python implementation of delta varint compression.
-
-    This compresses a list of integers by:
-    1. Computing deltas between consecutive values
-    2. Encoding each delta using variable-length encoding
-
-    This is a simplified implementation that provides the same interface
-    as the Java DeltaVarintCompressor for blob file format compatibility.
-    """
 
     @staticmethod
     def compress(values: List[int]) -> bytes:
-        """
-        Compress a list of integers using delta varint encoding.
-
-        Args:
-            values: List of integers to compress
-
-        Returns:
-            Compressed bytes
-        """
         if not values:
             return b''
 
@@ -59,15 +40,6 @@ class DeltaVarintCompressor:
 
     @staticmethod
     def decompress(data: bytes) -> List[int]:
-        """
-        Decompress bytes back to a list of integers.
-
-        Args:
-            data: Compressed bytes
-
-        Returns:
-            List of decompressed integers
-        """
         if not data:
             return []
 
@@ -88,15 +60,6 @@ class DeltaVarintCompressor:
 
     @staticmethod
     def _encode_varint(value: int) -> bytes:
-        """
-        Encode an integer using variable-length encoding.
-
-        Args:
-            value: Integer to encode
-
-        Returns:
-            Encoded bytes
-        """
         # Handle negative numbers by zigzag encoding
         if value < 0:
             value = (-value << 1) | 1
@@ -113,16 +76,6 @@ class DeltaVarintCompressor:
 
     @staticmethod
     def _decode_varint(data: bytes, offset: int) -> tuple[int, int]:
-        """
-        Decode a variable-length encoded integer.
-
-        Args:
-            data: Bytes to decode from
-            offset: Starting offset
-
-        Returns:
-            Tuple of (decoded_value, new_offset)
-        """
         value = 0
         shift = 0
 

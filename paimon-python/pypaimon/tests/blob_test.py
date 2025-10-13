@@ -1102,7 +1102,7 @@ class FormatBlobReaderTest(unittest.TestCase):
             read_fields=["blob_field"],
             full_fields=fields,
             push_down_predicate=None,
-            batch_size=1  # Force multiple batches
+            batch_size=1  # Batch size parameter is now ignored
         )
 
         # Read data
@@ -1163,13 +1163,13 @@ class FormatBlobReaderTest(unittest.TestCase):
         reader.close()
 
     def test_format_blob_reader_batch_size(self):
-        """Test FormatBlobReader with different batch sizes."""
+        """Test FormatBlobReader reads all records in single batch."""
         # Create test data
         test_blobs = [f"Blob {i}".encode() for i in range(10)]
         blob_file = self._create_test_blob_file(test_blobs)
         fields = [DataField(0, "blob_field", AtomicType("BLOB"))]
 
-        # Test with batch size of 3
+        # Test with batch size parameter (now ignored)
         reader = FormatBlobReader(
             file_io=self.mock_file_io,
             file_path=blob_file,
@@ -1192,15 +1192,13 @@ class FormatBlobReaderTest(unittest.TestCase):
             batch_size = batch.num_rows
             total_records += batch_size
 
-            # Each batch (except possibly the last) should have at most 3 records
-            self.assertLessEqual(batch_size, 3)
-
         reader.close()
 
         # Verify all records were read
         self.assertEqual(total_records, len(test_blobs))
-        # Should have multiple batches due to batch size limit
-        self.assertGreaterEqual(batches_read, 4)  # 10 records / 3 per batch = 4 batches
+        # Should read all records in a single batch since batch_size is no longer used
+        self.assertEqual(batches_read, 1)
+        self.assertEqual(total_records, 10)
 
     def test_format_blob_reader_close(self):
         """Test FormatBlobReader close functionality."""
@@ -1257,7 +1255,7 @@ class FormatBlobReaderTest(unittest.TestCase):
                 reader.close()
 
     def test_format_blob_reader_multiple_reads(self):
-        """Test FormatBlobReader with multiple read operations."""
+        """Test FormatBlobReader reads all data in single operation."""
         test_blobs = [f"Blob content {i}".encode() for i in range(5)]
         blob_file = self._create_test_blob_file(test_blobs)
         fields = [DataField(0, "blob_field", AtomicType("BLOB"))]
@@ -1268,13 +1266,13 @@ class FormatBlobReaderTest(unittest.TestCase):
             read_fields=["blob_field"],
             full_fields=fields,
             push_down_predicate=None,
-            batch_size=2  # Small batch size to force multiple reads
+            batch_size=2  # Batch size parameter is now ignored
         )
 
         all_blobs = []
         read_count = 0
 
-        # Read all data in multiple batches
+        # Read all data (now in single batch)
         while True:
             batch = reader.read_arrow_batch()
             if batch is None:
@@ -1289,7 +1287,7 @@ class FormatBlobReaderTest(unittest.TestCase):
 
         # Verify all data was read correctly
         self.assertEqual(len(all_blobs), len(test_blobs))
-        self.assertGreater(read_count, 1)  # Should have multiple reads
+        self.assertEqual(read_count, 1)  # Should have single read since batch_size is ignored
 
         # Verify content matches
         for i, expected_blob in enumerate(test_blobs):

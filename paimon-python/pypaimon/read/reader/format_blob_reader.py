@@ -31,26 +31,10 @@ from pypaimon.table.row.generic_row import GenericRow
 
 
 class FormatBlobReader(RecordBatchReader):
-    """
-    A RecordBatchReader for reading Blob files using the BlobFormatReader,
-    filters records based on the provided predicate and projection,
-    and converts Blob records to RecordBatch format.
-    """
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
                  full_fields: List[DataField], push_down_predicate: Any,
                  batch_size: int = 4096):
-        """
-        Initialize FormatBlobReader.
-
-        Args:
-            file_io: FileIO instance for file operations
-            file_path: Path to the blob file
-            read_fields: List of field names to read
-            full_fields: List of all available DataField objects
-            push_down_predicate: Predicate for filtering records
-            batch_size: Number of records per batch
-        """
         self._file_io = file_io
         self._file_path = file_path
         self._batch_size = batch_size
@@ -77,13 +61,6 @@ class FormatBlobReader(RecordBatchReader):
         self._current_batch = None
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
-        """
-        Read one batch of blob records and convert to Arrow RecordBatch.
-
-        Returns:
-            RecordBatch with blob data or None if no more data
-        """
-        # Initialize iterator if not done yet
         if self._blob_iterator is None:
             if self.returned:
                 return None
@@ -96,9 +73,12 @@ class FormatBlobReader(RecordBatchReader):
         records_in_batch = 0
 
         try:
-            while records_in_batch < self._batch_size:
+            while True:
                 # Get next blob record
                 blob_row = next(self._blob_iterator)
+                # Check if first read returns None, stop immediately
+                if blob_row is None:
+                    break
 
                 # Extract blob data from the row
                 blob = blob_row.values[0]  # Blob files have single blob field
@@ -115,7 +95,7 @@ class FormatBlobReader(RecordBatchReader):
                 records_in_batch += 1
 
         except StopIteration:
-            # No more records
+            # Stop immediately when StopIteration occurs
             pass
 
         if records_in_batch == 0:
