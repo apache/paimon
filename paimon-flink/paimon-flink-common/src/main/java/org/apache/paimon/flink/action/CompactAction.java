@@ -321,12 +321,10 @@ public class CompactAction extends TableActionBase {
                                             compactUnits.entrySet().stream()
                                                     .collect(
                                                             Collectors.toMap(
-                                                                    Map.Entry
-                                                                            ::getKey, // 保持原有的BinaryRow键
+                                                                    Map.Entry::getKey,
                                                                     unit ->
                                                                             unit.getValue()
-                                                                                    .outputLevel() // 提取CompactUnit中的level值
-                                                                    ))));
+                                                                                    .outputLevel()))));
             dataStreams.add(clusterCommittable);
             dataStreams.add(sourcePair.getRight());
         }

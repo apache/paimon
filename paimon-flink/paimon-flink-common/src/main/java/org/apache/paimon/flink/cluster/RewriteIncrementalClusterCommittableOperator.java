@@ -38,10 +38,7 @@ import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/**
- * Rewrite committable from postpone bucket table compactor. It moves all new files into compact
- * results, and delete unused new files, because compactor only produce compact snapshots.
- */
+/** Rewrite committable for new files written after clustered. */
 public class RewriteIncrementalClusterCommittableOperator
         extends BoundedOneInputOperator<Committable, Committable> {
     private static final long serialVersionUID = 1L;
