@@ -101,7 +101,8 @@ public class LogHybridSourceFactory
                 readBuilder,
                 dataTable.snapshotManager(),
                 dataTable.coreOptions().toConfiguration(),
-                rowData);
+                rowData,
+                dataTable.coreOptions().blobAsDescriptor());
     }
 
     /** The first source of a log {@link HybridSource}. */
@@ -116,8 +117,9 @@ public class LogHybridSourceFactory
                 ReadBuilder readBuilder,
                 SnapshotManager snapshotManager,
                 Options options,
-                @Nullable NestedProjectedRowData rowData) {
-            super(readBuilder, null, rowData);
+                @Nullable NestedProjectedRowData rowData,
+                boolean blobAsDescriptor) {
+            super(readBuilder, null, rowData, blobAsDescriptor);
             this.snapshotManager = snapshotManager;
             this.options = options;
         }

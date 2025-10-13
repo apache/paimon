@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.CoreOptions
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.CoreOptions.{PartitionSinkStrategy, WRITE_ONLY}
 import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
@@ -51,12 +51,18 @@ import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
 
-case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = false)
+case class PaimonSparkWriter(
+    table: FileStoreTable,
+    writeRowTracking: Boolean = false,
+    batchId: Long = -1)
   extends WriteHelper {
 
   private lazy val tableSchema = table.schema
 
   private lazy val bucketMode = table.bucketMode
+
+  private val fullCompactionDeltaCommits: Option[Int] =
+    Option.apply(coreOptions.fullCompactionDeltaCommits())
 
   @transient private lazy val serializer = new CommitMessageSerializer
 
@@ -98,7 +104,16 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
     val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
 
-    def newWrite() = SparkTableWrite(writeBuilder, writeType, rowKindColIdx, writeRowTracking)
+    def newWrite() = SparkTableWrite(
+      writeBuilder,
+      writeType,
+      rowKindColIdx,
+      writeRowTracking,
+      fullCompactionDeltaCommits,
+      batchId,
+      coreOptions.blobAsDescriptor(),
+      table.catalogEnvironment().catalogContext()
+    )
 
     def sparkParallelism = {
       val defaultParallelism = sparkSession.sparkContext.defaultParallelism
@@ -304,10 +319,11 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
    * deletion vectors; else, one index file will contain all deletion vector with the same partition
    * and bucket.
    */
-  def persistDeletionVectors(deletionVectors: Dataset[SparkDeletionVector]): Seq[CommitMessage] = {
+  def persistDeletionVectors(
+      deletionVectors: Dataset[SparkDeletionVector],
+      snapshot: Snapshot): Seq[CommitMessage] = {
     val sparkSession = deletionVectors.sparkSession
     import sparkSession.implicits._
-    val snapshot = table.snapshotManager().latestSnapshotFromFileSystem()
     val serializedCommits = deletionVectors
       .groupByKey(_.partitionAndBucket)
       .mapGroups {
@@ -394,7 +410,11 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
               .bootstrap(numSparkPartitions, sparkPartitionId)
               .toCloseableIterator
             TaskContext.get().addTaskCompletionListener[Unit](_ => bootstrapIterator.close())
-            val toPaimonRow = SparkRowUtils.toPaimonRow(rowType, rowKindColIdx)
+            val toPaimonRow = SparkRowUtils.toPaimonRow(
+              rowType,
+              rowKindColIdx,
+              table.coreOptions().blobAsDescriptor(),
+              table.catalogEnvironment().catalogContext())
 
             bootstrapIterator.asScala
               .map(

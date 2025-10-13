@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.data.{BinaryRow, InternalRow}
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
@@ -39,7 +40,9 @@ import scala.collection.mutable.ListBuffer
 case class DataEvolutionSparkTableWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
-    firstRowIdToPartitionMap: mutable.HashMap[Long, Tuple2[BinaryRow, Long]])
+    firstRowIdToPartitionMap: mutable.HashMap[Long, Tuple2[BinaryRow, Long]],
+    blobAsDescriptor: Boolean,
+    catalogContext: CatalogContext)
   extends SparkTableWriteTrait {
 
   private var currentWriter: PerFileWriter = _
@@ -49,7 +52,7 @@ case class DataEvolutionSparkTableWrite(
   private val commitMessageImpls = ListBuffer[CommitMessageImpl]()
 
   private val toPaimonRow = {
-    SparkRowUtils.toPaimonRow(writeType, -1)
+    SparkRowUtils.toPaimonRow(writeType, -1, blobAsDescriptor, catalogContext)
   }
 
   def write(row: Row): Unit = {

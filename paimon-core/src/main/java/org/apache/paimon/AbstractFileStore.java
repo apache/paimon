@@ -41,6 +41,7 @@ import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
+import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -267,6 +268,16 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (snapshotCommit == null) {
             snapshotCommit = new RenamingSnapshotCommit(snapshotManager, Lock.empty());
         }
+        ConflictDetection conflictDetection =
+                new ConflictDetection(
+                        tableName,
+                        commitUser,
+                        partitionType,
+                        pathFactory(),
+                        newKeyComparator(),
+                        bucketMode(),
+                        options.deletionVectorsEnabled(),
+                        newIndexFileHandler());
         return new FileStoreCommitImpl(
                 snapshotCommit,
                 fileIO,
@@ -287,7 +298,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestFullCompactionThresholdSize(),
                 options.manifestMergeMinCount(),
                 partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
-                newKeyComparator(),
                 options.branch(),
                 newStatsFileHandler(),
                 bucketMode(),
@@ -298,7 +308,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.commitMinRetryWait(),
                 options.commitMaxRetryWait(),
                 options.commitStrictModeLastSafeSnapshot().orElse(null),
-                options.rowTrackingEnabled());
+                options.rowTrackingEnabled(),
+                conflictDetection);
     }
 
     @Override

@@ -20,12 +20,13 @@ package org.apache.paimon.s3;
 
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 
+import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
+import com.amazonaws.services.s3.model.PartETag;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadResponse;
-import software.amazon.awssdk.services.s3.model.CompletedPart;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -220,15 +221,13 @@ class S3TwoPhaseOutputStreamTest {
 
         @SuppressWarnings("unused")
         public MockS3MultiPartUpload(File targetFile) {
-            super(createStubFileSystem());
+            super(createStubFileSystem(), new Configuration());
             this.targetFile = targetFile;
         }
 
         private static S3AFileSystem createStubFileSystem() {
             // Create minimal stub to avoid NullPointerException during initialization
-            StubS3AFileSystem fileSystem = new StubS3AFileSystem();
-            fileSystem.setConf(new org.apache.hadoop.conf.Configuration());
-            return fileSystem;
+            return new StubS3AFileSystem();
         }
 
         @Override
@@ -243,13 +242,8 @@ class S3TwoPhaseOutputStreamTest {
         }
 
         @Override
-        public CompletedPart uploadPart(
-                String key,
-                String uploadId,
-                int partNumber,
-                boolean isLastPart,
-                File inputFile,
-                long byteLength)
+        public PartETag uploadPart(
+                String key, String uploadId, int partNumber, File inputFile, long byteLength)
                 throws IOException {
             uploadPartCalls++;
 
@@ -266,15 +260,12 @@ class S3TwoPhaseOutputStreamTest {
             tempPartFiles.add(tempPartFile);
 
             // Return mock UploadPartResult
-            return CompletedPart.builder()
-                    .partNumber(partNumber)
-                    .eTag("etag-" + partNumber)
-                    .build();
+            return new PartETag(partNumber, "etag-" + partNumber);
         }
 
         @Override
-        public CompleteMultipartUploadResponse completeMultipartUpload(
-                String destKey, String uploadId, List<CompletedPart> partETags, long length) {
+        public CompleteMultipartUploadResult completeMultipartUpload(
+                String destKey, String uploadId, List<PartETag> partETags, long length) {
             completeMultipartUploadCalled = true;
 
             // Simulate combining all parts into the final target file
@@ -299,12 +290,7 @@ class S3TwoPhaseOutputStreamTest {
                 }
                 tempPartFiles.clear();
 
-                return CompleteMultipartUploadResponse.builder()
-                        .bucket("mock-bucket")
-                        .key(destKey)
-                        .eTag("mock-etag")
-                        .build();
-
+                return new MockCompleteMultipartUploadResult("mock-bucket", destKey, "mock-etag");
             } catch (IOException e) {
                 throw new RuntimeException("Failed to complete multipart upload", e);
             }
@@ -327,6 +313,49 @@ class S3TwoPhaseOutputStreamTest {
             if (targetFile.exists()) {
                 targetFile.delete();
             }
+        }
+    }
+
+    /** Mock implementation of PartETag. */
+    private static class MockPartETag extends PartETag {
+        private final String eTag;
+
+        public MockPartETag(String eTag, int partNumber) {
+            super(partNumber, eTag);
+            this.eTag = eTag;
+        }
+
+        @Override
+        public String getETag() {
+            return eTag;
+        }
+    }
+
+    /** Mock implementation of CompleteMultipartUploadResult. */
+    private static class MockCompleteMultipartUploadResult extends CompleteMultipartUploadResult {
+        private final String bucketName;
+        private final String key;
+        private final String eTag;
+
+        public MockCompleteMultipartUploadResult(String bucketName, String key, String eTag) {
+            this.bucketName = bucketName;
+            this.key = key;
+            this.eTag = eTag;
+        }
+
+        @Override
+        public String getBucketName() {
+            return bucketName;
+        }
+
+        @Override
+        public String getKey() {
+            return key;
+        }
+
+        @Override
+        public String getETag() {
+            return eTag;
         }
     }
 

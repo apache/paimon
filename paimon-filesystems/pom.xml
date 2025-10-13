@@ -33,6 +33,7 @@
 
     <modules>
         <module>paimon-hadoop-shaded</module>
+        <module>paimon-hadoop-shaded-3.4</module>
         <module>paimon-hadoop-uber</module>
         <module>paimon-oss</module>
         <module>paimon-oss-impl</module>
@@ -47,12 +48,12 @@
         <module>paimon-azure-impl</module>
         <module>paimon-obs</module>
         <module>paimon-obs-impl</module>
-        <module>paimon-s3-test-utils</module>
     </modules>
 
     <properties>
-        <fs.hadoopshaded.version>3.4.2</fs.hadoopshaded.version>
-        <fs.s3.aws.version>2.29.52</fs.s3.aws.version>
+        <fs.hadoopshaded.version>3.3.4</fs.hadoopshaded.version>
+        <fs.hadoopshaded-3.4.version>3.4.2</fs.hadoopshaded-3.4.version>
+        <fs.s3.aws.version>1.12.319</fs.s3.aws.version>
         <commons.beanutils.version>1.9.4</commons.beanutils.version>
     </properties>
 

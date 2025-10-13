@@ -483,6 +483,40 @@ class IcebergMetadataTest {
         assertThat(paimonIcebergMetadata2.snapshots().get(1).sequenceNumber()).isEqualTo(2L);
     }
 
+    @Test
+    @DisplayName("Test reading metadata with snapshot summary")
+    void testReadMetadataWithSnapshotSummary() throws Exception {
+        // Create a basic Iceberg table
+        Table icebergTable = createBasicIcebergTable("snapshot_summary_table");
+
+        // Perform append operation
+        icebergTable
+                .newFastAppend()
+                .appendFile(
+                        DataFiles.builder(PartitionSpec.unpartitioned())
+                                .withPath("/path/to/append-data.parquet")
+                                .withFileSizeInBytes(100)
+                                .withRecordCount(10)
+                                .build())
+                .commit();
+
+        // Read metadata after append operation
+        IcebergMetadata paimonIcebergMetadata = readIcebergMetadata("snapshot_summary_table");
+
+        // Verify snapshots
+        assertThat(paimonIcebergMetadata.snapshots()).hasSize(1);
+        IcebergSnapshot snapshot = paimonIcebergMetadata.snapshots().get(0);
+        assertThat(snapshot.snapshotId()).isNotNull();
+        assertThat(snapshot.parentSnapshotId()).isNull();
+
+        // Verify snapshot summary contains operation information
+        assertThat(snapshot.summary().operation()).isEqualTo("append");
+        assertThat(snapshot.summary().getSummary().get("operation")).isEqualTo("append");
+        assertThat(snapshot.summary().getSummary().get("total-records")).isEqualTo("10");
+        assertThat(snapshot.summary().getSummary().get("added-data-files")).isEqualTo("1");
+        assertThat(snapshot.summary().getSummary().get("added-files-size")).isEqualTo("100");
+    }
+
     /** Helper method to create a basic Iceberg table with simple schema. */
     private Table createBasicIcebergTable(String tableName) {
         TableIdentifier identifier = TableIdentifier.of("testdb", tableName);

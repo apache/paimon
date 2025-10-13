@@ -131,7 +131,8 @@ public class FileStoreSourceSplitReaderTest {
                 tableRead,
                 limit == null ? null : new RecordLimiter(limit),
                 new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
-                null);
+                null,
+                false);
     }
 
     private void innerTestOnce(int skip) throws Exception {

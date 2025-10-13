@@ -1204,7 +1204,8 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .noDefaultValue()
                     .withDescription(
-                            "Full compaction will be constantly triggered after delta commits.");
+                            "For streaming write, full compaction will be constantly triggered after delta commits. "
+                                    + "For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.");
 
     @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<StreamScanMode> STREAM_SCAN_MODE =
@@ -1990,10 +1991,17 @@ public class CoreOptions implements Serializable {
                     .withDescription("Format table file path only contain partition value.");
 
     public static final ConfigOption<String> BLOB_FIELD =
-            key("blob.field")
+            key("blob-field")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("Specify the blob field.");
+
+    public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
+            key("blob-as-descriptor")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Write blob field using blob descriptor rather than blob bytes.");
 
     private final Options options;
 
@@ -2788,6 +2796,11 @@ public class CoreOptions implements Serializable {
         return consumerId;
     }
 
+    @Nullable
+    public Integer fullCompactionDeltaCommits() {
+        return options.get(FULL_COMPACTION_DELTA_COMMITS);
+    }
+
     public static StreamingReadMode streamReadType(Options options) {
         return options.get(STREAMING_READ_MODE);
     }
@@ -3063,6 +3076,10 @@ public class CoreOptions implements Serializable {
 
     public boolean formatTablePartitionOnlyValueInPath() {
         return options.get(FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH);
+    }
+
+    public boolean blobAsDescriptor() {
+        return options.get(BLOB_AS_DESCRIPTOR);
     }
 
     /** Specifies the merge engine for table with primary key. */

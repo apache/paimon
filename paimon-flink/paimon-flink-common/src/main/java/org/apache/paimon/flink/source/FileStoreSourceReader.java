@@ -52,7 +52,8 @@ public class FileStoreSourceReader
             IOManager ioManager,
             @Nullable Long limit,
             @Nullable NestedProjectedRowData rowData,
-            @Nullable RowType readType) {
+            @Nullable RowType readType,
+            boolean blobAsDescriptor) {
         // limiter is created in SourceReader, it can be shared in all split readers
         super(
                 () ->
@@ -60,7 +61,8 @@ public class FileStoreSourceReader
                                 tableRead.withIOManager(ioManager),
                                 RecordLimiter.create(limit),
                                 metrics,
-                                readType),
+                                readType,
+                                blobAsDescriptor),
                 (element, output, state) ->
                         FlinkRecordsWithSplitIds.emitRecord(
                                 readerContext, element, output, state, metrics, rowData),

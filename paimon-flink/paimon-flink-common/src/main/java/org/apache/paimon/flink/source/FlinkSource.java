@@ -48,14 +48,17 @@ public abstract class FlinkSource
 
     @Nullable protected final Long limit;
     @Nullable protected final NestedProjectedRowData rowData;
+    protected final boolean blobAsDescriptor;
 
     public FlinkSource(
             ReadBuilder readBuilder,
             @Nullable Long limit,
-            @Nullable NestedProjectedRowData rowData) {
+            @Nullable NestedProjectedRowData rowData,
+            boolean blobAsDescriptor) {
         this.readBuilder = readBuilder;
         this.limit = limit;
         this.rowData = rowData;
+        this.blobAsDescriptor = blobAsDescriptor;
     }
 
     @Override
@@ -75,7 +78,8 @@ public abstract class FlinkSource
                 ioManager,
                 limit,
                 NestedProjectedRowData.copy(rowData),
-                readBuilder.readType());
+                readBuilder.readType(),
+                blobAsDescriptor);
     }
 
     @Override

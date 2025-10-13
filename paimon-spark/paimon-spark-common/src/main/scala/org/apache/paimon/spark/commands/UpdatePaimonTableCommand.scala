@@ -71,6 +71,7 @@ case class UpdatePaimonTableCommand(
 
   /** Update for table without primary keys */
   private def performUpdateForNonPkTable(sparkSession: SparkSession): Seq[CommitMessage] = {
+    val readSnapshot = table.snapshotManager().latestSnapshot()
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
     val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
@@ -100,7 +101,7 @@ case class UpdatePaimonTableCommand(
           val addCommitMessage = writeOnlyUpdatedData(sparkSession, touchedDataSplits)
 
           // Step4: write these deletion vectors.
-          val indexCommitMsg = writer.persistDeletionVectors(deletionVectors)
+          val indexCommitMsg = writer.persistDeletionVectors(deletionVectors, readSnapshot)
 
           addCommitMessage ++ indexCommitMsg
         } finally {
@@ -142,22 +143,32 @@ case class UpdatePaimonTableCommand(
   private def writeUpdatedAndUnchangedData(
       sparkSession: SparkSession,
       toUpdateScanRelation: LogicalPlan): Seq[CommitMessage] = {
+
+    def rowIdCol = col(ROW_ID_COLUMN)
+
+    def sequenceNumberCol = toColumn(
+      optimizedIf(
+        condition,
+        Literal(null),
+        toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
+      .as(SEQUENCE_NUMBER_COLUMN)
+
     var updateColumns = updateExpressions.zip(relation.output).map {
+      case (_, origin) if origin.name == ROW_ID_COLUMN => rowIdCol
+      case (_, origin) if origin.name == SEQUENCE_NUMBER_COLUMN => sequenceNumberCol
       case (update, origin) =>
         val updated = optimizedIf(condition, update, origin)
         toColumn(updated).as(origin.name, origin.metadata)
     }
 
     if (coreOptions.rowTrackingEnabled()) {
-      updateColumns ++= Seq(
-        col(ROW_ID_COLUMN),
-        toColumn(
-          optimizedIf(
-            condition,
-            Literal(null),
-            toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
-          .as(SEQUENCE_NUMBER_COLUMN)
-      )
+      val outputSet = relation.outputSet
+      if (!outputSet.exists(_.name == ROW_ID_COLUMN)) {
+        updateColumns ++= Seq(rowIdCol)
+      }
+      if (!outputSet.exists(_.name == SEQUENCE_NUMBER_COLUMN)) {
+        updateColumns ++= Seq(sequenceNumberCol)
+      }
     }
 
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)

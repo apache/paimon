@@ -26,6 +26,9 @@ import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.statistics.StatisticsHelper
 import org.apache.paimon.table.{DataTable, InnerTable}
 import org.apache.paimon.table.source.{InnerTableScan, Split}
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil
+import org.apache.paimon.table.system.FilesTable
+import org.apache.paimon.utils.{SnapshotManager, TagManager}
 
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
@@ -88,7 +91,7 @@ abstract class PaimonBaseScan(
   }
 
   override def toBatch: Batch = {
-    PaimonBatch(lazyInputPartitions, readBuilder, metadataColumns)
+    PaimonBatch(lazyInputPartitions, readBuilder, coreOptions.blobAsDescriptor(), metadataColumns)
   }
 
   override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream = {
@@ -132,12 +135,43 @@ abstract class PaimonBaseScan(
     } else {
       ""
     }
-    val latestSnapshotIdStr = if (table.latestSnapshot().isPresent) {
-      s", LatestSnapshotId: [${table.latestSnapshot().get.id}],"
+
+    val latestSnapshotId = if (table.latestSnapshot().isPresent) {
+      Some(table.latestSnapshot().get.id)
+    } else {
+      None
+    }
+
+    val latestSnapshotIdStr = if (latestSnapshotId.isDefined) {
+      s", LatestSnapshotId: [${latestSnapshotId.get}]"
     } else {
       ""
     }
-    s"PaimonScan: [${table.name}]" + latestSnapshotIdStr + pushedFiltersStr + pushedTopNFilterStr +
+
+    val currentSnapshot =
+      try {
+        table match {
+          case dataTable: DataTable =>
+            TimeTravelUtil.tryTravelToSnapshot(
+              coreOptions.toConfiguration,
+              dataTable.snapshotManager(),
+              dataTable.tagManager())
+          case _ =>
+            Optional.empty()
+        }
+      } catch {
+        case _: Exception => Optional.empty()
+      }
+
+    val currentSnapshotIdStr = if (currentSnapshot.isPresent) {
+      s", currentSnapshotId: [${currentSnapshot.get().id}]"
+    } else if (latestSnapshotId.isDefined) {
+      s", currentSnapshotId: [${latestSnapshotId.get}]"
+    } else {
+      ""
+    }
+
+    s"PaimonScan: [${table.name}]" + latestSnapshotIdStr + currentSnapshotIdStr + pushedFiltersStr + pushedTopNFilterStr +
       pushDownLimit.map(limit => s", Limit: [$limit]").getOrElse("")
   }
 }

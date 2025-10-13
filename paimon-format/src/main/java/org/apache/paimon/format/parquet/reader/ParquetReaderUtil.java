@@ -168,17 +168,17 @@ public class ParquetReaderUtil {
         int repetitionLevel = columnIO.getRepetitionLevel();
         int definitionLevel = columnIO.getDefinitionLevel();
         DataType type = dataField.type();
-        String filedName = dataField.name();
+        String fieldName = dataField.name();
         if (type instanceof RowType) {
             GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
             RowType rowType = (RowType) type;
             ImmutableList.Builder<ParquetField> fieldsBuilder = ImmutableList.builder();
             List<String> fieldNames = rowType.getFieldNames();
-            List<DataField> childrens = rowType.getFields();
-            for (int i = 0; i < childrens.size(); i++) {
+            List<DataField> children = rowType.getFields();
+            for (int i = 0; i < children.size(); i++) {
                 fieldsBuilder.add(
                         constructField(
-                                childrens.get(i),
+                                children.get(i),
                                 lookupColumnByName(groupColumnIO, fieldNames.get(i))));
             }
 
@@ -281,8 +281,8 @@ public class ParquetReaderUtil {
             ColumnIO elementTypeColumnIO;
             if (columnIO instanceof GroupColumnIO) {
                 GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
-                if (!StringUtils.isNullOrWhitespaceOnly(filedName)) {
-                    while (!Objects.equals(groupColumnIO.getName(), filedName)) {
+                if (!StringUtils.isNullOrWhitespaceOnly(fieldName)) {
+                    while (!Objects.equals(groupColumnIO.getName(), fieldName)) {
                         groupColumnIO = (GroupColumnIO) groupColumnIO.getChild(0);
                     }
                     elementTypeColumnIO = groupColumnIO;
