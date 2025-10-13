@@ -19,9 +19,12 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.DataEvolutionSplitRead;
@@ -32,6 +35,8 @@ import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -72,6 +77,22 @@ public class BlobTableTest extends TableTestBase {
                 });
 
         assertThat(integer.get()).isEqualTo(100);
+    }
+
+    @Test
+    public void testWriteByInputStream() throws Exception {
+        createTableDefault();
+        ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(blobBytes);
+
+        GenericRow genericRow = new GenericRow(3);
+        genericRow.setField(0, 0);
+        genericRow.setField(1, BinaryString.fromString("nice"));
+        genericRow.setField(
+                2, Blob.fromInputStream(() -> SeekableInputStream.wrap(byteArrayInputStream)));
+
+        writeDataDefault(Collections.singletonList(genericRow));
+
+        readDefault(row -> assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes));
     }
 
     @Test
