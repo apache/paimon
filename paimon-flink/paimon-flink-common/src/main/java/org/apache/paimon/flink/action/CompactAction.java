@@ -228,7 +228,6 @@ public class CompactAction extends TableActionBase {
             fullCompaction = false;
         }
         Options options = new Options(table.options());
-        Integer sinkParallelism = options.get(FlinkConnectorOptions.SINK_PARALLELISM);
         int localSampleMagnification = table.coreOptions().getLocalSampleMagnification();
         if (localSampleMagnification < 20) {
             throw new IllegalArgumentException(
@@ -237,15 +236,6 @@ public class CompactAction extends TableActionBase {
                             CoreOptions.SORT_COMPACTION_SAMPLE_MAGNIFICATION.key(),
                             localSampleMagnification));
         }
-        TableSortInfo sortInfo =
-                new TableSortInfo.Builder()
-                        .setSortColumns(incrementalClusterManager.clusterKeys())
-                        .setSortStrategy(incrementalClusterManager.clusterCurve())
-                        .setSinkParallelism(sinkParallelism)
-                        .setLocalSampleSize(sinkParallelism * localSampleMagnification)
-                        .setGlobalSampleSize(sinkParallelism * 1000)
-                        .setRangeNumber(sinkParallelism * 10)
-                        .build();
         String commitUser = CoreOptions.createCommitUser(options);
         InternalRowPartitionComputer partitionComputer =
                 new InternalRowPartitionComputer(
@@ -261,11 +251,14 @@ public class CompactAction extends TableActionBase {
             LOGGER.info(
                     "No partition needs to be incrementally clustered. "
                             + "Please set '--compact_strategy full' if you need to forcibly trigger the cluster.");
-            return false;
-            //            throw new RuntimeException(
-            //                    "No partition needs to be incrementally clustered. "
-            //                            + "Please set '--compact_strategy full' if you need to
-            // forcibly trigger the cluster.");
+            if (this.forceStartFlinkJob) {
+                env.fromSequence(0, 0)
+                        .name("Nothing to Cluster Source")
+                        .sinkTo(new DiscardingSink<>());
+                return true;
+            } else {
+                return false;
+            }
         }
         Map<BinaryRow, DataSplit[]> partitionSplits =
                 compactUnits.entrySet().stream()
@@ -296,11 +289,25 @@ public class CompactAction extends TableActionBase {
                             options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
             // 2.2 cluster in partition
+            Integer sinkParallelism = options.get(FlinkConnectorOptions.SINK_PARALLELISM);
+            if (sinkParallelism == null) {
+                sinkParallelism = sourcePair.getLeft().getParallelism();
+            }
+            TableSortInfo sortInfo =
+                    new TableSortInfo.Builder()
+                            .setSortColumns(incrementalClusterManager.clusterKeys())
+                            .setSortStrategy(incrementalClusterManager.clusterCurve())
+                            .setSinkParallelism(sinkParallelism)
+                            .setLocalSampleSize(sinkParallelism * localSampleMagnification)
+                            .setGlobalSampleSize(sinkParallelism * 1000)
+                            .setRangeNumber(sinkParallelism * 10)
+                            .build();
             DataStream<RowData> sorted =
                     TableSorter.getSorter(env, sourcePair.getLeft(), table, sortInfo).sort();
 
             // 2.3 write and then reorganize the committable
-            RowAppendTableSink sink = new RowAppendTableSink(table, null, null, sinkParallelism);
+            // set parallelism to null, and it'll forward parallelism when doWrite()
+            RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
             DataStream<Committable> clusterCommittable =
                     sink.doWrite(
                                     FlinkSinkBuilder.mapToInternalRow(sorted, table.rowType()),
@@ -319,14 +326,13 @@ public class CompactAction extends TableActionBase {
                                                                     unit ->
                                                                             unit.getValue()
                                                                                     .outputLevel() // 提取CompactUnit中的level值
-                                                                    ))))
-                            .forceNonParallel();
+                                                                    ))));
             dataStreams.add(clusterCommittable);
             dataStreams.add(sourcePair.getRight());
         }
 
         // 3. commit
-        RowAppendTableSink sink = new RowAppendTableSink(table, null, null, sinkParallelism);
+        RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
         DataStream<Committable> dataStream = dataStreams.get(0);
         for (int i = 1; i < dataStreams.size(); i++) {
             dataStream = dataStream.union(dataStreams.get(i));

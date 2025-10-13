@@ -47,7 +47,7 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 
-/** Source for incremental cluster. */
+/** Source for Incremental Clustering. */
 public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<Split> {
     private static final long serialVersionUID = 1L;
 
