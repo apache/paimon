@@ -56,8 +56,8 @@ class BlobDescriptor:
         data = struct.pack('<B', self._version)  # version (1 byte)
         data += struct.pack('<I', uri_length)  # uri length (4 bytes)
         data += uri_bytes  # uri bytes
-        data += struct.pack('<Q', self._offset)  # offset (8 bytes)
-        data += struct.pack('<Q', self._length)  # length (8 bytes)
+        data += struct.pack('<q', self._offset)  # offset (8 bytes, signed)
+        data += struct.pack('<q', self._length)  # length (8 bytes, signed)
 
         return data
 
@@ -74,8 +74,9 @@ class BlobDescriptor:
         version = struct.unpack('<B', data[offset:offset + 1])[0]
         offset += 1
 
-        if version != cls.CURRENT_VERSION:
-            raise ValueError(f"Unsupported BlobDescriptor version: {version}, expected {cls.CURRENT_VERSION}")
+        # For now, we only support version 1, but allow flexibility for future versions
+        if version < 1:
+            raise ValueError(f"Unsupported BlobDescriptor version: {version}")
 
         # Read URI length
         uri_length = struct.unpack('<I', data[offset:offset + 4])[0]
@@ -93,10 +94,10 @@ class BlobDescriptor:
         if offset + 16 > len(data):
             raise ValueError("Invalid BlobDescriptor data: missing offset/length")
 
-        blob_offset = struct.unpack('<Q', data[offset:offset + 8])[0]
+        blob_offset = struct.unpack('<q', data[offset:offset + 8])[0]
         offset += 8
 
-        blob_length = struct.unpack('<Q', data[offset:offset + 8])[0]
+        blob_length = struct.unpack('<q', data[offset:offset + 8])[0]
 
         return cls(uri, blob_offset, blob_length, version)
 

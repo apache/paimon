@@ -21,7 +21,7 @@ import zlib
 from typing import BinaryIO, List
 
 from pypaimon.table.row.blob import BlobData
-from pypaimon.format.blob.delta_varint_compressor import DeltaVarintCompressor
+from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 
 
 class BlobFormatWriter:
