@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List
+from typing import List, Tuple
 
 
 class DeltaVarintCompressor:
@@ -75,7 +75,7 @@ class DeltaVarintCompressor:
         return bytes(result)
 
     @staticmethod
-    def _decode_varint(data: bytes, offset: int) -> tuple[int, int]:
+    def _decode_varint(data: bytes, offset: int) -> Tuple[int, int]:
         value = 0
         shift = 0
 
