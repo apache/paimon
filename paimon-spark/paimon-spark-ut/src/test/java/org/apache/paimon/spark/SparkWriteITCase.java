@@ -29,6 +29,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.execution.ui.SQLExecutionUIData;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -37,7 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -45,6 +46,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
+
+import scala.collection.JavaConverters;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -339,15 +342,48 @@ public class SparkWriteITCase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"order", "zorder", "hilbert"})
-    public void testWriteWithClustering(String clusterStrategy) {
-        spark.sql(
-                "CREATE TABLE T (a INT, b INT) TBLPROPERTIES ("
-                        + "'clustering.columns'='a,b',"
-                        + String.format("'clustering.strategy'='%s')", clusterStrategy));
-        spark.sql("INSERT INTO T VALUES (2, 2), (1, 1), (3, 3)").collectAsList();
-        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
-        assertThat(rows.toString()).isEqualTo("[[1,1], [2,2], [3,3]]");
+    @CsvSource({
+        "order, true",
+        "zorder, true",
+        "hilbert, true",
+        "order, false",
+        "zorder, false",
+        "hilbert, false"
+    })
+    public void testWriteWithClustering(String clusterStrategy, boolean useV2Write) {
+        try {
+            long currentTimeMillis = System.currentTimeMillis();
+            spark.conf().set("spark.paimon.write.use-v2-write", String.valueOf(useV2Write));
+            spark.sql(
+                    "CREATE TABLE T (a INT, b INT) TBLPROPERTIES ("
+                            + "'clustering.columns'='a,b',"
+                            + String.format("'clustering.strategy'='%s')", clusterStrategy));
+
+            spark.sql("INSERT INTO T VALUES (2, 2), (1, 1), (3, 3)").collectAsList();
+            scala.collection.Seq<SQLExecutionUIData> executionSeq =
+                    spark.sharedState().statusStore().executionsList();
+
+            java.util.List<SQLExecutionUIData> executionList =
+                    JavaConverters.seqAsJavaList(executionSeq);
+
+            boolean hasSort =
+                    executionList.stream()
+                            .anyMatch(
+                                    e -> {
+                                        if (e.submissionTime() <= currentTimeMillis) {
+                                            return false;
+                                        }
+                                        String description = e.physicalPlanDescription();
+                                        return description != null
+                                                && description.toLowerCase().contains("sort");
+                                    });
+            assertThat(hasSort).isEqualTo(true);
+
+            List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+            assertThat(rows.toString()).isEqualTo("[[1,1], [2,2], [3,3]]");
+        } finally {
+            spark.conf().unset("spark.paimon.write.use-v2-write");
+        }
     }
 
     @Test
