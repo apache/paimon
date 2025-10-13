@@ -23,7 +23,6 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory
-from pypaimon import Schema
 from pypaimon.schema.data_types import (
     AtomicType, DataField, DataTypeParser, PyarrowFieldParser, Keyword
 )
@@ -150,7 +149,6 @@ class DataTypesTest(unittest.TestCase):
         pa_type = pa.large_binary()
         avro_type = PyarrowFieldParser.to_avro_type(pa_type, "blob_field")
         self.assertEqual(avro_type, "bytes")
-
 
     def test_blob_json_serialization(self):
         """Test BLOB type JSON serialization and deserialization"""

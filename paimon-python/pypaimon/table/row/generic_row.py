@@ -20,14 +20,11 @@ import struct
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from typing import Any, List, TYPE_CHECKING
+from typing import Any, List
 
 from pypaimon.schema.data_types import AtomicType, DataField, DataType
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.table.row.blob import BlobData
-
-if TYPE_CHECKING:
-    from pypaimon.table.row.blob import Blob
 
 
 @dataclass
@@ -273,7 +270,8 @@ class GenericRowSerializer:
                 raise ValueError(f"BinaryRow only support AtomicType yet, meet {field.type.__class__}")
 
             type_name = field.type.type.upper()
-            if any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING', 'BINARY', 'VARBINARY', 'BYTES', 'BLOB']):
+            if any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING',
+                                                     'BINARY', 'VARBINARY', 'BYTES', 'BLOB']):
                 if any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING']):
                     value_bytes = str(value).encode('utf-8')
                 elif type_name == 'BLOB':
