@@ -111,6 +111,8 @@ class DataWriter(ABC):
             self.file_io.write_orc(file_path, data, compression=self.compression)
         elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
             self.file_io.write_avro(file_path, data)
+        elif self.file_format == CoreOptions.FILE_FORMAT_BLOB:
+            self.file_io.write_blob(file_path, data)
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 

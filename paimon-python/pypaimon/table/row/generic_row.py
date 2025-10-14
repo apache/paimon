@@ -24,6 +24,7 @@ from typing import Any, List
 
 from pypaimon.schema.data_types import AtomicType, DataField, DataType
 from pypaimon.table.row.row_kind import RowKind
+from pypaimon.table.row.blob import BlobData
 
 
 @dataclass
@@ -111,6 +112,8 @@ class GenericRowDeserializer:
             return cls._parse_string(bytes_data, base_offset, field_offset)
         elif type_name.startswith('BINARY') or type_name.startswith('VARBINARY') or type_name == 'BYTES':
             return cls._parse_binary(bytes_data, base_offset, field_offset)
+        elif type_name == 'BLOB':
+            return cls._parse_blob(bytes_data, base_offset, field_offset)
         elif type_name.startswith('DECIMAL') or type_name.startswith('NUMERIC'):
             return cls._parse_decimal(bytes_data, base_offset, field_offset, data_type)
         elif type_name.startswith('TIMESTAMP'):
@@ -194,6 +197,13 @@ class GenericRowDeserializer:
             return bytes_data[field_offset:field_offset + length]
 
     @classmethod
+    def _parse_blob(cls, bytes_data: bytes, base_offset: int, field_offset: int) -> BlobData:
+        """Parse BLOB data from binary format and return a BlobData instance."""
+        # BLOB uses the same binary format as regular binary data
+        binary_data = cls._parse_binary(bytes_data, base_offset, field_offset)
+        return BlobData.from_bytes(binary_data)
+
+    @classmethod
     def _parse_decimal(cls, bytes_data: bytes, base_offset: int, field_offset: int, data_type: DataType) -> Decimal:
         unscaled_long = struct.unpack('<q', bytes_data[field_offset:field_offset + 8])[0]
         type_str = str(data_type)
@@ -260,9 +270,12 @@ class GenericRowSerializer:
                 raise ValueError(f"BinaryRow only support AtomicType yet, meet {field.type.__class__}")
 
             type_name = field.type.type.upper()
-            if any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING', 'BINARY', 'VARBINARY', 'BYTES']):
+            if any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING',
+                                                     'BINARY', 'VARBINARY', 'BYTES', 'BLOB']):
                 if any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING']):
                     value_bytes = str(value).encode('utf-8')
+                elif type_name == 'BLOB':
+                    value_bytes = value.to_data()
                 else:
                     value_bytes = bytes(value)
 

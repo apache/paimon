@@ -38,6 +38,7 @@ class CoreOptions(str, Enum):
     FILE_FORMAT_ORC = "orc"
     FILE_FORMAT_AVRO = "avro"
     FILE_FORMAT_PARQUET = "parquet"
+    FILE_FORMAT_BLOB = "blob"
     FILE_COMPRESSION = "file.compression"
     FILE_COMPRESSION_PER_LEVEL = "file.compression.per.level"
     FILE_FORMAT_PER_LEVEL = "file.format.per.level"
