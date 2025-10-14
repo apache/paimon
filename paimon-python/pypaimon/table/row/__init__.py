@@ -15,7 +15,3 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
-from .blob import Blob, BlobData, BlobDescriptor, BlobRef
-
-__all__ = ['Blob', 'BlobData', 'BlobDescriptor', 'BlobRef']
