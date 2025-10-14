@@ -51,7 +51,7 @@ class FormatBlobReader(RecordBatchReader):
 
         # Set up fields and schema
         if len(read_fields) > 1:
-            raise RuntimeError("BlobFileFormat only supports one field.")
+            raise RuntimeError("Blob reader only supports one field.")
         self._fields = read_fields
         full_fields_map = {field.name: field for field in full_fields}
         projected_data_fields = [full_fields_map[name] for name in read_fields]

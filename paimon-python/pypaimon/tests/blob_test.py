@@ -1880,7 +1880,8 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertTrue(
             "large_binary" in str(context.exception) or
             "to_paimon_type" in str(context.exception) or
-            "missing" in str(context.exception)
+            "missing" in str(context.exception) or
+            "Field must be Blob/BlobData instance" in str(context.exception)
         )
 
         # Test that blob format rejects tables with null values

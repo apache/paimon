@@ -29,7 +29,7 @@ from pyarrow._fs import FileSystem
 
 from pypaimon.common.config import OssOptions, S3Options
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
-from pypaimon.table.row import BlobData
+from pypaimon.table.row.blob import BlobData
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.write.blob_format_writer import BlobFormatWriter
@@ -386,7 +386,7 @@ class FileIO:
                 fields = [DataField(0, field.name, AtomicType("BLOB"))]
             else:
                 # Convert other types as needed
-                paimon_type = PyarrowFieldParser.to_paimon_type(field.type)
+                paimon_type = PyarrowFieldParser.to_paimon_type(field.type, field.nullable)
                 fields = [DataField(0, field.name, paimon_type)]
             # Convert PyArrow Table to records
             records_dict = data.to_pydict()

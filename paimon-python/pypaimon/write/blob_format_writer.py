@@ -43,8 +43,7 @@ class BlobFormatWriter:
         if blob_value is None:
             raise ValueError("BlobFormatWriter only supports non-null blob")
 
-        # Support both BlobData and BlobRef via Blob interface
-        if not isinstance(blob_value, (BlobData, Blob)):
+        if not isinstance(blob_value, Blob):
             raise ValueError("Field must be Blob/BlobData instance")
 
         previous_pos = self.position

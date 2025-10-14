@@ -28,9 +28,7 @@ class DeltaVarintCompressor:
             return b''
 
         # Estimate output size (conservative: 5 bytes per varint max)
-        estimated_size = len(data) * 5
         out = io.BytesIO()
-        out.truncate(estimated_size)  # Pre-allocate buffer
         out.seek(0)
 
         # Encode first value directly
