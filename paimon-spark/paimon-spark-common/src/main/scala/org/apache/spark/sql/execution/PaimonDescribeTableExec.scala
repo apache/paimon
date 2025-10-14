@@ -81,7 +81,7 @@ case class PaimonDescribeTableExec(
     rows += toCatalystRow("Table", identifier.name(), "")
     val partition = catalog
       .paimonCatalog()
-      .listPartitions(toIdentifier(identifier))
+      .listPartitions(toIdentifier(identifier, catalog.name()))
       .asScala
       .filter(_.spec().asScala == partitionSpec)
     if (partition.size != 1) {
