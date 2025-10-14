@@ -226,8 +226,8 @@ class PkReaderTest(unittest.TestCase):
                                             partition_keys=['dt'],
                                             primary_keys=['user_id', 'dt'],
                                             options={'bucket': '2'})
-        self.catalog.create_table('default.test_incremental_parquet', schema, False)
-        table = self.catalog.get_table('default.test_incremental_parquet')
+        self.catalog.create_table('default.test_incremental_read_multi_snapshots', schema, False)
+        table = self.catalog.get_table('default.test_incremental_read_multi_snapshots')
         write_builder = table.new_batch_write_builder()
         for i in range(1, 101):
             table_write = write_builder.new_write()
