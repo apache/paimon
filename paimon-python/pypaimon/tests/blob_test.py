@@ -1101,8 +1101,7 @@ class FormatBlobReaderTest(unittest.TestCase):
             file_path=blob_file,
             read_fields=["blob_field"],
             full_fields=fields,
-            push_down_predicate=None,
-            batch_size=1  # Batch size parameter is now ignored
+            push_down_predicate=None
         )
 
         # Read data
@@ -1175,8 +1174,7 @@ class FormatBlobReaderTest(unittest.TestCase):
             file_path=blob_file,
             read_fields=["blob_field"],
             full_fields=fields,
-            push_down_predicate=None,
-            batch_size=3
+            push_down_predicate=None
         )
 
         # Read data and count batches
@@ -1265,8 +1263,7 @@ class FormatBlobReaderTest(unittest.TestCase):
             file_path=blob_file,
             read_fields=["blob_field"],
             full_fields=fields,
-            push_down_predicate=None,
-            batch_size=2  # Batch size parameter is now ignored
+            push_down_predicate=None
         )
 
         all_blobs = []
@@ -1332,6 +1329,330 @@ class FormatBlobReaderTest(unittest.TestCase):
                 push_down_predicate=None
             )
             reader.read_arrow_batch()
+
+
+class BlobEndToEndTest(unittest.TestCase):
+    """End-to-end tests for blob functionality with schema definition, file writing, and reading."""
+
+    def setUp(self):
+        """Set up test environment."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.warehouse = os.path.join(self.temp_dir, 'warehouse')
+        # Create catalog for table operations
+        from pypaimon import CatalogFactory
+        self.catalog = CatalogFactory.create({
+            'warehouse': self.warehouse
+        })
+        self.catalog.create_database('test_db', False)
+
+    def tearDown(self):
+        """Clean up test environment."""
+        try:
+            shutil.rmtree(self.temp_dir)
+        except OSError:
+            pass
+
+    def test_blob_end_to_end(self):
+        """Test comprehensive end-to-end blob functionality with AtomicType BLOB: check type, write data, read data."""
+        from pypaimon.schema.data_types import DataField, AtomicType
+        from pypaimon.table.row.blob import BlobData
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pathlib import Path
+        import pyarrow as pa
+
+        # Set up file I/O
+        file_io = FileIO(self.temp_dir, {})
+
+        # Define schema with multiple AtomicType("BLOB") fields
+        comprehensive_fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "simple_blob", AtomicType("BLOB")),
+            DataField(2, "document_blob", AtomicType("BLOB")),
+            DataField(3, "image_blob", AtomicType("BLOB")),
+            DataField(4, "metadata_blob", AtomicType("BLOB")),
+            DataField(5, "description", AtomicType("STRING")),
+        ]
+
+        # ========== Step 1: Check Type Validation ==========
+        # Validate all BLOB fields are AtomicType("BLOB")
+        blob_fields = [
+            comprehensive_fields[1], comprehensive_fields[2],
+            comprehensive_fields[3], comprehensive_fields[4]
+        ]
+        for blob_field in blob_fields:
+            self.assertIsInstance(blob_field.type, AtomicType)
+            self.assertEqual(blob_field.type.type, "BLOB")
+
+        # ========== Step 2: Write Data ==========
+        # Prepare test data with multiple BLOB fields
+        test_data = {
+            'id': 1,
+            'simple_blob': BlobData(b'End-to-end test: PDF header %PDF-1.4\n...'),
+            'document_blob': BlobData(b'Document content: Lorem ipsum dolor sit amet...'),
+            'image_blob': BlobData(b'\x89PNG\r\n\x1a\n...complete_image_data...'),
+            'metadata_blob': BlobData(b'{"user_id": 12345, "created": "2024-01-01", "type": "profile"}'),
+            'description': "Comprehensive end-to-end BLOB test with atomic types only"
+        }
+
+        # Write each BLOB field to separate files (blob format supports single column only)
+        blob_files = {}
+
+        # Write simple_blob
+        simple_blob_data = [test_data['simple_blob'].to_data()]
+        simple_schema = pa.schema([pa.field("simple_blob", pa.large_binary())])
+        simple_table = pa.table([simple_blob_data], schema=simple_schema)
+        blob_files['simple_blob'] = Path(self.temp_dir) / "simple_blob.blob"
+        file_io.write_blob(blob_files['simple_blob'], simple_table)
+        self.assertTrue(file_io.exists(blob_files['simple_blob']))
+
+        # Write document_blob
+        document_blob_data = [test_data['document_blob'].to_data()]
+        document_schema = pa.schema([pa.field("document_blob", pa.large_binary())])
+        document_table = pa.table([document_blob_data], schema=document_schema)
+        blob_files['document_blob'] = Path(self.temp_dir) / "document_blob.blob"
+        file_io.write_blob(blob_files['document_blob'], document_table)
+        self.assertTrue(file_io.exists(blob_files['document_blob']))
+
+        # Write image_blob
+        image_blob_data = [test_data['image_blob'].to_data()]
+        image_schema = pa.schema([pa.field("image_blob", pa.large_binary())])
+        image_table = pa.table([image_blob_data], schema=image_schema)
+        blob_files['image_blob'] = Path(self.temp_dir) / "image_blob.blob"
+        file_io.write_blob(blob_files['image_blob'], image_table)
+        self.assertTrue(file_io.exists(blob_files['image_blob']))
+
+        # Write metadata_blob
+        metadata_blob_data = [test_data['metadata_blob'].to_data()]
+        metadata_schema = pa.schema([pa.field("metadata_blob", pa.large_binary())])
+        metadata_table = pa.table([metadata_blob_data], schema=metadata_schema)
+        blob_files['metadata_blob'] = Path(self.temp_dir) / "metadata_blob.blob"
+        file_io.write_blob(blob_files['metadata_blob'], metadata_table)
+        self.assertTrue(file_io.exists(blob_files['metadata_blob']))
+
+        # Verify all files were created with correct sizes
+        for field_name, file_path in blob_files.items():
+            file_size = file_io.get_file_size(file_path)
+            self.assertGreater(file_size, 0, f"{field_name} file should have content")
+
+        # ========== Step 3: Read Data and Check Data ==========
+        # Read and verify each BLOB field
+        for field_name, file_path in blob_files.items():
+            # Create field definition for reading
+            read_fields = [DataField(0, field_name, AtomicType("BLOB"))]
+
+            # Create reader
+            reader = FormatBlobReader(
+                file_io=file_io,
+                file_path=str(file_path),
+                read_fields=[field_name],
+                full_fields=read_fields,
+                push_down_predicate=None
+            )
+
+            # Read data
+            batch = reader.read_arrow_batch()
+            self.assertIsNotNone(batch, f"{field_name} batch should not be None")
+            self.assertEqual(batch.num_rows, 1, f"{field_name} should have 1 row")
+
+            # Verify data integrity
+            read_blob_data = batch.column(0)[0].as_py()
+            expected_blob_data = test_data[field_name].to_data()
+            self.assertEqual(read_blob_data, expected_blob_data, f"{field_name} data should match")
+
+            reader.close()
+
+        # Test multiple BLOB records in a single file
+        multiple_blob_data = [
+            test_data['simple_blob'].to_data(),
+            test_data['document_blob'].to_data(),
+            test_data['image_blob'].to_data(),
+            test_data['metadata_blob'].to_data()
+        ]
+        multiple_schema = pa.schema([pa.field("multiple_blobs", pa.large_binary())])
+        multiple_table = pa.table([multiple_blob_data], schema=multiple_schema)
+
+        multiple_blob_file = Path(self.temp_dir) / "multiple_blobs.blob"
+        file_io.write_blob(multiple_blob_file, multiple_table)
+        self.assertTrue(file_io.exists(multiple_blob_file))
+
+        # Read multiple BLOB records
+        multiple_fields = [DataField(0, "multiple_blobs", AtomicType("BLOB"))]
+        multiple_reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=str(multiple_blob_file),
+            read_fields=["multiple_blobs"],
+            full_fields=multiple_fields,
+            push_down_predicate=None
+        )
+
+        multiple_batch = multiple_reader.read_arrow_batch()
+        self.assertIsNotNone(multiple_batch)
+        self.assertEqual(multiple_batch.num_rows, 4)
+
+        # Verify each record in the multiple BLOB file
+        for i in range(multiple_batch.num_rows):
+            read_blob = multiple_batch.column(0)[i].as_py()
+            expected_blob = multiple_blob_data[i]
+            self.assertEqual(read_blob, expected_blob, f"Multiple blob record {i} should match")
+
+        multiple_reader.close()
+
+        # Final verification summary
+        total_files = len(blob_files) + 1  # Individual files + multiple blob file
+        total_records = len(blob_files) + len(multiple_blob_data)  # Individual records + multiple records
+        total_size = (
+            sum(file_io.get_file_size(path) for path in blob_files.values()) +
+            file_io.get_file_size(multiple_blob_file)
+        )
+
+        # Verify all operations completed successfully
+        self.assertEqual(total_files, 5, "Should have created 5 blob files")
+        self.assertEqual(total_records, 8, "Should have processed 8 blob records total")
+        self.assertGreater(total_size, 0, "Total file size should be greater than 0")
+
+    def test_blob_complex_types_throw_exception(self):
+        """Test that complex types containing BLOB elements throw exceptions during read/write operations."""
+        from pypaimon.schema.data_types import DataField, AtomicType, ArrayType, MultisetType, MapType
+        from pypaimon.table.row.blob import BlobData
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
+        from pypaimon.table.row.row_kind import RowKind
+        from pathlib import Path
+        import pyarrow as pa
+
+        # Set up file I/O
+        file_io = FileIO(self.temp_dir, {})
+
+        # ========== Test ArrayType(nullable=True, element_type=AtomicType("BLOB")) ==========
+        array_fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "blob_array", ArrayType(nullable=True, element_type=AtomicType("BLOB"))),
+        ]
+
+        # Test serialization throws exception for ArrayType<BLOB>
+        array_blob_data = [
+            BlobData(b"Array blob 1"),
+            BlobData(b"Array blob 2"),
+            BlobData(b"Array blob 3")
+        ]
+
+        array_row = GenericRow([1, array_blob_data], array_fields, RowKind.INSERT)
+
+        # GenericRowSerializer should throw exception for complex types
+        with self.assertRaises(ValueError) as context:
+            GenericRowSerializer.to_bytes(array_row)
+        self.assertIn("AtomicType", str(context.exception))
+
+        # Note: FileIO.write_blob validation for complex types is tested separately below
+
+        # ========== Test MultisetType(nullable=True, element_type=AtomicType("BLOB")) ==========
+        multiset_fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "blob_multiset", MultisetType(nullable=True, element_type=AtomicType("BLOB"))),
+        ]
+
+        # Test serialization throws exception for MultisetType<BLOB>
+        multiset_blob_data = [
+            BlobData(b"Multiset blob 1"),
+            BlobData(b"Multiset blob 2"),
+            BlobData(b"Multiset blob 1"),  # Duplicate allowed in multiset
+        ]
+
+        multiset_row = GenericRow([2, multiset_blob_data], multiset_fields, RowKind.INSERT)
+
+        # GenericRowSerializer should throw exception for complex types
+        with self.assertRaises(ValueError) as context:
+            GenericRowSerializer.to_bytes(multiset_row)
+        self.assertIn("AtomicType", str(context.exception))
+        map_fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "blob_map", MapType(
+                nullable=True, key_type=AtomicType("STRING"), value_type=AtomicType("BLOB")
+            )),
+        ]
+
+        # Test serialization throws exception for MapType<STRING, BLOB>
+        map_blob_data = {
+            "document": BlobData(b"Document content"),
+            "image": BlobData(b"Image data"),
+            "metadata": BlobData(b"Metadata content")
+        }
+
+        map_row = GenericRow([3, map_blob_data], map_fields, RowKind.INSERT)
+
+        # GenericRowSerializer should throw exception for complex types
+        with self.assertRaises(ValueError) as context:
+            GenericRowSerializer.to_bytes(map_row)
+        self.assertIn("AtomicType", str(context.exception))
+
+        # ========== Test FileIO.write_blob validation for complex types ==========
+        # Test that FileIO.write_blob properly validates and rejects complex types
+
+        # Create a table with multiple columns (should fail - blob format requires single column)
+        multi_column_schema = pa.schema([
+            pa.field("blob1", pa.large_binary()),
+            pa.field("blob2", pa.large_binary())
+        ])
+        multi_column_table = pa.table([
+            [b"blob1_data"],
+            [b"blob2_data"]
+        ], schema=multi_column_schema)
+
+        multi_column_file = Path(self.temp_dir) / "multi_column.blob"
+
+        # Should throw RuntimeError for multiple columns
+        with self.assertRaises(RuntimeError) as context:
+            file_io.write_blob(multi_column_file, multi_column_table)
+        self.assertIn("single column", str(context.exception))
+
+        # Test that FileIO.write_blob rejects null values
+        null_schema = pa.schema([pa.field("blob_with_nulls", pa.large_binary())])
+        null_table = pa.table([[b"data", None]], schema=null_schema)
+
+        null_file = Path(self.temp_dir) / "null_data.blob"
+
+        # Should throw RuntimeError for null values
+        with self.assertRaises(RuntimeError) as context:
+            file_io.write_blob(null_file, null_table)
+        self.assertIn("null values", str(context.exception))
+
+        # ========== Test FormatBlobReader with complex type schema ==========
+        # Create a valid blob file first
+        valid_blob_data = [b"Valid blob content"]
+        valid_schema = pa.schema([pa.field("valid_blob", pa.large_binary())])
+        valid_table = pa.table([valid_blob_data], schema=valid_schema)
+
+        valid_blob_file = Path(self.temp_dir) / "valid_blob.blob"
+        file_io.write_blob(valid_blob_file, valid_table)
+
+        # Try to read with complex type field definition - this should fail
+        # because FormatBlobReader tries to create PyArrow schema with complex types
+        complex_read_fields = [
+            DataField(0, "valid_blob", ArrayType(nullable=True, element_type=AtomicType("BLOB")))
+        ]
+
+        # FormatBlobReader creation should work, but reading should fail due to schema mismatch
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=str(valid_blob_file),
+            read_fields=["valid_blob"],
+            full_fields=complex_read_fields,
+            push_down_predicate=None
+        )
+
+        # Reading should fail because the schema expects complex type but data is atomic
+        with self.assertRaises(Exception) as context:
+            reader.read_arrow_batch()
+        # The error could be ArrowTypeError or other PyArrow-related errors
+        self.assertTrue(
+            "ArrowTypeError" in str(type(context.exception)) or
+            "TypeError" in str(type(context.exception)) or
+            "ValueError" in str(type(context.exception))
+        )
+
+        reader.close()
 
 
 if __name__ == '__main__':

@@ -33,11 +33,9 @@ from pypaimon.table.row.generic_row import GenericRow
 class FormatBlobReader(RecordBatchReader):
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
-                 full_fields: List[DataField], push_down_predicate: Any,
-                 batch_size: int = 4096):
+                 full_fields: List[DataField], push_down_predicate: Any):
         self._file_io = file_io
         self._file_path = file_path
-        self._batch_size = batch_size
         self._push_down_predicate = push_down_predicate
 
         # Get file size
@@ -51,6 +49,8 @@ class FormatBlobReader(RecordBatchReader):
         self._read_index()
 
         # Set up fields and schema
+        if len(read_fields) > 1:
+            raise RuntimeError("BlobFileFormat only support one field.")
         self._fields = read_fields
         full_fields_map = {field.name: field for field in full_fields}
         projected_data_fields = [full_fields_map[name] for name in read_fields]
@@ -65,7 +65,7 @@ class FormatBlobReader(RecordBatchReader):
             if self.returned:
                 return None
             self.returned = True
-            batch_iterator = BlobRecordIterator(self.file_path, self.blob_lengths, self.blob_offsets)
+            batch_iterator = BlobRecordIterator(self.file_path, self.blob_lengths, self.blob_offsets, self._fields[0])
             self._blob_iterator = iter(batch_iterator)
 
         # Collect records for this batch
@@ -161,7 +161,7 @@ class FormatBlobReader(RecordBatchReader):
 class BlobRecordIterator:
     """Iterator for blob records in a blob file."""
 
-    def __init__(self, file_path: str, blob_lengths: List[int], blob_offsets: List[int]):
+    def __init__(self, file_path: str, blob_lengths: List[int], blob_offsets: List[int], field_name: str):
         """
         Initialize blob record iterator.
 
@@ -171,6 +171,7 @@ class BlobRecordIterator:
             blob_offsets: List of blob offsets
         """
         self.file_path = file_path
+        self.field_name = field_name
         self.blob_lengths = blob_lengths
         self.blob_offsets = blob_offsets
         self.current_position = 0
@@ -207,7 +208,7 @@ class BlobRecordIterator:
         from pypaimon.schema.data_types import DataField, AtomicType
         from pypaimon.table.row.row_kind import RowKind
 
-        fields = [DataField(0, "blob_field", AtomicType("BLOB"))]
+        fields = [DataField(0, self.field_name, AtomicType("BLOB"))]
         return GenericRow([blob], fields, RowKind.INSERT)
 
     def returned_position(self) -> int:
