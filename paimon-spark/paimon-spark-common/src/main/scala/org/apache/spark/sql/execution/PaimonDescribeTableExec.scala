@@ -74,7 +74,7 @@ case class PaimonDescribeTableExec(
   }
 
   private def describeFormattedDetailedPartitionInfo(rows: ArrayBuffer[InternalRow]): Unit = {
-    checkNamespace(identifier.namespace())
+    checkNamespace(identifier.namespace(), catalog.name())
     rows += emptyRow()
     rows += toCatalystRow("# Detailed Partition Information", "", "")
     rows += toCatalystRow("Database", identifier.namespace().head, "")
