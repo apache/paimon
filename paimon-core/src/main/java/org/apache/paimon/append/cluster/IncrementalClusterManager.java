@@ -226,7 +226,8 @@ public class IncrementalClusterManager {
         return splits;
     }
 
-    public List<DataFileMeta> upgrade(List<DataFileMeta> filesAfterCluster, int outputLevel) {
+    public static List<DataFileMeta> upgrade(
+            List<DataFileMeta> filesAfterCluster, int outputLevel) {
         return filesAfterCluster.stream()
                 .map(file -> file.upgrade(outputLevel))
                 .collect(Collectors.toList());

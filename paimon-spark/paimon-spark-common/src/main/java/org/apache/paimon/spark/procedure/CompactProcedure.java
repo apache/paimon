@@ -617,7 +617,7 @@ public class CompactProcedure extends BaseProcedure {
                 List<DataFileMeta> clusterBefore = compactUnits.get(partition).files();
                 // upgrade the clustered file to outputLevel
                 List<DataFileMeta> clusterAfter =
-                        incrementalClusterManager.upgrade(
+                        IncrementalClusterManager.upgrade(
                                 entry.getValue(), compactUnits.get(partition).outputLevel());
                 LOG.info(
                         "Partition {}: upgrade file level to {}",
