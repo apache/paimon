@@ -28,6 +28,11 @@ from packaging.version import parse
 from pyarrow._fs import FileSystem
 
 from pypaimon.common.config import OssOptions, S3Options
+from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
+from pypaimon.table.row.blob import BlobData
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.row_kind import RowKind
+from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 class FileIO:
@@ -364,3 +369,53 @@ class FileIO:
 
         with self.new_output_stream(path) as output_stream:
             fastavro.writer(output_stream, avro_schema, records, **kwargs)
+
+    def write_blob(self, path: Path, data: pyarrow.Table, **kwargs):
+        try:
+            # Validate input constraints
+            if data.num_columns != 1:
+                raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
+            # Check for null values
+            column = data.column(0)
+            if column.null_count > 0:
+                raise RuntimeError("Blob format does not support null values")
+            # Convert PyArrow schema to Paimon DataFields
+            # For blob files, we expect exactly one blob column
+            field = data.schema[0]
+            if pyarrow.types.is_large_binary(field.type):
+                fields = [DataField(0, field.name, AtomicType("BLOB"))]
+            else:
+                # Convert other types as needed
+                paimon_type = PyarrowFieldParser.to_paimon_type(field.type, field.nullable)
+                fields = [DataField(0, field.name, paimon_type)]
+            # Convert PyArrow Table to records
+            records_dict = data.to_pydict()
+            num_rows = data.num_rows
+            field_name = fields[0].name
+            with self.new_output_stream(path) as output_stream:
+                writer = BlobFormatWriter(output_stream)
+                # Write each row
+                for i in range(num_rows):
+                    col_data = records_dict[field_name][i]
+                    # Convert to appropriate type based on field type
+                    if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
+                        if isinstance(col_data, bytes):
+                            blob_data = BlobData(col_data)
+                        else:
+                            # Convert to bytes if needed
+                            if hasattr(col_data, 'as_py'):
+                                col_data = col_data.as_py()
+                            if isinstance(col_data, str):
+                                col_data = col_data.encode('utf-8')
+                            blob_data = BlobData(col_data)
+                        row_values = [blob_data]
+                    else:
+                        row_values = [col_data]
+                    # Create GenericRow and write
+                    row = GenericRow(row_values, fields, RowKind.INSERT)
+                    writer.add_element(row)
+                writer.close()
+
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write blob file {path}: {e}") from e

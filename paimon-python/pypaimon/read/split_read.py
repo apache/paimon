@@ -21,6 +21,7 @@ from abc import ABC, abstractmethod
 from functools import partial
 from typing import List, Optional, Tuple
 
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
@@ -31,6 +32,7 @@ from pypaimon.read.reader.drop_delete_reader import DropDeleteRecordReader
 from pypaimon.read.reader.empty_record_reader import EmptyFileRecordReader
 from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
+from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.iface.record_reader import RecordReader
@@ -73,10 +75,13 @@ class SplitRead(ABC):
         file_format = extension[1:]
 
         format_reader: RecordBatchReader
-        if file_format == "avro":
+        if file_format == CoreOptions.FILE_FORMAT_AVRO:
             format_reader = FormatAvroReader(self.table.file_io, file_path, self._get_final_read_data_fields(),
                                              self.read_fields, self.push_down_predicate)
-        elif file_format == "parquet" or file_format == "orc":
+        elif file_format == CoreOptions.FILE_FORMAT_BLOB:
+            format_reader = FormatBlobReader(self.table.file_io, file_path, self._get_final_read_data_fields(),
+                                             self.read_fields, self.push_down_predicate)
+        elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path,
                                                 self._get_final_read_data_fields(), self.push_down_predicate)
         else:
