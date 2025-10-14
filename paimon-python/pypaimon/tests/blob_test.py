@@ -44,6 +44,10 @@ class MockFileIO:
         """Get file size."""
         return self._file_io.get_file_size(Path(path))
 
+    def new_input_stream(self, path: Path):
+        """Create new input stream for reading."""
+        return self._file_io.new_input_stream(path)
+
 
 class BlobTest(unittest.TestCase):
     """Tests for Blob interface following org.apache.paimon.data.BlobTest."""

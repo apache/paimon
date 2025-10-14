@@ -16,82 +16,160 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Tuple
+import io
+from typing import List
 
 
 class DeltaVarintCompressor:
 
     @staticmethod
-    def compress(values: List[int]) -> bytes:
-        if not values:
+    def compress(data: List[int]) -> bytes:
+        if not data:
             return b''
 
-        result = bytearray()
+        # Estimate output size (conservative: 5 bytes per varint max)
+        estimated_size = len(data) * 5
+        out = io.BytesIO()
+        out.truncate(estimated_size)  # Pre-allocate buffer
+        out.seek(0)
 
-        # First value is stored as-is
-        result.extend(DeltaVarintCompressor._encode_varint(values[0]))
+        # Encode first value directly
+        DeltaVarintCompressor._encode_varint(data[0], out)
 
-        # Subsequent values are stored as deltas
-        for i in range(1, len(values)):
-            delta = values[i] - values[i - 1]
-            result.extend(DeltaVarintCompressor._encode_varint(delta))
+        # Encode deltas without intermediate list creation
+        prev = data[0]
+        for i in range(1, len(data)):
+            current = data[i]
+            delta = current - prev
+            DeltaVarintCompressor._encode_varint(delta, out)
+            prev = current
 
-        return bytes(result)
+        # Return only the used portion of the buffer
+        position = out.tell()
+        result = out.getvalue()
+        out.close()
+        return result[:position]
 
     @staticmethod
-    def decompress(data: bytes) -> List[int]:
-        if not data:
+    def decompress(compressed: bytes) -> List[int]:
+        if not compressed:
             return []
 
+        # Fast path: decode directly into result without intermediate deltas list
+        in_stream = io.BytesIO(compressed)
         result = []
-        offset = 0
 
-        # Read first value
-        value, offset = DeltaVarintCompressor._decode_varint(data, offset)
-        result.append(value)
+        try:
+            # Decode first value
+            first_value = DeltaVarintCompressor._decode_varint(in_stream)
+            result.append(first_value)
 
-        # Read deltas and reconstruct values
-        while offset < len(data):
-            delta, offset = DeltaVarintCompressor._decode_varint(data, offset)
-            value = result[-1] + delta
-            result.append(value)
+            # Decode and reconstruct remaining values in one pass
+            current_value = first_value
+            while True:
+                try:
+                    delta = DeltaVarintCompressor._decode_varint(in_stream)
+                    current_value += delta
+                    result.append(current_value)
+                except RuntimeError:
+                    # End of stream reached
+                    break
+
+        except RuntimeError:
+            # Handle empty stream case
+            pass
+        finally:
+            in_stream.close()
 
         return result
 
     @staticmethod
-    def _encode_varint(value: int) -> bytes:
-        # Handle negative numbers by zigzag encoding
-        if value < 0:
-            value = (-value << 1) | 1
+    def _encode_varint(value: int, out: io.BytesIO) -> None:
+        # ZigZag encoding - use reliable arithmetic approach
+        if value >= 0:
+            zigzag = value << 1
         else:
-            value = value << 1
+            zigzag = ((-value) << 1) - 1
 
-        result = bytearray()
-        while value >= 0x80:
-            result.append((value & 0x7F) | 0x80)
-            value >>= 7
-        result.append(value & 0x7F)
-
-        return bytes(result)
+        # Optimized varint encoding - batch byte operations
+        if zigzag < 0x80:
+            # Single byte case (most common)
+            out.write(bytes([zigzag]))
+        elif zigzag < 0x4000:
+            # Two byte case
+            out.write(bytes([
+                (zigzag & 0x7F) | 0x80,
+                zigzag >> 7
+            ]))
+        elif zigzag < 0x200000:
+            # Three byte case
+            out.write(bytes([
+                (zigzag & 0x7F) | 0x80,
+                ((zigzag >> 7) & 0x7F) | 0x80,
+                zigzag >> 14
+            ]))
+        else:
+            # General case for larger numbers
+            while zigzag >= 0x80:
+                out.write(bytes([(zigzag & 0x7F) | 0x80]))
+                zigzag >>= 7
+            out.write(bytes([zigzag]))
 
     @staticmethod
-    def _decode_varint(data: bytes, offset: int) -> Tuple[int, int]:
-        value = 0
-        shift = 0
+    def _decode_varint(in_stream: io.BytesIO) -> int:
+        # Read first byte
+        byte_data = in_stream.read(1)
+        if not byte_data:
+            raise RuntimeError("End of stream")
 
-        while offset < len(data):
-            byte = data[offset]
-            offset += 1
+        b0 = byte_data[0]
 
-            value |= (byte & 0x7F) << shift
-            if (byte & 0x80) == 0:
-                break
+        # Fast path: single byte (most common case)
+        if b0 < 0x80:
+            return DeltaVarintCompressor._zigzag_decode(b0)
+
+        # Multi-byte case
+        result = b0 & 0x7F
+        shift = 7
+
+        # Unroll first few iterations for better performance
+        for _ in range(4):  # Handle up to 5 bytes total
+            byte_data = in_stream.read(1)
+            if not byte_data:
+                raise RuntimeError("Unexpected end of input")
+
+            b = byte_data[0]
+            result |= (b & 0x7F) << shift
+
+            if b < 0x80:
+                return DeltaVarintCompressor._zigzag_decode(result)
+
             shift += 7
+            if shift > 63:
+                raise RuntimeError("Varint overflow")
 
-        # Decode zigzag encoding
+        # Handle remaining bytes (rare case for very large numbers)
+        while True:
+            byte_data = in_stream.read(1)
+            if not byte_data:
+                raise RuntimeError("Unexpected end of input")
+
+            b = byte_data[0]
+            result |= (b & 0x7F) << shift
+
+            if b < 0x80:
+                break
+
+            shift += 7
+            if shift > 63:
+                raise RuntimeError("Varint overflow")
+
+        return DeltaVarintCompressor._zigzag_decode(result)
+
+    @staticmethod
+    def _zigzag_decode(value: int) -> int:
+        """Fast ZigZag decoding using bit operations."""
         if value & 1:
-            value = -(value >> 1)
+            return -((value + 1) >> 1)
         else:
-            value = value >> 1
-
-        return value, offset
+            return value >> 1

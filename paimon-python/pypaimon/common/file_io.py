@@ -374,15 +374,15 @@ class FileIO:
         try:
             # Validate input constraints
             if data.num_columns != 1:
-                raise ValueError(f"Blob format only supports a single column, got {data.num_columns} columns")
+                raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
             # Check for null values
             column = data.column(0)
             if column.null_count > 0:
-                raise ValueError("Blob format does not support null values")
+                raise RuntimeError("Blob format does not support null values")
             # Convert PyArrow schema to Paimon DataFields
             # For blob files, we expect exactly one blob column
             field = data.schema[0]
-            if field.type == pyarrow.large_binary():
+            if pyarrow.types.is_large_binary(field.type):
                 fields = [DataField(0, field.name, AtomicType("BLOB"))]
             else:
                 # Convert other types as needed

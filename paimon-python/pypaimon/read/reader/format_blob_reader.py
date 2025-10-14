@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 import struct
+from pathlib import Path
 from typing import List, Optional, Any, Iterator
 
 import pyarrow as pa
@@ -124,7 +125,8 @@ class FormatBlobReader(RecordBatchReader):
         self._blob_iterator = None
 
     def _read_index(self) -> None:
-        with open(self.file_path, 'rb') as f:
+        with self._file_io.new_input_stream(Path(self.file_path)) as f:
+            # Seek to header: last 5 bytes
             f.seek(self._file_size - 5)
             header = f.read(5)
 
@@ -145,10 +147,8 @@ class FormatBlobReader(RecordBatchReader):
             if len(index_bytes) != index_length:
                 raise IOError("Invalid blob file: cannot read index")
 
-            # Decompress blob lengths
+            # Decompress blob lengths and compute offsets
             blob_lengths = DeltaVarintCompressor.decompress(index_bytes)
-
-            # Calculate blob offsets
             blob_offsets = []
             offset = 0
             for length in blob_lengths:
@@ -159,6 +159,9 @@ class FormatBlobReader(RecordBatchReader):
 
 
 class BlobRecordIterator:
+    MAGIC_NUMBER_SIZE = 4
+    METADATA_OVERHEAD = 16
+
     def __init__(self, file_path: str, blob_lengths: List[int], blob_offsets: List[int], field_name: str):
         self.file_path = file_path
         self.field_name = field_name
@@ -175,8 +178,8 @@ class BlobRecordIterator:
 
         # Create blob reference for the current blob
         # Skip magic number (4 bytes) and exclude length (8 bytes) + CRC (4 bytes) = 12 bytes
-        blob_offset = self.blob_offsets[self.current_position] + 4  # Skip magic number
-        blob_length = self.blob_lengths[self.current_position] - 16  # Exclude magic(4) + length(8) + CRC(4)
+        blob_offset = self.blob_offsets[self.current_position] + self.MAGIC_NUMBER_SIZE  # Skip magic number
+        blob_length = self.blob_lengths[self.current_position] - self.METADATA_OVERHEAD
 
         # Create BlobDescriptor for this blob
         descriptor = BlobDescriptor(self.file_path, blob_offset, blob_length)
@@ -194,11 +197,3 @@ class BlobRecordIterator:
     def returned_position(self) -> int:
         """Get current position in the iterator."""
         return self.current_position
-
-    def file_path(self) -> str:
-        """Get the file path."""
-        return self.file_path
-
-    def release_batch(self) -> None:
-        """Release batch resources (no-op)."""
-        pass

@@ -20,14 +20,15 @@ import struct
 import zlib
 from typing import BinaryIO, List
 
-from pypaimon.table.row.blob import BlobData
+from pypaimon.table.row.blob import Blob, BlobData
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 
 
 class BlobFormatWriter:
     VERSION = 1
-    MAGIC_NUMBER = 1481511375  # Same as Java implementation
+    MAGIC_NUMBER = 1481511375
     BUFFER_SIZE = 4096
+    METADATA_SIZE = 12  # 8-byte length + 4-byte CRC
 
     def __init__(self, output_stream: BinaryIO):
         self.output_stream = output_stream
@@ -42,8 +43,9 @@ class BlobFormatWriter:
         if blob_value is None:
             raise ValueError("BlobFormatWriter only supports non-null blob")
 
-        if not isinstance(blob_value, BlobData):
-            raise ValueError("Field must be BlobData instance")
+        # Support both BlobData and BlobRef via Blob interface
+        if not isinstance(blob_value, (BlobData, Blob)):
+            raise ValueError("Field must be Blob/BlobData instance")
 
         previous_pos = self.position
         crc32 = 0  # Initialize CRC32
@@ -53,13 +55,22 @@ class BlobFormatWriter:
         crc32 = self._write_with_crc(magic_bytes, crc32)
 
         # Write blob data
-        blob_data = blob_value.to_data()
-        crc32 = self._write_with_crc(blob_data, crc32)
+        if isinstance(blob_value, BlobData):
+            data = blob_value.to_data()
+            crc32 = self._write_with_crc(data, crc32)
+        else:
+            # Stream from BlobRef/Blob
+            stream = blob_value.new_input_stream()
+            try:
+                chunk = stream.read(self.BUFFER_SIZE)
+                while chunk:
+                    crc32 = self._write_with_crc(chunk, crc32)
+                    chunk = stream.read(self.BUFFER_SIZE)
+            finally:
+                stream.close()
 
-        # Calculate total length including magic number, data, length, and CRC
-        # +12 for length (8 bytes) and CRC (4 bytes) fields written after the data;
-        # this makes the total calculation correct
-        bin_length = self.position - previous_pos + 12
+        # Calculate total length including magic + data + metadata (length + CRC)
+        bin_length = self.position - previous_pos + self.METADATA_SIZE
         self.lengths.append(bin_length)
 
         # Write length (8 bytes, little endian)
