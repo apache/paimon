@@ -64,7 +64,7 @@ class TableScan:
                 raise ValueError(
                     "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: " +
                     options[CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP])
-            earliest_snapshot = SnapshotManager(self.table).get_earliest_snapshot()
+            earliest_snapshot = SnapshotManager(self.table).try_get_earliest_snapshot()
             latest_snapshot = SnapshotManager(self.table).get_latest_snapshot()
             if earliest_snapshot is None or latest_snapshot is None:
                 return EmptyStartingScanner()

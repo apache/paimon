@@ -62,7 +62,7 @@ class IncrementalStartingScanner(FullStartingScanner):
         """
         snapshot_manager = SnapshotManager(table)
         starting_snapshot = snapshot_manager.earlier_or_equal_time_mills(start_timestamp)
-        earliest_snapshot = snapshot_manager.get_earliest_snapshot()
+        earliest_snapshot = snapshot_manager.try_get_earliest_snapshot()
 
         # If earliest_snapshot.time_millis > start_timestamp we should include the earliest_snapshot
         if starting_snapshot is None or (earliest_snapshot and earliest_snapshot.time_millis > start_timestamp):

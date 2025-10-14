@@ -60,15 +60,13 @@ class SnapshotManager:
         """
         return self.snapshot_dir / f"snapshot-{snapshot_id}"
 
-    def get_earliest_snapshot(self) -> Optional[Snapshot]:
-        """
-        Get the earliest snapshot.
-
-        Returns:
-            The earliest snapshot, or None if no snapshots exist
-        """
-        # TODO implement EARLIEST file
-        return self.get_snapshot_by_id(1)
+    def try_get_earliest_snapshot(self) -> Optional[Snapshot]:
+        if self.file_io.exists(self.snapshot_dir / "EARLIEST"):
+            earliest_content = self.file_io.read_file_utf8(self.snapshot_dir / "EARLIEST")
+            earliest_snapshot_id = int(earliest_content.strip())
+            return self.get_snapshot_by_id(earliest_snapshot_id)
+        else:
+            return self.get_snapshot_by_id(1)
 
     def earlier_or_equal_time_mills(self, timestamp: int) -> Optional[Snapshot]:
         """
