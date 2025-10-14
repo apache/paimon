@@ -250,14 +250,7 @@ public class CompactAction extends TableActionBase {
             LOGGER.info(
                     "No partition needs to be incrementally clustered. "
                             + "Please set '--compact_strategy full' if you need to forcibly trigger the cluster.");
-            if (this.forceStartFlinkJob) {
-                env.fromSequence(0, 0)
-                        .name("Nothing to Cluster Source")
-                        .sinkTo(new DiscardingSink<>());
-                return true;
-            } else {
-                return false;
-            }
+            return false;
         }
         Map<BinaryRow, DataSplit[]> partitionSplits =
                 compactUnits.entrySet().stream()
@@ -307,14 +300,9 @@ public class CompactAction extends TableActionBase {
             // 2.3 write and then reorganize the committable
             // set parallelism to null, and it'll forward parallelism when doWrite()
             RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
-            boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
             DataStream<Committable> clusterCommittable =
                     sink.doWrite(
-                                    FlinkSinkBuilder.mapToInternalRow(
-                                            sorted,
-                                            table.rowType(),
-                                            blobAsDescriptor,
-                                            table.catalogEnvironment().catalogContext()),
+                                    FlinkSinkBuilder.mapToInternalRow(sorted, table.rowType()),
                                     commitUser,
                                     null)
                             .transform(
