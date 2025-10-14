@@ -50,7 +50,7 @@ class FormatBlobReader(RecordBatchReader):
 
         # Set up fields and schema
         if len(read_fields) > 1:
-            raise RuntimeError("BlobFileFormat only support one field.")
+            raise RuntimeError("BlobFileFormat only supports one field.")
         self._fields = read_fields
         full_fields_map = {field.name: field for field in full_fields}
         projected_data_fields = [full_fields_map[name] for name in read_fields]
@@ -159,17 +159,7 @@ class FormatBlobReader(RecordBatchReader):
 
 
 class BlobRecordIterator:
-    """Iterator for blob records in a blob file."""
-
     def __init__(self, file_path: str, blob_lengths: List[int], blob_offsets: List[int], field_name: str):
-        """
-        Initialize blob record iterator.
-
-        Args:
-            file_path: Path to the blob file
-            blob_lengths: List of blob lengths
-            blob_offsets: List of blob offsets
-        """
         self.file_path = file_path
         self.field_name = field_name
         self.blob_lengths = blob_lengths
@@ -177,19 +167,9 @@ class BlobRecordIterator:
         self.current_position = 0
 
     def __iter__(self) -> Iterator[GenericRow]:
-        """Return iterator."""
         return self
 
     def __next__(self) -> GenericRow:
-        """
-        Get next blob record.
-
-        Returns:
-            GenericRow containing a single blob field
-
-        Raises:
-            StopIteration: When no more records
-        """
         if self.current_position >= len(self.blob_lengths):
             raise StopIteration
 

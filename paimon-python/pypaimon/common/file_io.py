@@ -374,7 +374,7 @@ class FileIO:
         try:
             # Validate input constraints
             if data.num_columns != 1:
-                raise ValueError(f"Blob format only supports single column, got {data.num_columns} columns")
+                raise ValueError(f"Blob format only supports a single column, got {data.num_columns} columns")
             # Check for null values
             column = data.column(0)
             if column.null_count > 0:

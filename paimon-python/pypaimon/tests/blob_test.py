@@ -1654,6 +1654,242 @@ class BlobEndToEndTest(unittest.TestCase):
 
         reader.close()
 
+    def test_blob_advanced_scenarios(self):
+        """Test advanced blob scenarios: corruption, truncation, zero-length, large blobs, compression, cross-format."""
+        from pypaimon.schema.data_types import DataField, AtomicType
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
+        from pathlib import Path
+        import pyarrow as pa
+
+        # Set up file I/O
+        file_io = FileIO(self.temp_dir, {})
+
+        # ========== Test 1: Corrupted file header test ==========
+
+        # Create a valid blob file first
+        valid_blob_data = [b"Test blob content for corruption test"]
+        valid_schema = pa.schema([pa.field("test_blob", pa.large_binary())])
+        valid_table = pa.table([valid_blob_data], schema=valid_schema)
+
+        header_test_file = Path(self.temp_dir) / "header_test.blob"
+        file_io.write_blob(header_test_file, valid_table)
+
+        # Read the file and corrupt the header (last 5 bytes: index_length + version)
+        with open(header_test_file, 'rb') as f:
+            original_data = f.read()
+
+        # Corrupt the version byte (last byte)
+        corrupted_data = bytearray(original_data)
+        corrupted_data[-1] = 99  # Invalid version (should be 1)
+
+        corrupted_header_file = Path(self.temp_dir) / "corrupted_header.blob"
+        with open(corrupted_header_file, 'wb') as f:
+            f.write(corrupted_data)
+
+        # Try to read corrupted file - should detect invalid version
+        fields = [DataField(0, "test_blob", AtomicType("BLOB"))]
+
+        # Reading should fail due to invalid version
+        with self.assertRaises(IOError) as context:
+            FormatBlobReader(
+                file_io=file_io,
+                file_path=str(corrupted_header_file),
+                read_fields=["test_blob"],
+                full_fields=fields,
+                push_down_predicate=None
+            )
+        self.assertIn("Unsupported blob file version", str(context.exception))
+
+        # ========== Test 2: Truncated blob file (mid-blob) read ==========
+
+        # Create a blob file with substantial content
+        large_content = b"Large blob content: " + b"X" * 1000 + b" End of content"
+        large_blob_data = [large_content]
+        large_schema = pa.schema([pa.field("large_blob", pa.large_binary())])
+        large_table = pa.table([large_blob_data], schema=large_schema)
+
+        full_blob_file = Path(self.temp_dir) / "full_blob.blob"
+        file_io.write_blob(full_blob_file, large_table)
+
+        # Read the full file and truncate it in the middle
+        with open(full_blob_file, 'rb') as f:
+            full_data = f.read()
+
+        # Truncate to about 50% of original size (mid-blob)
+        truncated_size = len(full_data) // 2
+        truncated_data = full_data[:truncated_size]
+
+        truncated_file = Path(self.temp_dir) / "truncated.blob"
+        with open(truncated_file, 'wb') as f:
+            f.write(truncated_data)
+
+        # Try to read truncated file - should fail gracefully
+        with self.assertRaises((IOError, OSError)) as context:
+            FormatBlobReader(
+                file_io=file_io,
+                file_path=str(truncated_file),
+                read_fields=["large_blob"],
+                full_fields=fields,
+                push_down_predicate=None
+            )
+        # Should detect truncation/incomplete data (either invalid header or invalid version)
+        self.assertTrue(
+            "cannot read header" in str(context.exception) or
+            "Unsupported blob file version" in str(context.exception)
+        )
+
+        # ========== Test 3: Zero-length blob handling ==========
+
+        # Create blob with zero-length content
+        zero_blob_data = [b""]  # Empty blob
+        zero_schema = pa.schema([pa.field("zero_blob", pa.large_binary())])
+        zero_table = pa.table([zero_blob_data], schema=zero_schema)
+
+        zero_blob_file = Path(self.temp_dir) / "zero_length.blob"
+        file_io.write_blob(zero_blob_file, zero_table)
+
+        # Verify file was created
+        self.assertTrue(file_io.exists(zero_blob_file))
+        file_size = file_io.get_file_size(zero_blob_file)
+        self.assertGreater(file_size, 0)  # File should have headers even with empty blob
+
+        # Read zero-length blob
+        zero_fields = [DataField(0, "zero_blob", AtomicType("BLOB"))]
+        zero_reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=str(zero_blob_file),
+            read_fields=["zero_blob"],
+            full_fields=zero_fields,
+            push_down_predicate=None
+        )
+
+        zero_batch = zero_reader.read_arrow_batch()
+        self.assertIsNotNone(zero_batch)
+        self.assertEqual(zero_batch.num_rows, 1)
+
+        # Verify empty blob content
+        read_zero_blob = zero_batch.column(0)[0].as_py()
+        self.assertEqual(read_zero_blob, b"")
+        self.assertEqual(len(read_zero_blob), 0)
+        zero_reader.close()
+
+        # ========== Test 4: Large blob (multi-GB range) simulation ==========
+        # Simulate large blob without actually creating multi-GB data
+        # Test chunked writing and memory-safe reading patterns
+
+        # Create moderately large blob (10MB) to test chunking behavior
+        chunk_size = 1024 * 1024  # 1MB chunks
+        large_blob_content = b"LARGE_BLOB_CHUNK:" + b"L" * (chunk_size - 17)  # Fill to 1MB
+
+        # Simulate multiple chunks
+        simulated_large_data = [large_blob_content * 10]  # 10MB total
+        large_sim_schema = pa.schema([pa.field("large_sim_blob", pa.large_binary())])
+        large_sim_table = pa.table([simulated_large_data], schema=large_sim_schema)
+
+        large_sim_file = Path(self.temp_dir) / "large_simulation.blob"
+        file_io.write_blob(large_sim_file, large_sim_table)
+
+        # Verify large file was written
+        large_sim_size = file_io.get_file_size(large_sim_file)
+        self.assertGreater(large_sim_size, 10 * 1024 * 1024)  # Should be > 10MB
+
+        # Read large blob in memory-safe manner
+        large_sim_fields = [DataField(0, "large_sim_blob", AtomicType("BLOB"))]
+        large_sim_reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=str(large_sim_file),
+            read_fields=["large_sim_blob"],
+            full_fields=large_sim_fields,
+            push_down_predicate=None
+        )
+
+        large_sim_batch = large_sim_reader.read_arrow_batch()
+        self.assertIsNotNone(large_sim_batch)
+        self.assertEqual(large_sim_batch.num_rows, 1)
+
+        # Verify large blob content (check prefix to avoid loading all into memory for comparison)
+        read_large_blob = large_sim_batch.column(0)[0].as_py()
+        self.assertTrue(read_large_blob.startswith(b"LARGE_BLOB_CHUNK:"))
+        self.assertEqual(len(read_large_blob), len(large_blob_content) * 10)
+        large_sim_reader.close()
+
+        # ========== Test 5: Index compression/decompression validation ==========
+        # Test DeltaVarintCompressor roundtrip
+        test_indices = [0, 100, 250, 1000, 5000, 10000, 50000]
+
+        # Compress indices
+        compressed_indices = DeltaVarintCompressor.compress(test_indices)
+        self.assertIsInstance(compressed_indices, bytes)
+        self.assertGreater(len(compressed_indices), 0)
+
+        # Decompress indices
+        decompressed_indices = DeltaVarintCompressor.decompress(compressed_indices)
+        self.assertEqual(decompressed_indices, test_indices)
+
+        # Test corruption detection in compressed indices
+        if len(compressed_indices) > 1:
+            # Corrupt the compressed data
+            corrupted_indices = bytearray(compressed_indices)
+            corrupted_indices[-1] = (corrupted_indices[-1] + 1) % 256  # Flip last byte
+
+            # Decompression should fail or produce different results
+            try:
+                corrupted_result = DeltaVarintCompressor.decompress(bytes(corrupted_indices))
+                # If decompression succeeds, result should be different
+                self.assertNotEqual(corrupted_result, test_indices)
+            except Exception:
+                pass
+
+        # ========== Test 6: Cross-format guard (multi-field tables) ==========
+        # Test that blob format rejects multi-field tables
+        multi_field_schema = pa.schema([
+            pa.field("blob_field", pa.large_binary()),
+            pa.field("string_field", pa.string()),
+            pa.field("int_field", pa.int64())
+        ])
+
+        multi_field_table = pa.table([
+            [b"blob_data_1", b"blob_data_2"],
+            ["string_1", "string_2"],
+            [100, 200]
+        ], schema=multi_field_schema)
+
+        multi_field_file = Path(self.temp_dir) / "multi_field.blob"
+
+        # Should reject multi-field table
+        with self.assertRaises(RuntimeError) as context:
+            file_io.write_blob(multi_field_file, multi_field_table)
+        self.assertIn("single column", str(context.exception))
+
+        # Test that blob format rejects non-binary field types
+        non_binary_schema = pa.schema([pa.field("string_field", pa.string())])
+        non_binary_table = pa.table([["not_binary_data"]], schema=non_binary_schema)
+
+        non_binary_file = Path(self.temp_dir) / "non_binary.blob"
+
+        # Should reject non-binary field
+        with self.assertRaises(RuntimeError) as context:
+            file_io.write_blob(non_binary_file, non_binary_table)
+        # Should fail due to type conversion issues (non-binary field can't be converted to BLOB)
+        self.assertTrue(
+            "large_binary" in str(context.exception) or
+            "to_paimon_type" in str(context.exception) or
+            "missing" in str(context.exception)
+        )
+
+        # Test that blob format rejects tables with null values
+        null_schema = pa.schema([pa.field("blob_with_null", pa.large_binary())])
+        null_table = pa.table([[b"data", None, b"more_data"]], schema=null_schema)
+
+        null_file = Path(self.temp_dir) / "with_nulls.blob"
+
+        # Should reject null values
+        with self.assertRaises(RuntimeError) as context:
+            file_io.write_blob(null_file, null_table)
+        self.assertIn("null values", str(context.exception))
+
 
 if __name__ == '__main__':
     unittest.main()
