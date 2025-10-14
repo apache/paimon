@@ -43,10 +43,10 @@ case class PaimonPartitionReader(
 ) extends PartitionReader[InternalRow] {
 
   private val splits: Iterator[Split] = partition.splits.toIterator
-  @Nullable private var currentRecordReader = readSplit()
   private var advanced = false
   private var currentRow: PaimonInternalRow = _
   private val ioManager: IOManager = createIOManager()
+  @Nullable private var currentRecordReader = readSplit()
   private val sparkRow: SparkInternalRow = {
     val dataFields = new JList(readBuilder.readType().getFields)
     dataFields.addAll(metadataColumns.map(_.toPaimonDataField).asJava)
