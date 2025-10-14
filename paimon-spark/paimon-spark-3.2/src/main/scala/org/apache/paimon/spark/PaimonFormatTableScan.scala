@@ -20,19 +20,46 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.FormatTable
-import org.apache.paimon.types.RowType
 
+import org.apache.spark.sql.PaimonUtils.fieldReference
+import org.apache.spark.sql.connector.expressions.NamedReference
+import org.apache.spark.sql.connector.read.SupportsRuntimeFiltering
+import org.apache.spark.sql.sources.{Filter, In}
 import org.apache.spark.sql.types.StructType
 
-/** A Scan implementation for {@link FormatTable} that supports basic scan operations. */
+import scala.collection.JavaConverters._
+
+/** Scan for {@link FormatTable} */
 case class PaimonFormatTableScan(
     table: FormatTable,
     requiredSchema: StructType,
-    filters: Seq[Predicate])
-  extends PaimonFormatTableBaseScan(table, requiredSchema, filters)
-  with PaimonBaseSupportsRuntimeFiltering
+    filters: Seq[Predicate],
+    override val pushDownLimit: Option[Int])
+  extends PaimonFormatTableBaseScan(table, requiredSchema, filters, pushDownLimit)
+  with SupportsRuntimeFiltering
   with ScanHelper {
 
-  override protected var partitionKeys: java.util.List[String] = table.partitionKeys()
-  override protected var rowType: RowType = table.rowType()
+  override def filterAttributes(): Array[NamedReference] = {
+    val requiredFields = readBuilder.readType().getFieldNames.asScala
+    table
+      .partitionKeys()
+      .asScala
+      .toArray
+      .filter(requiredFields.contains)
+      .map(fieldReference)
+  }
+
+  override def filter(filters: Array[Filter]): Unit = {
+    val converter = new SparkFilterConverter(table.rowType())
+    val partitionFilter = filters.flatMap {
+      case in @ In(attr, _) if table.partitionKeys().contains(attr) =>
+        Some(converter.convert(in))
+      case _ => None
+    }
+    if (partitionFilter.nonEmpty) {
+      readBuilder.withFilter(partitionFilter.head)
+      // set inputPartitions null to trigger to get the new splits.
+      inputPartitions = null
+    }
+  }
 }

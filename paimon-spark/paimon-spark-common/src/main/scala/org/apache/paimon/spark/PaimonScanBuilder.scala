@@ -24,12 +24,13 @@ import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggre
 import org.apache.paimon.table.{FileStoreTable, InnerTable}
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions
 import org.apache.spark.sql.connector.expressions.{NamedReference, SortOrder}
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
 import org.apache.spark.sql.connector.read._
+
+import java.util.{List => JList}
 
 import scala.collection.JavaConverters._
 
@@ -43,7 +44,7 @@ class PaimonScanBuilder(table: InnerTable)
 
   private var pushedSparkPredicates = Array.empty[SparkPredicate]
 
-  override protected var partitionKeys: java.util.List[String] = table.partitionKeys()
+  override protected var partitionKeys: JList[String] = table.partitionKeys()
   override protected var rowType: RowType = table.rowType()
 
   override def pushTopN(orders: Array[SortOrder], limit: Int): Boolean = {
@@ -135,7 +136,13 @@ class PaimonScanBuilder(table: InnerTable)
     if (localScan.isDefined) {
       localScan.get
     } else {
-      super.build()
+      PaimonScan(
+        table,
+        requiredSchema,
+        pushedPaimonPredicates,
+        reservedFilters,
+        pushDownLimit,
+        pushDownTopN)
     }
   }
 }

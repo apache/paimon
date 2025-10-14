@@ -23,9 +23,10 @@ import org.apache.paimon.table.FormatTable
 
 import org.apache.spark.sql.types.StructType
 
-/** Scan implementation for {@link FormatTable} that supports basic scan operations. */
+/** Scan implementation for {@link FormatTable}. */
 case class PaimonFormatTableScan(
     table: FormatTable,
     requiredSchema: StructType,
-    filters: Seq[Predicate])
-  extends PaimonFormatTableBaseScan(table, requiredSchema, filters) {}
+    filters: Seq[Predicate],
+    override val pushDownLimit: Option[Int])
+  extends PaimonFormatTableBaseScan(table, requiredSchema, filters, pushDownLimit) {}

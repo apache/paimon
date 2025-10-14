@@ -29,11 +29,12 @@ import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
-/** Base Scan implementation for {@link FormatTable} that supports basic scan operations. */
+/** Base Scan implementation for {@link FormatTable}. */
 abstract class PaimonFormatTableBaseScan(
     table: FormatTable,
     requiredSchema: StructType,
-    filters: Seq[Predicate])
+    filters: Seq[Predicate],
+    pushDownLimit: Option[Int])
   extends ColumnPruningAndPushDown
   with ScanHelper {
 

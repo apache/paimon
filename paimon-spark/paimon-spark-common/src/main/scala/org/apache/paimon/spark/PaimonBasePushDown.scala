@@ -26,11 +26,11 @@ import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPred
 import org.apache.spark.sql.connector.read.{SupportsPushDownLimit, SupportsPushDownRequiredColumns, SupportsPushDownV2Filters}
 import org.apache.spark.sql.sources.Filter
 
-import java.util.List
+import java.util.{List => JList}
 
 import scala.collection.mutable
 
-/** Base trait for Paimon scan builder. */
+/** Base trait for Paimon scan push down. */
 trait PaimonBasePushDown extends SupportsPushDownV2Filters with SupportsPushDownLimit {
   private var pushedSparkPredicates = Array.empty[SparkPredicate]
 
@@ -41,7 +41,7 @@ trait PaimonBasePushDown extends SupportsPushDownV2Filters with SupportsPushDown
   protected var hasPostScanPredicates = false
 
   protected var pushDownLimit: Option[Int] = None
-  protected var partitionKeys: List[String]
+  protected var partitionKeys: JList[String]
   protected var rowType: RowType
 
   override def pushPredicates(predicates: Array[SparkPredicate]): Array[SparkPredicate] = {

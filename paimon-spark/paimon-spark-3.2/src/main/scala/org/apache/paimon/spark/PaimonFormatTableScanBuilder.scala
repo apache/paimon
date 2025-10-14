@@ -24,16 +24,18 @@ import org.apache.paimon.types.RowType
 import org.apache.spark.sql.connector.read.{SupportsPushDownRequiredColumns, SupportsRuntimeFiltering}
 import org.apache.spark.sql.types.StructType
 
-/** ScanBuilder implementation for {@link FormatTable} that supports basic scan operations. */
+import java.util.{List => JList}
+
+/** ScanBuilder for {@link FormatTable}. */
 case class PaimonFormatTableScanBuilder(table: FormatTable)
   extends PaimonBasePushDown
   with SupportsPushDownRequiredColumns {
 
-  override protected var partitionKeys: java.util.List[String] = table.partitionKeys()
+  override protected var partitionKeys: JList[String] = table.partitionKeys()
   override protected var rowType: RowType = table.rowType()
   protected var requiredSchema: StructType = SparkTypeUtils.fromPaimonRowType(rowType)
 
-  override def build() = PaimonFormatTableScan(table, requiredSchema, pushedPaimonPredicates)
+  override def build() = PaimonFormatTableScan(table, requiredSchema, pushedPaimonPredicates, None)
 
   override def pruneColumns(requiredSchema: StructType): Unit = {
     this.requiredSchema = requiredSchema

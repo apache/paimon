@@ -24,11 +24,11 @@ import org.apache.paimon.types.RowType
 import org.apache.spark.sql.connector.read.SupportsPushDownFilters
 import org.apache.spark.sql.sources.Filter
 
-import java.util.List
+import java.util.{List => JList}
 
 import scala.collection.mutable
 
-/** Base trait for Paimon scan builder. */
+/** Base trait for Paimon scan filter push down. */
 trait PaimonBasePushDown extends SupportsPushDownFilters {
 
   private var pushedSparkFilters = Array.empty[Filter]
@@ -39,7 +39,7 @@ trait PaimonBasePushDown extends SupportsPushDownFilters {
 
   protected var hasPostScanPredicates = false
 
-  protected var partitionKeys: List[String]
+  protected var partitionKeys: JList[String]
   protected var rowType: RowType
 
   /**

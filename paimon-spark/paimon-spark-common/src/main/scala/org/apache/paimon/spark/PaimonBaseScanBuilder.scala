@@ -35,16 +35,6 @@ abstract class PaimonBaseScanBuilder(table: InnerTable)
 
   protected var pushDownTopN: Option[TopN] = None
 
-  override def build(): Scan = {
-    PaimonScan(
-      table,
-      requiredSchema,
-      Array.empty[Predicate],
-      Array.empty[Filter],
-      None,
-      pushDownTopN)
-  }
-
   override def pruneColumns(requiredSchema: StructType): Unit = {
     this.requiredSchema = requiredSchema
   }
