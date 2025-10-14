@@ -308,9 +308,14 @@ public class CompactAction extends TableActionBase {
             // 2.3 write and then reorganize the committable
             // set parallelism to null, and it'll forward parallelism when doWrite()
             RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
+            boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
             DataStream<Committable> clusterCommittable =
                     sink.doWrite(
-                                    FlinkSinkBuilder.mapToInternalRow(sorted, table.rowType()),
+                                    FlinkSinkBuilder.mapToInternalRow(
+                                            sorted,
+                                            table.rowType(),
+                                            blobAsDescriptor,
+                                            table.catalogEnvironment().catalogContext()),
                                     commitUser,
                                     null)
                             .transform(
