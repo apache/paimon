@@ -74,14 +74,14 @@ case class PaimonDescribeTableExec(
   }
 
   private def describeFormattedDetailedPartitionInfo(rows: ArrayBuffer[InternalRow]): Unit = {
-    checkNamespace(identifier.namespace())
+    checkNamespace(identifier.namespace(), catalog.name())
     rows += emptyRow()
     rows += toCatalystRow("# Detailed Partition Information", "", "")
     rows += toCatalystRow("Database", identifier.namespace().head, "")
     rows += toCatalystRow("Table", identifier.name(), "")
     val partition = catalog
       .paimonCatalog()
-      .listPartitions(toIdentifier(identifier))
+      .listPartitions(toIdentifier(identifier, catalog.name()))
       .asScala
       .filter(_.spec().asScala == partitionSpec)
     if (partition.size != 1) {
