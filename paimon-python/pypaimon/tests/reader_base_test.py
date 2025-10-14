@@ -248,7 +248,7 @@ class ReaderBasicTest(unittest.TestCase):
 
         with self.assertRaises(ValueError) as e:
             table_write.write_arrow_batch(record_batch)
-        self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema."))
+        self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema and write cols."))
 
     def test_reader_iterator(self):
         read_builder = self.table.new_read_builder()
@@ -609,7 +609,9 @@ class ReaderBasicTest(unittest.TestCase):
             embedded_index=None,
             file_source=None,
             value_stats_cols=value_stats_cols,  # This is the key field we're testing
-            external_path=None
+            external_path=None,
+            first_row_id=None,
+            write_cols=None
         )
 
         # Create ManifestEntry

@@ -26,6 +26,7 @@ from typing import Dict, List, Optional, Tuple
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
 
@@ -33,7 +34,8 @@ from pypaimon.table.row.generic_row import GenericRow
 class DataWriter(ABC):
     """Base class for data writers that handle PyArrow tables directly."""
 
-    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int):
+    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int,
+                 write_cols: Optional[List[str]] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -55,6 +57,7 @@ class DataWriter(ABC):
 
         self.pending_data: Optional[pa.Table] = None
         self.committed_files: List[DataFileMeta] = []
+        self.write_cols = write_cols
 
     def write(self, data: pa.RecordBatch):
         processed_data = self._process_data(data)
@@ -124,11 +127,13 @@ class DataWriter(ABC):
         max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
 
         # key stats & value stats
+        data_fields = self.table.fields if self.table.is_primary_key_table \
+            else PyarrowFieldParser.to_paimon_schema(data.schema)
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
-            for field in self.table.table_schema.fields
+            for field in data_fields
         }
-        all_fields = self.table.table_schema.fields
+        all_fields = data_fields
         min_value_stats = [column_stats[field.name]['min_values'] for field in all_fields]
         max_value_stats = [column_stats[field.name]['max_values'] for field in all_fields]
         value_null_counts = [column_stats[field.name]['null_counts'] for field in all_fields]
@@ -154,8 +159,8 @@ class DataWriter(ABC):
                 key_null_counts,
             ),
             value_stats=SimpleStats(
-                GenericRow(min_value_stats, self.table.table_schema.fields),
-                GenericRow(max_value_stats, self.table.table_schema.fields),
+                GenericRow(min_value_stats, data_fields),
+                GenericRow(max_value_stats, data_fields),
                 value_null_counts,
             ),
             min_sequence_number=min_seq,
@@ -165,7 +170,12 @@ class DataWriter(ABC):
             extra_files=[],
             creation_time=datetime.now(),
             delete_row_count=0,
-            value_stats_cols=None,  # None means all columns have statistics
+            file_source="APPEND",
+            value_stats_cols=None,  # None means all columns in the data have statistics
+            external_path=None,
+            first_row_id=None,
+            write_cols=self.write_cols,
+            # None means all columns in the table have been written
             file_path=str(file_path),
         ))
 
