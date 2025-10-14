@@ -60,15 +60,15 @@ public class HadoopFileIO implements FileIO {
 
     protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
 
-    private final org.apache.hadoop.fs.Path path;
+    private final Path path;
 
     public HadoopFileIO(Path path) {
-        this.path = path(path);
+        this.path = path;
     }
 
     @VisibleForTesting
     public void setFileSystem(FileSystem fs) throws IOException {
-        getFileSystem(path, p -> fs);
+        getFileSystem(path(path), p -> fs);
     }
 
     @Override
