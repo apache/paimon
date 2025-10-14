@@ -95,11 +95,14 @@ clustering and small-file merging must be performed exclusively via Incremental 
 ## Run Incremental Clustering
 {{< hint info >}}
 
-Currently, only support running Incremental Clustering in spark, support for flink will be added in the near future.
+only support running Incremental Clustering in batch mode.
 
 {{< /hint >}}
 
-To run a Incremental Clustering job, follow these instructions.
+To run a Incremental Clustering job, follow these instructions. 
+
+You don’t need to specify any clustering-related parameters when running Incremental Clustering,
+these options are already defined as table options. If you need to change clustering settings, please update the corresponding table options.
 
 {{< tabs "incremental-clustering" >}}
 
@@ -117,8 +120,46 @@ CALL sys.compact(table => 'T')
 -- run incremental clustering with full mode, this will recluster all data
 CALL sys.compact(table => 'T', compact_strategy => 'full')
 ```
-You don’t need to specify any clustering-related parameters when running Incremental Clustering, 
-these are already defined as table options. If you need to change clustering settings, please update the corresponding table options.
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
+
+Run the following command to submit a incremental clustering job for the table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    compact \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    [--compact_strategy <minor / full>] \
+    [--table_conf <table_conf>] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+```
+
+Example: run incremental clustering
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    compact \
+    --warehouse s3:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --table_conf sink.parallelism=2 \
+    --compact_strategy minor \
+    --catalog_conf s3.endpoint=https://****.com \
+    --catalog_conf s3.access-key=***** \
+    --catalog_conf s3.secret-key=*****
+```
+* `--compact_strategy` Determines how to pick files to be cluster, the default is `minor`.
+    * `full` : All files will be selected for clustered.
+    * `minor` : Pick the set of files that need to be clustered based on specified conditions.
+
+Note: write parallelism is set by `sink.parallelism`, if too big, may generate a large number of small files.
+
+You can use `-D execution.runtime-mode=batch` or `-yD execution.runtime-mode=batch` (for the ON-YARN scenario) to use batch mode.
 {{< /tab >}}
 
 {{< /tabs >}}
