@@ -550,7 +550,7 @@ class RESTReadWritePy36Test(RESTBaseTest):
 
         with self.assertRaises(ValueError) as e:
             table_write.write_arrow_batch(record_batch)
-        self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema."))
+        self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema and write cols."))
 
     def test_write_wide_table_large_data(self):
         logging.basicConfig(level=logging.INFO)
@@ -801,7 +801,9 @@ class RESTReadWritePy36Test(RESTBaseTest):
             embedded_index=None,
             file_source=None,
             value_stats_cols=value_stats_cols,  # This is the key field we're testing
-            external_path=None
+            external_path=None,
+            first_row_id=None,
+            write_cols=None
         )
 
         # Create ManifestEntry

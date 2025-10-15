@@ -34,6 +34,7 @@ class FileStoreWrite:
         self.table: FileStoreTable = table
         self.data_writers: Dict[Tuple, DataWriter] = {}
         self.max_seq_numbers = self._seq_number_stats()  # TODO: build this on-demand instead of on all
+        self.write_cols = None
 
     def write(self, partition: Tuple, bucket: int, data: pa.RecordBatch):
         key = (partition, bucket)
@@ -56,6 +57,7 @@ class FileStoreWrite:
                 partition=partition,
                 bucket=bucket,
                 max_seq_number=self.max_seq_numbers.get((partition, bucket), 1),
+                write_cols=self.write_cols
             )
 
     def prepare_commit(self) -> List[CommitMessage]:

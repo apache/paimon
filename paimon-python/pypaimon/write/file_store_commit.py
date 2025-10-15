@@ -130,6 +130,24 @@ class FileStoreCommit:
         added_file_count = 0
         deleted_file_count = 0
         delta_record_count = 0
+        # process snapshot
+        new_snapshot_id = self._generate_snapshot_id()
+
+        # Check if row tracking is enabled
+        row_tracking_enabled = self.table.options.get('row-tracking.enabled', 'false').lower() == 'true'
+
+        # Apply row tracking logic if enabled
+        next_row_id = None
+        if row_tracking_enabled:
+            # Assign snapshot ID to delta files
+            commit_entries = self._assign_snapshot_id(new_snapshot_id, commit_entries)
+
+            # Get the next row ID start from the latest snapshot
+            first_row_id_start = self._get_next_row_id_start()
+
+            # Assign row IDs to new files and get the next row ID for the snapshot
+            commit_entries, next_row_id = self._assign_row_tracking_meta(first_row_id_start, commit_entries)
+
         for entry in commit_entries:
             if entry.kind == 0:
                 added_file_count += 1
@@ -194,6 +212,7 @@ class FileStoreCommit:
             commit_identifier=commit_identifier,
             commit_kind=commit_kind,
             time_millis=int(time.time() * 1000),
+            next_row_id=next_row_id,
         )
 
         # Generate partition statistics for the commit
@@ -314,3 +333,59 @@ class FileStoreCommit:
             )
             for stats in partition_stats.values()
         ]
+
+    def _assign_snapshot_id(self, snapshot_id: int, commit_entries: List[ManifestEntry]) -> List[ManifestEntry]:
+        """Assign snapshot ID to all commit entries."""
+        return [entry.assign_sequence_number(snapshot_id, snapshot_id) for entry in commit_entries]
+
+    def _get_next_row_id_start(self) -> int:
+        """Get the next row ID start from the latest snapshot."""
+        latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+        if latest_snapshot and hasattr(latest_snapshot, 'next_row_id') and latest_snapshot.next_row_id is not None:
+            return latest_snapshot.next_row_id
+        return 0
+
+    def _assign_row_tracking_meta(self, first_row_id_start: int, commit_entries: List[ManifestEntry]):
+        """
+        Assign row tracking metadata (first_row_id) to new files.
+        This follows the Java implementation logic from FileStoreCommitImpl.assignRowTrackingMeta.
+        """
+        if not commit_entries:
+            return commit_entries, first_row_id_start
+
+        row_id_assigned = []
+        start = first_row_id_start
+        blob_start = first_row_id_start
+
+        for entry in commit_entries:
+            # Check if this is an append file that needs row ID assignment
+            if (entry.kind == 0 and  # ADD kind
+                    entry.file.file_source == "APPEND" and  # APPEND file source
+                    entry.file.first_row_id is None):  # No existing first_row_id
+
+                if self._is_blob_file(entry.file.file_name):
+                    # Handle blob files specially
+                    if blob_start >= start:
+                        raise RuntimeError(
+                            f"This is a bug, blobStart {blob_start} should be less than start {start} "
+                            f"when assigning a blob entry file."
+                        )
+                    row_count = entry.file.row_count
+                    row_id_assigned.append(entry.assign_first_row_id(blob_start))
+                    blob_start += row_count
+                else:
+                    # Handle regular files
+                    row_count = entry.file.row_count
+                    row_id_assigned.append(entry.assign_first_row_id(start))
+                    blob_start = start
+                    start += row_count
+            else:
+                # For compact files or files that already have first_row_id, don't assign
+                row_id_assigned.append(entry)
+
+        return row_id_assigned, start
+
+    @staticmethod
+    def _is_blob_file(file_name: str) -> bool:
+        """Check if a file is a blob file based on its extension."""
+        return file_name.endswith('.blob')
