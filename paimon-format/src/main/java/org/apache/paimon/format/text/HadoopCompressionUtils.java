@@ -103,7 +103,7 @@ public class HadoopCompressionUtils {
             CompressionCodec codec =
                     (CompressionCodec) codecClass.getDeclaredConstructor().newInstance();
 
-            // Set configuration for the codec if it implements Configurable
+            // To fix npe when the codec implements Configurable
             if (codec instanceof Configurable) {
                 ((Configurable) codec).setConf(new Configuration());
             }
