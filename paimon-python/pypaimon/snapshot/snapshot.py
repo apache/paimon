@@ -43,3 +43,4 @@ class Snapshot:
     changelog_record_count: Optional[int] = json_field("changelogRecordCount", default=None)
     watermark: Optional[int] = json_field("watermark", default=None)
     statistics: Optional[str] = json_field("statistics", default=None)
+    next_row_id: Optional[int] = json_field("nextRowId", default=None)

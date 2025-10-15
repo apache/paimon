@@ -68,6 +68,7 @@ class TableScan:
 
         self.only_read_real_buckets = True if int(
             self.table.options.get('bucket', -1)) == BucketMode.POSTPONE_BUCKET.value else False
+        self.data_evolution = self.table.options.get('data-evolution.enabled', 'false').lower() == 'true'
 
     def plan(self) -> Plan:
         file_entries = self.plan_files()
@@ -75,6 +76,8 @@ class TableScan:
             return Plan([])
         if self.table.is_primary_key_table:
             splits = self._create_primary_key_splits(file_entries)
+        elif self.data_evolution:
+            splits = self._create_data_evolution_splits(file_entries)
         else:
             splits = self._create_append_only_splits(file_entries)
 
@@ -253,6 +256,48 @@ class TableScan:
             "row_count": file_entry.file.row_count,
         })
 
+    def _create_data_evolution_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
+        """
+        Create data evolution splits for append-only tables with schema evolution.
+        This method groups files by firstRowId and creates splits that can handle
+        column merging across different schema versions.
+        """
+        partitioned_files = defaultdict(list)
+        for entry in file_entries:
+            partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
+
+        if self.idx_of_this_subtask is not None:
+            partitioned_files, plan_start_row, plan_end_row = self._append_only_filter_by_shard(partitioned_files)
+
+        def weight_func(file_list: List[DataFileMeta]) -> int:
+            return max(sum(f.file_size for f in file_list), self.open_file_cost)
+
+        splits = []
+        for key, file_entries in partitioned_files.items():
+            if not file_entries:
+                continue
+
+            data_files: List[DataFileMeta] = [e.file for e in file_entries]
+
+            # Split files by firstRowId for data evolution
+            split_by_row_id = self._split_by_row_id(data_files)
+
+            # Pack the split groups for optimal split sizes
+            packed_files: List[List[List[DataFileMeta]]] = self._pack_for_ordered(split_by_row_id, weight_func,
+                                                                                  self.target_split_size)
+
+            # Flatten the packed files and build splits
+            flatten_packed_files: List[List[DataFileMeta]] = [
+                [file for sub_pack in pack for file in sub_pack]
+                for pack in packed_files
+            ]
+
+            splits += self._build_split_from_pack(flatten_packed_files, file_entries, False)
+
+        if self.idx_of_this_subtask is not None:
+            self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
+        return splits
+
     def _create_append_only_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
         partitioned_files = defaultdict(list)
         for entry in file_entries:
@@ -360,3 +405,64 @@ class TableScan:
             packed.append(bin_items)
 
         return packed
+
+    @staticmethod
+    def _is_blob_file(file_name: str) -> bool:
+        """Check if a file is a blob file based on its extension."""
+        return file_name.endswith('.blob')
+
+    def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
+        """
+        Split files by firstRowId for data evolution.
+        This method groups files that have the same firstRowId, which is essential
+        for handling schema evolution where files with different schemas need to be
+        read together to merge columns.
+        """
+        split_by_row_id = []
+
+        # Sort files by firstRowId and then by maxSequenceNumber
+        # Files with null firstRowId are treated as having Long.MIN_VALUE
+        def sort_key(file: DataFileMeta) -> tuple:
+            first_row_id = file.first_row_id if file.first_row_id is not None else float('-inf')
+            is_blob = 1 if self._is_blob_file(file.file_name) else 0
+            # For files with same firstRowId, sort by maxSequenceNumber in descending order
+            # (larger sequence number means more recent data)
+            max_seq = file.max_sequence_number
+            return (first_row_id, is_blob, -max_seq)
+
+        sorted_files = sorted(files, key=sort_key)
+
+        # Split files by firstRowId
+        last_row_id = -1
+        check_row_id_start = 0
+        current_split = []
+
+        for file in sorted_files:
+            first_row_id = file.first_row_id
+            if first_row_id is None:
+                # Files without firstRowId are treated as individual splits
+                split_by_row_id.append([file])
+                continue
+
+            if not self._is_blob_file(file.file_name) and first_row_id != last_row_id:
+                if current_split:
+                    split_by_row_id.append(current_split)
+
+                # Validate that files don't overlap
+                if first_row_id < check_row_id_start:
+                    file_names = [f.file_name for f in sorted_files]
+                    raise ValueError(
+                        f"There are overlapping files in the split: {file_names}, "
+                        f"the wrong file is: {file.file_name}"
+                    )
+
+                current_split = []
+                last_row_id = first_row_id
+                check_row_id_start = first_row_id + file.row_count
+
+            current_split.append(file)
+
+        if current_split:
+            split_by_row_id.append(current_split)
+
+        return split_by_row_id

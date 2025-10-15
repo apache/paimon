@@ -31,6 +31,26 @@ class ManifestEntry:
     total_buckets: int
     file: DataFileMeta
 
+    def assign_first_row_id(self, first_row_id: int) -> 'ManifestEntry':
+        """Create a new ManifestEntry with the assigned first_row_id."""
+        return ManifestEntry(
+            kind=self.kind,
+            partition=self.partition,
+            bucket=self.bucket,
+            total_buckets=self.total_buckets,
+            file=self.file.assign_first_row_id(first_row_id)
+        )
+
+    def assign_sequence_number(self, min_sequence_number: int, max_sequence_number: int) -> 'ManifestEntry':
+        """Create a new ManifestEntry with the assigned sequence numbers."""
+        return ManifestEntry(
+            kind=self.kind,
+            partition=self.partition,
+            bucket=self.bucket,
+            total_buckets=self.total_buckets,
+            file=self.file.assign_sequence_number(min_sequence_number, max_sequence_number)
+        )
+
 
 MANIFEST_ENTRY_SCHEMA = {
     "type": "record",

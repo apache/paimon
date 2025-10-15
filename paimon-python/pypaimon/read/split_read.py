@@ -23,11 +23,14 @@ from typing import List, Optional, Tuple
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.concat_batch_reader import ConcatBatchReader, ShardBatchReader
 from pypaimon.read.reader.concat_record_reader import ConcatRecordReader
-from pypaimon.read.reader.data_file_record_reader import DataFileBatchReader
+from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
+from pypaimon.read.reader.data_evolution_merge_reader import DataEvolutionMergeReader
+from pypaimon.read.reader.field_bunch import FieldBunch, DataBunch, BlobBunch
 from pypaimon.read.reader.drop_delete_reader import DropDeleteRecordReader
 from pypaimon.read.reader.empty_record_reader import EmptyFileRecordReader
 from pypaimon.read.reader.filter_record_reader import FilterRecordReader
@@ -298,3 +301,194 @@ class MergeFileSplitRead(SplitRead):
 
     def _get_all_data_fields(self):
         return self._create_key_value_fields(self.table.fields)
+
+
+class DataEvolutionSplitRead(SplitRead):
+
+    def create_reader(self) -> RecordReader:
+        files = self.split.files
+        suppliers = []
+
+        # Split files by row ID using the same logic as Java DataEvolutionSplitGenerator.split
+        split_by_row_id = self._split_by_row_id(files)
+
+        for need_merge_files in split_by_row_id:
+            if len(need_merge_files) == 1 or not self.read_fields:
+                # No need to merge fields, just create a single file reader
+                suppliers.append(
+                    lambda f=need_merge_files[0]: self._create_file_reader(f)
+                )
+            else:
+                suppliers.append(
+                    lambda files=need_merge_files: self._create_union_reader(files)
+                )
+
+        return ConcatBatchReader(suppliers)
+
+    def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
+        """Split files by firstRowId for data evolution."""
+
+        # Sort files by firstRowId and then by maxSequenceNumber
+        def sort_key(file: DataFileMeta) -> tuple:
+            first_row_id = file.first_row_id if file.first_row_id is not None else float('-inf')
+            is_blob = 1 if self._is_blob_file(file.file_name) else 0
+            max_seq = file.max_sequence_number
+            return (first_row_id, is_blob, -max_seq)
+
+        sorted_files = sorted(files, key=sort_key)
+
+        # Split files by firstRowId
+        split_by_row_id = []
+        last_row_id = -1
+        check_row_id_start = 0
+        current_split = []
+
+        for file in sorted_files:
+            first_row_id = file.first_row_id
+            if first_row_id is None:
+                split_by_row_id.append([file])
+                continue
+
+            if not self._is_blob_file(file.file_name) and first_row_id != last_row_id:
+                if current_split:
+                    split_by_row_id.append(current_split)
+                if first_row_id < check_row_id_start:
+                    raise ValueError(
+                        f"There are overlapping files in the split: {files}, "
+                        f"the wrong file is: {file}"
+                    )
+                current_split = []
+                last_row_id = first_row_id
+                check_row_id_start = first_row_id + file.row_count
+            current_split.append(file)
+
+        if current_split:
+            split_by_row_id.append(current_split)
+
+        return split_by_row_id
+
+    def _create_union_reader(self, need_merge_files: List[DataFileMeta]) -> RecordReader:
+        """Create a DataEvolutionFileReader for merging multiple files."""
+        # Split field bunches
+        fields_files = self._split_field_bunches(need_merge_files)
+
+        # Validate row counts and first row IDs
+        row_count = fields_files[0].row_count()
+        first_row_id = fields_files[0].files()[0].first_row_id
+
+        for bunch in fields_files:
+            if bunch.row_count() != row_count:
+                raise ValueError("All files in a field merge split should have the same row count.")
+            if bunch.files()[0].first_row_id != first_row_id:
+                raise ValueError(
+                    "All files in a field merge split should have the same first row id and could not be null."
+                )
+
+        # Create the union reader
+        all_read_fields = self.read_fields
+        file_record_readers = [None] * len(fields_files)
+        read_field_index = [field.id for field in all_read_fields]
+
+        # Initialize offsets
+        row_offsets = [-1] * len(all_read_fields)
+        field_offsets = [-1] * len(all_read_fields)
+
+        for i, bunch in enumerate(fields_files):
+            first_file = bunch.files()[0]
+
+            # Get field IDs for this bunch
+            if self._is_blob_file(first_file.file_name):
+                # For blob files, we need to get the field ID from the write columns
+                field_ids = [self._get_field_id_from_write_cols(first_file)]
+            elif first_file.write_cols:
+                field_ids = self._get_field_ids_from_write_cols(first_file.write_cols)
+            else:
+                # For regular files, get all field IDs from the schema
+                field_ids = [field.id for field in self.table.fields]
+
+            read_fields = []
+            for j, read_field_id in enumerate(read_field_index):
+                for field_id in field_ids:
+                    if read_field_id == field_id:
+                        if row_offsets[j] == -1:
+                            row_offsets[j] = i
+                            field_offsets[j] = len(read_fields)
+                            read_fields.append(all_read_fields[j])
+                        break
+
+            if not read_fields:
+                file_record_readers[i] = None
+            else:
+                table_fields = self.read_fields
+                self.read_fields = read_fields  # create reader based on read_fields
+                # Create reader for this bunch
+                if len(bunch.files()) == 1:
+                    file_record_readers[i] = self._create_file_reader(bunch.files()[0])
+                else:
+                    # Create concatenated reader for multiple files
+                    suppliers = [
+                        lambda f=file: self._create_file_reader(f) for file in bunch.files()
+                    ]
+                    file_record_readers[i] = ConcatRecordReader(suppliers)
+                self.read_fields = table_fields
+
+        # Validate that all required fields are found
+        for i, field in enumerate(all_read_fields):
+            if row_offsets[i] == -1:
+                if not field.type.is_nullable():
+                    raise ValueError(f"Field {field} is not null but can't find any file contains it.")
+
+        return DataEvolutionMergeReader(row_offsets, field_offsets, file_record_readers)
+
+    def _create_file_reader(self, file: DataFileMeta) -> RecordReader:
+        """Create a file reader for a single file."""
+        return self.file_reader_supplier(file_path=file.file_path, for_merge_read=False)
+
+    def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:
+        """Split files into field bunches."""
+
+        fields_files = []
+        blob_bunch_map = {}
+        row_count = -1
+
+        for file in need_merge_files:
+            if self._is_blob_file(file.file_name):
+                field_id = self._get_field_id_from_write_cols(file)
+                if field_id not in blob_bunch_map:
+                    blob_bunch_map[field_id] = BlobBunch(row_count)
+                blob_bunch_map[field_id].add(file)
+            else:
+                # Normal file, just add it to the current merge split
+                fields_files.append(DataBunch(file))
+                row_count = file.row_count
+
+        fields_files.extend(blob_bunch_map.values())
+        return fields_files
+
+    def _get_field_id_from_write_cols(self, file: DataFileMeta) -> int:
+        """Get field ID from write columns for blob files."""
+        if not file.write_cols or len(file.write_cols) == 0:
+            raise ValueError("Blob file must have write columns")
+
+        # Find the field by name in the table schema
+        field_name = file.write_cols[0]
+        for field in self.table.fields:
+            if field.name == field_name:
+                return field.id
+        raise ValueError(f"Field {field_name} not found in table schema")
+
+    def _get_field_ids_from_write_cols(self, write_cols: List[str]) -> List[int]:
+        field_ids = []
+        for field_name in write_cols:
+            for field in self.table.fields:
+                if field.name == field_name:
+                    field_ids.append(field.id)
+        return field_ids
+
+    @staticmethod
+    def _is_blob_file(file_name: str) -> bool:
+        """Check if a file is a blob file based on its extension."""
+        return file_name.endswith('.blob')
+
+    def _get_all_data_fields(self):
+        return self.table.fields

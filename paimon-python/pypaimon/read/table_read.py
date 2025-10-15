@@ -26,7 +26,7 @@ from pypaimon.read.push_down_utils import extract_predicate_to_list
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.split_read import (MergeFileSplitRead, RawFileSplitRead,
-                                      SplitRead)
+                                      SplitRead, DataEvolutionSplitRead)
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
 
@@ -126,6 +126,14 @@ class TableRead:
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
             return MergeFileSplitRead(
+                table=self.table,
+                predicate=self.predicate,
+                push_down_predicate=self.push_down_predicate,
+                read_type=self.read_type,
+                split=split
+            )
+        elif self.table.options.get('data-evolution.enabled', 'false').lower() == 'true':
+            return DataEvolutionSplitRead(
                 table=self.table,
                 predicate=self.predicate,
                 push_down_predicate=self.push_down_predicate,
