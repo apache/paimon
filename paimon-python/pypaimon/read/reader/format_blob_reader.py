@@ -26,18 +26,20 @@ from pyarrow import RecordBatch
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser
-from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobRef
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser, AtomicType
+from pypaimon.table.row.blob import BlobDescriptor, BlobRef
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.row_kind import RowKind
 
 
 class FormatBlobReader(RecordBatchReader):
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
-                 full_fields: List[DataField], push_down_predicate: Any):
+                 full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool = False):
         self._file_io = file_io
         self._file_path = file_path
         self._push_down_predicate = push_down_predicate
+        self._blob_as_descriptor = blob_as_descriptor
 
         # Get file size
         self._file_size = file_io.get_file_size(file_path)
@@ -87,10 +89,11 @@ class FormatBlobReader(RecordBatchReader):
                 # Convert blob to appropriate format for each requested field
                 for field_name in self._fields:
                     # For blob files, all fields should contain blob data
-                    if isinstance(blob, Blob):
-                        blob_data = blob.to_data()
+                    blob_descriptor = blob.to_descriptor()
+                    if self._blob_as_descriptor:
+                        blob_data = blob_descriptor.serialize()
                     else:
-                        blob_data = bytes(blob) if blob is not None else None
+                        blob_data = blob.to_data()
                     pydict_data[field_name].append(blob_data)
 
                 records_in_batch += 1
@@ -186,11 +189,6 @@ class BlobRecordIterator:
         blob = BlobRef(descriptor)
 
         self.current_position += 1
-
-        # Return as GenericRow with single blob field
-        from pypaimon.schema.data_types import DataField, AtomicType
-        from pypaimon.table.row.row_kind import RowKind
-
         fields = [DataField(0, self.field_name, AtomicType("BLOB"))]
         return GenericRow([blob], fields, RowKind.INSERT)
 

@@ -393,7 +393,7 @@ class FileIO:
             num_rows = data.num_rows
             field_name = fields[0].name
             with self.new_output_stream(path) as output_stream:
-                writer = BlobFormatWriter(output_stream)
+                writer = BlobFormatWriter(output_stream, blob_as_descriptor)
                 # Write each row
                 for i in range(num_rows):
                     col_data = records_dict[field_name][i]
