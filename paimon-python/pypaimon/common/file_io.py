@@ -29,7 +29,7 @@ from pyarrow._fs import FileSystem
 
 from pypaimon.common.config import OssOptions, S3Options
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
-from pypaimon.table.row.blob import BlobData
+from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.write.blob_format_writer import BlobFormatWriter
@@ -370,7 +370,7 @@ class FileIO:
         with self.new_output_stream(path) as output_stream:
             fastavro.writer(output_stream, avro_schema, records, **kwargs)
 
-    def write_blob(self, path: Path, data: pyarrow.Table, **kwargs):
+    def write_blob(self, path: Path, data: pyarrow.Table, blob_as_descriptor: bool, **kwargs):
         try:
             # Validate input constraints
             if data.num_columns != 1:
@@ -399,7 +399,10 @@ class FileIO:
                     col_data = records_dict[field_name][i]
                     # Convert to appropriate type based on field type
                     if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
-                        if isinstance(col_data, bytes):
+                        if blob_as_descriptor:
+                            blob_descriptor = BlobDescriptor.deserialize(col_data)
+                            blob_data = Blob.from_descriptor(blob_descriptor)
+                        elif isinstance(col_data, bytes):
                             blob_data = BlobData(col_data)
                         else:
                             # Convert to bytes if needed

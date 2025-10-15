@@ -58,6 +58,7 @@ class DataWriter(ABC):
         self.pending_data: Optional[pa.Table] = None
         self.committed_files: List[DataFileMeta] = []
         self.write_cols = write_cols
+        self.blob_as_descriptor = options.get(CoreOptions.FILE_BLOB_AS_DESCRIPTOR, False)
 
     def write(self, data: pa.RecordBatch):
         processed_data = self._process_data(data)
@@ -115,7 +116,7 @@ class DataWriter(ABC):
         elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
             self.file_io.write_avro(file_path, data)
         elif self.file_format == CoreOptions.FILE_FORMAT_BLOB:
-            self.file_io.write_blob(file_path, data)
+            self.file_io.write_blob(file_path, data, self.blob_as_descriptor)
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
