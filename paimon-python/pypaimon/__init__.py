@@ -19,7 +19,7 @@ from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
 
-__version__ = "0.3.dev"
+__version__ = "1.4.dev"
 __all__ = [
     "PaimonVirtualFileSystem",
     "CatalogFactory",
