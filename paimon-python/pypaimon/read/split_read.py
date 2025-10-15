@@ -26,7 +26,7 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
-from pypaimon.read.reader.concat_batch_reader import ConcatBatchReader, ShardBatchReader
+from pypaimon.read.reader.concat_batch_reader import ConcatBatchReader, ShardBatchReader, MergeAllBatchReader
 from pypaimon.read.reader.concat_record_reader import ConcatRecordReader
 from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
 from pypaimon.read.reader.data_evolution_merge_reader import DataEvolutionMergeReader
@@ -73,21 +73,21 @@ class SplitRead(ABC):
     def create_reader(self) -> RecordReader:
         """Create a record reader for the given split."""
 
-    def file_reader_supplier(self, file_path: str, for_merge_read: bool):
+    def file_reader_supplier(self, file_path: str, for_merge_read: bool, read_fields: List[str]):
         _, extension = os.path.splitext(file_path)
         file_format = extension[1:]
 
         format_reader: RecordBatchReader
         if file_format == CoreOptions.FILE_FORMAT_AVRO:
-            format_reader = FormatAvroReader(self.table.file_io, file_path, self._get_final_read_data_fields(),
+            format_reader = FormatAvroReader(self.table.file_io, file_path, read_fields,
                                              self.read_fields, self.push_down_predicate)
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
             blob_as_descriptor = self.table.options.get(CoreOptions.FILE_BLOB_AS_DESCRIPTOR, False)
-            format_reader = FormatBlobReader(self.table.file_io, file_path, self._get_final_read_data_fields(),
+            format_reader = FormatBlobReader(self.table.file_io, file_path, read_fields,
                                              self.read_fields, self.push_down_predicate, blob_as_descriptor)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path,
-                                                self._get_final_read_data_fields(), self.push_down_predicate)
+                                                read_fields, self.push_down_predicate)
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
@@ -253,7 +253,12 @@ class RawFileSplitRead(SplitRead):
     def create_reader(self) -> RecordReader:
         data_readers = []
         for file_path in self.split.file_paths:
-            supplier = partial(self.file_reader_supplier, file_path=file_path, for_merge_read=False)
+            supplier = partial(
+                self.file_reader_supplier,
+                file_path=file_path,
+                for_merge_read=False,
+                read_fields=self._get_final_read_data_fields(),
+            )
             data_readers.append(supplier)
 
         if not data_readers:
@@ -274,7 +279,12 @@ class RawFileSplitRead(SplitRead):
 
 class MergeFileSplitRead(SplitRead):
     def kv_reader_supplier(self, file_path):
-        reader_supplier = partial(self.file_reader_supplier, file_path=file_path, for_merge_read=True)
+        reader_supplier = partial(
+            self.file_reader_supplier,
+            file_path=file_path,
+            for_merge_read=True,
+            read_fields=self._get_final_read_data_fields()
+        )
         return KeyValueWrapReader(reader_supplier(), len(self.trimmed_primary_key), self.value_arity)
 
     def section_reader_supplier(self, section: List[SortedRun]):
@@ -317,7 +327,7 @@ class DataEvolutionSplitRead(SplitRead):
             if len(need_merge_files) == 1 or not self.read_fields:
                 # No need to merge fields, just create a single file reader
                 suppliers.append(
-                    lambda f=need_merge_files[0]: self._create_file_reader(f)
+                    lambda f=need_merge_files[0]: self._create_file_reader(f, self._get_final_read_data_fields())
                 )
             else:
                 suppliers.append(
@@ -424,26 +434,30 @@ class DataEvolutionSplitRead(SplitRead):
                 self.read_fields = read_fields  # create reader based on read_fields
                 # Create reader for this bunch
                 if len(bunch.files()) == 1:
-                    file_record_readers[i] = self._create_file_reader(bunch.files()[0])
+                    file_record_readers[i] = self._create_file_reader(
+                        bunch.files()[0], [field.name for field in read_fields]
+                    )
                 else:
                     # Create concatenated reader for multiple files
                     suppliers = [
-                        lambda f=file: self._create_file_reader(f) for file in bunch.files()
+                        lambda f=file: self._create_file_reader(
+                            f, [field.name for field in read_fields]
+                        ) for file in bunch.files()
                     ]
-                    file_record_readers[i] = ConcatRecordReader(suppliers)
+                    file_record_readers[i] = MergeAllBatchReader(suppliers)
                 self.read_fields = table_fields
 
         # Validate that all required fields are found
         for i, field in enumerate(all_read_fields):
             if row_offsets[i] == -1:
-                if not field.type.is_nullable():
+                if not field.type.nullable:
                     raise ValueError(f"Field {field} is not null but can't find any file contains it.")
 
         return DataEvolutionMergeReader(row_offsets, field_offsets, file_record_readers)
 
-    def _create_file_reader(self, file: DataFileMeta) -> RecordReader:
+    def _create_file_reader(self, file: DataFileMeta, read_fields: [str]) -> RecordReader:
         """Create a file reader for a single file."""
-        return self.file_reader_supplier(file_path=file.file_path, for_merge_read=False)
+        return self.file_reader_supplier(file_path=file.file_path, for_merge_read=False, read_fields=read_fields)
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:
         """Split files into field bunches."""

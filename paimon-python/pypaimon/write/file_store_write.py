@@ -21,6 +21,7 @@ import pyarrow as pa
 
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
+from pypaimon.write.writer.data_blob_writer import DataBlobWriter
 from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
 
@@ -44,7 +45,15 @@ class FileStoreWrite:
         writer.write(data)
 
     def _create_data_writer(self, partition: Tuple, bucket: int) -> DataWriter:
-        if self.table.is_primary_key_table:
+        # Check if table has blob columns
+        if self._has_blob_columns():
+            return DataBlobWriter(
+                table=self.table,
+                partition=partition,
+                bucket=bucket,
+                max_seq_number=self.max_seq_numbers.get((partition, bucket), 1),
+            )
+        elif self.table.is_primary_key_table:
             return KeyValueDataWriter(
                 table=self.table,
                 partition=partition,
@@ -59,6 +68,17 @@ class FileStoreWrite:
                 max_seq_number=self.max_seq_numbers.get((partition, bucket), 1),
                 write_cols=self.write_cols
             )
+
+    def _has_blob_columns(self) -> bool:
+        """Check if the table schema contains blob columns."""
+        for field in self.table.table_schema.fields:
+            # Check if field type is blob
+            if hasattr(field.type, 'type') and field.type.type == 'BLOB':
+                return True
+            # Alternative: check for specific blob type class
+            elif hasattr(field.type, '__class__') and 'blob' in field.type.__class__.__name__.lower():
+                return True
+        return False
 
     def prepare_commit(self) -> List[CommitMessage]:
         commit_messages = []

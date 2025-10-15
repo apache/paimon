@@ -25,7 +25,6 @@ from urllib.parse import splitport, urlparse
 import pyarrow
 from packaging.version import parse
 from pyarrow._fs import FileSystem
-
 from pypaimon.common.config import OssOptions, S3Options
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
