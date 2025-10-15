@@ -78,7 +78,7 @@ To enable Incremental Clustering, the following configuration needs to be set fo
       <td><h5>clustering.strategy</h5></td>
       <td>'zorder' or 'hilbert' or 'order'</td>
       <td style="word-wrap: break-word;">No</td>
-      <td>Boolean</td>
+      <td>String</td>
       <td>The ordering algorithm used for clustering. If not set, It'll decided from the number of clustering columns. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
     </tr>
     </tbody>
