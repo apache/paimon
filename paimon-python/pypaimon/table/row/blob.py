@@ -19,6 +19,7 @@
 import io
 from abc import ABC, abstractmethod
 from typing import Optional, Union
+from urllib.parse import urlparse
 
 from pypaimon.common.uri_reader import UriReader, FileUriReader
 
@@ -149,10 +150,12 @@ class Blob(ABC):
         # Import FileIO locally to avoid circular imports
         from pypaimon.common.file_io import FileIO
 
-        # Create a minimal FileIO instance for local files
-        file_io = FileIO(f"file://{file}", {})
-
-        # Use -1 length to indicate "read entire file"
+        parsed = urlparse(file)
+        if parsed.scheme == "file":
+            file_uri = file
+        else:
+            file_uri = f"file://{file}"
+        file_io = FileIO(file_uri, {})
         uri_reader = FileUriReader(file_io)
         descriptor = BlobDescriptor(file, 0, -1)
         return Blob.from_descriptor(uri_reader, descriptor)
@@ -229,14 +232,14 @@ class BlobRef(Blob):
         uri = self._descriptor.uri
         offset = self._descriptor.offset
         length = self._descriptor.length
-        full_stream = self._uri_reader.new_input_stream(uri)
-        if offset > 0:
-            full_stream.seek(offset)
-        if length == -1:
-            data = full_stream.read()
-        else:
-            data = full_stream.read(length)
-        return io.BytesIO(data)
+        with self._uri_reader.new_input_stream(uri) as input_stream:
+            if offset > 0:
+                input_stream.seek(offset)
+            if length == -1:
+                data = input_stream.read()
+            else:
+                data = input_stream.read(length)
+            return io.BytesIO(data)
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, BlobRef):

@@ -39,7 +39,7 @@ class UriReader(ABC):
         return FileUriReader(file_io)
 
     @abstractmethod
-    def new_input_stream(self, uri: str) -> io.BytesIO:
+    def new_input_stream(self, uri: str):
         pass
 
 
@@ -48,7 +48,7 @@ class FileUriReader(UriReader):
     def __init__(self, file_io: Any):
         self._file_io = file_io
 
-    def new_input_stream(self, uri: str) -> io.BytesIO:
+    def new_input_stream(self, uri: str):
         try:
             parsed_uri = urlparse(uri)
             if parsed_uri.scheme == 'file':
@@ -56,16 +56,14 @@ class FileUriReader(UriReader):
             else:
                 file_path = uri
             path_obj = Path(file_path)
-            with self._file_io.new_input_stream(path_obj) as input_stream:
-                data = input_stream.read()
-                return io.BytesIO(data)
+            return self._file_io.new_input_stream(path_obj)
         except Exception as e:
             raise IOError(f"Failed to read file {uri}: {e}")
 
 
 class HttpUriReader(UriReader):
 
-    def new_input_stream(self, uri: str) -> io.BytesIO:
+    def new_input_stream(self, uri: str):
         try:
             with urlopen(uri) as response:
                 data = response.read()
