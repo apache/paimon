@@ -189,7 +189,7 @@ class BlobTest(unittest.TestCase):
 
         # from_file should return BlobRef
         file_io = FileIO(self.file if self.file.startswith('file://') else f"file://{self.file}", {})
-        blob_file = Blob.from_file(file_io, self.file, 0, len(self.file))
+        blob_file = Blob.from_file(file_io, self.file, 0, os.path.getsize(self.file))
         self.assertIsInstance(blob_file, BlobRef)
         self.assertIsInstance(blob_file, Blob)
 
@@ -497,8 +497,7 @@ class BlobTest(unittest.TestCase):
         descriptor = BlobDescriptor(self.file, 0, -1)
 
         # Create BlobRef from descriptor
-        file_io = FileIO(self.file if self.file.startswith('file://') else f"file://{self.file}", {})
-        blob_ref = BlobRef(file_io, descriptor)
+        blob_ref = Blob.from_local(self.file)
 
         # Verify descriptor is preserved
         returned_descriptor = blob_ref.to_descriptor()

@@ -50,7 +50,12 @@ class FileUriReader(UriReader):
 
     def new_input_stream(self, uri: str) -> io.BytesIO:
         try:
-            path_obj = Path(uri)
+            parsed_uri = urlparse(uri)
+            if parsed_uri.scheme == 'file':
+                file_path = parsed_uri.path
+            else:
+                file_path = uri
+            path_obj = Path(file_path)
             with self._file_io.new_input_stream(path_obj) as input_stream:
                 data = input_stream.read()
                 return io.BytesIO(data)
@@ -112,18 +117,25 @@ class UriReaderFactory:
             raise ValueError(f"Invalid URI: {input_uri}") from e
 
         key = UriKey(parsed_uri.scheme, parsed_uri.netloc or None)
-        lock = self._readers_lock.gen_rlock()
+        rlock = self._readers_lock.gen_rlock()
+        rlock.acquire()
         try:
-            lock.acquire()
             reader = self._readers.get(key)
             if reader is not None:
                 return reader
-            else:
-                reader = self._new_reader(key, parsed_uri)
-                self._readers[key] = reader
+        finally:
+            rlock.release()
+        wlock = self._readers_lock.gen_wlock()
+        wlock.acquire()
+        try:
+            reader = self._readers.get(key)
+            if reader is not None:
+                return reader
+            reader = self._new_reader(key, parsed_uri)
+            self._readers[key] = reader
             return reader
         finally:
-            lock.release()
+            wlock.release()
 
     def _new_reader(self, key: UriKey, parsed_uri: ParseResult) -> UriReader:
         scheme = key.scheme
