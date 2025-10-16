@@ -20,16 +20,8 @@ from typing import List, Optional
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
-from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.manifest.manifest_file_manager import ManifestFileManager
-from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.manifest.schema.manifest_entry import ManifestEntry
-from pypaimon.read.interval_partition import IntervalPartition, SortedRun
+
 from pypaimon.read.plan import Plan
-from pypaimon.read.push_down_utils import (extract_predicate_to_dict,
-                                           extract_predicate_to_list)
-from pypaimon.read.split import Split
 from pypaimon.read.scanner.empty_starting_scanner import EmptyStartingScanner
 from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner
 from pypaimon.read.scanner.incremental_starting_scanner import \
@@ -37,7 +29,6 @@ from pypaimon.read.scanner.incremental_starting_scanner import \
 from pypaimon.read.scanner.starting_scanner import StartingScanner
 from pypaimon.schema.data_types import DataField
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
-from pypaimon.table.bucket_mode import BucketMode
 
 
 class TableScan:
