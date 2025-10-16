@@ -96,6 +96,8 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
     /** Committer implementation that renames temporary file to target path. */
     private static class TempFileCommitter implements Committer {
 
+        private static final long serialVersionUID = 1L;
+
         private final FileIO fileIO;
         private final Path tempPath;
         private final Path targetPath;
