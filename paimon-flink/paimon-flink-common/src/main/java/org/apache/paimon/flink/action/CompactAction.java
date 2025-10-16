@@ -303,9 +303,7 @@ public class CompactAction extends TableActionBase {
             RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
             DataStream<Committable> written =
                     sink.doWrite(
-                            FlinkSinkBuilder.mapToInternalRow(
-                                    sorted,
-                                    table.rowType()),
+                            FlinkSinkBuilder.mapToInternalRow(sorted, table.rowType()),
                             commitUser,
                             null);
             DataStream<Committable> clusterCommittable =
