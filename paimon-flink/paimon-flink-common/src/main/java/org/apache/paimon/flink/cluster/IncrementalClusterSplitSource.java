@@ -38,8 +38,9 @@ import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.transformations.PartitionTransformation;
+import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
@@ -86,21 +87,25 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
             Map<String, String> partitionSpec,
             DataSplit[] splits,
             @Nullable Integer parallelism) {
-        DataStreamSource<Split> source =
+        DataStream<Split> source =
                 env.fromSource(
-                        new IncrementalClusterSplitSource(splits),
-                        WatermarkStrategy.noWatermarks(),
-                        String.format(
-                                "Incremental-cluster split generator: %s - %s",
-                                table.fullName(), partitionSpec),
-                        new JavaTypeInfo<>(Split.class));
+                                new IncrementalClusterSplitSource(splits),
+                                WatermarkStrategy.noWatermarks(),
+                                String.format(
+                                        "Incremental-cluster split generator: %s - %s",
+                                        table.fullName(), partitionSpec),
+                                new JavaTypeInfo<>(Split.class))
+                        .forceNonParallel();
 
+        PartitionTransformation<Split> partitioned =
+                new PartitionTransformation<>(
+                        source.getTransformation(), new RebalancePartitioner<>());
         if (parallelism != null) {
-            source.setParallelism(parallelism);
+            partitioned.setParallelism(parallelism);
         }
 
         return Pair.of(
-                new DataStream<>(source.getExecutionEnvironment(), source.getTransformation())
+                new DataStream<>(source.getExecutionEnvironment(), partitioned)
                         .transform(
                                 String.format(
                                         "Incremental-cluster reader: %s - %s",
