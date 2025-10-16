@@ -1173,6 +1173,26 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testBinlogTableStreamReadWithProjection() throws Exception {
+        sql(
+                "CREATE TABLE T (a INT, b INT, primary key (a) NOT ENFORCED) with ('changelog-producer' = 'lookup', "
+                        + "'bucket' = '2')");
+        BlockingIterator<Row, Row> iterator =
+                streamSqlBlockIter(
+                        "SELECT rowkind, a FROM T$binlog /*+ OPTIONS('scan.mode' = 'latest') */");
+        sql("INSERT INTO T VALUES (1, 2)");
+        sql("INSERT INTO T VALUES (1, 3)");
+        sql("INSERT INTO T VALUES (2, 2)");
+        List<Row> rows = iterator.collect(3);
+        assertThat(rows)
+                .containsExactly(
+                        Row.of("+I", new Integer[] {1}),
+                        Row.of("+U", new Integer[] {1, 1}),
+                        Row.of("+I", new Integer[] {2}));
+        iterator.close();
+    }
+
+    @Test
     public void testBinlogTableBatchRead() throws Exception {
         sql(
                 "CREATE TABLE T (a INT, b INT, primary key (a) NOT ENFORCED) with ('changelog-producer' = 'lookup', "
