@@ -25,10 +25,11 @@ import org.apache.paimon.table.format.FormatTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.api.connector.sink2.SinkWriter;
+import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
-import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.table.data.RowData;
 
 import java.util.List;
@@ -43,53 +44,74 @@ public class FlinkFormatTableDataStreamSink {
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<RowData> dataStream) {
-        return dataStream.addSink(new FormatTableSinkFunction(table));
+        return dataStream.sinkTo(new FormatTableSink(table));
     }
 
-    /** Sink function for format tables. */
-    private static class FormatTableSinkFunction extends RichSinkFunction<RowData> {
+    private static class FormatTableSink implements Sink<RowData> {
 
         private final FormatTable table;
-        private transient FormatTableWrite tableWrite;
-        private transient BatchWriteBuilder writeBuilder;
 
-        public FormatTableSinkFunction(FormatTable table) {
+        public FormatTableSink(FormatTable table) {
             this.table = table;
         }
 
-        @Override
-        public void open(Configuration parameters) throws Exception {
-            super.open(parameters);
-            this.writeBuilder = table.newBatchWriteBuilder();
-            this.tableWrite = (FormatTableWrite) writeBuilder.newWrite();
+        /**
+         * Do not annotate with <code>@override</code> here to maintain compatibility with Flink
+         * 2.0+.
+         */
+        public SinkWriter<RowData> createWriter(InitContext context) {
+            return new FormatTableSinkWriter(table);
         }
 
-        @Override
-        public void invoke(RowData value, Context context) throws Exception {
-            if (tableWrite != null) {
-                InternalRow internalRow = new FlinkRowWrapper(value);
-                tableWrite.write(internalRow);
+        /**
+         * Do not annotate with <code>@override</code> here to maintain compatibility with Flink
+         * 1.18-.
+         */
+        public SinkWriter<RowData> createWriter(WriterInitContext context) {
+            return new FormatTableSinkWriter(table);
+        }
+
+        /** Sink writer for format tables using Flink v2 API. */
+        private static class FormatTableSinkWriter implements SinkWriter<RowData> {
+
+            private transient FormatTableWrite tableWrite;
+            private transient BatchWriteBuilder writeBuilder;
+
+            public FormatTableSinkWriter(FormatTable table) {
+                this.writeBuilder = table.newBatchWriteBuilder();
+                this.tableWrite = (FormatTableWrite) writeBuilder.newWrite();
             }
-        }
 
-        @Override
-        public void close() throws Exception {
-            if (tableWrite != null) {
+            @Override
+            public void write(RowData element, Context context) {
                 try {
-                    // Prepare commit and commit the data
-                    List<CommitMessage> committers = tableWrite.prepareCommit();
-                    if (!committers.isEmpty()) {
-                        tableWrite.commit(committers);
-                    }
-                } finally {
+                    InternalRow internalRow = new FlinkRowWrapper(element);
+                    tableWrite.write(internalRow);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            public void flush(boolean endOfInput) {}
+
+            @Override
+            public void close() throws Exception {
+                if (tableWrite != null) {
                     try {
-                        tableWrite.close();
-                    } catch (Exception e) {
-                        // Log and ignore close errors
+                        // Prepare commit and commit the data
+                        List<CommitMessage> committers = tableWrite.prepareCommit();
+                        if (!committers.isEmpty()) {
+                            tableWrite.commit(committers);
+                        }
+                    } finally {
+                        try {
+                            tableWrite.close();
+                        } catch (Exception ignore) {
+                        }
                     }
                 }
             }
-            super.close();
         }
     }
 }
