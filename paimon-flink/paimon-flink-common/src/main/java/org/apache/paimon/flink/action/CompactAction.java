@@ -247,9 +247,10 @@ public class CompactAction extends TableActionBase {
         Map<BinaryRow, CompactUnit> compactUnits =
                 incrementalClusterManager.prepareForCluster(fullCompaction);
         if (compactUnits.isEmpty()) {
-            LOGGER.info(
+            LOGGER.warn(
                     "No partition needs to be incrementally clustered. "
-                            + "Please set '--compact_strategy full' if you need to forcibly trigger the cluster.");
+                            + "Please set '--compact_strategy full' if you need forcibly trigger the cluster."
+                            + "Please set '--force_start_flink_job true' if you need forcibly start a flink job.");
             return false;
         }
         Map<BinaryRow, DataSplit[]> partitionSplits =
@@ -300,11 +301,13 @@ public class CompactAction extends TableActionBase {
             // 2.3 write and then reorganize the committable
             // set parallelism to null, and it'll forward parallelism when doWrite()
             RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
-            DataStream<Committable> clusterCommittable =
+            DataStream<Committable> written =
                     sink.doWrite(
-                                    FlinkSinkBuilder.mapToInternalRow(sorted, table.rowType()),
-                                    commitUser,
-                                    null)
+                            FlinkSinkBuilder.mapToInternalRow(sorted, table.rowType()),
+                            commitUser,
+                            null);
+            DataStream<Committable> clusterCommittable =
+                    written.forward()
                             .transform(
                                     "Rewrite cluster committable",
                                     new CommittableTypeInfo(),
@@ -316,7 +319,8 @@ public class CompactAction extends TableActionBase {
                                                                     Map.Entry::getKey,
                                                                     unit ->
                                                                             unit.getValue()
-                                                                                    .outputLevel()))));
+                                                                                    .outputLevel()))))
+                            .setParallelism(written.getParallelism());
             dataStreams.add(clusterCommittable);
             dataStreams.add(sourcePair.getRight());
         }
