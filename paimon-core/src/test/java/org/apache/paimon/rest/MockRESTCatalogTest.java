@@ -170,6 +170,48 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         assertEquals(headers2.get("User-Agent"), "test");
     }
 
+    @Test
+    void testBaseHeadersInRequests() throws Exception {
+        // Set custom headers in options
+        String customHeaderName = "custom-header";
+        String customHeaderValue = "custom-value";
+        options.set(HEADER_PREFIX + customHeaderName, customHeaderValue);
+
+        // Clear any previous headers
+        restCatalogServer.clearReceivedHeaders();
+        assertEquals(0, restCatalogServer.getReceivedHeaders().size());
+
+        // Initialize catalog with custom headers
+        RESTCatalog restCatalog = initCatalog(false);
+        // init catalog will trigger REST GetConfig request
+        checkHeader(customHeaderName, customHeaderValue);
+
+        // Clear any previous headers
+        restCatalogServer.clearReceivedHeaders();
+        assertEquals(0, restCatalogServer.getReceivedHeaders().size());
+
+        // Perform an operation that will trigger REST request
+        restCatalog.listDatabases();
+        checkHeader(customHeaderName, customHeaderValue);
+    }
+
+    private void checkHeader(String headerName, String headerValue) {
+        // Verify that the header were included in the requests
+        List<Map<String, String>> receivedHeaders = restCatalogServer.getReceivedHeaders();
+        assert receivedHeaders.size() > 0 : "No requests were recorded";
+
+        // Check that request contains our custom headers
+        boolean foundCustomHeader = false;
+
+        for (Map<String, String> headers : receivedHeaders) {
+            if (headerValue.equals(headers.get(headerName))) {
+                foundCustomHeader = true;
+            }
+        }
+
+        assert foundCustomHeader : "Header was not found in any request";
+    }
+
     private void testDlfAuth(RESTCatalog restCatalog) throws Exception {
         String databaseName = "db1";
         restCatalog.createDatabase(databaseName, true);
