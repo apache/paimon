@@ -70,17 +70,6 @@ public class ManifestFileTest {
         assertThat(actualEntries).isEqualTo(entries);
     }
 
-    @Test
-    public void testReadLocalManifestFile() {
-        ManifestFile manifestFile = createManifestFile("/Users/langu/repos/scripts/paimon");
-        List<ManifestEntry> actualEntries =
-                new ArrayList<>(
-                        manifestFile.read("manifest-3b512107-8bb2-4d30-ad17-64f1750de290-1"));
-        for (ManifestEntry entry : actualEntries) {
-            System.out.println(entry);
-        }
-    }
-
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
         String failingName = UUID.randomUUID().toString();

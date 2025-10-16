@@ -140,14 +140,14 @@ public class CatalogOptions {
             key("cache.dv.enabled")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether to enable dv meta cache.");
+                    .withDescription("Whether to enable deletion vector meta cache.");
 
     public static final ConfigOption<Integer> CACHE_DV_MAX_NUM =
             key("cache.dv.max-num")
                     .intType()
                     .defaultValue(100000)
                     .withDescription(
-                            "Controls the maximum number of bucket-level deletion vector metadata entries that can be cached.");
+                            "Controls the maximum number of bucket-level deletion vector meta that can be cached.");
 
     public static final ConfigOption<Boolean> CASE_SENSITIVE =
             ConfigOptions.key("case-sensitive")

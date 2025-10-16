@@ -36,7 +36,7 @@ import java.util.Objects;
 
 /** Cache for deletion vector meta. */
 public class DVMetaCache {
-    private final Cache<MetaCacheKey, List<DVMetaCacheValue>> cache;
+    private final Cache<DVMetaCacheKey, List<DVMetaCacheValue>> cache;
 
     public DVMetaCache(long maxElementSize) {
         this.cache =
@@ -45,8 +45,8 @@ public class DVMetaCache {
 
     @Nullable
     public Map<String, DeletionFile> read(Path path, BinaryRow partition, int bucket) {
-        MetaCacheKey metaCacheKey = new MetaCacheKey(path, partition, bucket);
-        List<DVMetaCacheValue> cacheValue = this.cache.getIfPresent(metaCacheKey);
+        DVMetaCacheKey cacheKey = new DVMetaCacheKey(path, partition, bucket);
+        List<DVMetaCacheValue> cacheValue = this.cache.getIfPresent(cacheKey);
         if (cacheValue == null) {
             return null;
         }
@@ -66,7 +66,7 @@ public class DVMetaCache {
 
     public void put(
             Path path, BinaryRow partition, int bucket, Map<String, DeletionFile> dvFilesMap) {
-        MetaCacheKey key = new MetaCacheKey(path, partition, bucket);
+        DVMetaCacheKey key = new DVMetaCacheKey(path, partition, bucket);
         List<DVMetaCacheValue> cacheValue = new ArrayList<>();
         dvFilesMap.forEach(
                 (fileName, file) -> {
@@ -117,6 +117,38 @@ public class DVMetaCache {
         @Override
         public int hashCode() {
             return Objects.hash(super.hashCode(), fileName);
+        }
+    }
+
+    /** Cache key for deletion vector meta at bucket level. */
+    private static final class DVMetaCacheKey {
+        private final Path path;
+        private final BinaryRow row;
+        private final int bucket;
+
+        public DVMetaCacheKey(Path path, BinaryRow row, int bucket) {
+            this.path = path;
+            this.row = row;
+            this.bucket = bucket;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof DVMetaCacheKey)) {
+                return false;
+            }
+            DVMetaCacheKey that = (DVMetaCacheKey) o;
+            return bucket == that.bucket
+                    && Objects.equals(path, that.path)
+                    && Objects.equals(row, that.row);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(path, row, bucket);
         }
     }
 }

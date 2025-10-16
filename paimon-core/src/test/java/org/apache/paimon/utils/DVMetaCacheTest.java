@@ -28,103 +28,130 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link ObjectsCache}. */
+/** Test for {@link DVMetaCache}. */
 public class DVMetaCacheTest {
 
-    @TempDir java.nio.file.Path tempDir;
+    @Test
+    public void testPutAndRead() {
+        DVMetaCache cache = new DVMetaCache(100);
+        Path path = new Path("manifest/index-manifest");
+        BinaryRow partition = partition("test-partition");
 
-    private static final Path TEST_PATH = new Path("/test/snapshot/snapshot-");
-    //    private static final InternalRow PARTITION_ROW =
-    // GenericRow.of(BinaryString.fromString("part-val"));
+        // Put data for bucket 1 with multiple files
+        Map<String, DeletionFile> dvFiles1 = new HashMap<>();
+        dvFiles1.put("data1.parquet", new DeletionFile("dv1.parquet", 0L, 100L, 42L));
+        dvFiles1.put("data2.parquet", new DeletionFile("dv2.parquet", 100L, 500L, null));
+        cache.put(path, partition, 1, dvFiles1);
 
-    private DeletionFile createDeletionFile(
-            String dataFileName, long offset, long length, Long cardinality) {
-        return new DeletionFile(dataFileName, offset, length, cardinality);
+        // Put data for bucket 2 with single file
+        Map<String, DeletionFile> dvFiles2 = new HashMap<>();
+        dvFiles2.put("data3.parquet", new DeletionFile("dv3.parquet", 0L, 300L, 12L));
+        cache.put(path, partition, 2, dvFiles2);
+
+        // Read bucket 1 - verify multiple files
+        Map<String, DeletionFile> result1 = cache.read(path, partition, 1);
+        assertThat(result1).isNotNull().hasSize(2);
+        assertThat(result1).containsKeys("data1.parquet", "data2.parquet");
+
+        DeletionFile file1 = result1.get("data1.parquet");
+        assertThat(file1.path()).isEqualTo("dv1.parquet");
+        assertThat(file1.offset()).isEqualTo(0L);
+        assertThat(file1.length()).isEqualTo(100L);
+        assertThat(file1.cardinality()).isEqualTo(42L);
+
+        DeletionFile file2 = result1.get("data2.parquet");
+        assertThat(file2.path()).isEqualTo("dv2.parquet");
+        assertThat(file2.cardinality()).isNull();
+
+        // Read bucket 2 - verify single file
+        Map<String, DeletionFile> result2 = cache.read(path, partition, 2);
+        assertThat(result2).isNotNull().hasSize(1);
+        assertThat(result2).containsKey("data3.parquet");
+
+        // Read non-existent key
+        assertThat(cache.read(path, partition("other"), 0)).isNull();
+        assertThat(cache.read(path, partition, 999)).isNull();
     }
 
     @Test
-    public void testPutAndRead_SuccessfulRoundTrip() {
+    public void testEmptyMap() {
         DVMetaCache cache = new DVMetaCache(100);
+        Path path = new Path("test");
+        BinaryRow partition = partition("test");
 
-        Map<String, DeletionFile> dvFilesMap = new HashMap<>();
-        dvFilesMap.put("data1.parquet", new DeletionFile("dv1.parquet", 0L, 100L, 42L));
-        dvFilesMap.put("data2.parquet", createDeletionFile("dv2.parquet", 100L, 500L, 42L));
-        dvFilesMap.put("data3.parquet", createDeletionFile("dv3.parquet", 0L, 300L, null));
-        dvFilesMap.put("data4.parquet", createDeletionFile("dv4.parquet", 0L, 200L, null));
+        // Put empty map
+        cache.put(path, partition, 1, new HashMap<>());
 
+        // Should return empty map, not null
+        Map<String, DeletionFile> result = cache.read(path, partition, 1);
+        assertThat(result).isNotNull().isEmpty();
+    }
+
+    @Test
+    public void testOverwrite() {
+        DVMetaCache cache = new DVMetaCache(100);
+        Path path = new Path("test");
+        BinaryRow partition = partition("test");
+
+        // Put initial data
+        Map<String, DeletionFile> dvFiles1 = new HashMap<>();
+        dvFiles1.put("data1.parquet", new DeletionFile("dv1.parquet", 0L, 100L, 1L));
+        cache.put(path, partition, 1, dvFiles1);
+
+        // Overwrite with new data
+        Map<String, DeletionFile> dvFiles2 = new HashMap<>();
+        dvFiles2.put("data2.parquet", new DeletionFile("dv2.parquet", 0L, 200L, 2L));
+        cache.put(path, partition, 1, dvFiles2);
+
+        // Should return new data
+        Map<String, DeletionFile> result = cache.read(path, partition, 1);
+        assertThat(result).hasSize(1);
+        assertThat(result).containsKey("data2.parquet");
+        assertThat(result).doesNotContainKey("data1.parquet");
+    }
+
+    @Test
+    public void testCacheEviction() {
+        DVMetaCache cache = new DVMetaCache(2); // Small cache size
+        Path path = new Path("test");
+        BinaryRow partition = partition("test");
+
+        // Fill cache to capacity
+        Map<String, DeletionFile> dvFiles1 = new HashMap<>();
+        dvFiles1.put("data1.parquet", new DeletionFile("dv1.parquet", 0L, 100L, 1L));
+        cache.put(path, partition, 1, dvFiles1);
+
+        Map<String, DeletionFile> dvFiles2 = new HashMap<>();
+        dvFiles2.put("data2.parquet", new DeletionFile("dv2.parquet", 0L, 100L, 2L));
+        cache.put(path, partition, 2, dvFiles2);
+
+        // Verify both entries are cached
+        assertThat(cache.read(path, partition, 1)).isNotNull();
+        assertThat(cache.read(path, partition, 2)).isNotNull();
+
+        // Add third entry, should evict first one
+        Map<String, DeletionFile> dvFiles3 = new HashMap<>();
+        dvFiles3.put("data3.parquet", new DeletionFile("dv3.parquet", 0L, 100L, 3L));
+        cache.put(path, partition, 3, dvFiles3);
+
+        // First entry should be evicted
+        assertThat(cache.read(path, partition, 1)).isNull();
+        assertThat(cache.read(path, partition, 3)).isNotNull();
+    }
+
+    // ============================ Test utils ===================================
+
+    private BinaryRow partition(String partitionValue) {
         InternalRowSerializer serializer =
                 new InternalRowSerializer(RowType.of(DataTypes.STRING()));
-        BinaryRow p1 =
-                serializer.toBinaryRow(GenericRow.of(BinaryString.fromString("partition1"))).copy();
-        BinaryRow p2 =
-                serializer.toBinaryRow(GenericRow.of(BinaryString.fromString("partition2"))).copy();
-        BinaryRow p3 =
-                serializer.toBinaryRow(GenericRow.of(BinaryString.fromString("partition3"))).copy();
-        Path indexManifestPath = new Path("manifest/index-manifest");
-
-        cache.put(
-                indexManifestPath,
-                p1,
-                1,
-                new HashMap<String, DeletionFile>() {
-                    {
-                        put("data1.parquet", new DeletionFile("dv1.parquet", 0L, 100L, 42L));
-                        put("data2.parquet", new DeletionFile("dv2.parquet", 100L, 500L, null));
-                    }
-                });
-        cache.put(
-                indexManifestPath,
-                p1,
-                2,
-                new HashMap<String, DeletionFile>() {
-                    {
-                        put("data3.parquet", new DeletionFile("dv3.parquet", 0L, 300L, 12L));
-                    }
-                });
-        cache.put(
-                indexManifestPath,
-                p2,
-                1,
-                new HashMap<String, DeletionFile>() {
-                    {
-                        put("data4.parquet", new DeletionFile("dv4.parquet", 0L, 200L, 19L));
-                    }
-                });
-
-        Map<String, DeletionFile> r1 = cache.read(indexManifestPath, p1, 1);
-        assertThat(r1).isNotNull().hasSize(2);
-        assertThat(r1).containsKeys("data1.parquet", "data2.parquet");
-
-        DeletionFile f1 = r1.get("data1.parquet");
-        assertThat(f1.path()).isEqualTo("dv1.parquet");
-        assertThat(f1.offset()).isEqualTo(0L);
-        assertThat(f1.length()).isEqualTo(100L);
-        assertThat(f1.cardinality()).isEqualTo(42L);
-
-        DeletionFile f2 = r1.get("data2.parquet");
-        assertThat(f2.path()).isEqualTo("dv2.parquet");
-        assertThat(f2.offset()).isEqualTo(100L);
-        assertThat(f2.length()).isEqualTo(500L);
-        assertThat(f2.cardinality()).isNull();
-
-        Map<String, DeletionFile> r2 = cache.read(indexManifestPath, p1, 2);
-        assertThat(r2).isNotNull().hasSize(1);
-        assertThat(r2).containsKeys("data3.parquet");
-
-        DeletionFile f3 = r2.get("data3.parquet");
-        assertThat(f3.path()).isEqualTo("dv3.parquet");
-        assertThat(f3.offset()).isEqualTo(0L);
-        assertThat(f3.length()).isEqualTo(300L);
-        assertThat(f3.cardinality()).isEqualTo(12L);
-
-        Map<String, DeletionFile> r4 = cache.read(indexManifestPath, p3, 0);
-        assertThat(r4).isNull();
+        return serializer
+                .toBinaryRow(GenericRow.of(BinaryString.fromString(partitionValue)))
+                .copy();
     }
 }
