@@ -1016,4 +1016,13 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                 "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */"))
                 .hasSize(0);
     }
+
+    @Test
+    public void testLevel0FileCanBeReadForFilesTable() {
+        sql(
+                "CREATE TABLE test_table (a int PRIMARY KEY NOT ENFORCED, b string) "
+                        + "WITH ('deletion-vectors.enabled' = 'true', 'write-only' = 'true');");
+        sql("INSERT INTO test_table VALUES (1, 'A')");
+        assertThat(sql("SELECT * FROM `test_table$files`")).isNotEmpty();
+    }
 }
