@@ -211,27 +211,27 @@ class IcebergDataFieldTest {
     void testTimestampPrecisionValidation() {
         // Test invalid precision (<= 3)
         DataField invalidTimestampField =
-                new DataField(1, "timestamp", new TimestampType(false, 3));
+                new DataField(1, "timestamp", new TimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampField))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 9");
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9");
 
         // Test invalid precision (<= 3)
         DataField invalidTimestampField2 =
-                new DataField(2, "timestamp", new TimestampType(false, 3));
+                new DataField(2, "timestamp", new TimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampField2))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 9");
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9");
 
         // Test invalid local timezone timestamp precision (<= 3)
         DataField invalidTimestampLtzField =
-                new DataField(3, "timestamptz", new LocalZonedTimestampType(false, 3));
+                new DataField(3, "timestamptz", new LocalZonedTimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampLtzField))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 9");
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9");
 
         // Test valid precision boundaries
         DataField validTimestamp4 = new DataField(4, "timestamp", new TimestampType(false, 4));
