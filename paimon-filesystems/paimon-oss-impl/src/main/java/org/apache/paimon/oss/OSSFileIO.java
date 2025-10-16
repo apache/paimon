@@ -24,10 +24,14 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.ReflectionUtils;
 
+import com.aliyun.oss.OSSClient;
+import com.aliyun.oss.common.comm.ServiceClient;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem;
+import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystemStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,6 +62,7 @@ public class OSSFileIO extends HadoopCompliantFileIO {
     private static final String OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
+    private static final String OSS_SECOND_LEVEL_DOMAIN_ENABLED = "fs.oss.sld.enabled";
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
@@ -152,6 +157,11 @@ public class OSSFileIO extends HadoopCompliantFileIO {
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
+
+                    if (hadoopOptions.getBoolean(OSS_SECOND_LEVEL_DOMAIN_ENABLED, false)) {
+                        enableSecondLevelDomain(fs);
+                    }
+
                     return fs;
                 };
 
@@ -168,6 +178,19 @@ public class OSSFileIO extends HadoopCompliantFileIO {
         if (!allowCache) {
             fsMap.values().forEach(IOUtils::closeQuietly);
             fsMap.clear();
+        }
+    }
+
+    public void enableSecondLevelDomain(AliyunOSSFileSystem fs) {
+        AliyunOSSFileSystemStore store = fs.getStore();
+        try {
+            OSSClient ossClient = ReflectionUtils.getPrivateFieldValue(store, "ossClient");
+            ServiceClient serviceClient =
+                    ReflectionUtils.getPrivateFieldValue(ossClient, "serviceClient");
+            serviceClient.getClientConfiguration().setSLDEnabled(true);
+        } catch (Exception e) {
+            LOG.error("Failed to enable second level domain.", e);
+            throw new RuntimeException("Failed to enable second level domain.", e);
         }
     }
 
