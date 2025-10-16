@@ -136,6 +136,10 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         long rowIdStart = -1;
         long rowIdEnd = -1;
         for (DataFileMeta file : files) {
+            if (file.firstRowId() == null) {
+                result.add(file);
+                continue;
+            }
             if (!isBlobFile(file.fileName())) {
                 rowIdStart = file.firstRowId();
                 rowIdEnd = file.firstRowId() + file.rowCount();
