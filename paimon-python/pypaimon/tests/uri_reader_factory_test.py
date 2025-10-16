@@ -18,8 +18,24 @@ limitations under the License.
 import os
 import tempfile
 import unittest
+from pathlib import Path
+from pypaimon.common.file_io import FileIO
+from pypaimon.common.uri_reader import UriReaderFactory, HttpUriReader, FileUriReader, UriReader
 
-from pypaimon.common.uri_reader import UriReaderFactory, HttpUriReader, FileUriReader
+
+class MockFileIO:
+    """Mock FileIO for testing."""
+
+    def __init__(self, file_io: FileIO):
+        self._file_io = file_io
+
+    def get_file_size(self, path: str) -> int:
+        """Get file size."""
+        return self._file_io.get_file_size(Path(path))
+
+    def new_input_stream(self, path: Path):
+        """Create new input stream for reading."""
+        return self._file_io.new_input_stream(path)
 
 
 class UriReaderFactoryTest(unittest.TestCase):
@@ -194,6 +210,17 @@ class UriReaderFactoryTest(unittest.TestCase):
         # But same scheme should be cached
         reader3 = self.factory.create(f"file://{self.temp_dir}/another_file.txt")
         self.assertIs(reader2, reader3)  # Same file:// scheme
+
+    def test_get_file_path_with_file_uri(self):
+        file_uri = f"file://{self.temp_file}"
+        path = UriReader.get_file_path(file_uri)
+        self.assertEqual(str(path), self.temp_file)
+        oss_file_path = "bucket/tmp/another_file.txt"
+        file_uri = f"oss://{oss_file_path}"
+        path = UriReader.get_file_path(file_uri)
+        self.assertEqual(str(path), oss_file_path)
+        path = UriReader.get_file_path(self.temp_file)
+        self.assertEqual(str(path), self.temp_file)
 
 
 if __name__ == '__main__':

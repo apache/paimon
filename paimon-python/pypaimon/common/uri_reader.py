@@ -21,8 +21,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse, ParseResult
-from urllib.request import urlopen
 
+import requests
 from cachetools import LRUCache
 from readerwriterlock import rwlock
 
@@ -38,6 +38,17 @@ class UriReader(ABC):
     def from_file(cls, file_io: Any) -> 'FileUriReader':
         return FileUriReader(file_io)
 
+    @classmethod
+    def get_file_path(cls, uri: str):
+        parsed_uri = urlparse(uri)
+        if parsed_uri.scheme == 'file':
+            path = Path(parsed_uri.path)
+        elif parsed_uri.scheme and parsed_uri.scheme != '':
+            path = Path(parsed_uri.netloc + parsed_uri.path)
+        else:
+            path = Path(uri)
+        return path
+
     @abstractmethod
     def new_input_stream(self, uri: str):
         pass
@@ -50,13 +61,8 @@ class FileUriReader(UriReader):
 
     def new_input_stream(self, uri: str):
         try:
-            parsed_uri = urlparse(uri)
-            if parsed_uri.scheme == 'file':
-                file_path = parsed_uri.path
-            else:
-                file_path = uri
-            path_obj = Path(file_path)
-            return self._file_io.new_input_stream(path_obj)
+            path = self.get_file_path(uri)
+            return self._file_io.new_input_stream(path)
         except Exception as e:
             raise IOError(f"Failed to read file {uri}: {e}")
 
@@ -65,11 +71,12 @@ class HttpUriReader(UriReader):
 
     def new_input_stream(self, uri: str):
         try:
-            with urlopen(uri) as response:
-                data = response.read()
-                return io.BytesIO(data)
+            response = requests.get(uri)
+            if response.status_code != 200:
+                raise RuntimeError(f"Failed to read HTTP URI {uri} status code {response.status_code}")
+            return io.BytesIO(response.content)
         except Exception as e:
-            raise IOError(f"Failed to read HTTP URI {uri}: {e}")
+            raise RuntimeError(f"Failed to read HTTP URI {uri}: {e}")
 
 
 class UriKey:
