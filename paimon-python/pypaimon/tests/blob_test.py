@@ -92,23 +92,14 @@ class BlobTest(unittest.TestCase):
 
     def test_from_file_with_offset_and_length(self):
         """Test Blob.from_file() method with offset and length."""
-        blob = Blob.from_file(self.file, 0, 4)
+        file_io = FileIO(self.file if self.file.startswith('file://') else f"file://{self.file}", {})
+        blob = Blob.from_file(file_io, self.file, 0, 4)
 
         # Verify it returns a BlobRef instance
         self.assertIsInstance(blob, BlobRef)
 
         # Verify the data matches (first 4 bytes: "test")
         self.assertEqual(blob.to_data(), b"test")
-
-    def test_from_file_full(self):
-        """Test Blob.from_file() method without offset and length."""
-        blob = Blob.from_file(self.file)
-
-        # Verify it returns a BlobRef instance
-        self.assertIsInstance(blob, BlobRef)
-
-        # Verify the data matches
-        self.assertEqual(blob.to_data(), b"test data")
 
     def test_from_http(self):
         """Test Blob.from_http() method."""
@@ -197,7 +188,8 @@ class BlobTest(unittest.TestCase):
         self.assertIsInstance(blob_ref, Blob)
 
         # from_file should return BlobRef
-        blob_file = Blob.from_file(self.file)
+        file_io = FileIO(self.file if self.file.startswith('file://') else f"file://{self.file}", {})
+        blob_file = Blob.from_file(file_io, self.file, 0, len(self.file))
         self.assertIsInstance(blob_file, BlobRef)
         self.assertIsInstance(blob_file, Blob)
 
@@ -505,7 +497,8 @@ class BlobTest(unittest.TestCase):
         descriptor = BlobDescriptor(self.file, 0, -1)
 
         # Create BlobRef from descriptor
-        blob_ref = BlobRef(descriptor)
+        file_io = FileIO(self.file if self.file.startswith('file://') else f"file://{self.file}", {})
+        blob_ref = BlobRef(file_io, descriptor)
 
         # Verify descriptor is preserved
         returned_descriptor = blob_ref.to_descriptor()
@@ -582,7 +575,8 @@ class BlobEndToEndTest(unittest.TestCase):
                 file_path=str(file_path),
                 read_fields=[field_name],
                 full_fields=read_fields,
-                push_down_predicate=None
+                push_down_predicate=None,
+                blob_as_descriptor=False
             )
 
             # Read data
@@ -723,7 +717,8 @@ class BlobEndToEndTest(unittest.TestCase):
             file_path=str(valid_blob_file),
             read_fields=["valid_blob"],
             full_fields=complex_read_fields,
-            push_down_predicate=None
+            push_down_predicate=None,
+            blob_as_descriptor=False
         )
 
         # Reading should fail because the schema expects complex type but data is atomic
@@ -780,7 +775,8 @@ class BlobEndToEndTest(unittest.TestCase):
                 file_path=str(corrupted_header_file),
                 read_fields=["test_blob"],
                 full_fields=fields,
-                push_down_predicate=None
+                push_down_predicate=None,
+                blob_as_descriptor=False
             )
         self.assertIn("Unsupported blob file version", str(context.exception))
 
@@ -814,7 +810,8 @@ class BlobEndToEndTest(unittest.TestCase):
                 file_path=str(truncated_file),
                 read_fields=["large_blob"],
                 full_fields=fields,
-                push_down_predicate=None
+                push_down_predicate=None,
+                blob_as_descriptor=False
             )
         # Should detect truncation/incomplete data (either invalid header or invalid version)
         self.assertTrue(
@@ -844,7 +841,8 @@ class BlobEndToEndTest(unittest.TestCase):
             file_path=str(zero_blob_file),
             read_fields=["zero_blob"],
             full_fields=zero_fields,
-            push_down_predicate=None
+            push_down_predicate=None,
+            blob_as_descriptor=False
         )
 
         zero_batch = zero_reader.read_arrow_batch()
@@ -884,7 +882,8 @@ class BlobEndToEndTest(unittest.TestCase):
             file_path=str(large_sim_file),
             read_fields=["large_sim_blob"],
             full_fields=large_sim_fields,
-            push_down_predicate=None
+            push_down_predicate=None,
+            blob_as_descriptor=False
         )
 
         large_sim_batch = large_sim_reader.read_arrow_batch()

@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
 import logging
 import os
 import subprocess
@@ -28,6 +27,7 @@ from packaging.version import parse
 from pyarrow._fs import FileSystem
 
 from pypaimon.common.config import OssOptions, S3Options
+from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
 from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
 from pypaimon.table.row.generic_row import GenericRow
@@ -40,6 +40,7 @@ class FileIO:
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
         scheme, netloc, _ = self.parse_location(path)
+        self.uri_reader_factory = UriReaderFactory(catalog_options)
         if scheme in {"oss"}:
             self.filesystem = self._initialize_oss_fs(path)
         elif scheme in {"s3", "s3a", "s3n"}:
@@ -393,7 +394,7 @@ class FileIO:
             num_rows = data.num_rows
             field_name = fields[0].name
             with self.new_output_stream(path) as output_stream:
-                writer = BlobFormatWriter(output_stream, blob_as_descriptor)
+                writer = BlobFormatWriter(output_stream)
                 # Write each row
                 for i in range(num_rows):
                     col_data = records_dict[field_name][i]
@@ -401,7 +402,8 @@ class FileIO:
                     if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
                         if blob_as_descriptor:
                             blob_descriptor = BlobDescriptor.deserialize(col_data)
-                            blob_data = Blob.from_descriptor(blob_descriptor)
+                            uri_reader = self.uri_reader_factory.create(blob_descriptor.uri)
+                            blob_data = Blob.from_descriptor(uri_reader, blob_descriptor)
                         elif isinstance(col_data, bytes):
                             blob_data = BlobData(col_data)
                         else:

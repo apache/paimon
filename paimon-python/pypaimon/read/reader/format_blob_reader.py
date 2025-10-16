@@ -27,7 +27,7 @@ from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser, AtomicType
-from pypaimon.table.row.blob import BlobDescriptor, BlobRef
+from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 
@@ -35,14 +35,14 @@ from pypaimon.table.row.row_kind import RowKind
 class FormatBlobReader(RecordBatchReader):
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
-                 full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool = False):
+                 full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool):
         self._file_io = file_io
         self._file_path = file_path
         self._push_down_predicate = push_down_predicate
         self._blob_as_descriptor = blob_as_descriptor
 
         # Get file size
-        self._file_size = file_io.get_file_size(file_path)
+        self._file_size = file_io.get_file_size(Path(file_path))
 
         # Initialize the low-level blob format reader
         self.file_path = file_path
@@ -68,7 +68,10 @@ class FormatBlobReader(RecordBatchReader):
             if self.returned:
                 return None
             self.returned = True
-            batch_iterator = BlobRecordIterator(self.file_path, self.blob_lengths, self.blob_offsets, self._fields[0])
+            batch_iterator = BlobRecordIterator(
+                self._file_io, self.file_path, self.blob_lengths,
+                self.blob_offsets, self._fields[0]
+            )
             self._blob_iterator = iter(batch_iterator)
 
         # Collect records for this batch
@@ -77,18 +80,11 @@ class FormatBlobReader(RecordBatchReader):
 
         try:
             while True:
-                # Get next blob record
                 blob_row = next(self._blob_iterator)
-                # Check if first read returns None, stop immediately
                 if blob_row is None:
                     break
-
-                # Extract blob data from the row
-                blob = blob_row.values[0]  # Blob files have single blob field
-
-                # Convert blob to appropriate format for each requested field
+                blob = blob_row.values[0]
                 for field_name in self._fields:
-                    # For blob files, all fields should contain blob data
                     blob_descriptor = blob.to_descriptor()
                     if self._blob_as_descriptor:
                         blob_data = blob_descriptor.serialize()
@@ -165,7 +161,9 @@ class BlobRecordIterator:
     MAGIC_NUMBER_SIZE = 4
     METADATA_OVERHEAD = 16
 
-    def __init__(self, file_path: str, blob_lengths: List[int], blob_offsets: List[int], field_name: str):
+    def __init__(self, file_io: FileIO, file_path: str, blob_lengths: List[int],
+                 blob_offsets: List[int], field_name: str):
+        self.file_io = file_io
         self.file_path = file_path
         self.field_name = field_name
         self.blob_lengths = blob_lengths
@@ -178,20 +176,14 @@ class BlobRecordIterator:
     def __next__(self) -> GenericRow:
         if self.current_position >= len(self.blob_lengths):
             raise StopIteration
-
         # Create blob reference for the current blob
         # Skip magic number (4 bytes) and exclude length (8 bytes) + CRC (4 bytes) = 12 bytes
         blob_offset = self.blob_offsets[self.current_position] + self.MAGIC_NUMBER_SIZE  # Skip magic number
         blob_length = self.blob_lengths[self.current_position] - self.METADATA_OVERHEAD
-
-        # Create BlobDescriptor for this blob
-        descriptor = BlobDescriptor(self.file_path, blob_offset, blob_length)
-        blob = BlobRef(descriptor)
-
+        blob = Blob.from_file(self.file_io, self.file_path, blob_offset, blob_length)
         self.current_position += 1
         fields = [DataField(0, self.field_name, AtomicType("BLOB"))]
         return GenericRow([blob], fields, RowKind.INSERT)
 
     def returned_position(self) -> int:
-        """Get current position in the iterator."""
         return self.current_position
