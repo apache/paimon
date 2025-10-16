@@ -65,10 +65,14 @@ class BlobTestBase extends PaimonSparkTestBase {
 
       sql(
         "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')")
-      sql("INSERT INTO t VALUES (1, 'paimon', X'" + bytesToHex(blobDescriptor.serialize()) + "')")
-
+      sql(
+        "INSERT INTO t VALUES (1, 'paimon', X'" + bytesToHex(blobDescriptor.serialize()) + "'),"
+          + "(5, 'paimon', X'" + bytesToHex(blobDescriptor.serialize()) + "'),"
+          + "(2, 'paimon', X'" + bytesToHex(blobDescriptor.serialize()) + "'),"
+          + "(3, 'paimon', X'" + bytesToHex(blobDescriptor.serialize()) + "'),"
+          + "(4, 'paimon', X'" + bytesToHex(blobDescriptor.serialize()) + "')")
       val newDescriptorBytes =
-        sql("SELECT picture FROM t").collect()(0).get(0).asInstanceOf[Array[Byte]]
+        sql("SELECT picture FROM t WHERE id = 1").collect()(0).get(0).asInstanceOf[Array[Byte]]
       val newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes)
       val options = new Options()
       options.set("warehouse", tempDBDir.toString)
@@ -79,7 +83,7 @@ class BlobTestBase extends PaimonSparkTestBase {
 
       sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
       checkAnswer(
-        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t WHERE id = 1"),
         Seq(Row(1, "paimon", blobData, 0, 1))
       )
     }
