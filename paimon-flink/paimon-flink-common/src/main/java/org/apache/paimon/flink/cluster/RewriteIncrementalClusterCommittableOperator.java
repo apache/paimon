@@ -29,6 +29,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -41,6 +43,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Rewrite committable for new files written after clustered. */
 public class RewriteIncrementalClusterCommittableOperator
         extends BoundedOneInputOperator<Committable, Committable> {
+
+    protected static final Logger LOG =
+            LoggerFactory.getLogger(RewriteIncrementalClusterCommittableOperator.class);
     private static final long serialVersionUID = 1L;
 
     private final FileStoreTable table;
