@@ -79,7 +79,6 @@ public class DVMetaCache {
                                     file.cardinality());
                     cacheValue.add(dvMetaCacheValue);
                 });
-        //        System.out.println("put cache value size" + cacheValue);
         this.cache.put(key, cacheValue);
     }
 

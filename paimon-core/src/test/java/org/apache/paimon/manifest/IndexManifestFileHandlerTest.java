@@ -18,45 +18,39 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestAppendFileStore;
+import org.apache.paimon.TestFileStore;
+import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.utils.DVMetaCache;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SegmentsCache;
-import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.UUID;
 
-import static org.apache.paimon.SnapshotTest.newSnapshotManager;
-import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_PART_TYPE;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomDeletionVectorIndexFile;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -145,207 +139,186 @@ public class IndexManifestFileHandlerTest {
         assertThat(entries.contains(entry4)).isTrue();
     }
 
-    /**
-     * Checks if the given List of IndexFileMeta and Map of String to DeletionFile are equivalent.
-     * Two collections are considered equivalent if they contain the same deletion vector
-     * information for the same data files.
-     *
-     * @param indexFileMetas List of IndexFileMeta containing deletion vector metadata
-     * @param deletionFiles Map from data file name to DeletionFile
-     * @return true if the two collections are equivalent, false otherwise
-     */
-    public boolean areEquivalent(
-            BinaryRow partition,
-            Integer bucket,
-            IndexFileHandler indexFileHandler,
-            List<IndexFileMeta> indexFileMetas,
-            Map<String, DeletionFile> deletionFiles) {
-        if (indexFileMetas == null && deletionFiles == null) {
-            return true;
-        }
-        if (indexFileMetas == null && deletionFiles != null) {
-            return false;
-        }
-        Map<String, DeletionFile> extractedMetas = new HashMap<>();
-        for (IndexFileMeta indexFileMeta : indexFileMetas) {
-            LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas =
-                    indexFileMeta.dvRanges();
-            if (deletionVectorMetas == null) {
-                continue;
-            }
-            deletionVectorMetas.forEach(
-                    (dataFileName, meta) -> {
-                        extractedMetas.put(
-                                dataFileName,
-                                new DeletionFile(
-                                        indexFileHandler
-                                                .dvIndex(partition, bucket)
-                                                .path(indexFileMeta)
-                                                .toString(),
-                                        meta.offset(),
-                                        meta.length(),
-                                        meta.cardinality()));
-                    });
-        }
-
-        if (deletionFiles == null) {
-            if (extractedMetas.size() == 0) {
-                return true;
-            } else {
-                return false;
-            }
-        }
-
-        if (extractedMetas.size() != deletionFiles.size()) {
-            return false;
-        }
-        // check extractedMetas is the same as deletionFiles
-        for (Map.Entry<String, DeletionFile> entry : deletionFiles.entrySet()) {
-            if (!extractedMetas.containsKey(entry.getKey())) {
-                return false;
-            }
-            if (!Objects.equals(extractedMetas.get(entry.getKey()), entry.getValue())) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     @Test
-    // TODO: generate a random index manifest file instead of reading a local file
-    public void testReadLocalIndexManifestFile() {
+    public void testDVMetaCache() {
+        TestFileStore fileStore = keyValueFileStore();
+
+        // Setup cache and index-manifest file
         MemorySize manifestMaxMemory = MemorySize.ofMebiBytes(128);
         long manifestCacheThreshold = MemorySize.ofMebiBytes(1).getBytes();
         SegmentsCache<Path> manifestCache =
                 SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
         DVMetaCache dvMetaCache = new DVMetaCache(1000000);
-        Path path = new Path("/Users/langu/repos/scripts/paimon");
-        FileStorePathFactory pathFactory =
-                new FileStorePathFactory(
-                        path,
-                        DEFAULT_PART_TYPE,
-                        "default",
-                        CoreOptions.FILE_FORMAT.defaultValue(),
-                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
-                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
-                        CoreOptions.PARTITION_GENERATE_LEGCY_NAME.defaultValue(),
-                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
-                        CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        null,
-                        null,
-                        false);
-        FileIO localFileIO = LocalFileIO.create();
-        //        FileIO fileIO = FileIOFinder.find(path);
+
         IndexManifestFile indexManifestFile =
                 new IndexManifestFile.Factory(
-                                localFileIO,
-                                FileFormat.fromIdentifier("avro", new Options()),
+                                fileStore.fileIO(),
+                                FileFormat.manifestFormat(fileStore.options()),
                                 "zstd",
-                                pathFactory,
+                                fileStore.pathFactory(),
                                 manifestCache,
                                 dvMetaCache)
                         .create();
 
-        SnapshotManager snapshotManager =
-                newSnapshotManager(LocalFileIO.create(), new Path(tempDir.toString()));
-        // 1. scan local file to get partition and buckets
-        List<IndexManifestEntry> entries =
-                indexManifestFile.read("index-manifest-1e28f20e-a437-4673-b91e-ab74d08eb5c8-0");
-        //        for (IndexManifestEntry entry : entries) {
-        //            System.out.println(entry);
-        //        }
-        Map<BinaryRow, Map<Integer, List<IndexManifestEntry>>> grouped = new LinkedHashMap<>();
-        for (IndexManifestEntry entry : entries) {
-            grouped.computeIfAbsent(entry.partition(), k -> new LinkedHashMap<>())
-                    .computeIfAbsent(entry.bucket(), k -> new ArrayList<>())
-                    .add(entry);
-        }
-        Set<Pair<BinaryRow, Integer>> partitionBuckets =
-                grouped.entrySet().stream()
-                        .flatMap(
-                                e ->
-                                        e.getValue().keySet().stream()
-                                                .map(bucket -> Pair.of(e.getKey(), bucket)))
-                        .collect(Collectors.toSet());
+        IndexManifestFileHandler indexManifestFileHandler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.HASH_FIXED);
 
+        BinaryRow partition1 = partition(1);
+        BinaryRow partition2 = partition(2);
+
+        IndexManifestEntry entry1 =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        partition1,
+                        0,
+                        deletionVectorIndexFile("data1.parquet", "data2.parquet"));
+        IndexManifestEntry entry2 =
+                new IndexManifestEntry(
+                        FileKind.ADD, partition1, 1, deletionVectorIndexFile("data3.parquet"));
+        IndexManifestEntry entry3 =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        partition2,
+                        0,
+                        deletionVectorIndexFile("data4.parquet", "data5.parquet"));
+
+        String indexManifestFileName =
+                indexManifestFileHandler.write(null, Arrays.asList(entry1, entry2, entry3));
+
+        // Create IndexFileHandler with cache enabled
         IndexFileHandler indexFileHandler =
                 new IndexFileHandler(
-                        localFileIO,
-                        snapshotManager,
+                        fileStore.fileIO(),
+                        fileStore.snapshotManager(),
                         indexManifestFile,
-                        new IndexFilePathFactories(pathFactory),
+                        new IndexFilePathFactories(fileStore.pathFactory()),
                         MemorySize.ofMebiBytes(2),
                         false,
                         true);
+
         CacheMetrics cacheMetrics = new CacheMetrics();
         indexFileHandler.withCacheMetrics(cacheMetrics);
 
+        Snapshot snapshot = snapshot(indexManifestFileName);
+
+        // Test 1: First access should miss cache
+        Map<String, DeletionFile> deletionFiles1 =
+                indexFileHandler.scanDVIndexWithCache(snapshot, partition1, 0);
+        assertThat(deletionFiles1).isNotNull();
+        assertThat(cacheMetrics.getMissedObject().get()).isEqualTo(1);
+        assertThat(cacheMetrics.getHitObject().get()).isEqualTo(0);
+
+        // Test 2: Second access to same partition/bucket should hit cache
+        Map<String, DeletionFile> deletionFiles2 =
+                indexFileHandler.scanDVIndexWithCache(snapshot, partition1, 0);
+        assertThat(deletionFiles2).isNotNull();
+        assertThat(deletionFiles1).isEqualTo(deletionFiles2);
+        assertThat(cacheMetrics.getHitObject().get()).isEqualTo(1);
+
+        // Test 3: Access different bucket in same partition should hit cache
+        Map<String, DeletionFile> deletionFiles3 =
+                indexFileHandler.scanDVIndexWithCache(snapshot, partition1, 1);
+        assertThat(deletionFiles3).isNotNull();
+        assertThat(cacheMetrics.getHitObject().get()).isEqualTo(2);
+        assertThat(cacheMetrics.getMissedObject().get()).isEqualTo(1); // Still only 1 miss
+
+        // Test 4: Access different partition should miss cache
+        Map<String, DeletionFile> deletionFiles4 =
+                indexFileHandler.scanDVIndexWithCache(snapshot, partition2, 0);
+        assertThat(deletionFiles4).isNotNull();
+        assertThat(cacheMetrics.getMissedObject().get()).isEqualTo(2); // Now 2 misses total
+
+        // Test 5: Verify cache consistency with non-cache method
+        Set<Pair<BinaryRow, Integer>> partitionBuckets = new HashSet<>();
+        partitionBuckets.add(Pair.of(partition1, 0));
+        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> nonCacheResult =
+                indexFileHandler.scanDVIndex(snapshot, partitionBuckets);
+        Map<String, DeletionFile> nonCacheDeletionFiles =
+                nonCacheResult.get(Pair.of(partition1, 0));
+
+        assertThat(deletionFiles1).isEqualTo(nonCacheDeletionFiles);
+
+        // Test 6: Verify extractDeletionFileByMeta works correctly
+        List<IndexManifestEntry> entries = indexManifestFile.read(indexManifestFileName);
+        IndexManifestEntry targetEntry =
+                entries.stream()
+                        .filter(e -> e.partition().equals(partition1) && e.bucket() == 0)
+                        .findFirst()
+                        .orElse(null);
+        assertThat(targetEntry).isNotNull();
+
+        Map<String, DeletionFile> extractedFiles =
+                indexFileHandler.extractDeletionFileByMeta(partition1, 0, targetEntry.indexFile());
+        assertThat(extractedFiles).isNotNull();
+        assertThat(extractedFiles.size()).isGreaterThan(0);
+    }
+
+    // ============================ Test utils ===================================
+
+    private BinaryRow partition(int partitionValue) {
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(partition);
+        writer.writeInt(0, partitionValue);
+        writer.complete();
+        return partition;
+    }
+
+    private IndexFileMeta deletionVectorIndexFile(String... dataFileNames) {
+        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        int offset = 0;
+        for (String dataFileName : dataFileNames) {
+            dvRanges.put(
+                    dataFileName,
+                    new DeletionVectorMeta(
+                            dataFileName, offset, 100 + offset, (long) (10 + offset)));
+            offset += 150;
+        }
+        return new IndexFileMeta(
+                DELETION_VECTORS_INDEX,
+                "dv_index_" + UUID.randomUUID().toString(),
+                1024,
+                512,
+                dvRanges,
+                null);
+    }
+
+    private Snapshot snapshot(String indexManifestFileName) {
         String json =
                 "{\n"
                         + "  \"version\" : 3,\n"
-                        + "  \"id\" : 5,\n"
+                        + "  \"id\" : 1,\n"
                         + "  \"schemaId\" : 0,\n"
                         + "  \"baseManifestList\" : null,\n"
-                        + "  \"baseManifestListSize\" : 6,\n"
+                        + "  \"baseManifestListSize\" : 0,\n"
                         + "  \"deltaManifestList\" : null,\n"
-                        + "  \"deltaManifestListSize\" : 8,\n"
-                        + "  \"changelogManifestListSize\" : 10,\n"
-                        + "  \"indexManifest\" : \"index-manifest-1e28f20e-a437-4673-b91e-ab74d08eb5c8-0\",\n"
-                        + "  \"commitUser\" : null,\n"
-                        + "  \"commitIdentifier\" : 0,\n"
+                        + "  \"deltaManifestListSize\" : 0,\n"
+                        + "  \"changelogManifestListSize\" : 0,\n"
+                        + "  \"indexManifest\" : \""
+                        + indexManifestFileName
+                        + "\",\n"
+                        + "  \"commitUser\" : \"test\",\n"
+                        + "  \"commitIdentifier\" : 1,\n"
                         + "  \"commitKind\" : \"APPEND\",\n"
-                        + "  \"timeMillis\" : 1234,\n"
+                        + "  \"timeMillis\" : "
+                        + System.currentTimeMillis()
+                        + ",\n"
                         + "  \"totalRecordCount\" : null,\n"
-                        + "  \"deltaRecordCount\" : null,\n"
-                        + "  \"unknownKey\" : 22222\n"
+                        + "  \"deltaRecordCount\" : null\n"
                         + "}";
-        Snapshot snapshot = Snapshot.fromJson(json);
-        // 2. warmup dv meta cache for each partition
-        Set<BinaryRow> partitions =
-                partitionBuckets.stream().map(Pair::getLeft).collect(Collectors.toSet());
-        for (BinaryRow partition : partitions) {
-            Map<String, DeletionFile> deletionFiles =
-                    indexFileHandler.scanDVIndexWithCache(snapshot, partition, 0);
-            assertThat(deletionFiles).isNotNull();
-        }
+        return Snapshot.fromJson(json);
+    }
 
-        assertThat(cacheMetrics.getMissedObject().get() == partitions.size()).isTrue();
-
-        // 3. get index file metas
-        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> indexFileMetas =
-                indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX, partitions);
-
-        int maxCheckCount = Integer.min(partitionBuckets.size(), 100);
-        int i = 0;
-        for (Pair<BinaryRow, Integer> partitionBucket : partitionBuckets) {
-            Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> res =
-                    indexFileHandler.scanDVIndex(snapshot, Collections.singleton(partitionBucket));
-            assertThat(res).isNotNull();
-            Map<String, DeletionFile> deletionFiles1 = res.get(partitionBucket);
-            Map<String, DeletionFile> deletionFiles2 =
-                    indexFileHandler.scanDVIndexWithCache(
-                            snapshot, partitionBucket.getLeft(), partitionBucket.getRight());
-            // check scanDVIndex and scanDVIndexWithCache are equivalent
-            if (deletionFiles1 == null) {
-                assertThat(deletionFiles2).isEmpty();
-            } else {
-                assertThat(deletionFiles1.equals(deletionFiles2)).isTrue();
-            }
-            // check ScanDVIndex and scan are equivalent
-            assertThat(
-                            areEquivalent(
-                                    partitionBucket.getLeft(),
-                                    partitionBucket.getRight(),
-                                    indexFileHandler,
-                                    indexFileMetas.get(partitionBucket),
-                                    deletionFiles1))
-                    .isTrue();
-            if (++i == maxCheckCount) {
-                break;
-            }
-        }
-        System.out.println(maxCheckCount);
-        System.out.println(cacheMetrics.getHitObject().get());
-        assertThat(cacheMetrics.getHitObject().get() == maxCheckCount).isTrue();
+    private TestFileStore keyValueFileStore() {
+        return new TestFileStore.Builder(
+                        "avro",
+                        tempDir.toString(),
+                        2, // 2 buckets for testing
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
+                        DeduplicateMergeFunction.factory(),
+                        null)
+                .build();
     }
 }

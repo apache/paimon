@@ -360,7 +360,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                             e.getValue().keySet().stream()
                                                     .map(bucket -> Pair.of(e.getKey(), bucket)))
                             .collect(Collectors.toSet());
-            // TODO: to avoid cache being frequently evicted,
+            // to avoid cache being frequently evicted,
             //  currently we only read from cache when bucket number is 1
             if (indexFileHandler.isEnableDVMetaCache() && partitionBuckets.size() == 1) {
                 Pair<BinaryRow, Integer> partitionBucket = partitionBuckets.iterator().next();
