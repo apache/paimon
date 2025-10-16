@@ -35,7 +35,7 @@ class IncrementalStartingScanner(FullStartingScanner):
         snapshots_in_range = []
         for snapshot_id in range(self.startingSnapshotId + 1, self.endingSnapshotId + 1):
             snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
-            if snapshot:
+            if snapshot.commit_kind == "APPEND":
                 snapshots_in_range.append(snapshot)
 
         # Collect all file entries from all snapshots in range
