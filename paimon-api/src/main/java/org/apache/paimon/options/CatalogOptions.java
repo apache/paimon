@@ -136,6 +136,19 @@ public class CatalogOptions {
                     .withDescription(
                             "Controls the max number for snapshots per table in the catalog are cached.");
 
+    public static final ConfigOption<Boolean> CACHE_DV_ENABLED =
+            key("cache.dv.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to enable deletion vector meta cache.");
+
+    public static final ConfigOption<Integer> CACHE_DV_MAX_NUM =
+            key("cache.dv.max-num")
+                    .intType()
+                    .defaultValue(100000)
+                    .withDescription(
+                            "Controls the maximum number of bucket-level deletion vector meta that can be cached.");
+
     public static final ConfigOption<Boolean> CASE_SENSITIVE =
             ConfigOptions.key("case-sensitive")
                     .booleanType()

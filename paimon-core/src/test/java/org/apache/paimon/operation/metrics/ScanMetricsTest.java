@@ -50,7 +50,9 @@ public class ScanMetricsTest {
                         ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES,
                         ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES,
                         ScanMetrics.MANIFEST_HIT_CACHE,
-                        ScanMetrics.MANIFEST_MISSED_CACHE);
+                        ScanMetrics.MANIFEST_MISSED_CACHE,
+                        ScanMetrics.DVMETA_HIT_CACHE,
+                        ScanMetrics.DVMETA_MISSED_CACHE);
     }
 
     /** Tests that the metrics are updated properly. */

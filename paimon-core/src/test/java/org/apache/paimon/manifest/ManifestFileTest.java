@@ -57,6 +57,7 @@ public class ManifestFileTest {
     public void testWriteAndReadManifestFile() {
         List<ManifestEntry> entries = generateData();
         ManifestFileMeta meta = gen.createManifestFileMeta(entries);
+        System.out.println(tempDir.toString());
         ManifestFile manifestFile = createManifestFile(tempDir.toString());
 
         List<ManifestFileMeta> actualMetas = manifestFile.write(entries);
