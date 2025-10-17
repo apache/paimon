@@ -77,15 +77,6 @@ class DataBlobWriter(DataWriter):
     CHECK_ROLLING_RECORD_CNT = 1000
 
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int):
-        """
-        Initialize the DataBlobWriter.
-
-        Args:
-            table: The FileStoreTable instance
-            partition: Partition tuple
-            bucket: Bucket number
-            max_seq_number: Maximum sequence number
-        """
         super().__init__(table, partition, bucket, max_seq_number)
 
         # Determine blob column from table schema
@@ -116,7 +107,6 @@ class DataBlobWriter(DataWriter):
         logger.info(f"Initialized DataBlobWriter with blob column: {self.blob_column_name}")
 
     def _get_blob_columns_from_schema(self) -> str:
-        """Get blob column name from table schema."""
         blob_columns = []
         for field in self.table.table_schema.fields:
             type_str = str(field.type).lower()
@@ -132,17 +122,13 @@ class DataBlobWriter(DataWriter):
         return blob_columns[0]  # Return single blob column name
 
     def _process_data(self, data: pa.RecordBatch) -> pa.RecordBatch:
-        """Process incoming data for normal columns only."""
-        # Split data and process only normal part
         normal_data, _ = self._split_data(data)
         return normal_data
 
     def _merge_data(self, existing_data: pa.Table, new_data: pa.Table) -> pa.Table:
-        """Merge existing normal data with new normal data."""
         return self._merge_normal_data(existing_data, new_data)
 
     def write(self, data: pa.RecordBatch):
-        """Write data to both normal and blob writers."""
         try:
             # Split data into normal and blob parts
             normal_data, blob_data = self._split_data(data)
@@ -172,14 +158,12 @@ class DataBlobWriter(DataWriter):
             raise e
 
     def prepare_commit(self) -> List[DataFileMeta]:
-        """Prepare commit by writing any remaining data and returning file metadata."""
         # Close any remaining data
         self._close_current_writers()
 
         return self.committed_files.copy()
 
     def close(self):
-        """Close the writer and clean up resources."""
         if self.closed:
             return
 
@@ -218,11 +202,9 @@ class DataBlobWriter(DataWriter):
         return pa.Table.from_batches([data])
 
     def _merge_normal_data(self, existing_data: pa.Table, new_data: pa.Table) -> pa.Table:
-        """Merge existing normal data with new data."""
         return pa.concat_tables([existing_data, new_data])
 
     def _should_roll_normal(self) -> bool:
-        """Check if normal data files should be rolled based on size and record count."""
         if self.pending_normal_data is None:
             return False
 
@@ -261,7 +243,6 @@ class DataBlobWriter(DataWriter):
                     f"added {len(blob_metas)} blob file metadata after normal metadata")
 
     def _write_normal_data_to_file(self, data: pa.Table) -> DataFileMeta:
-        """Write normal data to file and return metadata."""
         if data.num_rows == 0:
             return None
 
@@ -282,7 +263,6 @@ class DataBlobWriter(DataWriter):
         return self._create_data_file_meta(file_name, file_path, data)
 
     def _create_data_file_meta(self, file_name: str, file_path: Path, data: pa.Table) -> DataFileMeta:
-        """Create DataFileMeta for normal data file."""
         # Column stats (only for normal columns)
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
@@ -327,10 +307,6 @@ class DataBlobWriter(DataWriter):
             write_cols=self.write_cols)
 
     def _validate_consistency(self, normal_meta: DataFileMeta, blob_metas: List[DataFileMeta]):
-        """
-        Validate that row counts match between normal and blob files.
-        Note: This validation is now done at a higher level since blob files can roll independently.
-        """
         if normal_meta is None:
             return
 

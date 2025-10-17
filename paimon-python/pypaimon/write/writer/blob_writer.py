@@ -19,38 +19,24 @@
 import logging
 from typing import Tuple
 
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 logger = logging.getLogger(__name__)
 
 
 class BlobWriter(AppendOnlyDataWriter):
-    """
-    A specialized writer for blob data that extends AppendOnlyDataWriter.
-    The only difference is that it uses "blob" as the file format.
-    """
 
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, blob_column: str):
-        """
-        Initialize BlobWriter.
-
-        Args:
-            table: The table to write to
-            partition: The partition tuple
-            bucket: The bucket number
-            max_seq_number: The maximum sequence number
-        """
-        # Call parent constructor
         super().__init__(table, partition, bucket, max_seq_number, [blob_column])
 
         # Override file format to "blob"
-        self.file_format = "blob"
+        self.file_format = CoreOptions.FILE_FORMAT_BLOB
 
         logger.info("Initialized BlobWriter with blob file format")
 
     @staticmethod
     def _get_column_stats(record_batch, column_name: str):
-        """Override to not generate min/max values for blob columns."""
         column_array = record_batch.column(column_name)
         if column_array.null_count == len(column_array):
             return {

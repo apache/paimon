@@ -18,6 +18,7 @@ limitations under the License.
 from collections import defaultdict
 from typing import Callable, List, Optional
 
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
@@ -65,7 +66,7 @@ class FullStartingScanner(StartingScanner):
 
         self.only_read_real_buckets = True if int(
             self.table.options.get('bucket', -1)) == BucketMode.POSTPONE_BUCKET.value else False
-        self.data_evolution = self.table.options.get('data-evolution.enabled', 'false').lower() == 'true'
+        self.data_evolution = self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true'
 
     def scan(self) -> Plan:
         file_entries = self.plan_files()

@@ -21,6 +21,7 @@ import uuid
 from pathlib import Path
 from typing import List
 
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -134,7 +135,7 @@ class FileStoreCommit:
         new_snapshot_id = self._generate_snapshot_id()
 
         # Check if row tracking is enabled
-        row_tracking_enabled = self.table.options.get('row-tracking.enabled', 'false').lower() == 'true'
+        row_tracking_enabled = self.table.options.get(CoreOptions.ROW_TRACKING_ENABLED, 'false').lower() == 'true'
 
         # Apply row tracking logic if enabled
         next_row_id = None
