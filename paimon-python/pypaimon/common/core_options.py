@@ -49,3 +49,5 @@ class CoreOptions(str, Enum):
     INCREMENTAL_BETWEEN_TIMESTAMP = "incremental-between-timestamp"
     # Commit options
     COMMIT_USER_PREFIX = "commit.user-prefix"
+    ROW_TRACKING_ENABLED = "row-tracking.enabled"
+    DATA_EVOLUTION_ENABLED = "data-evolution.enabled"
