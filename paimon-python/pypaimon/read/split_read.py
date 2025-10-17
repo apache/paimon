@@ -82,8 +82,9 @@ class SplitRead(ABC):
             format_reader = FormatAvroReader(self.table.file_io, file_path, self._get_final_read_data_fields(),
                                              self.read_fields, self.push_down_predicate)
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
+            blob_as_descriptor = self.table.options.get(CoreOptions.FILE_BLOB_AS_DESCRIPTOR, False)
             format_reader = FormatBlobReader(self.table.file_io, file_path, self._get_final_read_data_fields(),
-                                             self.read_fields, self.push_down_predicate)
+                                             self.read_fields, self.push_down_predicate, blob_as_descriptor)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path,
                                                 self._get_final_read_data_fields(), self.push_down_predicate)
