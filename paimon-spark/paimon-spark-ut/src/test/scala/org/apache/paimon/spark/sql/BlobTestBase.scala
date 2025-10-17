@@ -103,7 +103,9 @@ class BlobTestBase extends PaimonSparkTestBase {
 
       val blobDescriptor = new BlobDescriptor(uri, 0, blobData.length)
       sql(
-        "CREATE TABLE IF NOT EXISTS t (\n" + "id STRING,\n" + "name STRING,\n" + "file_size STRING,\n" + "crc64 STRING,\n" + "modified_time STRING,\n" + "content BINARY\n" + ") \n" + "PARTITIONED BY (ds STRING, batch STRING) \n" + "TBLPROPERTIES ('comment' = 'blob格式表','partition.expiration-time' = '365 d','row-tracking.enabled' = 'true','data-evolution.enabled' = 'true','blob-field' = 'content','blob-as-descriptor' = 'true')")
+        "CREATE TABLE IF NOT EXISTS t (\n" + "id STRING,\n" + "name STRING,\n" + "file_size STRING,\n" + "crc64 STRING,\n" + "modified_time STRING,\n" + "content BINARY\n" + ") \n" +
+          "PARTITIONED BY (ds STRING, batch STRING) \n" +
+          "TBLPROPERTIES ('comment' = 'blob table','partition.expiration-time' = '365 d','row-tracking.enabled' = 'true','data-evolution.enabled' = 'true','blob-field' = 'content','blob-as-descriptor' = 'true')")
       sql(
         "INSERT OVERWRITE TABLE t\nPARTITION(ds= '1017',batch = 'test') VALUES \n('1','paimon','1024','12345678','20241017',X'" + bytesToHex(
           blobDescriptor.serialize()) + "')")
