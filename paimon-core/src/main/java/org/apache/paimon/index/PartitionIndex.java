@@ -139,7 +139,7 @@ public class PartitionIndex {
                                 maxBucketId, targetBucketRowNumber));
             }
         }
-        // todo: check this part 
+        // todo: check this part
         // 4. exceed buckets upper bound
         int bucket = ListUtils.pickRandomly(totalBucketArray);
         hash2Bucket.put(hash, (short) bucket);
