@@ -300,7 +300,13 @@ public class TableSchema implements Serializable {
     private List<DataField> projectedDataFields(List<String> projectedFieldNames) {
         List<String> fieldNames = fieldNames();
         return projectedFieldNames.stream()
-                .map(k -> fields.get(fieldNames.indexOf(k)))
+                .map(
+                        k -> {
+                            return !fieldNames.contains(k)
+                                    ? null
+                                    : fields.get(fieldNames.indexOf(k));
+                        })
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
     }
 
