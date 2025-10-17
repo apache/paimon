@@ -38,13 +38,6 @@ class BlobWriter(AppendOnlyDataWriter):
     @staticmethod
     def _get_column_stats(record_batch, column_name: str):
         column_array = record_batch.column(column_name)
-        if column_array.null_count == len(column_array):
-            return {
-                "min_values": None,
-                "max_values": None,
-                "null_counts": column_array.null_count,
-            }
-
         # For blob data, don't generate min/max values
         return {
             "min_values": None,
