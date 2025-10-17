@@ -107,7 +107,7 @@ class FullStartingScanner(StartingScanner):
             file_entries = self._filter_by_predicate(file_entries)
         return file_entries
 
-    def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
+    def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'FullStartingScanner':
         if idx_of_this_subtask >= number_of_para_subtasks:
             raise Exception("idx_of_this_subtask must be less than number_of_para_subtasks")
         self.idx_of_this_subtask = idx_of_this_subtask
@@ -361,7 +361,6 @@ class FullStartingScanner(StartingScanner):
 
         return packed
 
-
     def _create_data_evolution_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
         """
         Create data evolution splits for append-only tables with schema evolution.
@@ -403,7 +402,6 @@ class FullStartingScanner(StartingScanner):
         if self.idx_of_this_subtask is not None:
             self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
         return splits
-
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
         """
@@ -468,7 +466,6 @@ class FullStartingScanner(StartingScanner):
     def _is_blob_file(file_name: str) -> bool:
         """Check if a file is a blob file based on its extension."""
         return file_name.endswith('.blob')
-
 
     @staticmethod
     def _filter_blob(files: List[DataFileMeta]) -> List[DataFileMeta]:
