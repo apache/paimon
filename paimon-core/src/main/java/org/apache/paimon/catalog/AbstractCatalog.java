@@ -41,6 +41,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.ChainTableUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -383,7 +384,10 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotSystemTable(identifier, "createTable");
         validateCreateTable(schema);
         validateCustomTablePath(schema.options());
-
+        ChainTableUtils.checkChainTableOptions(
+                schema.options(),
+                schema.primaryKeys() == null ? null : String.join(",", schema.primaryKeys()),
+                !schema.partitionKeys().isEmpty());
         // check db exists
         getDatabase(identifier.getDatabaseName());
 

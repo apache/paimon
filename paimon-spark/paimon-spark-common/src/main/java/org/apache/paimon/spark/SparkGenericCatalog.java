@@ -23,6 +23,7 @@ import org.apache.paimon.hive.HiveCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.spark.util.SQLConfUtils;
+import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
@@ -211,6 +212,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
             return sparkCatalog.createTable(ident, schema, partitions, properties);
         } else {
             // delegate to the session catalog
+            ChainTableUtils.checkChainTableOptions(properties, null, partitions.length != 0);
             return SparkShimLoader.shim()
                     .createTable(asTableCatalog(), ident, schema, partitions, properties);
         }

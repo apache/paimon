@@ -60,6 +60,10 @@ public interface InnerTableScan extends TableScan {
         return this;
     }
 
+    default InnerTableScan withPartitionFilter(Predicate predicate) {
+        return this;
+    }
+
     default InnerTableScan withBucket(int bucket) {
         return this;
     }

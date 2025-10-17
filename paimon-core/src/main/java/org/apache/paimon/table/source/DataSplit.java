@@ -47,6 +47,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -89,8 +90,24 @@ public class DataSplit implements Split {
         return partition;
     }
 
+    public BinaryRow readPartition() {
+        return partition();
+    }
+
+    public HashMap<String, String> fileBucketPathMapping() {
+        throw new UnsupportedOperationException("fileMappings is not supported");
+    }
+
+    public HashMap<String, String> fileBranchMapping() {
+        throw new UnsupportedOperationException("fileMappings is not supported");
+    }
+
     public int bucket() {
         return bucket;
+    }
+
+    public String dataSplitType() {
+        return DataSplitType.DATA_SPLIT.name();
     }
 
     public String bucketPath() {
@@ -111,6 +128,10 @@ public class DataSplit implements Split {
 
     public List<DataFileMeta> dataFiles() {
         return dataFiles;
+    }
+
+    public List<DeletionFile> dataDeletionFiles() {
+        return dataDeletionFiles;
     }
 
     @Override

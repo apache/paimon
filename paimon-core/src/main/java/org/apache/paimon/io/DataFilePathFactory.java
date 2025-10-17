@@ -98,6 +98,16 @@ public class DataFilePathFactory {
         return newPathFromName(newFileName(prefix));
     }
 
+    public Path newPath(String prefix, Path relativeBucketPath) {
+        String fileName = newFileName(prefix);
+        if (externalPathProvider != null) {
+            return externalPathProvider
+                    .withBucketPath(relativeBucketPath)
+                    .getNextExternalDataPath(fileName);
+        }
+        return new Path(relativeBucketPath, fileName);
+    }
+
     private String newFileName(String prefix) {
         String extension;
         if (compressExtension != null && isTextFormat(formatIdentifier)) {
@@ -129,14 +139,31 @@ public class DataFilePathFactory {
         return file.externalPath().map(Path::new).orElse(new Path(parent, file.fileName()));
     }
 
+    public Path toPath(DataFileMeta file, Path relativeBucketPath) {
+        return file.externalPath()
+                .map(Path::new)
+                .orElse(new Path(relativeBucketPath, file.fileName()));
+    }
+
     public Path toPath(FileEntry file) {
         return Optional.ofNullable(file.externalPath())
                 .map(Path::new)
                 .orElse(new Path(parent, file.fileName()));
     }
 
+    public Path toPath(FileEntry file, Path relativeBucketPath) {
+        return Optional.ofNullable(file.externalPath())
+                .map(Path::new)
+                .orElse(new Path(relativeBucketPath, file.fileName()));
+    }
+
     public Path toAlignedPath(String fileName, DataFileMeta aligned) {
         return new Path(aligned.externalPathDir().map(Path::new).orElse(parent), fileName);
+    }
+
+    public Path toAlignedPath(String fileName, DataFileMeta aligned, Path relativeBucketPath) {
+        return new Path(
+                aligned.externalPathDir().map(Path::new).orElse(relativeBucketPath), fileName);
     }
 
     public Path toAlignedPath(String fileName, FileEntry aligned) {
@@ -145,6 +172,14 @@ public class DataFilePathFactory {
                         .map(Path::new)
                         .map(p -> p.getParent().toUri().toString());
         return new Path(externalPathDir.map(Path::new).orElse(parent), fileName);
+    }
+
+    public Path toAlignedPath(String fileName, FileEntry aligned, Path relativeBucketPath) {
+        Optional<String> externalPathDir =
+                Optional.ofNullable(aligned.externalPath())
+                        .map(Path::new)
+                        .map(p -> p.getParent().toUri().toString());
+        return new Path(externalPathDir.map(Path::new).orElse(relativeBucketPath), fileName);
     }
 
     public static Path dataFileToFileIndexPath(Path dataFilePath) {
