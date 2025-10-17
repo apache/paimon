@@ -45,5 +45,6 @@ class CoreOptions(str, Enum):
     FILE_BLOCK_SIZE = "file.block-size"
     # Scan options
     SCAN_FALLBACK_BRANCH = "scan.fallback-branch"
+    INCREMENTAL_BETWEEN_TIMESTAMP = "incremental-between-timestamp"
     # Commit options
     COMMIT_USER_PREFIX = "commit.user-prefix"
