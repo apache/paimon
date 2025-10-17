@@ -363,11 +363,6 @@ class FullStartingScanner(StartingScanner):
         return packed
 
     def _create_data_evolution_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
-        """
-        Create data evolution splits for append-only tables with schema evolution.
-        This method groups files by firstRowId and creates splits that can handle
-        column merging across different schema versions.
-        """
         partitioned_files = defaultdict(list)
         for entry in file_entries:
             partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
@@ -405,16 +400,8 @@ class FullStartingScanner(StartingScanner):
         return splits
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
-        """
-        Split files by firstRowId for data evolution.
-        This method groups files that have the same firstRowId, which is essential
-        for handling schema evolution where files with different schemas need to be
-        read together to merge columns.
-        """
         split_by_row_id = []
 
-        # Sort files by firstRowId and then by maxSequenceNumber
-        # Files with null firstRowId are treated as having Long.MIN_VALUE
         def sort_key(file: DataFileMeta) -> tuple:
             first_row_id = file.first_row_id if file.first_row_id is not None else float('-inf')
             is_blob = 1 if self._is_blob_file(file.file_name) else 0
@@ -465,37 +452,23 @@ class FullStartingScanner(StartingScanner):
 
     @staticmethod
     def _is_blob_file(file_name: str) -> bool:
-        """Check if a file is a blob file based on its extension."""
         return file_name.endswith('.blob')
 
     @staticmethod
     def _filter_blob(files: List[DataFileMeta]) -> List[DataFileMeta]:
-        """
-        Filter blob files to only include those that fall within the row ID range of non-blob files.
-        This is equivalent to the filterBlob method in Java DataEvolutionSplitGenerator.
-
-        Args:
-            files: List of DataFileMeta objects
-
-        Returns:
-            Filtered list of DataFileMeta objects
-        """
         result = []
         row_id_start = -1
         row_id_end = -1
 
         for file in files:
             if not FullStartingScanner._is_blob_file(file.file_name):
-                # Non-blob file: update the row ID range
                 if file.first_row_id is not None:
                     row_id_start = file.first_row_id
                     row_id_end = file.first_row_id + file.row_count
                 result.append(file)
             else:
-                # Blob file: only include if it falls within the current row ID range
                 if file.first_row_id is not None and row_id_start != -1:
                     if row_id_start <= file.first_row_id < row_id_end:
                         result.append(file)
-                # If no valid range is set yet, don't include the blob file
 
         return result

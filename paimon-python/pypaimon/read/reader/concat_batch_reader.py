@@ -87,24 +87,11 @@ class MergeAllBatchReader(RecordBatchReader):
     """
 
     def __init__(self, reader_suppliers: List[Callable]):
-        """
-        Initialize the MergeAllBatchReader.
-
-        Args:
-            reader_suppliers: List of callable functions that return RecordBatchReader instances
-        """
         self.reader_suppliers = reader_suppliers
         self.merged_batch: Optional[RecordBatch] = None
         self.batch_created = False
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
-        """
-        Read and return a single merged batch containing all data from all reader suppliers.
-        After the first call, subsequent calls will return None.
-
-        Returns:
-            A single RecordBatch containing all concatenated data, or None if already consumed
-        """
         if self.batch_created:
             return None
 
@@ -155,6 +142,5 @@ class MergeAllBatchReader(RecordBatchReader):
         return self.merged_batch
 
     def close(self) -> None:
-        """Close the reader and clean up resources."""
         self.merged_batch = None
         self.batch_created = False
