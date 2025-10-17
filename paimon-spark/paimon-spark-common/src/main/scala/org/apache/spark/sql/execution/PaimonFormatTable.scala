@@ -195,7 +195,9 @@ case class PaimonFormatTable(
   }
 
   override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
-    PaimonFormatTableScanBuilder(table.copy(caseInsensitiveStringMap), schema, Seq.empty)
+    val scanBuilder = PaimonFormatTableScanBuilder(table.copy(caseInsensitiveStringMap))
+    scanBuilder.pruneColumns(schema)
+    scanBuilder
   }
 
   override def newWriteBuilder(logicalWriteInfo: LogicalWriteInfo): WriteBuilder = {

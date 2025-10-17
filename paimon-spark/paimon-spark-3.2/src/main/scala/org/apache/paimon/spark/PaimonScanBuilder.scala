@@ -18,61 +18,23 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate}
 import org.apache.paimon.table.InnerTable
+import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.connector.read.SupportsPushDownFilters
+import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.sources.Filter
 
-import scala.collection.mutable
+import java.util.{List => JList}
 
 class PaimonScanBuilder(table: InnerTable)
   extends PaimonBaseScanBuilder(table)
-  with SupportsPushDownFilters {
+  with PaimonBasePushDown {
 
   private var pushedSparkFilters = Array.empty[Filter]
 
-  /**
-   * Pushes down filters, and returns filters that need to be evaluated after scanning. <p> Rows
-   * should be returned from the data source if and only if all the filters match. That is, filters
-   * must be interpreted as ANDed together.
-   */
-  override def pushFilters(filters: Array[Filter]): Array[Filter] = {
-    val pushable = mutable.ArrayBuffer.empty[(Filter, Predicate)]
-    val postScan = mutable.ArrayBuffer.empty[Filter]
-    val reserved = mutable.ArrayBuffer.empty[Filter]
-
-    val converter = new SparkFilterConverter(table.rowType)
-    val visitor = new PartitionPredicateVisitor(table.partitionKeys())
-    filters.foreach {
-      filter =>
-        val predicate = converter.convertIgnoreFailure(filter)
-        if (predicate == null) {
-          postScan.append(filter)
-        } else {
-          pushable.append((filter, predicate))
-          if (predicate.visit(visitor)) {
-            reserved.append(filter)
-          } else {
-            postScan.append(filter)
-          }
-        }
-    }
-
-    if (pushable.nonEmpty) {
-      this.pushedSparkFilters = pushable.map(_._1).toArray
-      this.pushedPaimonPredicates = pushable.map(_._2).toArray
-    }
-    if (reserved.nonEmpty) {
-      this.reservedFilters = reserved.toArray
-    }
-    if (postScan.nonEmpty) {
-      this.hasPostScanPredicates = true
-    }
-    postScan.toArray
-  }
-
-  override def pushedFilters(): Array[Filter] = {
-    pushedSparkFilters
+  override protected var partitionKeys: JList[String] = table.partitionKeys()
+  override protected var rowType: RowType = table.rowType()
+  override def build(): Scan = {
+    PaimonScan(table, requiredSchema, pushedPaimonPredicates, reservedFilters, None, pushDownTopN)
   }
 }
