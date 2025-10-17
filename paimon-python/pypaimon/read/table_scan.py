@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Optional
+from typing import Optional
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
@@ -27,21 +27,18 @@ from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner
 from pypaimon.read.scanner.incremental_starting_scanner import \
     IncrementalStartingScanner
 from pypaimon.read.scanner.starting_scanner import StartingScanner
-from pypaimon.schema.data_types import DataField
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class TableScan:
     """Implementation of TableScan for native Python reading."""
 
-    def __init__(self, table, predicate: Optional[Predicate], limit: Optional[int],
-                 read_type: List[DataField]):
+    def __init__(self, table, predicate: Optional[Predicate], limit: Optional[int]):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.limit = limit
-        self.read_type = read_type
         self.starting_scanner = self._create_starting_scanner()
 
     def plan(self) -> Plan:
@@ -67,10 +64,9 @@ class TableScan:
             if (start_timestamp == end_timestamp or start_timestamp > latest_snapshot.time_millis
                     or end_timestamp < earliest_snapshot.time_millis):
                 return EmptyStartingScanner()
-            return IncrementalStartingScanner.between_timestamps(self.table, self.predicate, self.limit, self.read_type,
-                                                                 start_timestamp,
-                                                                 end_timestamp)
-        return FullStartingScanner(self.table, self.predicate, self.limit, self.read_type)
+            return IncrementalStartingScanner.between_timestamps(self.table, self.predicate, self.limit,
+                                                                 start_timestamp, end_timestamp)
+        return FullStartingScanner(self.table, self.predicate, self.limit)
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
         self.starting_scanner.with_shard(idx_of_this_subtask, number_of_para_subtasks)

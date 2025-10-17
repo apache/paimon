@@ -24,6 +24,7 @@ import pyarrow
 from pyarrow import compute as pyarrow_compute
 from pyarrow import dataset as pyarrow_dataset
 
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.internal_row import InternalRow
 
 
@@ -33,6 +34,20 @@ class Predicate:
     index: Optional[int]
     field: Optional[str]
     literals: Optional[List[Any]] = None
+
+    def new_index(self, index: int):
+        return Predicate(
+            method=self.method,
+            index=index,
+            field=self.field,
+            literals=self.literals)
+
+    def new_literals(self, literals: List[Any]):
+        return Predicate(
+            method=self.method,
+            index=self.index,
+            field=self.field,
+            literals=literals)
 
     def test(self, record: InternalRow) -> bool:
         if self.method == 'equal':
@@ -124,6 +139,16 @@ class Predicate:
             return self.literals[0] <= value <= self.literals[1]
 
         raise ValueError("Unsupported predicate method: {}".format(self.method))
+
+    def test_by_simple_stats(self, stat: SimpleStats, row_count: int) -> bool:
+        return self.test_by_stats({
+            "min_values": stat.min_values.to_dict(),
+            "max_values": stat.max_values.to_dict(),
+            "null_counts": {
+                stat.min_values.fields[i].name: stat.null_counts[i] for i in range(len(stat.min_values.fields))
+            },
+            "row_count": row_count,
+        })
 
     def test_by_stats(self, stat: Dict) -> bool:
         if self.method == 'and':
