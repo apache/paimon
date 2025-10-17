@@ -95,7 +95,14 @@ public class HashBucketAssigner implements BucketAssigner {
             this.partitionIndex.put(partition, index);
         }
 
-        int assigned = index.assign(hash, this::isMyBucket, maxBucketsNum, maxBucketId, minEmptyBucketsBeforeAsyncCheck, minRefreshInterval);
+        int assigned =
+                index.assign(
+                        hash,
+                        this::isMyBucket,
+                        maxBucketsNum,
+                        maxBucketId,
+                        minEmptyBucketsBeforeAsyncCheck,
+                        minRefreshInterval);
         if (LOG.isDebugEnabled()) {
             LOG.debug("Assign {} to the partition {} key hash {}", assigned, partition, hash);
         }

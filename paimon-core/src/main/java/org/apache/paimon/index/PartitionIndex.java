@@ -28,6 +28,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -37,7 +38,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.function.IntPredicate;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
@@ -58,11 +58,13 @@ public class PartitionIndex {
 
     public long lastAccessedCommitIdentifier;
 
-    public final IndexFileHandler indexFileHandler;
+    private final IndexFileHandler indexFileHandler;
 
-    public final BinaryRow partition;
+    private final BinaryRow partition;
 
     private volatile CompletableFuture<Void> refreshFuture;
+
+    private Instant lastRefreshTime;
 
     public PartitionIndex(
             Int2ShortHashMap hash2Bucket,
@@ -79,9 +81,16 @@ public class PartitionIndex {
         this.accessed = true;
         this.indexFileHandler = indexFileHandler;
         this.partition = partition;
+        this.lastRefreshTime = Instant.now();
     }
 
-    public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum, int maxBucketId, int minEmptyBucketsBeforeAsyncCheck, Duration minRefreshInterval) {
+    public int assign(
+            int hash,
+            IntPredicate bucketFilter,
+            int maxBucketsNum,
+            int maxBucketId,
+            int minEmptyBucketsBeforeAsyncCheck,
+            Duration minRefreshInterval) {
         accessed = true;
 
         // 1. is it a key that has appeared before
@@ -89,7 +98,8 @@ public class PartitionIndex {
             return hash2Bucket.get(hash);
         }
 
-        if (shouldRefreshEmptyBuckets(maxBucketId, minEmptyBucketsBeforeAsyncCheck)) {
+        if (shouldRefreshEmptyBuckets(maxBucketId, minEmptyBucketsBeforeAsyncCheck)
+                && isReachedTheMinRefreshInterval(minRefreshInterval)) {
             refreshBucketsFromDisk();
         }
 
@@ -109,7 +119,7 @@ public class PartitionIndex {
             }
         }
 
-        //from onwards is to create new bucket
+        // from onwards is to create new bucket
         int globalMaxBucketId = (maxBucketsNum == -1 ? Short.MAX_VALUE : maxBucketsNum) - 1;
         if (totalBucketSet.isEmpty() || maxBucketId < globalMaxBucketId) {
             // 3. create a new bucket
@@ -129,7 +139,7 @@ public class PartitionIndex {
                                 maxBucketId, targetBucketRowNumber));
             }
         }
-        //esto no se si lo necesitaremos
+        // todo: check this part 
         // 4. exceed buckets upper bound
         int bucket = ListUtils.pickRandomly(totalBucketArray);
         hash2Bucket.put(hash, (short) bucket);
@@ -169,38 +179,50 @@ public class PartitionIndex {
                 throw new UncheckedIOException(e);
             }
         }
-        return new PartitionIndex(mapBuilder.build(), buckets, targetBucketRowNumber,indexFileHandler,partition);
+        return new PartitionIndex(
+                mapBuilder.build(), buckets, targetBucketRowNumber, indexFileHandler, partition);
     }
 
-    private boolean shouldRefreshEmptyBuckets(int maxBucketId, int minEmptyBucketsBeforeAsyncCheck) {
-        return maxBucketId != -1 && minEmptyBucketsBeforeAsyncCheck != -1 && (nonFullBucketInformation.size() == maxBucketId - minEmptyBucketsBeforeAsyncCheck);
+    private boolean shouldRefreshEmptyBuckets(
+            int maxBucketId, int minEmptyBucketsBeforeAsyncCheck) {
+        return maxBucketId != -1
+                && minEmptyBucketsBeforeAsyncCheck != -1
+                && (nonFullBucketInformation.size()
+                == maxBucketId - minEmptyBucketsBeforeAsyncCheck);
     }
 
-    //no debo actualizat otras propiedades aquí lo que hago es solo rellenar el bucket de nuevo de forma asyncrona
+    private boolean isReachedTheMinRefreshInterval(final Duration duration) {
+        return Instant.now().isAfter(lastRefreshTime.plus(duration));
+    }
+
+
     private void refreshBucketsFromDisk() {
         // Only start refresh if not already in progress
         if (refreshFuture == null || refreshFuture.isDone()) {
-            refreshFuture = CompletableFuture.runAsync(() -> {
-                try {
-                    List<IndexManifestEntry> files = indexFileHandler.scanEntries(HASH_INDEX, partition);
-                    Map<Integer, Long> tempBucketInfo = new HashMap<>();
+            refreshFuture =
+                    CompletableFuture.runAsync(
+                            () -> {
+                                try {
+                                    List<IndexManifestEntry> files =
+                                            indexFileHandler.scanEntries(HASH_INDEX, partition);
+                                    Map<Integer, Long> tempBucketInfo = new HashMap<>();
 
-                    for (IndexManifestEntry file : files) {
-                        long currentNumberOfRows = file.indexFile().rowCount();
-                        if (currentNumberOfRows < targetBucketRowNumber) {
-                            tempBucketInfo.put(file.bucket(), currentNumberOfRows);
-                        }
-                    }
+                                    for (IndexManifestEntry file : files) {
+                                        long currentNumberOfRows = file.indexFile().rowCount();
+                                        if (currentNumberOfRows < targetBucketRowNumber) {
+                                            tempBucketInfo.put(file.bucket(), currentNumberOfRows);
+                                        }
+                                    }
 
-                    nonFullBucketInformation.putAll(tempBucketInfo);
-
-                } catch (Exception e) {
-                    // Log error instead of throwing
-                    System.err.println("Error refreshing buckets from disk: " + e.getMessage());
-                }
-            });
+                                    nonFullBucketInformation.putAll(tempBucketInfo);
+                                    lastRefreshTime = Instant.now();
+                                } catch (Exception e) {
+                                    // Log error instead of throwing
+                                    System.err.println(
+                                            "Error refreshing buckets from disk: "
+                                                    + e.getMessage());
+                                }
+                            });
         }
     }
-
-
 }
