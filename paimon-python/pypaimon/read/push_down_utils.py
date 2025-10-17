@@ -21,6 +21,49 @@ from typing import Dict, List, Set
 from pypaimon.common.predicate import Predicate
 
 
+def to_partition_predicate(input_predicate: 'Predicate', all_fields: List[str], partition_keys: List[str]):
+    if not input_predicate or not partition_keys:
+        return None
+
+    predicates: list['Predicate'] = _split_and(input_predicate)
+    predicates = [element for element in predicates if _get_all_fields(element).issubset(partition_keys)]
+    new_predicate = Predicate(
+        method='and',
+        index=None,
+        field=None,
+        literals=predicates
+    )
+
+    part_to_index = {element: idx for idx, element in enumerate(partition_keys)}
+    mapping: Dict[int, int] = {
+        i: part_to_index.get(all_fields[i], -1)
+        for i in range(len(all_fields))
+    }
+
+    return _change_index(new_predicate, mapping)
+
+def _split_and(input_predicate: 'Predicate'):
+    if not input_predicate:
+        return list()
+
+    if input_predicate.method == 'and':
+        return list(input_predicate.literals)
+
+    return [input_predicate]
+
+
+def _change_index(input_predicate: 'Predicate', mapping: Dict[int, int]):
+    if not input_predicate:
+        return None
+
+    if input_predicate.method == 'and' or input_predicate.method == 'or':
+        predicates: list['Predicate'] = input_predicate.literals
+        new_predicates = [_change_index(element, mapping) for element in predicates]
+        return input_predicate.new_literals(new_predicates)
+
+    return input_predicate.new_index(mapping[input_predicate.index])
+
+
 def extract_predicate_to_list(result: list, input_predicate: 'Predicate', keys: List[str]):
     if not input_predicate or not keys:
         return
