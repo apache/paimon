@@ -286,7 +286,8 @@ for batch in table_read.to_arrow_batch_reader(splits):
 ```
 
 #### Python Iterator
-You can read the data row by row into a native Python iterator. 
+
+You can read the data row by row into a native Python iterator.
 This is convenient for custom row-based processing logic.
 
 ```python
@@ -365,23 +366,177 @@ print(ray_dataset.to_pandas())
 # ...
 ```
 
+### Incremental Read Between Timestamps
+
+This API allows reading data committed between two snapshot timestamps. The steps are as follows.
+
+- Set the option `CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP` on a copied table via `table.copy({...})`. The value must
+  be a string: `"startMillis,endMillis"`, where `startMillis` is exclusive and `endMillis` is inclusive.
+- Use `SnapshotManager` to obtain snapshot timestamps or you can determine them by yourself.
+- Read the data as above.
+
+Example:
+
+```python
+from pypaimon import CatalogFactory
+from pypaimon.common.core_options import CoreOptions
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
+
+# Prepare catalog and obtain a table
+catalog = CatalogFactory.create({'warehouse': '/path/to/warehouse'})
+table = catalog.get_table('default.your_table_name')
+
+# Assume the table has at least two snapshots (1 and 2)
+snapshot_manager = SnapshotManager(table)
+t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
+t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
+
+# Read records committed between [t1, t2]
+table_inc = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: f"{t1},{t2}"})
+
+read_builder = table_inc.new_read_builder()
+table_scan = read_builder.new_scan()
+table_read = read_builder.new_read()
+splits = table_scan.plan().splits()
+
+# To Arrow
+arrow_table = table_read.to_arrow(splits)
+
+# Or to pandas
+pandas_df = table_read.to_pandas(splits)
+```
+
+### Shard Read
+
+Shard Read allows you to read data in parallel by dividing the table into multiple shards. This is useful for
+distributed processing and parallel computation.
+
+You can specify the shard index and total number of shards to read a specific portion of the data:
+
+```python
+# Prepare read builder
+table = catalog.get_table('database_name.table_name')
+read_builder = table.new_read_builder()
+table_read = read_builder.new_read()
+
+# Read the second shard (index 1) out of 3 total shards
+splits = read_builder.new_scan().with_shard(1, 3).plan().splits()
+
+# Read all shards and concatenate results
+splits1 = read_builder.new_scan().with_shard(0, 3).plan().splits()
+splits2 = read_builder.new_scan().with_shard(1, 3).plan().splits()
+splits3 = read_builder.new_scan().with_shard(2, 3).plan().splits()
+
+# Combine results from all shards
+
+all_splits = splits1 + splits2 + splits3
+pa_table = table_read.to_arrow(all_splits)
+```
+
+Example with shard read:
+
+```python
+import pyarrow as pa
+from pypaimon import CatalogFactory, Schema
+
+# Create catalog
+catalog_options = {'warehouse': 'file:///path/to/warehouse'}
+catalog = CatalogFactory.create(catalog_options)
+catalog.create_database("default", False)
+# Define schema
+pa_schema = pa.schema([
+    ('user_id', pa.int64()),
+    ('item_id', pa.int64()),
+    ('behavior', pa.string()),
+    ('dt', pa.string()),
+])
+
+# Create table and write data
+schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+catalog.create_table('default.test_table', schema, False)
+table = catalog.get_table('default.test_table')
+
+# Write data in two batches
+write_builder = table.new_batch_write_builder()
+
+# First write
+table_write = write_builder.new_write()
+table_commit = write_builder.new_commit()
+data1 = {
+    'user_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+    'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014],
+    'behavior': ['a', 'b', 'c', None, 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm'],
+    'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1'],
+}
+pa_table = pa.Table.from_pydict(data1, schema=pa_schema)
+table_write.write_arrow(pa_table)
+table_commit.commit(table_write.prepare_commit())
+table_write.close()
+table_commit.close()
+
+# Second write
+table_write = write_builder.new_write()
+table_commit = write_builder.new_commit()
+data2 = {
+    'user_id': [5, 6, 7, 8, 18],
+    'item_id': [1005, 1006, 1007, 1008, 1018],
+    'behavior': ['e', 'f', 'g', 'h', 'z'],
+    'dt': ['p2', 'p1', 'p2', 'p2', 'p1'],
+}
+pa_table = pa.Table.from_pydict(data2, schema=pa_schema)
+table_write.write_arrow(pa_table)
+table_commit.commit(table_write.prepare_commit())
+table_write.close()
+table_commit.close()
+
+# Read specific shard
+read_builder = table.new_read_builder()
+table_read = read_builder.new_read()
+
+# Read shard 2 out of 3 total shards
+splits = read_builder.new_scan().with_shard(2, 3).plan().splits()
+shard_data = table_read.to_arrow(splits)
+
+# Verify shard distribution by reading all shards
+splits1 = read_builder.new_scan().with_shard(0, 3).plan().splits()
+splits2 = read_builder.new_scan().with_shard(1, 3).plan().splits()
+splits3 = read_builder.new_scan().with_shard(2, 3).plan().splits()
+
+# Combine all shards should equal full table read
+all_shards_data = pa.concat_tables([
+    table_read.to_arrow(splits1),
+    table_read.to_arrow(splits2),
+    table_read.to_arrow(splits3),
+])
+full_table_data = table_read.to_arrow(read_builder.new_scan().plan().splits())
+```
+
+Key points about shard read:
+
+- **Shard Index**: Zero-based index of the shard to read (0 to total_shards-1)
+- **Total Shards**: Total number of shards to divide the data into
+- **Data Distribution**: Data is distributed evenly across shards, with remainder rows going to the last shard
+- **Parallel Processing**: Each shard can be processed independently for better performance
+- **Consistency**: Combining all shards should produce the complete table data
+
 ## Data Types
-| Python Native Type | PyArrow Type | Paimon Type |
-| :--- | :--- | :--- |
-| `int` | `pyarrow.int8()` | `TINYINT` |
-| `int` | `pyarrow.int16()` | `SMALLINT` |
-| `int` | `pyarrow.int32()` | `INT` |
-| `int` | `pyarrow.int64()` | `BIGINT` |
-| `float` | `pyarrow.float32()` | `FLOAT` |
-| `float` | `pyarrow.float64()` | `DOUBLE` |
-| `bool` | `pyarrow.bool_()` | `BOOLEAN` |
-| `str` | `pyarrow.string()` | `STRING`, `CHAR(n)`, `VARCHAR(n)` |
-| `bytes` | `pyarrow.binary()` | `BYTES`, `VARBINARY(n)` |
-| `bytes` | `pyarrow.binary(length)` | `BINARY(length)` |
-| `decimal.Decimal` | `pyarrow.decimal128(precision, scale)` | `DECIMAL(precision, scale)` |
-| `datetime.datetime` | `pyarrow.timestamp(unit, tz=None)` | `TIMESTAMP(p)` |
-| `datetime.date` | `pyarrow.date32()` | `DATE` |
-| `datetime.time` | `pyarrow.time32(unit)` or `pyarrow.time64(unit)` | `TIME(p)` |
+
+| Python Native Type  | PyArrow Type                                     | Paimon Type                       |
+|:--------------------|:-------------------------------------------------|:----------------------------------|
+| `int`               | `pyarrow.int8()`                                 | `TINYINT`                         |
+| `int`               | `pyarrow.int16()`                                | `SMALLINT`                        |
+| `int`               | `pyarrow.int32()`                                | `INT`                             |
+| `int`               | `pyarrow.int64()`                                | `BIGINT`                          |
+| `float`             | `pyarrow.float32()`                              | `FLOAT`                           |
+| `float`             | `pyarrow.float64()`                              | `DOUBLE`                          |
+| `bool`              | `pyarrow.bool_()`                                | `BOOLEAN`                         |
+| `str`               | `pyarrow.string()`                               | `STRING`, `CHAR(n)`, `VARCHAR(n)` |
+| `bytes`             | `pyarrow.binary()`                               | `BYTES`, `VARBINARY(n)`           |
+| `bytes`             | `pyarrow.binary(length)`                         | `BINARY(length)`                  |
+| `decimal.Decimal`   | `pyarrow.decimal128(precision, scale)`           | `DECIMAL(precision, scale)`       |
+| `datetime.datetime` | `pyarrow.timestamp(unit, tz=None)`               | `TIMESTAMP(p)`                    |
+| `datetime.date`     | `pyarrow.date32()`                               | `DATE`                            |
+| `datetime.time`     | `pyarrow.time32(unit)` or `pyarrow.time64(unit)` | `TIME(p)`                         |
 
 ## Predicate
 
@@ -403,4 +558,3 @@ print(ray_dataset.to_pandas())
 | f is in [l1, l2]      | PredicateBuilder.is_in(f, [l1, l2])           |
 | f is not in [l1, l2]  | PredicateBuilder.is_not_in(f, [l1, l2])       |
 | lower <= f <= upper   | PredicateBuilder.between(f, lower, upper)     |
-

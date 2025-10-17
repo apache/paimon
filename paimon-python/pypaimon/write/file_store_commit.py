@@ -27,7 +27,7 @@ from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.table_scan import TableScan
+from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
@@ -101,7 +101,7 @@ class FileStoreCommit:
                                        f"in {msg.partition} does not belong to this partition")
 
         commit_entries = []
-        current_entries = TableScan(self.table, partition_filter, None, []).plan_files()
+        current_entries = FullStartingScanner(self.table, partition_filter, None, []).plan_files()
         for entry in current_entries:
             entry.kind = 1
             commit_entries.append(entry)

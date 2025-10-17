@@ -47,6 +47,9 @@ class ManifestListManager:
         manifest_files.extend(delta_manifests)
         return manifest_files
 
+    def read_delta(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        return self.read(snapshot.delta_manifest_list)
+
     def read(self, manifest_list_name: str) -> List[ManifestFileMeta]:
         manifest_files = []
 
