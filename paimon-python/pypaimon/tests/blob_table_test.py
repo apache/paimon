@@ -875,9 +875,7 @@ class DataBlobWriterTest(unittest.TestCase):
     def test_blob_write_read_end_to_end_with_descriptor(self):
         """Test end-to-end blob functionality using blob descriptors."""
         import random
-        import tempfile
         from pypaimon import Schema
-        from pypaimon.common.core_options import CoreOptions
         from pypaimon.table.row.blob import BlobDescriptor, Blob
         from pypaimon.common.uri_reader import UriReaderFactory
         from pypaimon.common.config import CatalogOptions
@@ -951,7 +949,7 @@ class DataBlobWriterTest(unittest.TestCase):
 
         # Deserialize the blob descriptor
         new_blob_descriptor = BlobDescriptor.deserialize(picture_bytes)
-        
+
         # The URI might be different if the blob was stored in the table's data directory
         # Let's verify the descriptor properties and try to read the data
         # Note: offset might be non-zero due to blob file format overhead
@@ -966,13 +964,12 @@ class DataBlobWriterTest(unittest.TestCase):
 
         # Verify the blob data matches the original
         self.assertEqual(blob.to_data(), blob_data, "Blob data should match original")
-        
+
         print("✅ Blob descriptor end-to-end test passed:")
         print("   - Created external blob file and descriptor")
         print("   - Wrote and read blob descriptor successfully")
         print("   - Verified blob data can be read from descriptor")
         print("   - Tested blob-as-descriptor=true mode")
-
 
     def test_blob_write_read_large_data_end_to_end(self):
         """Test end-to-end blob functionality with large blob data (1MB per blob)."""
