@@ -24,14 +24,19 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /** Table sink for format tables. */
-public class FlinkFormatTableSink implements DynamicTableSink {
+public class FlinkFormatTableSink implements DynamicTableSink, SupportsPartitioning {
 
     private final ObjectIdentifier tableIdentifier;
     private final FormatTable table;
     private final DynamicTableFactory.Context context;
+    private Map<String, String> staticPartitions = new HashMap<>();
 
     public FlinkFormatTableSink(
             ObjectIdentifier tableIdentifier,
@@ -55,11 +60,25 @@ public class FlinkFormatTableSink implements DynamicTableSink {
 
     @Override
     public DynamicTableSink copy() {
-        return new FlinkFormatTableSink(tableIdentifier, table, context);
+        FlinkFormatTableSink copied = new FlinkFormatTableSink(tableIdentifier, table, context);
+        copied.staticPartitions = new HashMap<>(staticPartitions);
+        return copied;
     }
 
     @Override
     public String asSummaryString() {
         return "Paimon-FormatTable";
+    }
+
+    @Override
+    public void applyStaticPartition(Map<String, String> partition) {
+        table.partitionKeys()
+                .forEach(
+                        partitionKey -> {
+                            if (partition.containsKey(partitionKey)) {
+                                this.staticPartitions.put(
+                                        partitionKey, partition.get(partitionKey));
+                            }
+                        });
     }
 }

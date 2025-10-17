@@ -1333,10 +1333,13 @@ public class HiveCatalog extends AbstractCatalog {
     public Table getHmsTable(Identifier identifier)
             throws TableNotExistException, TableNoPermissionException {
         try {
-            return clients.run(
-                    client ->
-                            client.getTable(
-                                    identifier.getDatabaseName(), identifier.getTableName()));
+            Table t =
+                    clients.run(
+                            client ->
+                                    client.getTable(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName()));
+            return t;
         } catch (NoSuchObjectException e) {
             throw new TableNotExistException(identifier);
         } catch (TException e) {
