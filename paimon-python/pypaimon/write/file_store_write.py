@@ -118,12 +118,12 @@ class FileStoreWrite:
         partition_filter = predicate_builder.and_predicates(sub_predicates)
 
         scan = read_builder.with_filter(partition_filter).new_scan()
-        file_entries = scan.plan_files()
+        splits = scan.plan().splits()
 
         max_seq_numbers = {}
-        for entry in file_entries:
-            current_seq_num = entry.file.max_sequence_number
-            existing_max = max_seq_numbers.get(entry.bucket, -1)
+        for split in splits:
+            current_seq_num = max([file.max_sequence_number for file in split.files])
+            existing_max = max_seq_numbers.get(split.bucket, -1)
             if current_seq_num > existing_max:
-                max_seq_numbers[entry.bucket] = current_seq_num
+                max_seq_numbers[split.bucket] = current_seq_num
         return max_seq_numbers
