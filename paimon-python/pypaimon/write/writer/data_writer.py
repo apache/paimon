@@ -58,7 +58,7 @@ class DataWriter(ABC):
         self.pending_data: Optional[pa.Table] = None
         self.committed_files: List[DataFileMeta] = []
         self.write_cols = write_cols
-        self.blob_as_descriptor = options.get(CoreOptions.FILE_BLOB_AS_DESCRIPTOR, False)
+        self.blob_as_descriptor = CoreOptions.get_blob_as_descriptor(options)
 
     def write(self, data: pa.RecordBatch):
         try:
