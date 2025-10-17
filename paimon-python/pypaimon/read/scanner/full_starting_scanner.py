@@ -25,25 +25,25 @@ from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.plan import Plan
 from pypaimon.read.push_down_utils import (extract_predicate_to_dict,
-                                           extract_predicate_to_list)
+                                           extract_predicate_to_list,
+                                           to_partition_predicate)
 from pypaimon.read.scanner.starting_scanner import StartingScanner
 from pypaimon.read.split import Split
-from pypaimon.schema.data_types import DataField
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.bucket_mode import BucketMode
 
 
 class FullStartingScanner(StartingScanner):
-    def __init__(self, table, predicate: Optional[Predicate], limit: Optional[int], read_type: List[DataField]):
+    def __init__(self, table, predicate: Optional[Predicate], limit: Optional[int]):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.limit = limit
-        self.read_type = read_type
 
         self.snapshot_manager = SnapshotManager(table)
         self.manifest_list_manager = ManifestListManager(table)
@@ -82,15 +82,26 @@ class FullStartingScanner(StartingScanner):
         splits = self._apply_push_down_limit(splits)
         return Plan(splits)
 
-    def plan_files(self) -> List[ManifestEntry]:
+    def _read_manifest_files(self) -> List[ManifestFileMeta]:
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         if not latest_snapshot:
             return []
         manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
+        partition_predicate = to_partition_predicate(self.predicate, self.table.field_names, self.table.partition_keys)
 
+        def test_predicate(file: ManifestFileMeta) -> bool:
+            if not partition_predicate:
+                return True
+            return partition_predicate.test_by_simple_stats(
+                file.partition_stats,
+                file.num_added_files + file.num_deleted_files)
+
+        return [file for file in manifest_files if test_predicate(file)]
+
+    def plan_files(self) -> List[ManifestEntry]:
+        manifest_files = self._read_manifest_files()
         deleted_entries = set()
         added_entries = []
-        # TODO: filter manifest files by predicate
         for manifest_file in manifest_files:
             manifest_entries = self.manifest_file_manager.read(manifest_file.file_name,
                                                                lambda row: self._bucket_filter(row))
