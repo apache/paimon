@@ -42,6 +42,7 @@ def to_partition_predicate(input_predicate: 'Predicate', all_fields: List[str], 
 
     return _change_index(new_predicate, mapping)
 
+
 def _split_and(input_predicate: 'Predicate'):
     if not input_predicate:
         return list()
