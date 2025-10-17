@@ -61,14 +61,21 @@ class DataWriter(ABC):
         self.blob_as_descriptor = options.get(CoreOptions.FILE_BLOB_AS_DESCRIPTOR, False)
 
     def write(self, data: pa.RecordBatch):
-        processed_data = self._process_data(data)
+        try:
+            processed_data = self._process_data(data)
 
-        if self.pending_data is None:
-            self.pending_data = processed_data
-        else:
-            self.pending_data = self._merge_data(self.pending_data, processed_data)
+            if self.pending_data is None:
+                self.pending_data = processed_data
+            else:
+                self.pending_data = self._merge_data(self.pending_data, processed_data)
 
-        self._check_and_roll_if_needed()
+            self._check_and_roll_if_needed()
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("Exception occurs when writing data. Cleaning up.", exc_info=e)
+            self.abort()
+            raise e
 
     def prepare_commit(self) -> List[DataFileMeta]:
         if self.pending_data is not None and self.pending_data.num_rows > 0:
@@ -78,6 +85,36 @@ class DataWriter(ABC):
         return self.committed_files.copy()
 
     def close(self):
+        try:
+            if self.pending_data is not None and self.pending_data.num_rows > 0:
+                self._write_data_to_file(self.pending_data)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("Exception occurs when closing writer. Cleaning up.", exc_info=e)
+            self.abort()
+            raise e
+        finally:
+            self.pending_data = None
+            # Note: Don't clear committed_files in close() - they should be returned by prepare_commit()
+
+    def abort(self):
+        """
+        Abort all writers and clean up resources. This method should be called when an error occurs
+        during writing. It deletes any files that were written and cleans up resources.
+        """
+        # Delete any files that were written
+        for file_meta in self.committed_files:
+            try:
+                if file_meta.file_path:
+                    self.file_io.delete_quietly(file_meta.file_path)
+            except Exception as e:
+                # Log but don't raise - we want to clean up as much as possible
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to delete file {file_meta.file_path} during abort: {e}")
+
+        # Clean up resources
         self.pending_data = None
         self.committed_files.clear()
 

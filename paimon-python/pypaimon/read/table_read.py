@@ -20,6 +20,7 @@ from typing import Any, Iterator, List, Optional
 import pandas
 import pyarrow
 
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read.push_down_utils import extract_predicate_to_list
@@ -132,7 +133,7 @@ class TableRead:
                 read_type=self.read_type,
                 split=split
             )
-        elif self.table.options.get('data-evolution.enabled', 'false').lower() == 'true':
+        elif self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true':
             return DataEvolutionSplitRead(
                 table=self.table,
                 predicate=self.predicate,
