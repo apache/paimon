@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FormatTable.Format;
@@ -32,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.hadoop.hive.serde.serdeConstants.FIELD_DELIM;
+import static org.apache.paimon.CoreOptions.FILE_COMPRESSION;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
@@ -89,6 +91,9 @@ class HiveTableUtils {
 
         Schema.Builder builder = Schema.newBuilder();
         rowType.getFields().forEach(f -> builder.column(f.name(), f.type(), f.description()));
+        if (!sd.isCompressed() && !options.contains(FILE_COMPRESSION)) {
+            options.set(FILE_COMPRESSION, HadoopCompressionType.NONE.value());
+        }
         options.set(PATH, location);
         options.set(TYPE, FORMAT_TABLE);
         options.set(FILE_FORMAT, format.name().toLowerCase());
