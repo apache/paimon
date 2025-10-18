@@ -95,6 +95,7 @@ public class RollingBlobFileWriterTest {
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
                         TARGET_FILE_SIZE,
+                        TARGET_FILE_SIZE,
                         SCHEMA,
                         pathFactory,
                         seqNumCounter,
@@ -172,6 +173,78 @@ public class RollingBlobFileWriterTest {
         // Should be able to get results
         List<DataFileMeta> results = writer.result();
         assertThat(results).isNotEmpty();
+    }
+
+    @Test
+    public void testBlobTargetFileSize() throws IOException {
+        // Set a specific blob target file size (different from regular target file size)
+        long blobTargetFileSize = 500 * 1024 * 1024L; // 2 MB for blob files
+
+        // Create a new writer with different blob target file size
+        RollingBlobFileWriter blobSizeTestWriter =
+                new RollingBlobFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        128 * 1024 * 1024,
+                        blobTargetFileSize, // Different blob target size
+                        SCHEMA,
+                        new DataFilePathFactory(
+                                new Path(tempDir + "/blob-size-test"),
+                                "parquet",
+                                "data",
+                                "changelog",
+                                false,
+                                null,
+                                null),
+                        new LongCounter(),
+                        COMPRESSION,
+                        new StatsCollectorFactories(new CoreOptions(new Options())),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false, // asyncFileWrite
+                        false // statsDenseStore
+                        );
+
+        // Create large blob data that will exceed the blob target file size
+        byte[] largeBlobData = new byte[3 * 1024 * 1024]; // 3 MB blob data
+        new Random(123).nextBytes(largeBlobData);
+
+        // Write multiple rows with large blob data to trigger rolling
+        for (int i = 0; i < 400; i++) {
+            InternalRow row =
+                    GenericRow.of(
+                            i,
+                            BinaryString.fromString("large-blob-test-" + i),
+                            new BlobData(largeBlobData));
+            blobSizeTestWriter.write(row);
+        }
+
+        blobSizeTestWriter.close();
+        List<DataFileMeta> results = blobSizeTestWriter.result();
+
+        // Verify that we have multiple files due to rolling
+        assertThat(results.size()).isGreaterThan(1);
+
+        // Check that blob files (format = "blob") meet the target size requirement
+        List<DataFileMeta> blobFiles =
+                results.stream()
+                        .filter(file -> "blob".equals(file.fileFormat()))
+                        .collect(java.util.stream.Collectors.toList());
+
+        assertThat(blobFiles).isNotEmpty();
+
+        // Verify that blob files are close to the target size (within reasonable tolerance)
+        for (DataFileMeta blobFile : blobFiles.subList(0, blobFiles.size() - 1)) {
+            long fileSize = blobFile.fileSize();
+            assertThat(fileSize)
+                    .as("Blob file size should be close to target size")
+                    .isGreaterThanOrEqualTo(blobTargetFileSize)
+                    .isLessThanOrEqualTo(blobTargetFileSize + largeBlobData.length);
+        }
+
+        // Verify total record count
+        assertThat(blobSizeTestWriter.recordCount()).isEqualTo(400);
     }
 
     @Test

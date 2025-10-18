@@ -72,6 +72,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final long schemaId;
     private final FileFormat fileFormat;
     private final long targetFileSize;
+    private final long blobTargetFileSize;
     private final RowType writeSchema;
     @Nullable private final List<String> writeCols;
     private final DataFilePathFactory pathFactory;
@@ -102,6 +103,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             long schemaId,
             FileFormat fileFormat,
             long targetFileSize,
+            long blobTargetFileSize,
             RowType writeSchema,
             @Nullable List<String> writeCols,
             long maxSequenceNumber,
@@ -123,6 +125,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
         this.targetFileSize = targetFileSize;
+        this.blobTargetFileSize = blobTargetFileSize;
         this.writeSchema = writeSchema;
         this.writeCols = writeCols;
         this.pathFactory = pathFactory;
@@ -299,6 +302,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     schemaId,
                     fileFormat,
                     targetFileSize,
+                    blobTargetFileSize,
                     writeSchema,
                     pathFactory,
                     seqNumCounter,

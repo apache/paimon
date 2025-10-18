@@ -89,6 +89,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                     RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
             blobWriter;
     private final long targetFileSize;
+    private final long blobTargetFileSize;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
@@ -103,6 +104,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             long schemaId,
             FileFormat fileFormat,
             long targetFileSize,
+            long blobTargetFileSize,
             RowType writeSchema,
             DataFilePathFactory pathFactory,
             LongCounter seqNumCounter,
@@ -115,6 +117,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
 
         // Initialize basic fields
         this.targetFileSize = targetFileSize;
+        this.blobTargetFileSize = blobTargetFileSize;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
 
@@ -152,7 +155,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                         fileSource,
                         asyncFileWrite,
                         statsDenseStore,
-                        targetFileSize);
+                        blobTargetFileSize);
     }
 
     /** Creates a factory for normal data writers. */
