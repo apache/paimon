@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.ChannelWithMeta;
@@ -41,6 +42,7 @@ import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -395,6 +397,35 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
+    public void testNoSpillWhenMeetBlobType() throws Exception {
+        // Create a schema with BLOB type
+        RowType blobSchema =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {new IntType(), new VarCharType(), new BlobType()},
+                                new String[] {"id", "name", "data"})
+                        .build();
+
+        AppendOnlyWriter writer = createWriterWithBlobSchema(blobSchema, Long.MAX_VALUE, false);
+
+        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
+
+        char[] largeString = new char[990];
+        Arrays.fill(largeString, 'a');
+        byte[] largeBlobData = new byte[1024];
+        Arrays.fill(largeBlobData, (byte) 'b');
+
+        for (int j = 0; j < 100; j++) {
+            writer.write(createBlobRow(j, String.valueOf(largeString), largeBlobData));
+        }
+
+        writer.toBufferedWriter();
+        RowBuffer buffer = writer.getWriteBuffer();
+        assertThat(buffer).isNull();
+        writer.close();
+    }
+
+    @Test
     public void testNoBuffer() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
 
@@ -685,5 +716,57 @@ public class AppendOnlyWriterTest {
                 null,
                 null,
                 null);
+    }
+
+    private InternalRow createBlobRow(int id, String name, byte[] blobData) {
+        return GenericRow.of(id, BinaryString.fromString(name), new BlobData(blobData));
+    }
+
+    private AppendOnlyWriter createWriterWithBlobSchema(
+            RowType schema, long targetFileSize, boolean spillable) {
+        FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
+        LinkedList<DataFileMeta> toCompact = new LinkedList<>();
+        BucketedAppendCompactManager compactManager =
+                new BucketedAppendCompactManager(
+                        Executors.newSingleThreadScheduledExecutor(
+                                new ExecutorThreadFactory("compaction-thread")),
+                        toCompact,
+                        null,
+                        MIN_FILE_NUM,
+                        targetFileSize,
+                        false,
+                        compactBefore -> Collections.emptyList(),
+                        null);
+        CoreOptions options =
+                new CoreOptions(Collections.singletonMap("metadata.stats-mode", "truncate(16)"));
+        AppendOnlyWriter writer =
+                new AppendOnlyWriter(
+                        LocalFileIO.create(),
+                        IOManager.create(tempDir.toString()),
+                        SCHEMA_ID,
+                        fileFormat,
+                        targetFileSize,
+                        schema,
+                        null,
+                        getMaxSequenceNumber(toCompact),
+                        compactManager,
+                        files -> {
+                            throw new RuntimeException("Can't read back in blob mode");
+                        },
+                        false,
+                        pathFactory,
+                        null,
+                        false,
+                        spillable,
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        CompressOptions.defaultOptions(),
+                        new StatsCollectorFactories(options),
+                        MemorySize.MAX_VALUE,
+                        new FileIndexOptions(),
+                        true,
+                        false);
+        writer.setMemoryPool(
+                new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
+        return writer;
     }
 }
