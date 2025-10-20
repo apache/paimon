@@ -72,7 +72,7 @@ class Predicate:
         'contains': lambda min_v, max_v, literals: True,
     }
 
-    _arrow_converter: ClassVar[dict[str, Callable[[Any, List[Any]], Any]]] = {
+    _arrow_converter: ClassVar[dict[str, Callable[[Any, List[Any]], bool]]] = {
         'equal': lambda field, literals: field == literals[0],
         'notEqual': lambda field, literals: field != literals[0],
         'lessThan': lambda field, literals: field < literals[0],
