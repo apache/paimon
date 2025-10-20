@@ -121,8 +121,8 @@ class Predicate:
             'notIn': lambda literals: not any(min_value == l == max_value for l in literals),
             'between': lambda literals: literals[0] <= max_value and literals[1] >= min_value,
             'startsWith': lambda literals: ((isinstance(min_value, str) and isinstance(max_value, str)) and
-                                       ((min_value.startswith(literals[0]) or min_value < literals[0]) and
-                                        (max_value.startswith(literals[0]) or max_value > literals[0]))),
+                                            ((min_value.startswith(literals[0]) or min_value < literals[0]) and
+                                             (max_value.startswith(literals[0]) or max_value > literals[0]))),
             'endsWith': lambda literals: True,
             'contains': lambda literals: True,
         }
