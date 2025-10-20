@@ -25,7 +25,7 @@ import org.apache.spark.sql.Row
 
 /**
  * Two-session reproduction of stale cache: session1 caches table, session2 drops & recreates, then
- * session1 commits with stale tableId and fails (without fix).
+ * session1 commits with stale tableId and fails.
  */
 class PaimonSparkTwoSessionCacheTest extends PaimonSparkTestWithRestCatalogBase {
 
