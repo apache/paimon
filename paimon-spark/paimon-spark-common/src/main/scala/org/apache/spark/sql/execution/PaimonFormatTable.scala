@@ -19,7 +19,7 @@
 package org.apache.spark.sql.execution
 
 import org.apache.paimon.fs.TwoPhaseOutputStream
-import org.apache.paimon.spark.{PaimonFormatTableScanBuilder, SparkInternalRowWrapper, SparkTypeUtils}
+import org.apache.paimon.spark.{FormatTableScanBuilder, SparkInternalRowWrapper, SparkTypeUtils}
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.{FormatBatchWriteBuilder, TwoPhaseCommitMessage}
 import org.apache.paimon.table.sink.BatchTableWrite
@@ -195,7 +195,9 @@ case class PaimonFormatTable(
   }
 
   override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
-    PaimonFormatTableScanBuilder(table.copy(caseInsensitiveStringMap), schema, Seq.empty)
+    val scanBuilder = FormatTableScanBuilder(table.copy(caseInsensitiveStringMap))
+    scanBuilder.pruneColumns(schema)
+    scanBuilder
   }
 
   override def newWriteBuilder(logicalWriteInfo: LogicalWriteInfo): WriteBuilder = {

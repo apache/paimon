@@ -18,22 +18,15 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.table.InnerTable
-import org.apache.paimon.types.RowType
+import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.table.FormatTable
 
-import org.apache.spark.sql.connector.read.Scan
-import org.apache.spark.sql.sources.Filter
+import org.apache.spark.sql.types.StructType
 
-import java.util.{List => JList}
-
-class PaimonScanBuilder(table: InnerTable)
-  extends PaimonBaseScanBuilder(table)
-  with PaimonBasePushDown {
-
-  override protected var partitionKeys: JList[String] = table.partitionKeys()
-  override protected var rowType: RowType = table.rowType()
-
-  override def build(): Scan = {
-    PaimonScan(table, requiredSchema, pushedPaimonPredicates, reservedFilters, None, pushDownTopN)
-  }
-}
+/** Scan implementation for {@link FormatTable}. */
+case class PaimonFormatTableScan(
+    table: FormatTable,
+    requiredSchema: StructType,
+    filters: Seq[Predicate],
+    override val pushDownLimit: Option[Int])
+  extends PaimonFormatTableBaseScan(table, requiredSchema, filters, pushDownLimit) {}
