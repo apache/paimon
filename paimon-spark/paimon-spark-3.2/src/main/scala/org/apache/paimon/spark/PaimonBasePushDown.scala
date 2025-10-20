@@ -31,16 +31,13 @@ import scala.collection.mutable
 /** Base trait for Paimon scan filter push down. */
 trait PaimonBasePushDown extends SupportsPushDownFilters {
 
-  private var pushedSparkFilters = Array.empty[Filter]
-
-  protected var pushedPaimonPredicates: Array[Predicate] = Array.empty
-
-  protected var reservedFilters: Array[Filter] = Array.empty
-
-  protected var hasPostScanPredicates = false
-
   protected var partitionKeys: JList[String]
   protected var rowType: RowType
+
+  private var pushedSparkFilters = Array.empty[Filter]
+  protected var pushedPaimonPredicates: Array[Predicate] = Array.empty
+  protected var reservedFilters: Array[Filter] = Array.empty
+  protected var hasPostScanPredicates = false
 
   /**
    * Pushes down filters, and returns filters that need to be evaluated after scanning. <p> Rows

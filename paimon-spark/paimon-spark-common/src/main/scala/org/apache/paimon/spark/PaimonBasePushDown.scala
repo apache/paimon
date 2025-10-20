@@ -32,17 +32,15 @@ import scala.collection.mutable
 
 /** Base trait for Paimon scan push down. */
 trait PaimonBasePushDown extends SupportsPushDownV2Filters with SupportsPushDownLimit {
-  private var pushedSparkPredicates = Array.empty[SparkPredicate]
 
-  protected var pushedPaimonPredicates: Array[Predicate] = Array.empty
-
-  protected var reservedFilters: Array[Filter] = Array.empty
-
-  protected var hasPostScanPredicates = false
-
-  protected var pushDownLimit: Option[Int] = None
   protected var partitionKeys: JList[String]
   protected var rowType: RowType
+
+  private var pushedSparkPredicates = Array.empty[SparkPredicate]
+  protected var pushedPaimonPredicates: Array[Predicate] = Array.empty
+  protected var reservedFilters: Array[Filter] = Array.empty
+  protected var hasPostScanPredicates = false
+  protected var pushDownLimit: Option[Int] = None
 
   override def pushPredicates(predicates: Array[SparkPredicate]): Array[SparkPredicate] = {
     val pushable = mutable.ArrayBuffer.empty[(SparkPredicate, Predicate)]

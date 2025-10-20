@@ -42,8 +42,6 @@ class PaimonScanBuilder(table: InnerTable)
 
   private var localScan: Option[Scan] = None
 
-  private var pushedSparkPredicates = Array.empty[SparkPredicate]
-
   override protected var partitionKeys: JList[String] = table.partitionKeys()
   override protected var rowType: RowType = table.rowType()
 

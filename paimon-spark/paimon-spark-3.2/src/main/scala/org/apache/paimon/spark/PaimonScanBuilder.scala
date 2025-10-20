@@ -30,10 +30,9 @@ class PaimonScanBuilder(table: InnerTable)
   extends PaimonBaseScanBuilder(table)
   with PaimonBasePushDown {
 
-  private var pushedSparkFilters = Array.empty[Filter]
-
   override protected var partitionKeys: JList[String] = table.partitionKeys()
   override protected var rowType: RowType = table.rowType()
+
   override def build(): Scan = {
     PaimonScan(table, requiredSchema, pushedPaimonPredicates, reservedFilters, None, pushDownTopN)
   }
