@@ -82,15 +82,17 @@ class FullStartingScanner(StartingScanner):
         if not latest_snapshot:
             return []
         manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
+        return self.filter_manifest_files(manifest_files)
 
-        def test_predicate(file: ManifestFileMeta) -> bool:
+    def filter_manifest_files(self, files: List[ManifestFileMeta]) -> List[ManifestFileMeta]:
+        def filter_manifest_file(file: ManifestFileMeta) -> bool:
             if not self.partition_key_predicate:
                 return True
             return self.partition_key_predicate.test_by_simple_stats(
                 file.partition_stats,
                 file.num_added_files + file.num_deleted_files)
 
-        return [file for file in manifest_files if test_predicate(file)]
+        return [file for file in files if filter_manifest_file(file)]
 
     def plan_files(self) -> List[ManifestEntry]:
         manifest_files = self._read_manifest_files()
