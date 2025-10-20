@@ -61,6 +61,32 @@ class DataFileMeta:
         path_builder = path_builder / ("bucket-" + str(bucket)) / self.file_name
         self.file_path = str(path_builder)
 
+    def copy_without_stats(self) -> 'DataFileMeta':
+        """Create a new DataFileMeta without value statistics."""
+        return DataFileMeta(
+            file_name=self.file_name,
+            file_size=self.file_size,
+            row_count=self.row_count,
+            min_key=self.min_key,
+            max_key=self.max_key,
+            key_stats=self.key_stats,
+            value_stats=SimpleStats.empty_stats(),
+            min_sequence_number=self.min_sequence_number,
+            max_sequence_number=self.max_sequence_number,
+            schema_id=self.schema_id,
+            level=self.level,
+            extra_files=self.extra_files,
+            creation_time=self.creation_time,
+            delete_row_count=self.delete_row_count,
+            embedded_index=self.embedded_index,
+            file_source=self.file_source,
+            value_stats_cols=[],
+            external_path=self.external_path,
+            first_row_id=self.first_row_id,
+            write_cols=self.write_cols,
+            file_path=self.file_path
+        )
+
     def assign_first_row_id(self, first_row_id: int) -> 'DataFileMeta':
         """Create a new DataFileMeta with the assigned first_row_id."""
         return DataFileMeta(

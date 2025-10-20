@@ -180,7 +180,9 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         latest_snapshot = SnapshotManager(table).get_latest_snapshot()
         manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
-            manifest_files[0].file_name, lambda row: table_scan.starting_scanner._filter_manifest_entry(row))
+            manifest_files[0].file_name,
+            lambda row: table_scan.starting_scanner._filter_manifest_entry(row),
+            drop_stats=False)
         min_value_stats = manifest_entries[0].file.value_stats.min_values.values
         max_value_stats = manifest_entries[0].file.value_stats.max_values.values
         expected_min_values = [col[0].as_py() for col in expect_data]
@@ -849,7 +851,7 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         manifest_manager.write(manifest_file_name, [entry])
 
         # Read the manifest entry back
-        entries = manifest_manager.read(manifest_file_name)
+        entries = manifest_manager.read(manifest_file_name, drop_stats=False)
 
         # Verify we have exactly one entry
         self.assertEqual(len(entries), 1)
