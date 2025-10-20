@@ -27,7 +27,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.plan import Plan
-from pypaimon.read.push_down_utils import (filter_and_transform_predicate)
+from pypaimon.read.push_down_utils import (trim_and_transform_predicate)
 from pypaimon.read.scanner.starting_scanner import StartingScanner
 from pypaimon.read.split import Split
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
@@ -46,10 +46,10 @@ class FullStartingScanner(StartingScanner):
         self.manifest_list_manager = ManifestListManager(table)
         self.manifest_file_manager = ManifestFileManager(table)
 
-        self.primary_key_predicate = filter_and_transform_predicate(
+        self.primary_key_predicate = trim_and_transform_predicate(
             self.predicate, self.table.field_names, self.table.table_schema.get_trimmed_primary_keys())
 
-        self.partition_key_predicate = filter_and_transform_predicate(
+        self.partition_key_predicate = trim_and_transform_predicate(
             self.predicate, self.table.field_names, self.table.partition_keys)
 
         self.target_split_size = 128 * 1024 * 1024

@@ -22,7 +22,7 @@ import pyarrow
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
-from pypaimon.read.push_down_utils import filter_predicate_by_fields
+from pypaimon.read.push_down_utils import trim_predicate_by_fields
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.split_read import (MergeFileSplitRead, RawFileSplitRead,
@@ -112,7 +112,7 @@ class TableRead:
         if self.predicate is None:
             return None
         elif self.table.is_primary_key_table:
-            pk_predicate = filter_predicate_by_fields(self.predicate, self.table.primary_keys)
+            pk_predicate = trim_predicate_by_fields(self.predicate, self.table.primary_keys)
             if not pk_predicate:
                 return None
             return pk_predicate.to_arrow()
