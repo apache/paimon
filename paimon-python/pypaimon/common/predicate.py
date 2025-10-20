@@ -19,6 +19,7 @@
 from dataclasses import dataclass
 from functools import reduce
 from typing import Any, Dict, List, Optional
+from typing import ClassVar
 
 import pyarrow
 from pyarrow import compute as pyarrow_compute
@@ -34,6 +35,55 @@ class Predicate:
     index: Optional[int]
     field: Optional[str]
     literals: Optional[List[Any]] = None
+
+    _row_tester: ClassVar[dict[str, Any]] = {
+        'equal': lambda val, literals: val == literals[0],
+        'notEqual': lambda val, literals: val != literals[0],
+        'lessThan': lambda val, literals: val < literals[0],
+        'lessOrEqual': lambda val, literals: val <= literals[0],
+        'greaterThan': lambda val, literals: val > literals[0],
+        'greaterOrEqual': lambda val, literals: val >= literals[0],
+        'isNull': lambda val, literals: val is None,
+        'isNotNull': lambda val, literals: val is not None,
+        'startsWith': lambda val, literals: isinstance(val, str) and val.startswith(literals[0]),
+        'endsWith': lambda val, literals: isinstance(val, str) and val.endswith(literals[0]),
+        'contains': lambda val, literals: isinstance(val, str) and literals[0] in val,
+        'in': lambda val, literals: val in literals,
+        'notIn': lambda val, literals: val not in literals,
+        'between': lambda val, literals: literals[0] <= val <= literals[1]
+    }
+
+    _stats_tester: ClassVar[dict[str, Any]] = {
+        'equal': lambda min_v, max_v, literals: min_v <= literals[0] <= max_v,
+        'notEqual': lambda min_v, max_v, literals: not (min_v == literals[0] == max_v),
+        'lessThan': lambda min_v, max_v, literals: literals[0] > min_v,
+        'lessOrEqual': lambda min_v, max_v, literals: literals[0] >= min_v,
+        'greaterThan': lambda min_v, max_v, literals: literals[0] < max_v,
+        'greaterOrEqual': lambda min_v, max_v, literals: literals[0] <= max_v,
+        'in': lambda min_v, max_v, literals: any(min_v <= l <= max_v for l in literals),
+        'notIn': lambda min_v, max_v, literals: not any(min_v == l == max_v for l in literals),
+        'between': lambda min_v, max_v, literals: literals[0] <= max_v and literals[1] >= min_v,
+        'startsWith': lambda min_v, max_v, literals:
+            ((isinstance(min_v, str) and isinstance(max_v, str)) and
+             ((min_v.startswith(literals[0]) or min_v < literals[0]) and
+              (max_v.startswith(literals[0]) or max_v > literals[0]))),
+        'endsWith': lambda min_v, max_v, literals: True,
+        'contains': lambda min_v, max_v, literals: True,
+    }
+
+    _arrow_converter: ClassVar[dict[str, Any]] = {
+        'equal': lambda field, literals: field == literals[0],
+        'notEqual': lambda field, literals: field != literals[0],
+        'lessThan': lambda field, literals: field < literals[0],
+        'lessOrEqual': lambda field, literals: field <= literals[0],
+        'greaterThan': lambda field, literals: field > literals[0],
+        'greaterOrEqual': lambda field, literals: field >= literals[0],
+        'isNull': lambda field, literals: field.is_null(),
+        'isNotNull': lambda field, literals: field.is_valid(),
+        'in': lambda field, literals: field.isin(literals),
+        'notIn': lambda field, literals: ~field.isin(literals),
+        'between': lambda field, literals: (field >= literals[0]) & (field <= literals[1]),
+    }
 
     def new_index(self, index: int):
         return Predicate(
@@ -56,23 +106,7 @@ class Predicate:
             t = any(p.test(record) for p in self.literals)
             return t
 
-        dispatch = {
-            'equal': lambda val, literals: val == literals[0],
-            'notEqual': lambda val, literals: val != literals[0],
-            'lessThan': lambda val, literals: val < literals[0],
-            'lessOrEqual': lambda val, literals: val <= literals[0],
-            'greaterThan': lambda val, literals: val > literals[0],
-            'greaterOrEqual': lambda val, literals: val >= literals[0],
-            'isNull': lambda val, literals: val is None,
-            'isNotNull': lambda val, literals: val is not None,
-            'startsWith': lambda val, literals: isinstance(val, str) and val.startswith(literals[0]),
-            'endsWith': lambda val, literals: isinstance(val, str) and val.endswith(literals[0]),
-            'contains': lambda val, literals: isinstance(val, str) and literals[0] in val,
-            'in': lambda val, literals: val in literals,
-            'notIn': lambda val, literals: val not in literals,
-            'between': lambda val, literals: literals[0] <= val <= literals[1],
-        }
-        func = dispatch.get(self.method)
+        func = self._row_tester.get(self.method)
         if func:
             field_value = record.get_field(self.index)
             return func(field_value, self.literals)
@@ -110,25 +144,9 @@ class Predicate:
             # invalid stats, skip validation
             return True
 
-        dispatch = {
-            'equal': lambda literals: min_value <= literals[0] <= max_value,
-            'notEqual': lambda literals: not (min_value == literals[0] == max_value),
-            'lessThan': lambda literals: literals[0] > min_value,
-            'lessOrEqual': lambda literals: literals[0] >= min_value,
-            'greaterThan': lambda literals: literals[0] < max_value,
-            'greaterOrEqual': lambda literals: literals[0] <= max_value,
-            'in': lambda literals: any(min_value <= l <= max_value for l in literals),
-            'notIn': lambda literals: not any(min_value == l == max_value for l in literals),
-            'between': lambda literals: literals[0] <= max_value and literals[1] >= min_value,
-            'startsWith': lambda literals: ((isinstance(min_value, str) and isinstance(max_value, str)) and
-                                            ((min_value.startswith(literals[0]) or min_value < literals[0]) and
-                                             (max_value.startswith(literals[0]) or max_value > literals[0]))),
-            'endsWith': lambda literals: True,
-            'contains': lambda literals: True,
-        }
-        func = dispatch.get(self.method)
+        func = self._stats_tester.get(self.method)
         if func:
-            return func(self.literals)
+            return func(min_value, max_value, self.literals)
         raise ValueError(f"Unsupported predicate method: {self.method}")
 
     def to_arrow(self) -> Any:
@@ -177,22 +195,8 @@ class Predicate:
                 return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
 
         field = pyarrow_dataset.field(self.field)
-        dispatch = {
-            'equal': lambda literals: field == literals[0],
-            'notEqual': lambda literals: field != literals[0],
-            'lessThan': lambda literals: field < literals[0],
-            'lessOrEqual': lambda literals: field <= literals[0],
-            'greaterThan': lambda literals: field > literals[0],
-            'greaterOrEqual': lambda literals: field >= literals[0],
-            'isNull': lambda literals: field.is_null(),
-            'isNotNull': lambda literals: field.is_valid(),
-            'in': lambda literals: field.isin(literals),
-            'notIn': lambda literals: ~field.isin(literals),
-            'between': lambda literals: (field >= literals[0]) & (field <= literals[1]),
-        }
-
-        func = dispatch.get(self.method)
+        func = self._arrow_converter.get(self.method)
         if func:
-            return func(self.literals)
+            return func(field, self.literals)
 
         raise ValueError("Unsupported predicate method: {}".format(self.method))
