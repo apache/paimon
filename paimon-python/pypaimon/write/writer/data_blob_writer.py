@@ -83,7 +83,7 @@ class DataBlobWriter(DataWriter):
         self.blob_column_name = self._get_blob_columns_from_schema()
 
         # Split schema into normal and blob columns
-        all_column_names = [field.name for field in self.table.table_schema.fields]
+        all_column_names = self.table.field_names
         self.normal_column_names = [col for col in all_column_names if col != self.blob_column_name]
         self.write_cols = self.normal_column_names
 
