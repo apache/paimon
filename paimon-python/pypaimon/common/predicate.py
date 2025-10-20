@@ -50,93 +50,50 @@ class Predicate:
             literals=literals)
 
     def test(self, record: InternalRow) -> bool:
+        if self.method == 'and':
+            return all(p.test(record) for p in self.literals)
+        if self.method == 'or':
+            t = any(p.test(record) for p in self.literals)
+            return t
+
         if self.method == 'equal':
             return record.get_field(self.index) == self.literals[0]
-        elif self.method == 'notEqual':
+        if self.method == 'notEqual':
             return record.get_field(self.index) != self.literals[0]
-        elif self.method == 'lessThan':
+        if self.method == 'lessThan':
             return record.get_field(self.index) < self.literals[0]
-        elif self.method == 'lessOrEqual':
+        if self.method == 'lessOrEqual':
             return record.get_field(self.index) <= self.literals[0]
-        elif self.method == 'greaterThan':
+        if self.method == 'greaterThan':
             return record.get_field(self.index) > self.literals[0]
-        elif self.method == 'greaterOrEqual':
+        if self.method == 'greaterOrEqual':
             return record.get_field(self.index) >= self.literals[0]
-        elif self.method == 'isNull':
+        if self.method == 'isNull':
             return record.get_field(self.index) is None
-        elif self.method == 'isNotNull':
+        if self.method == 'isNotNull':
             return record.get_field(self.index) is not None
-        elif self.method == 'startsWith':
+        if self.method == 'startsWith':
             field_value = record.get_field(self.index)
             if not isinstance(field_value, str):
                 return False
             return field_value.startswith(self.literals[0])
-        elif self.method == 'endsWith':
+        if self.method == 'endsWith':
             field_value = record.get_field(self.index)
             if not isinstance(field_value, str):
                 return False
             return field_value.endswith(self.literals[0])
-        elif self.method == 'contains':
+        if self.method == 'contains':
             field_value = record.get_field(self.index)
             if not isinstance(field_value, str):
                 return False
             return self.literals[0] in field_value
-        elif self.method == 'in':
+        if self.method == 'in':
             return record.get_field(self.index) in self.literals
-        elif self.method == 'notIn':
+        if self.method == 'notIn':
             return record.get_field(self.index) not in self.literals
-        elif self.method == 'between':
+        if self.method == 'between':
             field_value = record.get_field(self.index)
             return self.literals[0] <= field_value <= self.literals[1]
-        elif self.method == 'and':
-            return all(p.test(record) for p in self.literals)
-        elif self.method == 'or':
-            t = any(p.test(record) for p in self.literals)
-            return t
-        else:
-            raise ValueError("Unsupported predicate method: {}".format(self.method))
-
-    def test_by_value(self, value: Any) -> bool:
-        if self.method == 'and':
-            return all(p.test_by_value(value) for p in self.literals)
-        if self.method == 'or':
-            t = any(p.test_by_value(value) for p in self.literals)
-            return t
-
-        if self.method == 'equal':
-            return value == self.literals[0]
-        if self.method == 'notEqual':
-            return value != self.literals[0]
-        if self.method == 'lessThan':
-            return value < self.literals[0]
-        if self.method == 'lessOrEqual':
-            return value <= self.literals[0]
-        if self.method == 'greaterThan':
-            return value > self.literals[0]
-        if self.method == 'greaterOrEqual':
-            return value >= self.literals[0]
-        if self.method == 'isNull':
-            return value is None
-        if self.method == 'isNotNull':
-            return value is not None
-        if self.method == 'startsWith':
-            if not isinstance(value, str):
-                return False
-            return value.startswith(self.literals[0])
-        if self.method == 'endsWith':
-            if not isinstance(value, str):
-                return False
-            return value.endswith(self.literals[0])
-        if self.method == 'contains':
-            if not isinstance(value, str):
-                return False
-            return self.literals[0] in value
-        if self.method == 'in':
-            return value in self.literals
-        if self.method == 'notIn':
-            return value not in self.literals
-        if self.method == 'between':
-            return self.literals[0] <= value <= self.literals[1]
 
         raise ValueError("Unsupported predicate method: {}".format(self.method))
 
@@ -208,27 +165,34 @@ class Predicate:
             raise ValueError("Unsupported predicate method: {}".format(self.method))
 
     def to_arrow(self) -> Any:
+        if self.method == 'and':
+            return reduce(lambda x, y: x & y,
+                          [p.to_arrow() for p in self.literals])
+        if self.method == 'or':
+            return reduce(lambda x, y: x | y,
+                          [p.to_arrow() for p in self.literals])
+
         if self.method == 'equal':
             return pyarrow_dataset.field(self.field) == self.literals[0]
-        elif self.method == 'notEqual':
+        if self.method == 'notEqual':
             return pyarrow_dataset.field(self.field) != self.literals[0]
-        elif self.method == 'lessThan':
+        if self.method == 'lessThan':
             return pyarrow_dataset.field(self.field) < self.literals[0]
-        elif self.method == 'lessOrEqual':
+        if self.method == 'lessOrEqual':
             return pyarrow_dataset.field(self.field) <= self.literals[0]
-        elif self.method == 'greaterThan':
+        if self.method == 'greaterThan':
             return pyarrow_dataset.field(self.field) > self.literals[0]
-        elif self.method == 'greaterOrEqual':
+        if self.method == 'greaterOrEqual':
             return pyarrow_dataset.field(self.field) >= self.literals[0]
-        elif self.method == 'isNull':
+        if self.method == 'isNull':
             return pyarrow_dataset.field(self.field).is_null()
-        elif self.method == 'isNotNull':
+        if self.method == 'isNotNull':
             return pyarrow_dataset.field(self.field).is_valid()
-        elif self.method == 'in':
+        if self.method == 'in':
             return pyarrow_dataset.field(self.field).isin(self.literals)
-        elif self.method == 'notIn':
+        if self.method == 'notIn':
             return ~pyarrow_dataset.field(self.field).isin(self.literals)
-        elif self.method == 'startsWith':
+        if self.method == 'startsWith':
             pattern = self.literals[0]
             # For PyArrow compatibility - improved approach
             try:
@@ -240,7 +204,7 @@ class Predicate:
             except Exception:
                 # Fallback to True
                 return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
-        elif self.method == 'endsWith':
+        if self.method == 'endsWith':
             pattern = self.literals[0]
             # For PyArrow compatibility
             try:
@@ -252,7 +216,7 @@ class Predicate:
             except Exception:
                 # Fallback to True
                 return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
-        elif self.method == 'contains':
+        if self.method == 'contains':
             pattern = self.literals[0]
             # For PyArrow compatibility
             try:
@@ -264,14 +228,8 @@ class Predicate:
             except Exception:
                 # Fallback to True
                 return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
-        elif self.method == 'between':
+        if self.method == 'between':
             return (pyarrow_dataset.field(self.field) >= self.literals[0]) & \
                 (pyarrow_dataset.field(self.field) <= self.literals[1])
-        elif self.method == 'and':
-            return reduce(lambda x, y: x & y,
-                          [p.to_arrow() for p in self.literals])
-        elif self.method == 'or':
-            return reduce(lambda x, y: x | y,
-                          [p.to_arrow() for p in self.literals])
-        else:
-            raise ValueError("Unsupported predicate method: {}".format(self.method))
+
+        raise ValueError("Unsupported predicate method: {}".format(self.method))
