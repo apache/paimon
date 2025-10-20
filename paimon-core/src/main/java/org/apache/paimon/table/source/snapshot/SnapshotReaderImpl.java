@@ -54,6 +54,9 @@ import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -76,6 +79,8 @@ import static org.apache.paimon.predicate.PredicateBuilder.splitAndByPartition;
 
 /** Implementation of {@link SnapshotReader}. */
 public class SnapshotReaderImpl implements SnapshotReader {
+
+    private static final Logger LOG = LoggerFactory.getLogger(SnapshotReaderImpl.class);
 
     private final FileStoreScan scan;
     private final TableSchema tableSchema;
@@ -338,6 +343,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
         }
         List<DataSplit> splits =
                 generateSplits(snapshot, scanMode != ScanMode.ALL, splitGenerator, grouped);
+        LOG.info(
+                "Result of Scan, splits num:{}, files num:{}",
+                splits.size(),
+                splits.stream()
+                        .map(dataSplit -> dataSplit.dataFiles().size())
+                        .reduce(0, Integer::sum));
         return new PlanImpl(
                 plan.watermark(), snapshot == null ? null : snapshot.id(), (List) splits);
     }
