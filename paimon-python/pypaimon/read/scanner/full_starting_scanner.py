@@ -32,8 +32,6 @@ from pypaimon.read.scanner.starting_scanner import StartingScanner
 from pypaimon.read.split import Split
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.manifest.schema.simple_stats import SimpleStats
 
 
 class FullStartingScanner(StartingScanner):
@@ -77,14 +75,14 @@ class FullStartingScanner(StartingScanner):
         splits = self._apply_push_down_limit(splits)
         return Plan(splits)
 
-    def _read_manifest_files(self) -> List[ManifestFileMeta]:
+    def plan_files(self) -> List[ManifestEntry]:
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         if not latest_snapshot:
             return []
         manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
-        return self.filter_manifest_files(manifest_files)
+        return self.read_manifest_entries(manifest_files)
 
-    def filter_manifest_files(self, files: List[ManifestFileMeta]) -> List[ManifestFileMeta]:
+    def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
         def filter_manifest_file(file: ManifestFileMeta) -> bool:
             if not self.partition_key_predicate:
                 return True
@@ -92,13 +90,11 @@ class FullStartingScanner(StartingScanner):
                 file.partition_stats,
                 file.num_added_files + file.num_deleted_files)
 
-        return [file for file in files if filter_manifest_file(file)]
-
-    def plan_files(self) -> List[ManifestEntry]:
-        manifest_files = self._read_manifest_files()
         deleted_entries = set()
         added_entries = []
         for manifest_file in manifest_files:
+            if not filter_manifest_file(manifest_file):
+                continue
             manifest_entries = self.manifest_file_manager.read(
                 manifest_file.file_name,
                 lambda row: self._filter_manifest_entry(row))

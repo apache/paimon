@@ -43,13 +43,7 @@ class IncrementalStartingScanner(FullStartingScanner):
         for snapshot in snapshots_in_range:
             # Get manifest files for this snapshot
             manifest_files = self.manifest_list_manager.read_delta(snapshot)
-            manifest_files = self.filter_manifest_files(manifest_files)
-
-            # Read all entries from manifest files
-            for manifest_file in manifest_files:
-                entries = self.manifest_file_manager.read(manifest_file.file_name,
-                                                          lambda row: self._filter_manifest_entry(row))
-                file_entries.extend(entries)
+            file_entries.extend(self.read_manifest_entries(manifest_files))
         return file_entries
 
     @staticmethod
