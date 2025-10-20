@@ -54,7 +54,7 @@ class Predicate:
         'between': lambda val, literals: literals[0] <= val <= literals[1],
     }
 
-    _stats_tester: ClassVar[dict[str, Any]] = {
+    _stats_tester: ClassVar[dict[str, Callable[[Any, Any, List[Any]], bool]]] = {
         'equal': lambda min_v, max_v, literals: min_v <= literals[0] <= max_v,
         'notEqual': lambda min_v, max_v, literals: not (min_v == literals[0] == max_v),
         'lessThan': lambda min_v, max_v, literals: literals[0] > min_v,
@@ -72,7 +72,7 @@ class Predicate:
         'contains': lambda min_v, max_v, literals: True,
     }
 
-    _arrow_converter: ClassVar[dict[str, Any]] = {
+    _arrow_converter: ClassVar[dict[str, Callable[[Any, List[Any]], Any]]] = {
         'equal': lambda field, literals: field == literals[0],
         'notEqual': lambda field, literals: field != literals[0],
         'lessThan': lambda field, literals: field < literals[0],
