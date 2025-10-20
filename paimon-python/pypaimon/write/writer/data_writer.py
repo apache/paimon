@@ -44,7 +44,7 @@ class DataWriter(ABC):
 
         self.file_io = self.table.file_io
         self.trimmed_primary_key_fields = self.table.table_schema.get_trimmed_primary_key_fields()
-        self.trimmed_primary_key = [field.name for field in self.trimmed_primary_key_fields]
+        self.trimmed_primary_key = self.table.table_schema.get_trimmed_primary_keys()
 
         options = self.table.options
         self.target_file_size = 256 * 1024 * 1024
