@@ -321,8 +321,8 @@ class StartsWith(Tester):
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
         return ((isinstance(min_v, str) and isinstance(max_v, str)) and
-             ((min_v.startswith(literals[0]) or min_v < literals[0]) and
-              (max_v.startswith(literals[0]) or max_v > literals[0])))
+                ((min_v.startswith(literals[0]) or min_v < literals[0]) and
+                 (max_v.startswith(literals[0]) or max_v > literals[0])))
 
     def test_by_arrow(self, val, literals) -> bool:
         return True
