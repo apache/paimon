@@ -170,3 +170,6 @@ class TableSchema:
                 "this will result in only one record in a partition")
         field_map = {field.name: field for field in self.fields}
         return [field_map[name] for name in adjusted if name in field_map]
+
+    def get_trimmed_primary_keys(self) -> List[str]:
+        return [field.name for field in self.get_trimmed_primary_key_fields()]

@@ -48,8 +48,6 @@ class IncrementalStartingScanner(FullStartingScanner):
             for manifest_file in manifest_files:
                 entries = self.manifest_file_manager.read(manifest_file.file_name)
                 file_entries.extend(entries)
-        if self.predicate:
-            file_entries = self._filter_by_predicate(file_entries)
         return file_entries
 
     @staticmethod

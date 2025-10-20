@@ -17,6 +17,7 @@
 ################################################################################
 from io import BytesIO
 from typing import List
+from typing import Callable
 
 import fastavro
 
@@ -41,7 +42,7 @@ class ManifestFileManager:
         self.primary_key_fields = self.table.table_schema.get_primary_key_fields()
         self.trimmed_primary_key_fields = self.table.table_schema.get_trimmed_primary_key_fields()
 
-    def read(self, manifest_file_name: str, bucket_filter=None) -> List[ManifestEntry]:
+    def read(self, manifest_file_name: str, manifest_entry_filter=None) -> List[ManifestEntry]:
         manifest_file_path = self.manifest_path / manifest_file_name
 
         entries = []
@@ -105,7 +106,7 @@ class ManifestFileManager:
                 total_buckets=record['_TOTAL_BUCKETS'],
                 file=file_meta
             )
-            if bucket_filter is not None and not bucket_filter(entry):
+            if manifest_entry_filter is not None and not manifest_entry_filter(entry):
                 continue
             entries.append(entry)
         return entries
