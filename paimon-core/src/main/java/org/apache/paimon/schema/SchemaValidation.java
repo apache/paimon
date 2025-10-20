@@ -140,6 +140,14 @@ public class SchemaValidation {
                             ChangelogProducer.LOOKUP));
         }
 
+        if (options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null
+                && changelogProducer == ChangelogProducer.LOOKUP) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "'%s' property is not supported for '%s' changelog producer type.",
+                            FULL_COMPACTION_DELTA_COMMITS.key(), ChangelogProducer.LOOKUP));
+        }
+
         checkArgument(
                 options.snapshotNumRetainMin() > 0,
                 SNAPSHOT_NUM_RETAINED_MIN.key() + " should be at least 1");
