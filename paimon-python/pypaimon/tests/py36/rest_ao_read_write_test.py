@@ -849,7 +849,7 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         manifest_manager.write(manifest_file_name, [entry])
 
         # Read the manifest entry back
-        entries = manifest_manager.read(manifest_file_name)
+        entries = manifest_manager.read(manifest_file_name, drop_stats=False)
 
         # Verify we have exactly one entry
         self.assertEqual(len(entries), 1)
