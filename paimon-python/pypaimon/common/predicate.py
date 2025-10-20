@@ -155,11 +155,13 @@ class Predicate:
 
         raise ValueError("Unsupported predicate method: {}".format(self.method))
 
+
 class RegisterMeta(ABCMeta):
     def __init__(cls, name, bases, dct):
         super().__init__(name, bases, dct)
         if not bool(cls.__abstractmethods__):
             Predicate.testers[cls.name] = cls()
+
 
 class Tester(ABC, metaclass=RegisterMeta):
 
@@ -183,6 +185,7 @@ class Tester(ABC, metaclass=RegisterMeta):
         Test based on the specific arrow value and literals.
         """
 
+
 class Equal(Tester):
 
     name = 'equal'
@@ -195,6 +198,7 @@ class Equal(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val == literals[0]
+
 
 class NotEqual(Tester):
 
@@ -209,6 +213,7 @@ class NotEqual(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return val != literals[0]
 
+
 class LessThan(Tester):
 
     name = "lessThan"
@@ -221,6 +226,7 @@ class LessThan(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val < literals[0]
+
 
 class LessOrEqual(Tester):
 
@@ -235,6 +241,7 @@ class LessOrEqual(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return val <= literals[0]
 
+
 class GreaterThan(Tester):
 
     name = "greaterThan"
@@ -247,6 +254,7 @@ class GreaterThan(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val > literals[0]
+
 
 class GreaterOrEqual(Tester):
 
@@ -261,6 +269,7 @@ class GreaterOrEqual(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return val >= literals[0]
 
+
 class In(Tester):
 
     name = "in"
@@ -273,6 +282,7 @@ class In(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val.isin(literals)
+
 
 class NotIn(Tester):
 
@@ -287,6 +297,7 @@ class NotIn(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return ~val.isin(literals)
 
+
 class Between(Tester):
 
     name = "between"
@@ -299,6 +310,7 @@ class Between(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return (val >= literals[0]) & (val <= literals[1])
+
 
 class StartsWith(Tester):
 
@@ -315,6 +327,7 @@ class StartsWith(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return True
 
+
 class EndsWith(Tester):
 
     name = "endsWith"
@@ -327,6 +340,7 @@ class EndsWith(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return True
+
 
 class Contains(Tester):
 
@@ -341,6 +355,7 @@ class Contains(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return True
 
+
 class IsNull(Tester):
 
     name = "isNull"
@@ -353,6 +368,7 @@ class IsNull(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val.is_null()
+
 
 class IsNotNull(Tester):
 
