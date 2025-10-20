@@ -56,46 +56,27 @@ class Predicate:
             t = any(p.test(record) for p in self.literals)
             return t
 
-        if self.method == 'equal':
-            return record.get_field(self.index) == self.literals[0]
-        if self.method == 'notEqual':
-            return record.get_field(self.index) != self.literals[0]
-        if self.method == 'lessThan':
-            return record.get_field(self.index) < self.literals[0]
-        if self.method == 'lessOrEqual':
-            return record.get_field(self.index) <= self.literals[0]
-        if self.method == 'greaterThan':
-            return record.get_field(self.index) > self.literals[0]
-        if self.method == 'greaterOrEqual':
-            return record.get_field(self.index) >= self.literals[0]
-        if self.method == 'isNull':
-            return record.get_field(self.index) is None
-        if self.method == 'isNotNull':
-            return record.get_field(self.index) is not None
-        if self.method == 'startsWith':
+        dispatch = {
+            'equal': lambda val, literals: val == literals[0],
+            'notEqual': lambda val, literals: val != literals[0],
+            'lessThan': lambda val, literals: val < literals[0],
+            'lessOrEqual': lambda val, literals: val <= literals[0],
+            'greaterThan': lambda val, literals: val > literals[0],
+            'greaterOrEqual': lambda val, literals: val >= literals[0],
+            'isNull': lambda val, literals: val is None,
+            'isNotNull': lambda val, literals: val is not None,
+            'startsWith': lambda val, literals: isinstance(val, str) and val.startswith(literals[0]),
+            'endsWith': lambda val, literals: isinstance(val, str) and val.endswith(literals[0]),
+            'contains': lambda val, literals: isinstance(val, str) and literals[0] in val,
+            'in': lambda val, literals: val in literals,
+            'notIn': lambda val, literals: val not in literals,
+            'between': lambda val, literals: literals[0] <= val <= literals[1],
+        }
+        func = dispatch.get(self.method)
+        if func:
             field_value = record.get_field(self.index)
-            if not isinstance(field_value, str):
-                return False
-            return field_value.startswith(self.literals[0])
-        if self.method == 'endsWith':
-            field_value = record.get_field(self.index)
-            if not isinstance(field_value, str):
-                return False
-            return field_value.endswith(self.literals[0])
-        if self.method == 'contains':
-            field_value = record.get_field(self.index)
-            if not isinstance(field_value, str):
-                return False
-            return self.literals[0] in field_value
-        if self.method == 'in':
-            return record.get_field(self.index) in self.literals
-        if self.method == 'notIn':
-            return record.get_field(self.index) not in self.literals
-        if self.method == 'between':
-            field_value = record.get_field(self.index)
-            return self.literals[0] <= field_value <= self.literals[1]
-
-        raise ValueError("Unsupported predicate method: {}".format(self.method))
+            return func(field_value, self.literals)
+        raise ValueError(f"Unsupported predicate method: {self.method}")
 
     def test_by_simple_stats(self, stat: SimpleStats, row_count: int) -> bool:
         return self.test_by_stats({
@@ -126,43 +107,29 @@ class Predicate:
         max_value = stat["max_values"][self.field]
 
         if min_value is None or max_value is None or (null_count is not None and null_count == row_count):
-            return False
+            # invalid stats, skip validation
+            return True
 
-        if self.method == 'equal':
-            return min_value <= self.literals[0] <= max_value
-        if self.method == 'notEqual':
-            return not (min_value == self.literals[0] == max_value)
-        if self.method == 'lessThan':
-            return self.literals[0] > min_value
-        if self.method == 'lessOrEqual':
-            return self.literals[0] >= min_value
-        if self.method == 'greaterThan':
-            return self.literals[0] < max_value
-        if self.method == 'greaterOrEqual':
-            return self.literals[0] <= max_value
-        if self.method == 'startsWith':
-            if not isinstance(min_value, str) or not isinstance(max_value, str):
-                raise RuntimeError("startsWith predicate on non-str field")
-            return ((min_value.startswith(self.literals[0]) or min_value < self.literals[0])
-                    and (max_value.startswith(self.literals[0]) or max_value > self.literals[0]))
-        if self.method == 'endsWith':
-            return True
-        if self.method == 'contains':
-            return True
-        if self.method == 'in':
-            for literal in self.literals:
-                if min_value <= literal <= max_value:
-                    return True
-            return False
-        if self.method == 'notIn':
-            for literal in self.literals:
-                if min_value == literal == max_value:
-                    return False
-            return True
-        if self.method == 'between':
-            return self.literals[0] <= max_value and self.literals[1] >= min_value
-        else:
-            raise ValueError("Unsupported predicate method: {}".format(self.method))
+        dispatch = {
+            'equal': lambda literals: min_value <= literals[0] <= max_value,
+            'notEqual': lambda literals: not (min_value == literals[0] == max_value),
+            'lessThan': lambda literals: literals[0] > min_value,
+            'lessOrEqual': lambda literals: literals[0] >= min_value,
+            'greaterThan': lambda literals: literals[0] < max_value,
+            'greaterOrEqual': lambda literals: literals[0] <= max_value,
+            'in': lambda literals: any(min_value <= l <= max_value for l in literals),
+            'notIn': lambda literals: not any(min_value == l == max_value for l in literals),
+            'between': lambda literals: literals[0] <= max_value and literals[1] >= min_value,
+            'startsWith': lambda literals: ((isinstance(min_value, str) and isinstance(max_value, str)) and
+                                       ((min_value.startswith(literals[0]) or min_value < literals[0]) and
+                                        (max_value.startswith(literals[0]) or max_value > literals[0]))),
+            'endsWith': lambda literals: True,
+            'contains': lambda literals: True,
+        }
+        func = dispatch.get(self.method)
+        if func:
+            return func(self.literals)
+        raise ValueError(f"Unsupported predicate method: {self.method}")
 
     def to_arrow(self) -> Any:
         if self.method == 'and':
@@ -172,26 +139,6 @@ class Predicate:
             return reduce(lambda x, y: x | y,
                           [p.to_arrow() for p in self.literals])
 
-        if self.method == 'equal':
-            return pyarrow_dataset.field(self.field) == self.literals[0]
-        if self.method == 'notEqual':
-            return pyarrow_dataset.field(self.field) != self.literals[0]
-        if self.method == 'lessThan':
-            return pyarrow_dataset.field(self.field) < self.literals[0]
-        if self.method == 'lessOrEqual':
-            return pyarrow_dataset.field(self.field) <= self.literals[0]
-        if self.method == 'greaterThan':
-            return pyarrow_dataset.field(self.field) > self.literals[0]
-        if self.method == 'greaterOrEqual':
-            return pyarrow_dataset.field(self.field) >= self.literals[0]
-        if self.method == 'isNull':
-            return pyarrow_dataset.field(self.field).is_null()
-        if self.method == 'isNotNull':
-            return pyarrow_dataset.field(self.field).is_valid()
-        if self.method == 'in':
-            return pyarrow_dataset.field(self.field).isin(self.literals)
-        if self.method == 'notIn':
-            return ~pyarrow_dataset.field(self.field).isin(self.literals)
         if self.method == 'startsWith':
             pattern = self.literals[0]
             # For PyArrow compatibility - improved approach
@@ -228,8 +175,24 @@ class Predicate:
             except Exception:
                 # Fallback to True
                 return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
-        if self.method == 'between':
-            return (pyarrow_dataset.field(self.field) >= self.literals[0]) & \
-                (pyarrow_dataset.field(self.field) <= self.literals[1])
+
+        field = pyarrow_dataset.field(self.field)
+        dispatch = {
+            'equal': lambda literals: field == literals[0],
+            'notEqual': lambda literals: field != literals[0],
+            'lessThan': lambda literals: field < literals[0],
+            'lessOrEqual': lambda literals: field <= literals[0],
+            'greaterThan': lambda literals: field > literals[0],
+            'greaterOrEqual': lambda literals: field >= literals[0],
+            'isNull': lambda literals: field.is_null(),
+            'isNotNull': lambda literals: field.is_valid(),
+            'in': lambda literals: field.isin(literals),
+            'notIn': lambda literals: ~field.isin(literals),
+            'between': lambda literals: (field >= literals[0]) & (field <= literals[1]),
+        }
+
+        func = dispatch.get(self.method)
+        if func:
+            return func(self.literals)
 
         raise ValueError("Unsupported predicate method: {}".format(self.method))
