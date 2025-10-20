@@ -44,6 +44,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStreamingReadResult;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link DeleteAction}. */
 public class DeleteActionITCase extends ActionITCaseBase {
@@ -124,5 +125,41 @@ public class DeleteActionITCase extends ActionITCaseBase {
 
         assertThat(snapshot.id()).isEqualTo(1);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+    }
+
+    @Test
+    public void testDeleteActionWriteOnlyRejected() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("write-only", "true");
+        FileStoreTable table =
+                createFileStoreTable(
+                        ROW_TYPE,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        options);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
+        writeData(rowData(1L, BinaryString.fromString("A")));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        DeleteAction action =
+                createAction(
+                        DeleteAction.class,
+                        "delete",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--where",
+                        "k=1");
+
+        assertThatThrownBy(action::run)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("write-only");
     }
 }
