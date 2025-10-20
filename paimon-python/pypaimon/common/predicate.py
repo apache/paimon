@@ -16,11 +16,12 @@
 # limitations under the License.
 ################################################################################
 
+from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
 from functools import reduce
+from threading import Lock
 from typing import Any, Dict, List, Optional
 from typing import ClassVar
-from typing import Callable
 
 import pyarrow
 from pyarrow import compute as pyarrow_compute
@@ -37,54 +38,7 @@ class Predicate:
     field: Optional[str]
     literals: Optional[List[Any]] = None
 
-    _row_tester: ClassVar[dict[str, Callable[[Any, List[Any]], bool]]] = {
-        'equal': lambda val, literals: val == literals[0],
-        'notEqual': lambda val, literals: val != literals[0],
-        'lessThan': lambda val, literals: val < literals[0],
-        'lessOrEqual': lambda val, literals: val <= literals[0],
-        'greaterThan': lambda val, literals: val > literals[0],
-        'greaterOrEqual': lambda val, literals: val >= literals[0],
-        'isNull': lambda val, literals: val is None,
-        'isNotNull': lambda val, literals: val is not None,
-        'startsWith': lambda val, literals: isinstance(val, str) and val.startswith(literals[0]),
-        'endsWith': lambda val, literals: isinstance(val, str) and val.endswith(literals[0]),
-        'contains': lambda val, literals: isinstance(val, str) and literals[0] in val,
-        'in': lambda val, literals: val in literals,
-        'notIn': lambda val, literals: val not in literals,
-        'between': lambda val, literals: literals[0] <= val <= literals[1],
-    }
-
-    _stats_tester: ClassVar[dict[str, Callable[[Any, Any, List[Any]], bool]]] = {
-        'equal': lambda min_v, max_v, literals: min_v <= literals[0] <= max_v,
-        'notEqual': lambda min_v, max_v, literals: not (min_v == literals[0] == max_v),
-        'lessThan': lambda min_v, max_v, literals: literals[0] > min_v,
-        'lessOrEqual': lambda min_v, max_v, literals: literals[0] >= min_v,
-        'greaterThan': lambda min_v, max_v, literals: literals[0] < max_v,
-        'greaterOrEqual': lambda min_v, max_v, literals: literals[0] <= max_v,
-        'in': lambda min_v, max_v, literals: any(min_v <= l <= max_v for l in literals),
-        'notIn': lambda min_v, max_v, literals: not any(min_v == l == max_v for l in literals),
-        'between': lambda min_v, max_v, literals: literals[0] <= max_v and literals[1] >= min_v,
-        'startsWith': lambda min_v, max_v, literals:
-            ((isinstance(min_v, str) and isinstance(max_v, str)) and
-             ((min_v.startswith(literals[0]) or min_v < literals[0]) and
-              (max_v.startswith(literals[0]) or max_v > literals[0]))),
-        'endsWith': lambda min_v, max_v, literals: True,
-        'contains': lambda min_v, max_v, literals: True,
-    }
-
-    _arrow_converter: ClassVar[dict[str, Callable[[Any, List[Any]], bool]]] = {
-        'equal': lambda field, literals: field == literals[0],
-        'notEqual': lambda field, literals: field != literals[0],
-        'lessThan': lambda field, literals: field < literals[0],
-        'lessOrEqual': lambda field, literals: field <= literals[0],
-        'greaterThan': lambda field, literals: field > literals[0],
-        'greaterOrEqual': lambda field, literals: field >= literals[0],
-        'isNull': lambda field, literals: field.is_null(),
-        'isNotNull': lambda field, literals: field.is_valid(),
-        'in': lambda field, literals: field.isin(literals),
-        'notIn': lambda field, literals: ~field.isin(literals),
-        'between': lambda field, literals: (field >= literals[0]) & (field <= literals[1]),
-    }
+    testers: ClassVar[Dict[str, Any]] = {}
 
     def new_index(self, index: int):
         return Predicate(
@@ -107,10 +61,10 @@ class Predicate:
             t = any(p.test(record) for p in self.literals)
             return t
 
-        func = self._row_tester.get(self.method)
-        if func:
-            field_value = record.get_field(self.index)
-            return func(field_value, self.literals)
+        field_value = record.get_field(self.index)
+        tester = Predicate.testers.get(self.method)
+        if tester:
+            return tester.test_by_value(field_value, self.literals)
         raise ValueError(f"Unsupported predicate method: {self.method}")
 
     def test_by_simple_stats(self, stat: SimpleStats, row_count: int) -> bool:
@@ -145,9 +99,9 @@ class Predicate:
             # invalid stats, skip validation
             return True
 
-        func = self._stats_tester.get(self.method)
-        if func:
-            return func(min_value, max_value, self.literals)
+        tester = Predicate.testers.get(self.method)
+        if tester:
+            return tester.test_by_stats(min_value, max_value, self.literals)
         raise ValueError(f"Unsupported predicate method: {self.method}")
 
     def to_arrow(self) -> Any:
@@ -196,8 +150,208 @@ class Predicate:
                 return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
 
         field = pyarrow_dataset.field(self.field)
-        func = self._arrow_converter.get(self.method)
-        if func:
-            return func(field, self.literals)
+        tester = Predicate.testers.get(self.method)
+        if tester:
+            return tester.test_by_arrow(field, self.literals)
 
         raise ValueError("Unsupported predicate method: {}".format(self.method))
+
+class RegisterMeta(ABCMeta):
+    """元类：自动注册子类到字典"""
+    def __init__(cls, name, bases, dct):
+        super().__init__(name, bases, dct)
+        if cls is not 'Tester':  # 跳过基类自身
+            Predicate.testers[cls.name] = cls  # 注册子类（非实例）
+
+class Tester(ABC, metaclass=RegisterMeta):
+
+    name = None
+
+    @abstractmethod
+    def test_by_value(self, val, literals) -> bool:
+        """
+        Test based on the specific val and literals.
+        """
+
+    @abstractmethod
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        """
+        Test based on the specific min_value and max_value and literals.
+        """
+
+    @abstractmethod
+    def test_by_arrow(self, val, literals) -> bool:
+        """
+        Test based on the specific arrow value and literals.
+        """
+
+class Equal(Tester):
+
+    name = 'equal'
+
+    def test_by_value(self, val, literals) -> bool:
+        return val == literals[0]
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return min_v <= literals[0] <= max_v
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return val == literals[0]
+
+class NotEqual(Tester):
+
+    name = "notEqual"
+
+    def test_by_value(self, val, literals) -> bool:
+        return val != literals[0]
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return not (min_v == literals[0] == max_v)
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return val != literals[0]
+
+class LessThan(Tester):
+
+    name = "lessThan"
+
+    def test_by_value(self, val, literals) -> bool:
+        return val < literals[0]
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return literals[0] > min_v
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return val < literals[0]
+
+class LessOrEqual(Tester):
+
+    name = "lessOrEqual"
+
+    def test_by_value(self, val, literals) -> bool:
+        return val <= literals[0]
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return literals[0] >= min_v
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return val <= literals[0]
+
+class GreaterThan(Tester):
+
+    name = "greaterThan"
+
+    def test_by_value(self, val, literals) -> bool:
+        return val > literals[0]
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return literals[0] < max_v
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return val > literals[0]
+
+class GreaterOrEqual(Tester):
+
+    name = "greaterOrEqual"
+
+    def test_by_value(self, val, literals) -> bool:
+        return val >= literals[0]
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return literals[0] <= max_v
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return val >= literals[0]
+
+class In(Tester):
+
+    name = "in"
+
+    def test_by_value(self, val, literals) -> bool:
+        return val in literals
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return any(min_v <= l <= max_v for l in literals)
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return val.isin(literals)
+
+class NotIn(Tester):
+
+    name = "notIn"
+
+    def test_by_value(self, val, literals) -> bool:
+        return val not in literals
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return not any(min_v == l == max_v for l in literals)
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return ~val.isin(literals)
+
+class Between(Tester):
+
+    name = "between"
+
+    def test_by_value(self, val, literals) -> bool:
+        return literals[0] <= val <= literals[1]
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return literals[0] <= max_v and literals[1] >= min_v
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return (val >= literals[0]) & (val <= literals[1])
+
+class StartsWith(Tester):
+
+    name = "startsWith"
+
+    def test_by_value(self, val, literals) -> bool:
+        return isinstance(val, str) and val.startswith(literals[0])
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return ((isinstance(min_v, str) and isinstance(max_v, str)) and
+             ((min_v.startswith(literals[0]) or min_v < literals[0]) and
+              (max_v.startswith(literals[0]) or max_v > literals[0])))
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return True
+
+class EndsWith(Tester):
+
+    name = "endsWith"
+
+    def test_by_value(self, val, literals) -> bool:
+        return isinstance(val, str) and val.endswith(literals[0])
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return True
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return True
+
+class IsNull(Tester):
+
+    name = "isNull"
+
+    def test_by_value(self, val, literals) -> bool:
+        return val is None
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return True
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return val.is_null()
+
+class IsNotNull(Tester):
+
+    name = "isNotNull"
+
+    def test_by_value(self, val, literals) -> bool:
+        return val is not None
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return True
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return val.is_valid()
