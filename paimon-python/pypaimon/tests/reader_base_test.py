@@ -210,14 +210,22 @@ class ReaderBasicTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
-        actual_data = table_read.to_arrow(table_scan.plan().splits())
+        splits = table_scan.plan().splits()
+
+        # assert data file without stats
+        first_file = splits[0].files[0]
+        self.assertEqual(first_file.value_stats_cols, [])
+        self.assertEqual(first_file.value_stats, SimpleStats.empty_stats())
+
+        # assert equal
+        actual_data = table_read.to_arrow(splits)
         self.assertEqual(actual_data, expect_data)
 
         # to test GenericRow ability
         latest_snapshot = SnapshotManager(table).get_latest_snapshot()
         manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
-            manifest_files[0].file_name, lambda row: table_scan.starting_scanner._filter_manifest_entry(row))
+            manifest_files[0].file_name, lambda row: table_scan.starting_scanner._filter_manifest_entry(row), False)
         min_value_stats = manifest_entries[0].file.value_stats.min_values.values
         max_value_stats = manifest_entries[0].file.value_stats.max_values.values
         expected_min_values = [col[0].as_py() for col in expect_data]
@@ -627,7 +635,7 @@ class ReaderBasicTest(unittest.TestCase):
         manifest_manager.write(manifest_file_name, [entry])
 
         # Read the manifest entry back
-        entries = manifest_manager.read(manifest_file_name)
+        entries = manifest_manager.read(manifest_file_name, drop_stats=False)
 
         # Verify we have exactly one entry
         self.assertEqual(len(entries), 1)
