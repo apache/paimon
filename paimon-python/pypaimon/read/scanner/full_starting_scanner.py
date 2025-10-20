@@ -213,9 +213,7 @@ class FullStartingScanner(StartingScanner):
     def _filter_manifest_entry(self, entry: ManifestEntry) -> bool:
         if self.only_read_real_buckets and entry.bucket < 0:
             return False
-        if not self.partition_key_predicate:
-            return True
-        if not self.partition_key_predicate.test(entry.partition):
+        if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
             return False
         if self.table.is_primary_key_table:
             predicate = self.primary_key_predicate

@@ -112,7 +112,10 @@ class TableRead:
         if self.predicate is None:
             return None
         elif self.table.is_primary_key_table:
-            return filter_predicate_by_fields(self.predicate, self.table.primary_keys).to_arrow()
+            pk_predicate = filter_predicate_by_fields(self.predicate, self.table.primary_keys)
+            if not pk_predicate:
+                return None
+            return pk_predicate.to_arrow()
         else:
             return self.predicate.to_arrow()
 
