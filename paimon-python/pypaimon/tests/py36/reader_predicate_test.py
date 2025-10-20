@@ -25,6 +25,7 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory
 from pypaimon import Schema
+from pypaimon.read import push_down_utils
 from pypaimon.read.split import Split
 
 
@@ -80,3 +81,13 @@ class ReaderPredicateTest(unittest.TestCase):
         splits: list[Split] = read_builder.new_scan().plan().splits()
         self.assertEqual(len(splits), 1)
         self.assertEqual(splits[0].partition.to_dict().get("pt"), 1003)
+
+    def test_trim_predicate(self):
+        predicate_builder = self.table.new_read_builder().new_predicate_builder()
+        p1 = predicate_builder.between('pt', 1002, 1003)
+        p2 = predicate_builder.and_predicates([predicate_builder.equal('pt', 1003), predicate_builder.equal('a', 3)])
+        predicate = predicate_builder.and_predicates([p1, p2])
+        pred = push_down_utils.trim_predicate_by_fields(predicate, self.table.partition_keys)
+        self.assertEqual(len(pred.literals), 2)
+        self.assertEqual(pred.literals[0].field, 'pt')
+        self.assertEqual(pred.literals[1].field, 'pt')
