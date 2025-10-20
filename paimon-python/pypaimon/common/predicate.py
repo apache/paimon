@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from functools import reduce
 from typing import Any, Dict, List, Optional
 from typing import ClassVar
+from typing import Callable
 
 import pyarrow
 from pyarrow import compute as pyarrow_compute
@@ -36,7 +37,7 @@ class Predicate:
     field: Optional[str]
     literals: Optional[List[Any]] = None
 
-    _row_tester: ClassVar[dict[str, Any]] = {
+    _row_tester: ClassVar[dict[str, Callable[[Any, List[Any]], bool]]] = {
         'equal': lambda val, literals: val == literals[0],
         'notEqual': lambda val, literals: val != literals[0],
         'lessThan': lambda val, literals: val < literals[0],
@@ -50,6 +51,7 @@ class Predicate:
         'contains': lambda val, literals: isinstance(val, str) and literals[0] in val,
         'in': lambda val, literals: val in literals,
         'notIn': lambda val, literals: val not in literals,
+        'between': lambda val, literals: literals[0] <= val <= literals[1],
     }
 
     _stats_tester: ClassVar[dict[str, Any]] = {
