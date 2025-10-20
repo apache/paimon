@@ -136,7 +136,7 @@ ANALYZE TABLE my_table COMPUTE STATISTICS FOR ALL COLUMNS;
 
 The REFRESH TABLE statement invalidates the cached entries, which include data and metadata of the given table.
 
-In particular, when the caching catalog is enabled, Paimon will automatically cache the table's metadata. In multi-session scenarios, after a table is recreated in one session, this command must be used to clear the cache in another session.
+In particular, when the caching catalog is enabled, Paimon will automatically cache the table's metadata. In multi-session scenarios, after a table is recreated in one session, this command must be used in another session to clear the cache.
 
 ```sql
 REFRESH TABLE table_identifier;
