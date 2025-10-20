@@ -20,7 +20,6 @@ from typing import Callable, List, Optional
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
-from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -28,9 +27,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.plan import Plan
-from pypaimon.read.push_down_utils import (extract_predicate_to_dict,
-                                           extract_predicate_to_list,
-                                           to_partition_predicate)
+from pypaimon.read.push_down_utils import (filter_and_transform_predicate)
 from pypaimon.read.scanner.starting_scanner import StartingScanner
 from pypaimon.read.split import Split
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
@@ -49,14 +46,11 @@ class FullStartingScanner(StartingScanner):
         self.manifest_list_manager = ManifestListManager(table)
         self.manifest_file_manager = ManifestFileManager(table)
 
-        pk_conditions = []
-        trimmed_pk = [field.name for field in self.table.table_schema.get_trimmed_primary_key_fields()]
-        extract_predicate_to_list(pk_conditions, self.predicate, trimmed_pk)
-        self.primary_key_predicate = PredicateBuilder(self.table.fields).and_predicates(pk_conditions)
+        self.primary_key_predicate = filter_and_transform_predicate(
+            self.predicate, self.table.field_names, self.table.table_schema.get_trimmed_primary_keys())
 
-        partition_conditions = defaultdict(list)
-        extract_predicate_to_dict(partition_conditions, self.predicate, self.table.partition_keys)
-        self.partition_key_predicate = partition_conditions
+        self.partition_key_predicate = filter_and_transform_predicate(
+            self.predicate, self.table.field_names, self.table.partition_keys)
 
         self.target_split_size = 128 * 1024 * 1024
         self.open_file_cost = 4 * 1024 * 1024
@@ -82,29 +76,29 @@ class FullStartingScanner(StartingScanner):
         splits = self._apply_push_down_limit(splits)
         return Plan(splits)
 
-    def _read_manifest_files(self) -> List[ManifestFileMeta]:
+    def plan_files(self) -> List[ManifestEntry]:
         latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         if not latest_snapshot:
             return []
         manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
-        partition_predicate = to_partition_predicate(self.predicate, self.table.field_names, self.table.partition_keys)
+        return self.read_manifest_entries(manifest_files)
 
-        def test_predicate(file: ManifestFileMeta) -> bool:
-            if not partition_predicate:
+    def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
+        def filter_manifest_file(file: ManifestFileMeta) -> bool:
+            if not self.partition_key_predicate:
                 return True
-            return partition_predicate.test_by_simple_stats(
+            return self.partition_key_predicate.test_by_simple_stats(
                 file.partition_stats,
                 file.num_added_files + file.num_deleted_files)
 
-        return [file for file in manifest_files if test_predicate(file)]
-
-    def plan_files(self) -> List[ManifestEntry]:
-        manifest_files = self._read_manifest_files()
         deleted_entries = set()
         added_entries = []
         for manifest_file in manifest_files:
-            manifest_entries = self.manifest_file_manager.read(manifest_file.file_name,
-                                                               lambda row: self._bucket_filter(row))
+            if not filter_manifest_file(manifest_file):
+                continue
+            manifest_entries = self.manifest_file_manager.read(
+                manifest_file.file_name,
+                lambda row: self._filter_manifest_entry(row))
             for entry in manifest_entries:
                 if entry.kind == 0:
                     added_entries.append(entry)
@@ -115,8 +109,6 @@ class FullStartingScanner(StartingScanner):
             entry for entry in added_entries
             if (tuple(entry.partition.values), entry.bucket, entry.file.file_name) not in deleted_entries
         ]
-        if self.predicate:
-            file_entries = self._filter_by_predicate(file_entries)
         return file_entries
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'FullStartingScanner':
@@ -203,12 +195,6 @@ class FullStartingScanner(StartingScanner):
                 filtered_entries.append(entry)
         return filtered_entries
 
-    def _bucket_filter(self, entry: Optional[ManifestEntry]) -> bool:
-        bucket = entry.bucket
-        if self.only_read_real_buckets and bucket < 0:
-            return False
-        return True
-
     def _apply_push_down_limit(self, splits: List[Split]) -> List[Split]:
         if self.limit is None:
             return splits
@@ -224,45 +210,26 @@ class FullStartingScanner(StartingScanner):
 
         return limited_splits
 
-    def _filter_by_predicate(self, file_entries: List[ManifestEntry]) -> List[ManifestEntry]:
-        if not self.predicate:
-            return file_entries
-
-        filtered_files = []
-        for file_entry in file_entries:
-            if self.partition_key_predicate and not self._filter_by_partition(file_entry):
-                continue
-            if not self._filter_by_stats(file_entry):
-                continue
-            filtered_files.append(file_entry)
-
-        return filtered_files
-
-    def _filter_by_partition(self, file_entry: ManifestEntry) -> bool:
-        partition_dict = file_entry.partition.to_dict()
-        for field_name, conditions in self.partition_key_predicate.items():
-            partition_value = partition_dict[field_name]
-            for predicate in conditions:
-                if not predicate.test_by_value(partition_value):
-                    return False
-        return True
-
-    def _filter_by_stats(self, file_entry: ManifestEntry) -> bool:
-        if file_entry.kind != 0:
+    def _filter_manifest_entry(self, entry: ManifestEntry) -> bool:
+        if self.only_read_real_buckets and entry.bucket < 0:
+            return False
+        if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
             return False
         if self.table.is_primary_key_table:
             predicate = self.primary_key_predicate
-            stats = file_entry.file.key_stats
+            stats = entry.file.key_stats
         else:
             predicate = self.predicate
-            stats = file_entry.file.value_stats
+            stats = entry.file.value_stats
+        if not predicate:
+            return True
         return predicate.test_by_stats({
             "min_values": stats.min_values.to_dict(),
             "max_values": stats.max_values.to_dict(),
             "null_counts": {
                 stats.min_values.fields[i].name: stats.null_counts[i] for i in range(len(stats.min_values.fields))
             },
-            "row_count": file_entry.file.row_count,
+            "row_count": entry.file.row_count
         })
 
     def _create_append_only_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:

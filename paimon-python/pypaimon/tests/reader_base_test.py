@@ -217,7 +217,7 @@ class ReaderBasicTest(unittest.TestCase):
         latest_snapshot = SnapshotManager(table).get_latest_snapshot()
         manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
-            manifest_files[0].file_name, lambda row: table_scan.starting_scanner._bucket_filter(row))
+            manifest_files[0].file_name, lambda row: table_scan.starting_scanner._filter_manifest_entry(row))
         min_value_stats = manifest_entries[0].file.value_stats.min_values.values
         max_value_stats = manifest_entries[0].file.value_stats.max_values.values
         expected_min_values = [col[0].as_py() for col in expect_data]

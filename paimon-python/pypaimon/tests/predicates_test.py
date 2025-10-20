@@ -419,7 +419,7 @@ class PredicateTest(unittest.TestCase):
         table_commit.close()
 
         # test filter by partition
-        predicate_builder: PredicateBuilder = table.new_read_builder().new_predicate_builder()
+        predicate_builder = table.new_read_builder().new_predicate_builder()
         p1 = predicate_builder.startswith('dt1', "p1")
         p2 = predicate_builder.is_in('dt1', ["p2"])
         p3 = predicate_builder.or_predicates([p1, p2])
@@ -433,7 +433,7 @@ class PredicateTest(unittest.TestCase):
         self.assertEqual(splits[1].partition.to_dict()["dt2"], 2)
 
         # test filter by stats
-        predicate_builder: PredicateBuilder = table.new_read_builder().new_predicate_builder()
+        predicate_builder = table.new_read_builder().new_predicate_builder()
         p1 = predicate_builder.equal('key1', 7)
         p2 = predicate_builder.is_in('key2', ["e", "f"])
         p3 = predicate_builder.or_predicates([p1, p2])

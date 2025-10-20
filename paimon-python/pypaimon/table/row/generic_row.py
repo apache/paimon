@@ -23,18 +23,34 @@ from decimal import Decimal
 from typing import Any, List
 
 from pypaimon.schema.data_types import AtomicType, DataField, DataType
-from pypaimon.table.row.row_kind import RowKind
+from pypaimon.table.row.internal_row import InternalRow, RowKind
 from pypaimon.table.row.blob import BlobData
 
 
 @dataclass
-class GenericRow:
-    values: List[Any]
-    fields: List[DataField]
-    row_kind: RowKind = RowKind.INSERT
+class GenericRow(InternalRow):
+
+    def __init__(self, values: List[Any], fields: List[DataField], row_kind: RowKind = RowKind.INSERT):
+        self.values = values
+        self.fields = fields
+        self.row_kind = row_kind
 
     def to_dict(self):
         return {self.fields[i].name: self.values[i] for i in range(len(self.fields))}
+
+    def get_field(self, pos: int):
+        if pos >= len(self.values):
+            raise IndexError(f"Position {pos} is out of bounds for row arity {len(self.values)}")
+        return self.values[pos]
+
+    def is_null_at(self, pos: int) -> bool:
+        return self.get_field(pos) is None
+
+    def get_row_kind(self) -> RowKind:
+        return self.row_kind
+
+    def __len__(self) -> int:
+        return len(self.values)
 
 
 class GenericRowDeserializer:
