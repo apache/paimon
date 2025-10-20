@@ -55,4 +55,29 @@ class TriggerTagAutomaticCreationProcedureTest extends PaimonSparkTestBase {
         .getString(0))(loadTable("T").tagManager().tagObjects().get(0).getRight)
   }
 
+  test("Paimon procedure: trigger tag automatic creation without snapshot test") {
+    spark.sql("""CREATE TABLE T (id INT, name STRING)
+                |USING PAIMON
+                |TBLPROPERTIES (
+                |'primary-key'='id',
+                |'tag.automatic-creation'='process-time',
+                |'tag.creation-period'='daily',
+                |'tag.creation-delay'='10 m',
+                |'tag.num-retained-max'='90'
+                |)""".stripMargin)
+
+    val table = loadTable("T")
+    assertResult(0)(table.snapshotManager().snapshotCount())
+    assertResult(0)(spark.sql("show tags T").count())
+
+    spark.sql("CALL paimon.sys.trigger_tag_automatic_creation(table => 'test.T')")
+    assertResult(1)(table.snapshotManager().snapshotCount())
+    assertResult(1)(spark.sql("show tags T").count())
+    assertResult(
+      spark
+        .sql("select date_format(date_sub(current_date(), 1), 'yyyy-MM-dd')")
+        .head()
+        .getString(0))(loadTable("T").tagManager().tagObjects().get(0).getRight)
+  }
+
 }
