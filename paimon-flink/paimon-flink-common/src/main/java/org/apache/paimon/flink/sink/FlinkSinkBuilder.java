@@ -137,15 +137,10 @@ public class FlinkSinkBuilder {
 
     /** Clustering the input data if possible. */
     public FlinkSinkBuilder clusteringIfPossible(
-            boolean clusteringIncremental,
             String clusteringColumns,
             String clusteringStrategy,
             boolean sortInCluster,
             int sampleFactor) {
-        // If incremental clustering is enabled, the clustering will be skipped.
-        if (clusteringIncremental) {
-            return this;
-        }
         // The clustering will be skipped if the clustering columns are empty or the execution
         // mode is STREAMING or the table type is illegal.
         List<String> columns = CoreOptions.clusteringColumns(clusteringColumns);

@@ -135,13 +135,14 @@ public abstract class FlinkTableSinkBase
                             .forRowData(
                                     new DataStream<>(
                                             dataStream.getExecutionEnvironment(),
-                                            dataStream.getTransformation()))
-                            .clusteringIfPossible(
-                                    conf.get(CLUSTERING_INCREMENTAL),
-                                    conf.get(CLUSTERING_COLUMNS),
-                                    conf.get(CLUSTERING_STRATEGY),
-                                    conf.get(CLUSTERING_SORT_IN_CLUSTER),
-                                    conf.get(CLUSTERING_SAMPLE_FACTOR));
+                                            dataStream.getTransformation()));
+                    if (!conf.get(CLUSTERING_INCREMENTAL)) {
+                        builder.clusteringIfPossible(
+                                conf.get(CLUSTERING_COLUMNS),
+                                conf.get(CLUSTERING_STRATEGY),
+                                conf.get(CLUSTERING_SORT_IN_CLUSTER),
+                                conf.get(CLUSTERING_SAMPLE_FACTOR));
+                    }
                     if (overwrite) {
                         builder.overwrite(staticPartitions);
                     }
