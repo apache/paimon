@@ -94,7 +94,7 @@ SHOW PARTITIONS my_table;
 SHOW PARTITIONS my_table PARTITION (dt='20230817');
 ```
 
-## Show Table Extended
+## Show table extended
 The SHOW TABLE EXTENDED statement is used to list table or partition information.
 
 ```sql
@@ -130,4 +130,14 @@ ANALYZE TABLE my_table COMPUTE STATISTICS FOR COLUMNS col1;
 
 -- collect table-level statistics and column statistics for all columns
 ANALYZE TABLE my_table COMPUTE STATISTICS FOR ALL COLUMNS;
+```
+
+## Refresh table
+
+The REFRESH TABLE statement invalidates the cached entries, which include data and metadata of the given table.
+
+In particular, when the caching catalog is enabled, Paimon will automatically cache the table's metadata. In multi-session scenarios, after a table is recreated in one session, this command must be used to clear the cache in another session.
+
+```sql
+REFRESH TABLE table_identifier;
 ```
