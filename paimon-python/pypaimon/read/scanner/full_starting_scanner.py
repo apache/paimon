@@ -49,7 +49,8 @@ class FullStartingScanner(StartingScanner):
         self.primary_key_predicate = filter_and_transform_predicate(
             self.predicate, self.table.field_names, self.table.table_schema.get_trimmed_primary_keys())
 
-        self.partition_key_predicate = filter_and_transform_predicate(self.predicate, self.table.field_names, self.table.partition_keys)
+        self.partition_key_predicate = filter_and_transform_predicate(
+            self.predicate, self.table.field_names, self.table.partition_keys)
 
         self.target_split_size = 128 * 1024 * 1024
         self.open_file_cost = 4 * 1024 * 1024

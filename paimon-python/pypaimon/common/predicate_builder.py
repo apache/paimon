@@ -18,7 +18,6 @@
 
 from typing import Any, List, Optional
 
-from pypaimon.common import predicate
 from pypaimon.common.predicate import Predicate
 from pypaimon.schema.data_types import DataField
 

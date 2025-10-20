@@ -17,7 +17,6 @@
 ################################################################################
 from io import BytesIO
 from typing import List
-from typing import Callable
 
 import fastavro
 
