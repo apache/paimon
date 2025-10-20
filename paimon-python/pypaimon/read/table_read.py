@@ -22,8 +22,7 @@ import pyarrow
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
-from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.push_down_utils import extract_predicate_to_list
+from pypaimon.read.push_down_utils import filter_predicate_by_fields
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.split_read import (MergeFileSplitRead, RawFileSplitRead,
@@ -113,14 +112,10 @@ class TableRead:
         if self.predicate is None:
             return None
         elif self.table.is_primary_key_table:
-            result = []
-            extract_predicate_to_list(result, self.predicate, self.table.primary_keys)
-            if result:
-                # the field index is unused for arrow field
-                pk_predicates = (PredicateBuilder(self.table.fields).and_predicates(result)).to_arrow()
-                return pk_predicates
-            else:
+            pk_predicate = filter_predicate_by_fields(self.predicate, self.table.primary_keys)
+            if not pk_predicate:
                 return None
+            return pk_predicate.to_arrow()
         else:
             return self.predicate.to_arrow()
 
