@@ -19,7 +19,6 @@
 from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
 from functools import reduce
-from threading import Lock
 from typing import Any, Dict, List, Optional
 from typing import ClassVar
 
@@ -157,11 +156,10 @@ class Predicate:
         raise ValueError("Unsupported predicate method: {}".format(self.method))
 
 class RegisterMeta(ABCMeta):
-    """元类：自动注册子类到字典"""
     def __init__(cls, name, bases, dct):
         super().__init__(name, bases, dct)
-        if cls is not 'Tester':  # 跳过基类自身
-            Predicate.testers[cls.name] = cls  # 注册子类（非实例）
+        if not bool(cls.__abstractmethods__):
+            Predicate.testers[cls.name] = cls()
 
 class Tester(ABC, metaclass=RegisterMeta):
 
@@ -323,6 +321,19 @@ class EndsWith(Tester):
 
     def test_by_value(self, val, literals) -> bool:
         return isinstance(val, str) and val.endswith(literals[0])
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return True
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return True
+
+class Contains(Tester):
+
+    name = "contains"
+
+    def test_by_value(self, val, literals) -> bool:
+        return isinstance(val, str) and literals[0] in val
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
         return True
