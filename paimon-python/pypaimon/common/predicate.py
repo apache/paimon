@@ -50,7 +50,7 @@ class Predicate:
         'contains': lambda val, literals: isinstance(val, str) and literals[0] in val,
         'in': lambda val, literals: val in literals,
         'notIn': lambda val, literals: val not in literals,
-        'between': lambda val, literals: literals[0] <= val <= literals[1]
+        'between': lambda val, literals: literals[0] <= val <= literals[1],
     }
 
     _stats_tester: ClassVar[dict[str, Any]] = {
