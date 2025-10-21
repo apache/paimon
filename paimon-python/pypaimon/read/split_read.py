@@ -64,7 +64,7 @@ class SplitRead(ABC):
         self.split = split
         self.value_arity = len(read_type)
 
-        self.trimmed_primary_key = self.table.table_schema.get_trimmed_primary_keys()
+        self.trimmed_primary_key = self.table.trimmed_primary_keys
         self.read_fields = read_type
         if isinstance(self, MergeFileSplitRead):
             self.read_fields = self._create_key_value_fields(read_type)

@@ -34,12 +34,6 @@ class InternalRow(ABC):
         """
 
     @abstractmethod
-    def is_null_at(self, pos: int) -> bool:
-        """
-        Returns true if the element is null at the given position.
-        """
-
-    @abstractmethod
     def get_row_kind(self) -> RowKind:
         """
         Returns the kind of change that this row describes in a changelog.

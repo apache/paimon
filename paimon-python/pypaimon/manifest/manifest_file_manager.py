@@ -38,9 +38,9 @@ class ManifestFileManager:
         self.table: FileStoreTable = table
         self.manifest_path = table.table_path / "manifest"
         self.file_io = table.file_io
-        self.partition_key_fields = self.table.table_schema.get_partition_key_fields()
-        self.primary_key_fields = self.table.table_schema.get_primary_key_fields()
-        self.trimmed_primary_key_fields = self.table.table_schema.get_trimmed_primary_key_fields()
+        self.partition_keys_fields = self.table.partition_keys_fields
+        self.primary_keys_fields = self.table.primary_keys_fields
+        self.trimmed_primary_keys_fields = self.table.trimmed_primary_keys_fields
 
     def read(self, manifest_file_name: str, manifest_entry_filter=None, drop_stats=True) -> List[ManifestEntry]:
         manifest_file_path = self.manifest_path / manifest_file_name
@@ -55,8 +55,8 @@ class ManifestFileManager:
             file_dict = dict(record['_FILE'])
             key_dict = dict(file_dict['_KEY_STATS'])
             key_stats = SimpleStats(
-                min_values=BinaryRow(key_dict['_MIN_VALUES'], self.trimmed_primary_key_fields),
-                max_values=BinaryRow(key_dict['_MAX_VALUES'], self.trimmed_primary_key_fields),
+                min_values=BinaryRow(key_dict['_MIN_VALUES'], self.trimmed_primary_keys_fields),
+                max_values=BinaryRow(key_dict['_MAX_VALUES'], self.trimmed_primary_keys_fields),
                 null_counts=key_dict['_NULL_COUNTS'],
             )
 
@@ -80,8 +80,8 @@ class ManifestFileManager:
                 file_name=file_dict['_FILE_NAME'],
                 file_size=file_dict['_FILE_SIZE'],
                 row_count=file_dict['_ROW_COUNT'],
-                min_key=GenericRowDeserializer.from_bytes(file_dict['_MIN_KEY'], self.trimmed_primary_key_fields),
-                max_key=GenericRowDeserializer.from_bytes(file_dict['_MAX_KEY'], self.trimmed_primary_key_fields),
+                min_key=GenericRowDeserializer.from_bytes(file_dict['_MIN_KEY'], self.trimmed_primary_keys_fields),
+                max_key=GenericRowDeserializer.from_bytes(file_dict['_MAX_KEY'], self.trimmed_primary_keys_fields),
                 key_stats=key_stats,
                 value_stats=value_stats,
                 min_sequence_number=file_dict['_MIN_SEQUENCE_NUMBER'],
@@ -100,7 +100,7 @@ class ManifestFileManager:
             )
             entry = ManifestEntry(
                 kind=record['_KIND'],
-                partition=GenericRowDeserializer.from_bytes(record['_PARTITION'], self.partition_key_fields),
+                partition=GenericRowDeserializer.from_bytes(record['_PARTITION'], self.partition_keys_fields),
                 bucket=record['_BUCKET'],
                 total_buckets=record['_TOTAL_BUCKETS'],
                 file=file_meta

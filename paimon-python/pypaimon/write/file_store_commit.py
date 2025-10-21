@@ -67,7 +67,7 @@ class FileStoreCommit:
 
         commit_entries = []
         for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.table_schema.get_partition_key_fields())
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,
@@ -89,7 +89,7 @@ class FileStoreCommit:
         partition_filter = None
         # sanity check, all changes must be done within the given partition, meanwhile build a partition filter
         if len(overwrite_partition) > 0:
-            predicate_builder = PredicateBuilder(self.table.table_schema.get_partition_key_fields())
+            predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
             sub_predicates = []
             for key, value in overwrite_partition.items():
                 sub_predicates.append(predicate_builder.equal(key, value))
@@ -107,7 +107,7 @@ class FileStoreCommit:
             entry.kind = 1
             commit_entries.append(entry)
         for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.table_schema.get_partition_key_fields())
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,
@@ -174,11 +174,11 @@ class FileStoreCommit:
             partition_stats=SimpleStats(
                 min_values=GenericRow(
                     values=partition_min_stats,
-                    fields=self.table.table_schema.get_partition_key_fields(),
+                    fields=self.table.partition_keys_fields
                 ),
                 max_values=GenericRow(
                     values=partition_max_stats,
-                    fields=self.table.table_schema.get_partition_key_fields(),
+                    fields=self.table.partition_keys_fields
                 ),
                 null_counts=partition_null_counts,
             ),

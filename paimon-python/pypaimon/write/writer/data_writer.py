@@ -43,8 +43,8 @@ class DataWriter(ABC):
         self.bucket = bucket
 
         self.file_io = self.table.file_io
-        self.trimmed_primary_key_fields = self.table.table_schema.get_trimmed_primary_key_fields()
-        self.trimmed_primary_key = self.table.table_schema.get_trimmed_primary_keys()
+        self.trimmed_primary_keys_fields = self.table.trimmed_primary_keys_fields
+        self.trimmed_primary_keys = self.table.trimmed_primary_keys
 
         options = self.table.options
         self.target_file_size = 256 * 1024 * 1024
@@ -159,7 +159,7 @@ class DataWriter(ABC):
 
         # min key & max key
 
-        selected_table = data.select(self.trimmed_primary_key)
+        selected_table = data.select(self.trimmed_primary_keys)
         key_columns_batch = selected_table.to_batches()[0]
         min_key_row_batch = key_columns_batch.slice(0, 1)
         max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
@@ -177,7 +177,7 @@ class DataWriter(ABC):
         min_value_stats = [column_stats[field.name]['min_values'] for field in all_fields]
         max_value_stats = [column_stats[field.name]['max_values'] for field in all_fields]
         value_null_counts = [column_stats[field.name]['null_counts'] for field in all_fields]
-        key_fields = self.trimmed_primary_key_fields
+        key_fields = self.trimmed_primary_keys_fields
         min_key_stats = [column_stats[field.name]['min_values'] for field in key_fields]
         max_key_stats = [column_stats[field.name]['max_values'] for field in key_fields]
         key_null_counts = [column_stats[field.name]['null_counts'] for field in key_fields]
@@ -191,11 +191,11 @@ class DataWriter(ABC):
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
             row_count=data.num_rows,
-            min_key=GenericRow(min_key, self.trimmed_primary_key_fields),
-            max_key=GenericRow(max_key, self.trimmed_primary_key_fields),
+            min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
+            max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
             key_stats=SimpleStats(
-                GenericRow(min_key_stats, self.trimmed_primary_key_fields),
-                GenericRow(max_key_stats, self.trimmed_primary_key_fields),
+                GenericRow(min_key_stats, self.trimmed_primary_keys_fields),
+                GenericRow(max_key_stats, self.trimmed_primary_keys_fields),
                 key_null_counts,
             ),
             value_stats=SimpleStats(
