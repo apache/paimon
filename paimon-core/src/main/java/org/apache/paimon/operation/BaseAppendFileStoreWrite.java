@@ -59,6 +59,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
+import static org.apache.paimon.types.DataTypeRoot.BLOB;
 import static org.apache.paimon.utils.StatsCollectorFactories.createStatsFactories;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
@@ -233,6 +234,9 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     @Override
     protected void forceBufferSpill() throws Exception {
         if (ioManager == null) {
+            return;
+        }
+        if (writeType.getFieldTypes().stream().noneMatch(t -> t.is(BLOB))) {
             return;
         }
         if (forceBufferSpill) {

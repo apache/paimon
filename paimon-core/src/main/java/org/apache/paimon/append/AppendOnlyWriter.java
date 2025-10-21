@@ -270,10 +270,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     public void toBufferedWriter() throws Exception {
-        if (sinkWriter != null
-                && !sinkWriter.bufferSpillableWriter()
-                && dataFileRead != null
-                && writeSchema.getFieldTypes().stream().noneMatch(t -> t.is(BLOB))) {
+        if (sinkWriter != null && !sinkWriter.bufferSpillableWriter() && dataFileRead != null) {
             // fetch the written results
             List<DataFileMeta> files = sinkWriter.flush();
 
