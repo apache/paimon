@@ -49,6 +49,7 @@ import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
@@ -442,6 +443,12 @@ public class RESTCatalog implements Catalog {
             checkNotSystemTable(identifier, "createTable");
             validateCreateTable(schema);
             createExternalTablePathIfNotExist(schema);
+
+            // For external tables, create schema file on client side before sending to server
+            if (isExternalTable(schema)) {
+                createExternalTableSchema(schema);
+            }
+
             api.createTable(identifier, schema);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
@@ -1007,5 +1014,20 @@ public class RESTCatalog implements Catalog {
                 }
             }
         }
+    }
+
+    private boolean isExternalTable(Schema schema) {
+        Map<String, String> options = schema.options();
+        return options.containsKey(CoreOptions.PATH.key());
+    }
+
+    private void createExternalTableSchema(Schema schema) throws Exception {
+        Map<String, String> options = schema.options();
+        Path externalPath = new Path(options.get(PATH.key()));
+
+        SchemaManager schemaManager =
+                new SchemaManager(fileIOFromOptions(externalPath), externalPath);
+
+        schemaManager.createTable(schema, true);
     }
 }

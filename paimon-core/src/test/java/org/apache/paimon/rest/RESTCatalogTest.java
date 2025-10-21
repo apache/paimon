@@ -2590,7 +2590,14 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         // Create database and external table
         restCatalog.createDatabase("test_external_table_db", true);
-        Identifier identifier = Identifier.create("test_external_table_db", "external_test_table");
+        Identifier identifier =
+                Identifier.create("test_external_table_db", "external_test_table_with_oss");
+
+        try {
+            catalog.dropTable(identifier, true);
+        } catch (Exception e) {
+            // Ignore drop errors - table might not exist
+        }
         catalog.createTable(identifier, externalTableSchema, false);
 
         // Verify table exists
