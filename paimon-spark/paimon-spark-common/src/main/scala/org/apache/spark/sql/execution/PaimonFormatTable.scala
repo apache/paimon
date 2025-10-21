@@ -24,6 +24,7 @@ import org.apache.paimon.spark.write.BaseWriteBuilder
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.TwoPhaseCommitMessage
 import org.apache.paimon.table.sink.BatchTableWrite
+import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.StringUtils
 
 import org.apache.hadoop.fs.Path
@@ -320,12 +321,14 @@ class PartitionedJsonTable(
 }
 
 case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: StructType)
-  extends BaseWriteBuilder(table.partitionType())
+  extends BaseWriteBuilder(table)
   with SupportsOverwrite
   with SupportsDynamicOverwrite {
 
   private var overwriteDynamic = false
   private var overwritePartitions: Option[Map[String, String]] = None
+
+  override def partitionRowType(): RowType = table.partitionType
 
   override def build: Write = new Write() {
     override def toBatch: BatchWrite = {

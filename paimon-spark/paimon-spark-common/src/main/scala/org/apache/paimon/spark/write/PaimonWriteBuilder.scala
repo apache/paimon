@@ -21,18 +21,20 @@ package org.apache.paimon.spark.write
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{InsertInto, Overwrite, SaveMode}
 import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.connector.write.{SupportsOverwrite, WriteBuilder}
 import org.apache.spark.sql.sources._
 
 class PaimonWriteBuilder(table: FileStoreTable, options: Options)
-  extends BaseWriteBuilder(table.schema().logicalPartitionType())
+  extends BaseWriteBuilder(table)
   with SupportsOverwrite {
 
   private var saveMode: SaveMode = InsertInto
 
   override def build = new PaimonWrite(table, saveMode, options)
 
+  override def partitionRowType(): RowType = table.schema().logicalPartitionType()
   override def overwrite(filters: Array[Filter]): WriteBuilder = {
     failIfCanNotOverwrite(filters)
 
