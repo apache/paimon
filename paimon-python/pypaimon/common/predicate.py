@@ -27,7 +27,6 @@ from pyarrow import compute as pyarrow_compute
 from pyarrow import dataset as pyarrow_dataset
 
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.internal_row import InternalRow
 
 
@@ -74,25 +73,15 @@ class Predicate:
         if self.method == 'or':
             return any(p.test_by_simple_stats(stat, row_count) for p in self.literals)
 
-        # Get null count using the mapped index
-        null_count = stat.null_counts[self.index] if stat.null_counts and self.index < len(
-            stat.null_counts) else 0
+        null_count = stat.null_counts[self.index]
 
         if self.method == 'isNull':
             return null_count is not None and null_count > 0
         if self.method == 'isNotNull':
             return null_count is None or row_count is None or null_count < row_count
 
-        if not isinstance(stat.min_values, GenericRow):
-            # Parse field values using BinaryRow's direct field access by name
-            min_value = stat.min_values.get_field(self.index)
-            max_value = stat.max_values.get_field(self.index)
-        else:
-            # TODO transform partition to BinaryRow
-            min_values = stat.min_values.to_dict()
-            max_values = stat.max_values.to_dict()
-            min_value = min_values[self.field]
-            max_value = max_values[self.field]
+        min_value = stat.min_values.get_field(self.index)
+        max_value = stat.max_values.get_field(self.index)
 
         if min_value is None or max_value is None or (null_count is not None and null_count == row_count):
             # invalid stats, skip validation

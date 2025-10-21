@@ -48,7 +48,7 @@ class FullStartingScanner(StartingScanner):
         self.manifest_file_manager = ManifestFileManager(table)
 
         self.primary_key_predicate = trim_and_transform_predicate(
-            self.predicate, self.table.field_names, self.table.table_schema.get_trimmed_primary_keys())
+            self.predicate, self.table.field_names, self.table.trimmed_primary_keys)
 
         self.partition_key_predicate = trim_and_transform_predicate(
             self.predicate, self.table.field_names, self.table.partition_keys)

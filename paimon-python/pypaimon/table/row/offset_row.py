@@ -47,9 +47,6 @@ class OffsetRow(InternalRow):
             raise IndexError(f"Position {pos} is out of bounds for row arity {self.arity}")
         return self.row_tuple[self.offset + pos]
 
-    def is_null_at(self, pos: int) -> bool:
-        return self.get_field(pos) is None
-
     def get_row_kind(self) -> RowKind:
         return RowKind(self.row_kind_byte)
 

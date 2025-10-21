@@ -45,9 +45,6 @@ class GenericRow(InternalRow):
             raise IndexError(f"Position {pos} is out of bounds for row arity {len(self.values)}")
         return self.values[pos]
 
-    def is_null_at(self, pos: int) -> bool:
-        return self.get_field(pos) is None
-
     def get_row_kind(self) -> RowKind:
         return self.row_kind
 

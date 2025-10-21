@@ -54,8 +54,5 @@ class BinaryRow(InternalRow):
     def get_row_kind(self) -> RowKind:
         return self.row_kind
 
-    def is_null_at(self, pos: int) -> bool:
-        return self.get_field(pos) is None
-
     def __len__(self):
         return self.arity

@@ -50,13 +50,6 @@ class ProjectedRow(InternalRow):
             return None
         return self.row.get_field(self.index_mapping[pos])
 
-    def is_null_at(self, pos: int) -> bool:
-        """Returns true if the element is null at the given position."""
-        if self.index_mapping[pos] < 0:
-            # TODO move this logical to hive
-            return True
-        return self.row.is_null_at(self.index_mapping[pos])
-
     def get_row_kind(self) -> RowKind:
         """Returns the kind of change that this row describes in a changelog."""
         return self.row.get_row_kind()

@@ -49,7 +49,12 @@ class FileStoreTable(Table):
         self.field_names = [field.name for field in table_schema.fields]
         self.field_dict = {field.name: field for field in self.fields}
         self.primary_keys = table_schema.primary_keys
+        self.primary_keys_fields = [self.field_dict[name] for name in self.primary_keys]
         self.partition_keys = table_schema.partition_keys
+        self.partition_keys_fields = [self.field_dict[name] for name in self.partition_keys]
+        self.trimmed_primary_keys = [pk for pk in self.primary_keys if pk not in self.partition_keys]
+        self.trimmed_primary_keys_fields = [self.field_dict[name] for name in self.trimmed_primary_keys]
+
         self.options = table_schema.options
         self.cross_partition_update = self.table_schema.cross_partition_update()
         self.is_primary_key_table = bool(self.primary_keys)
