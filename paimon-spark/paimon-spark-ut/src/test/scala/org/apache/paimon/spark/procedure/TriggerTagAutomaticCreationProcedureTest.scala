@@ -60,6 +60,7 @@ class TriggerTagAutomaticCreationProcedureTest extends PaimonSparkTestBase {
                 |USING PAIMON
                 |TBLPROPERTIES (
                 |'primary-key'='id',
+                |'snapshot.ignore-empty-commit'='false',
                 |'tag.automatic-creation'='process-time',
                 |'tag.creation-period'='daily',
                 |'tag.creation-delay'='10 m',
