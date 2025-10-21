@@ -22,8 +22,9 @@ import org.apache.paimon.fs.TwoPhaseOutputStream
 import org.apache.paimon.spark.{FormatTableScanBuilder, SparkInternalRowWrapper, SparkTypeUtils}
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.table.FormatTable
-import org.apache.paimon.table.format.{FormatBatchWriteBuilder, TwoPhaseCommitMessage}
+import org.apache.paimon.table.format.TwoPhaseCommitMessage
 import org.apache.paimon.table.sink.BatchTableWrite
+import org.apache.paimon.utils.StringUtils
 
 import org.apache.hadoop.fs.Path
 import org.apache.spark.internal.Logging
@@ -32,6 +33,7 @@ import org.apache.spark.sql.catalyst.{InternalRow, SQLConfHelper}
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Literal}
 import org.apache.spark.sql.connector.catalog.{SupportsPartitionManagement, SupportsRead, SupportsWrite, TableCapability}
 import org.apache.spark.sql.connector.catalog.TableCapability.{ACCEPT_ANY_SCHEMA, BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
+import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{BatchWrite, DataWriter, DataWriterFactory, LogicalWriteInfo, PhysicalWriteInfo, SupportsDynamicOverwrite, SupportsOverwrite, Write, WriteBuilder, WriterCommitMessage}
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite
@@ -133,6 +135,10 @@ trait PartitionedFormatTable extends SupportsPartitionManagement {
   val fileIndex: PartitioningAwareFileIndex
 
   override def partitionSchema(): StructType = partitionSchema_
+
+  override def partitioning(): Array[Transform] = {
+    partitionSchema().fields.map(f => Expressions.identity(StringUtils.quote(f.name))).toArray
+  }
 
   override def listPartitionIdentifiers(
       names: Array[String],
