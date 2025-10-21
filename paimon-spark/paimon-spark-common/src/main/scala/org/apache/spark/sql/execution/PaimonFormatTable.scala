@@ -20,6 +20,7 @@ package org.apache.spark.sql.execution
 
 import org.apache.paimon.fs.TwoPhaseOutputStream
 import org.apache.paimon.spark.{PaimonFormatTableScanBuilder, SparkInternalRowWrapper, SparkTypeUtils}
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.{FormatBatchWriteBuilder, TwoPhaseCommitMessage}
 import org.apache.paimon.table.sink.BatchTableWrite
@@ -27,12 +28,12 @@ import org.apache.paimon.table.sink.BatchTableWrite
 import org.apache.hadoop.fs.Path
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
+import org.apache.spark.sql.catalyst.{InternalRow, SQLConfHelper}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Literal}
 import org.apache.spark.sql.connector.catalog.{SupportsPartitionManagement, SupportsRead, SupportsWrite, TableCapability}
-import org.apache.spark.sql.connector.catalog.TableCapability.{BATCH_READ, BATCH_WRITE}
+import org.apache.spark.sql.connector.catalog.TableCapability.{ACCEPT_ANY_SCHEMA, BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
 import org.apache.spark.sql.connector.read.ScanBuilder
-import org.apache.spark.sql.connector.write.{BatchWrite, DataWriter, DataWriterFactory, LogicalWriteInfo, PhysicalWriteInfo, Write, WriteBuilder, WriterCommitMessage}
+import org.apache.spark.sql.connector.write.{BatchWrite, DataWriter, DataWriterFactory, LogicalWriteInfo, PhysicalWriteInfo, SupportsDynamicOverwrite, SupportsOverwrite, Write, WriteBuilder, WriterCommitMessage}
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.datasources.v2.csv.{CSVScanBuilder, CSVTable}
@@ -40,6 +41,7 @@ import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable
 import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
+import org.apache.spark.sql.sources.{And, Filter}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -138,7 +140,7 @@ trait PartitionedFormatTable extends SupportsPartitionManagement {
     val partitionFilters = names.zipWithIndex.map {
       case (name, index) =>
         val f = partitionSchema().apply(name)
-        EqualTo(
+        org.apache.spark.sql.catalyst.expressions.EqualTo(
           AttributeReference(f.name, f.dataType, f.nullable)(),
           Literal(ident.get(index, f.dataType), f.dataType))
     }.toSeq
@@ -191,7 +193,12 @@ case class PaimonFormatTable(
   }
 
   override def capabilities(): util.Set[TableCapability] = {
-    util.EnumSet.of(BATCH_READ, BATCH_WRITE)
+    util.EnumSet.of(
+      BATCH_READ,
+      BATCH_WRITE,
+      OVERWRITE_DYNAMIC,
+      ACCEPT_ANY_SCHEMA,
+      OVERWRITE_BY_FILTER)
   }
 
   override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
@@ -304,7 +311,15 @@ class PartitionedJsonTable(
 }
 
 case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: StructType)
-  extends WriteBuilder {
+  extends WriteBuilder
+  with ExpressionHelper
+  with SQLConfHelper
+  with SupportsOverwrite
+  with SupportsDynamicOverwrite {
+
+  private var overwriteDynamic = false
+  private var overwritePartitions: Option[Map[String, String]] = None
+
   override def build: Write = new Write() {
     override def toBatch: BatchWrite = {
       FormatTableBatchWrite(table, writeSchema)
@@ -313,6 +328,42 @@ case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: Struc
     override def toStreaming: StreamingWrite = {
       throw new UnsupportedOperationException("FormatTable doesn't support streaming write")
     }
+  }
+
+  override def overwrite(filters: Array[Filter]): WriteBuilder = {
+    if (overwriteDynamic) {
+      throw new IllegalArgumentException("Cannot overwrite dynamically and by filter both")
+    }
+
+    val conjunctiveFilters = if (filters.nonEmpty) {
+      Some(filters.reduce((l, r) => And(l, r)))
+    } else {
+      None
+    }
+
+    if (isTruncate(conjunctiveFilters.get)) {
+      overwritePartitions = Option.apply(Map.empty[String, String])
+    } else {
+      overwritePartitions =
+        Option.apply(convertPartitionFilterToMap(conjunctiveFilters.get, table.partitionType()))
+    }
+
+    this
+  }
+
+  override def overwriteDynamicPartitions(): WriteBuilder = {
+    if (overwritePartitions.exists(_.nonEmpty)) {
+      throw new IllegalArgumentException("Cannot overwrite dynamically and by filter both")
+    }
+
+    overwriteDynamic = true
+    overwritePartitions = Option.apply(Map.empty[String, String])
+    this
+  }
+
+  protected def failWithReason(filter: Filter): Unit = {
+    throw new RuntimeException(
+      s"Only support Overwrite filters with Equal and EqualNullSafe, but got: $filter")
   }
 }
 

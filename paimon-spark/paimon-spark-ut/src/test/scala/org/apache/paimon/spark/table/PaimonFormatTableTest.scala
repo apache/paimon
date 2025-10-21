@@ -61,6 +61,35 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
+  test("PaimonFormatTableRead table: csv insert overwrite") {
+    val tableName = "paimon_overwrite_yt"
+    withTable(tableName) {
+      spark.sql(
+        s"""
+           |CREATE TABLE $tableName (a INT, b INT, c STRING)
+           |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon', 'file.compression'='none')
+           |PARTITIONED BY (a)
+           |""".stripMargin)
+      spark.sql(s"DESCRIBE FORMATTED $tableName").show(100, false)
+
+      val columns = spark.catalog.listColumns(tableName).collect()
+      columns.foreach {
+        col =>
+          println(s"Column: ${col.name}, Type: ${col.dataType}, IsPartition: ${col.isPartition}")
+      }
+
+      val partitionColumns = columns.filter(_.isPartition).map(_.name)
+      println(s"partition: ${partitionColumns.mkString(", ")}")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      table.fileIO().mkdirs(new Path(table.location()))
+      spark.sql(s"INSERT OVERWRITE $tableName PARTITION (a = 1)  (b, c)  VALUES (5, '5'), (7, '7')")
+      checkAnswer(
+        spark.sql(s"SELECT a, b, c FROM $tableName ORDER BY a, b"),
+        Row(1, 5, "5") :: Row(1, 7, "7") :: Nil)
+    }
+  }
+
   test("PaimonFormatTableRead table: csv with field-delimiter") {
     val tableName = "paimon_format_test_csv_options"
     withTable(tableName) {
