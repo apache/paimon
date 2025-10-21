@@ -26,7 +26,6 @@ class PredicateBuilder:
     """Implementation of PredicateBuilder using Predicate."""
 
     def __init__(self, row_field: List[DataField]):
-        self.row_field = row_field
         self.field_names = [field.name for field in row_field]
 
     def _get_field_index(self, field: str) -> int:
