@@ -17,12 +17,14 @@
 ################################################################################
 
 import struct
-from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from typing import Any, List
+from typing import Any, List, Union
+
+from dataclasses import dataclass
 
 from pypaimon.schema.data_types import AtomicType, DataField, DataType
+from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.internal_row import InternalRow, RowKind
 from pypaimon.table.row.blob import BlobData
 
@@ -38,7 +40,7 @@ class GenericRow(InternalRow):
     def to_dict(self):
         return {self.fields[i].name: self.values[i] for i in range(len(self.fields))}
 
-    def get_field(self, pos: int):
+    def get_field(self, pos: int) -> Any:
         if pos >= len(self.values):
             raise IndexError(f"Position {pos} is out of bounds for row arity {len(self.values)}")
         return self.values[pos]
@@ -74,28 +76,28 @@ class GenericRowDeserializer:
             actual_data = bytes_data[4:]
 
         fields = []
-        null_bits_size_in_bytes = cls._calculate_bit_set_width_in_bytes(arity)
+        null_bits_size_in_bytes = cls.calculate_bit_set_width_in_bytes(arity)
         for i, data_field in enumerate(data_fields):
             value = None
-            if not cls._is_null_at(actual_data, 0, i):
-                value = cls._parse_field_value(actual_data, 0, null_bits_size_in_bytes, i, data_field.type)
+            if not cls.is_null_at(actual_data, 0, i):
+                value = cls.parse_field_value(actual_data, 0, null_bits_size_in_bytes, i, data_field.type)
             fields.append(value)
 
         return GenericRow(fields, data_fields, RowKind(actual_data[0]))
 
     @classmethod
-    def _calculate_bit_set_width_in_bytes(cls, arity: int) -> int:
+    def calculate_bit_set_width_in_bytes(cls, arity: int) -> int:
         return ((arity + 63 + cls.HEADER_SIZE_IN_BITS) // 64) * 8
 
     @classmethod
-    def _is_null_at(cls, bytes_data: bytes, offset: int, pos: int) -> bool:
+    def is_null_at(cls, bytes_data: bytes, offset: int, pos: int) -> bool:
         index = pos + cls.HEADER_SIZE_IN_BITS
         byte_index = offset + (index // 8)
         bit_index = index % 8
         return (bytes_data[byte_index] & (1 << bit_index)) != 0
 
     @classmethod
-    def _parse_field_value(
+    def parse_field_value(
             cls,
             bytes_data: bytes,
             base_offset: int,
@@ -264,17 +266,19 @@ class GenericRowSerializer:
     MAX_FIX_PART_DATA_SIZE = 7
 
     @classmethod
-    def to_bytes(cls, binary_row: GenericRow) -> bytes:
-        arity = len(binary_row.fields)
+    def to_bytes(cls, row: Union[GenericRow, BinaryRow]) -> bytes:
+        if isinstance(row, BinaryRow):
+            return row.data
+        arity = len(row.fields)
         null_bits_size_in_bytes = cls._calculate_bit_set_width_in_bytes(arity)
         fixed_part_size = null_bits_size_in_bytes + arity * 8
         fixed_part = bytearray(fixed_part_size)
-        fixed_part[0] = binary_row.row_kind.value
+        fixed_part[0] = row.row_kind.value
 
         variable_part_data = []
         current_variable_offset = 0
 
-        for i, (value, field) in enumerate(zip(binary_row.values, binary_row.fields)):
+        for i, (value, field) in enumerate(zip(row.values, row.fields)):
             field_fixed_offset = null_bits_size_in_bytes + i * 8
 
             if value is None:

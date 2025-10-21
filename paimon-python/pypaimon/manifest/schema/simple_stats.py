@@ -21,12 +21,13 @@ from typing import List, Optional
 from typing import ClassVar
 
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.internal_row import InternalRow
 
 
 @dataclass
 class SimpleStats:
-    min_values: GenericRow
-    max_values: GenericRow
+    min_values: InternalRow
+    max_values: InternalRow
     null_counts: Optional[List[int]]
 
     _empty_stats: ClassVar[object] = None

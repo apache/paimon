@@ -27,6 +27,7 @@ from pyarrow import compute as pyarrow_compute
 from pyarrow import dataset as pyarrow_dataset
 
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.internal_row import InternalRow
 
 
@@ -67,32 +68,31 @@ class Predicate:
         raise ValueError(f"Unsupported predicate method: {self.method}")
 
     def test_by_simple_stats(self, stat: SimpleStats, row_count: int) -> bool:
-        return self.test_by_stats({
-            "min_values": stat.min_values.to_dict(),
-            "max_values": stat.max_values.to_dict(),
-            "null_counts": {
-                stat.min_values.fields[i].name: stat.null_counts[i] for i in range(len(stat.min_values.fields))
-            },
-            "row_count": row_count,
-        })
-
-    def test_by_stats(self, stat: Dict) -> bool:
+        """Test predicate against BinaryRow stats with denseIndexMapping like Java implementation."""
         if self.method == 'and':
-            return all(p.test_by_stats(stat) for p in self.literals)
+            return all(p.test_by_simple_stats(stat, row_count) for p in self.literals)
         if self.method == 'or':
-            t = any(p.test_by_stats(stat) for p in self.literals)
-            return t
+            return any(p.test_by_simple_stats(stat, row_count) for p in self.literals)
 
-        null_count = stat["null_counts"][self.field]
-        row_count = stat["row_count"]
+        # Get null count using the mapped index
+        null_count = stat.null_counts[self.index] if stat.null_counts and self.index < len(
+            stat.null_counts) else 0
 
         if self.method == 'isNull':
             return null_count is not None and null_count > 0
         if self.method == 'isNotNull':
             return null_count is None or row_count is None or null_count < row_count
 
-        min_value = stat["min_values"][self.field]
-        max_value = stat["max_values"][self.field]
+        if not isinstance(stat.min_values, GenericRow):
+            # Parse field values using BinaryRow's direct field access by name
+            min_value = stat.min_values.get_field(self.index)
+            max_value = stat.max_values.get_field(self.index)
+        else:
+            # TODO transform partition to BinaryRow
+            min_values = stat.min_values.to_dict()
+            max_values = stat.max_values.to_dict()
+            min_value = min_values[self.field]
+            max_value = max_values[self.field]
 
         if min_value is None or max_value is None or (null_count is not None and null_count == row_count):
             # invalid stats, skip validation
@@ -164,7 +164,6 @@ class RegisterMeta(ABCMeta):
 
 
 class Tester(ABC, metaclass=RegisterMeta):
-
     name = None
 
     @abstractmethod
@@ -187,7 +186,6 @@ class Tester(ABC, metaclass=RegisterMeta):
 
 
 class Equal(Tester):
-
     name = 'equal'
 
     def test_by_value(self, val, literals) -> bool:
@@ -201,7 +199,6 @@ class Equal(Tester):
 
 
 class NotEqual(Tester):
-
     name = "notEqual"
 
     def test_by_value(self, val, literals) -> bool:
@@ -215,7 +212,6 @@ class NotEqual(Tester):
 
 
 class LessThan(Tester):
-
     name = "lessThan"
 
     def test_by_value(self, val, literals) -> bool:
@@ -229,7 +225,6 @@ class LessThan(Tester):
 
 
 class LessOrEqual(Tester):
-
     name = "lessOrEqual"
 
     def test_by_value(self, val, literals) -> bool:
@@ -243,7 +238,6 @@ class LessOrEqual(Tester):
 
 
 class GreaterThan(Tester):
-
     name = "greaterThan"
 
     def test_by_value(self, val, literals) -> bool:
@@ -257,7 +251,6 @@ class GreaterThan(Tester):
 
 
 class GreaterOrEqual(Tester):
-
     name = "greaterOrEqual"
 
     def test_by_value(self, val, literals) -> bool:
@@ -271,7 +264,6 @@ class GreaterOrEqual(Tester):
 
 
 class In(Tester):
-
     name = "in"
 
     def test_by_value(self, val, literals) -> bool:
@@ -285,7 +277,6 @@ class In(Tester):
 
 
 class NotIn(Tester):
-
     name = "notIn"
 
     def test_by_value(self, val, literals) -> bool:
@@ -299,7 +290,6 @@ class NotIn(Tester):
 
 
 class Between(Tester):
-
     name = "between"
 
     def test_by_value(self, val, literals) -> bool:
@@ -313,7 +303,6 @@ class Between(Tester):
 
 
 class StartsWith(Tester):
-
     name = "startsWith"
 
     def test_by_value(self, val, literals) -> bool:
@@ -329,7 +318,6 @@ class StartsWith(Tester):
 
 
 class EndsWith(Tester):
-
     name = "endsWith"
 
     def test_by_value(self, val, literals) -> bool:
@@ -343,7 +331,6 @@ class EndsWith(Tester):
 
 
 class Contains(Tester):
-
     name = "contains"
 
     def test_by_value(self, val, literals) -> bool:
@@ -357,7 +344,6 @@ class Contains(Tester):
 
 
 class IsNull(Tester):
-
     name = "isNull"
 
     def test_by_value(self, val, literals) -> bool:
@@ -371,7 +357,6 @@ class IsNull(Tester):
 
 
 class IsNotNull(Tester):
-
     name = "isNotNull"
 
     def test_by_value(self, val, literals) -> bool:

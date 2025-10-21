@@ -37,7 +37,7 @@ from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, PyarrowFieldParser)
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
-from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
 from pypaimon.write.file_store_commit import FileStoreCommit
 
 
@@ -226,8 +226,10 @@ class ReaderBasicTest(unittest.TestCase):
         manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
             manifest_files[0].file_name, lambda row: table_scan.starting_scanner._filter_manifest_entry(row), False)
-        min_value_stats = manifest_entries[0].file.value_stats.min_values.values
-        max_value_stats = manifest_entries[0].file.value_stats.max_values.values
+        min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
+                                                            table.fields).values
+        max_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.max_values.data,
+                                                            table.fields).values
         expected_min_values = [col[0].as_py() for col in expect_data]
         expected_max_values = [col[1].as_py() for col in expect_data]
         self.assertEqual(min_value_stats, expected_min_values)
@@ -649,23 +651,27 @@ class ReaderBasicTest(unittest.TestCase):
         # Verify value_stats structure based on the logic
         if value_stats_cols is None:
             # Should use all table fields - verify we have data for all fields
-            self.assertEqual(len(read_entry.file.value_stats.min_values.values), expected_fields_count)
-            self.assertEqual(len(read_entry.file.value_stats.max_values.values), expected_fields_count)
+            self.assertEqual(read_entry.file.value_stats.min_values.arity, expected_fields_count)
+            self.assertEqual(read_entry.file.value_stats.min_values.arity, expected_fields_count)
             self.assertEqual(len(read_entry.file.value_stats.null_counts), expected_fields_count)
         elif not value_stats_cols:  # Empty list
             # Should use empty fields - verify we have no field data
-            self.assertEqual(len(read_entry.file.value_stats.min_values.values), 0)
-            self.assertEqual(len(read_entry.file.value_stats.max_values.values), 0)
+            self.assertEqual(read_entry.file.value_stats.min_values.arity, 0)
+            self.assertEqual(read_entry.file.value_stats.max_values.arity, 0)
             self.assertEqual(len(read_entry.file.value_stats.null_counts), 0)
         else:
             # Should use specified fields - verify we have data for specified fields only
-            self.assertEqual(len(read_entry.file.value_stats.min_values.values), expected_fields_count)
-            self.assertEqual(len(read_entry.file.value_stats.max_values.values), expected_fields_count)
+            self.assertEqual(read_entry.file.value_stats.min_values.arity, expected_fields_count)
+            self.assertEqual(read_entry.file.value_stats.max_values.arity, expected_fields_count)
             self.assertEqual(len(read_entry.file.value_stats.null_counts), expected_fields_count)
 
         # Verify the actual values match what we expect
         if expected_fields_count > 0:
-            self.assertEqual(read_entry.file.value_stats.min_values.values, min_values)
-            self.assertEqual(read_entry.file.value_stats.max_values.values, max_values)
+            self.assertEqual(
+                GenericRowDeserializer.from_bytes(read_entry.file.value_stats.min_values.data, test_fields).values,
+                min_values)
+            self.assertEqual(
+                GenericRowDeserializer.from_bytes(read_entry.file.value_stats.max_values.data, test_fields).values,
+                max_values)
 
         self.assertEqual(read_entry.file.value_stats.null_counts, null_counts)

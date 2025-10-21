@@ -39,7 +39,7 @@ class SchemaManager:
                 return None
 
             max_version = max(versions)
-            return self._read_schema(max_version)
+            return self.read_schema(max_version)
         except Exception as e:
             raise RuntimeError(f"Failed to load schema from path: {self.schema_path}") from e
 
@@ -64,7 +64,7 @@ class SchemaManager:
     def _to_schema_path(self, schema_id: int) -> Path:
         return self.schema_path / f"{self.schema_prefix}{schema_id}"
 
-    def _read_schema(self, schema_id: int) -> Optional['TableSchema']:
+    def read_schema(self, schema_id: int) -> Optional['TableSchema']:
         schema_path = self._to_schema_path(schema_id)
         if not self.file_io.exists(schema_path):
             return None

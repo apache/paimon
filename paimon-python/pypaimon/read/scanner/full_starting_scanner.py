@@ -32,6 +32,7 @@ from pypaimon.read.scanner.starting_scanner import StartingScanner
 from pypaimon.read.split import Split
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 
 
 class FullStartingScanner(StartingScanner):
@@ -61,6 +62,19 @@ class FullStartingScanner(StartingScanner):
         self.only_read_real_buckets = True if int(
             self.table.options.get('bucket', -1)) == BucketMode.POSTPONE_BUCKET.value else False
         self.data_evolution = self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true'
+
+        self._schema_cache = {}
+
+        def schema_fields_func(schema_id: int):
+            if schema_id not in self._schema_cache:
+                schema = self.table.schema_manager.read_schema(schema_id)
+                self._schema_cache[schema_id] = schema
+            return self._schema_cache[schema_id].fields if self._schema_cache[schema_id] else []
+
+        self.simple_stats_evolutions = SimpleStatsEvolutions(
+            schema_fields_func,
+            self.table.table_schema.id
+        )
 
     def scan(self) -> Plan:
         file_entries = self.plan_files()
@@ -215,22 +229,35 @@ class FullStartingScanner(StartingScanner):
             return False
         if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
             return False
+
+        # Get SimpleStatsEvolution for this schema
+        evolution = self.simple_stats_evolutions.get_or_create(entry.file.schema_id)
+
+        # Apply evolution to stats
         if self.table.is_primary_key_table:
             predicate = self.primary_key_predicate
             stats = entry.file.key_stats
+            stats_fields = None
         else:
             predicate = self.predicate
             stats = entry.file.value_stats
+            if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
+                stats_fields = entry.file.write_cols
+            else:
+                stats_fields = entry.file.value_stats_cols
         if not predicate:
             return True
-        return predicate.test_by_stats({
-            "min_values": stats.min_values.to_dict(),
-            "max_values": stats.max_values.to_dict(),
-            "null_counts": {
-                stats.min_values.fields[i].name: stats.null_counts[i] for i in range(len(stats.min_values.fields))
-            },
-            "row_count": entry.file.row_count
-        })
+        evolved_stats = evolution.evolution(
+            stats,
+            entry.file.row_count,
+            stats_fields
+        )
+
+        # Test predicate against evolved stats
+        return predicate.test_by_simple_stats(
+            evolved_stats,
+            entry.file.row_count
+        )
 
     def _create_append_only_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
         partitioned_files = defaultdict(list)
