@@ -145,7 +145,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     @Override
     public void withWriteType(RowType writeType) {
         this.writeType = writeType;
-        this.withBlob = rowType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
+        this.withBlob = writeType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
         int fullCount = rowType.getFieldCount();
         List<String> fullNames = rowType.getFieldNames();
         this.writeCols = writeType.getFieldNames();
