@@ -59,7 +59,6 @@ class SimpleStatsEvolution:
             null_counts = self._project_array(null_counts, dense_index_mapping)
 
         if self.index_mapping is not None:
-            # TODO support schema evolution
             min_values = self._project_row(min_values, self.index_mapping)
             max_values = self._project_row(max_values, self.index_mapping)
 

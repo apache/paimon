@@ -40,7 +40,6 @@ class SimpleStatsEvolutions:
         if self.table_schema_id == data_schema_id:
             evolution = SimpleStatsEvolution(self.schema_fields(data_schema_id), None, None)
         else:
-            # TODO support schema evolution
             if self.table_fields is None:
                 self.table_fields = self.table_data_fields
 

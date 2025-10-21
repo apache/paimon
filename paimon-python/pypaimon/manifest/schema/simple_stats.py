@@ -17,7 +17,7 @@
 ################################################################################
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 from typing import ClassVar
 
 from pypaimon.table.row.generic_row import GenericRow
@@ -28,7 +28,8 @@ from pypaimon.table.row.internal_row import InternalRow
 class SimpleStats:
     min_values: InternalRow
     max_values: InternalRow
-    null_counts: Optional[List[int]]
+    # TODO convert null counts to InternalArray
+    null_counts: List[int]
 
     _empty_stats: ClassVar[object] = None
 
