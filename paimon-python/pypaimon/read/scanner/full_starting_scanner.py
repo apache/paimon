@@ -235,29 +235,28 @@ class FullStartingScanner(StartingScanner):
 
         # Apply evolution to stats
         if self.table.is_primary_key_table:
-            predicate = self.primary_key_predicate
-            stats = entry.file.key_stats
-            stats_fields = None
+            if not self.primary_key_predicate:
+                return True
+            return self.primary_key_predicate.test_by_simple_stats(
+                entry.file.key_stats,
+                entry.file.row_count
+            )
         else:
-            predicate = self.predicate
-            stats = entry.file.value_stats
+            if not self.predicate:
+                return True
             if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                 stats_fields = entry.file.write_cols
             else:
                 stats_fields = entry.file.value_stats_cols
-        if not predicate:
-            return True
-        evolved_stats = evolution.evolution(
-            stats,
-            entry.file.row_count,
-            stats_fields
-        )
-
-        # Test predicate against evolved stats
-        return predicate.test_by_simple_stats(
-            evolved_stats,
-            entry.file.row_count
-        )
+            evolved_stats = evolution.evolution(
+                entry.file.value_stats,
+                entry.file.row_count,
+                stats_fields
+            )
+            return self.predicate.test_by_simple_stats(
+                evolved_stats,
+                entry.file.row_count
+            )
 
     def _create_append_only_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
         partitioned_files = defaultdict(list)

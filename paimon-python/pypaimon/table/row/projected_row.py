@@ -46,7 +46,6 @@ class ProjectedRow(InternalRow):
     def get_field(self, pos: int) -> Any:
         """Returns the value at the given position."""
         if self.index_mapping[pos] < 0:
-            # TODO move this logical to hive
             return None
         return self.row.get_field(self.index_mapping[pos])
 
