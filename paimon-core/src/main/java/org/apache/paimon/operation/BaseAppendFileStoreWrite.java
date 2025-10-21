@@ -236,7 +236,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (ioManager == null) {
             return;
         }
-        if (writeType.getFieldTypes().stream().noneMatch(t -> t.is(BLOB))) {
+        if (writeType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB))) {
             return;
         }
         if (forceBufferSpill) {
