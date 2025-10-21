@@ -328,6 +328,22 @@ public class DataSplit implements Split {
                 rawConvertible);
     }
 
+    @Override
+    public String toString() {
+        return "{"
+                + "snapshotId="
+                + snapshotId
+                + ", partition=hash-"
+                + partition.hashCode()
+                + ", bucket="
+                + bucket
+                + ", rawConvertible="
+                + rawConvertible
+                + '}'
+                + "@"
+                + Integer.toHexString(hashCode());
+    }
+
     private void writeObject(ObjectOutputStream out) throws IOException {
         serialize(new DataOutputViewStreamWrapper(out));
     }
