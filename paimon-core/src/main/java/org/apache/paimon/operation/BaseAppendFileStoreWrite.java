@@ -79,6 +79,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private RowType writeType;
     private @Nullable List<String> writeCols;
     private boolean forceBufferSpill = false;
+    private boolean withBlob;
 
     public BaseAppendFileStoreWrite(
             FileIO fileIO,
@@ -101,6 +102,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.writeCols = null;
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
+        this.withBlob = rowType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
 
         this.fileIndexOptions = options.indexColumnsOptions();
     }
@@ -143,6 +145,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     @Override
     public void withWriteType(RowType writeType) {
         this.writeType = writeType;
+        this.withBlob = rowType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
         int fullCount = rowType.getFieldCount();
         List<String> fullNames = rowType.getFieldNames();
         this.writeCols = writeType.getFieldNames();
@@ -236,7 +239,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (ioManager == null) {
             return;
         }
-        if (writeType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB))) {
+        if (withBlob) {
             return;
         }
         if (forceBufferSpill) {
