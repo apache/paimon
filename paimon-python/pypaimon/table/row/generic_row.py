@@ -28,6 +28,7 @@ from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.internal_row import InternalRow, RowKind
 from pypaimon.table.row.blob import BlobData
 
+
 @dataclass
 class GenericRow(InternalRow):
 
