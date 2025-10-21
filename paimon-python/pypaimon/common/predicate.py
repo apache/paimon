@@ -36,7 +36,6 @@ class Predicate:
     method: str
     index: Optional[int]
     field: Optional[str]
-    field_type: Optional[pyarrow.DataType] = None
     literals: Optional[List[Any]] = None
 
     testers: ClassVar[Dict[str, Any]] = {}
@@ -46,7 +45,6 @@ class Predicate:
             method=self.method,
             index=index,
             field=self.field,
-            field_type=self.field_type,
             literals=self.literals)
 
     def new_literals(self, literals: List[Any]):
@@ -54,7 +52,6 @@ class Predicate:
             method=self.method,
             index=self.index,
             field=self.field,
-            field_type=self.field_type,
             literals=literals)
 
     def test(self, record: InternalRow) -> bool:

@@ -43,7 +43,6 @@ class PredicateBuilder:
             method=method,
             index=index,
             field=field,
-            field_type=self.row_field[index].type,
             literals=literals
         )
 
