@@ -26,6 +26,7 @@ import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.flink.log.LogSinkProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -118,7 +119,12 @@ public abstract class FlinkTableSinkBase
             throw new UnsupportedOperationException(
                     "Paimon doesn't support streaming INSERT OVERWRITE.");
         }
-
+        if (table instanceof FormatTable) {
+            FormatTable formatTable = (FormatTable) table;
+            return new PaimonDataStreamSinkProvider(
+                    (dataStream) ->
+                            new FlinkFormatTableDataStreamSink(formatTable).sinkFrom(dataStream));
+        }
         LogSinkProvider logSinkProvider = null;
         if (logStoreTableFactory != null) {
             logSinkProvider = logStoreTableFactory.createSinkProvider(this.context, context);
