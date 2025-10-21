@@ -24,6 +24,7 @@ import pandas as pd
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.table.row.generic_row import GenericRowDeserializer
 
 
 def _check_filtered_result(read_builder, expected_df):
@@ -454,20 +455,26 @@ class PredicateTest(unittest.TestCase):
             if split.partition.values == ["p1", 2]:
                 count += 1
                 self.assertEqual(len(split.files), 1)
-                min_values = split.files[0].key_stats.min_values.to_dict()
-                max_values = split.files[0].key_stats.max_values.to_dict()
+                min_values = GenericRowDeserializer.from_bytes(split.files[0].key_stats.min_values.data,
+                                                               table.fields).to_dict()
+                max_values = GenericRowDeserializer.from_bytes(split.files[0].key_stats.max_values.data,
+                                                               table.fields).to_dict()
                 self.assertTrue(min_values["key1"] == 1 and min_values["key2"] == "e"
                                 and max_values["key1"] == 4 and max_values["key2"] == "h")
             elif split.partition.values == ["p2", 2]:
                 count += 1
-                min_values = split.files[0].key_stats.min_values.to_dict()
-                max_values = split.files[0].key_stats.max_values.to_dict()
+                min_values = GenericRowDeserializer.from_bytes(split.files[0].key_stats.min_values.data,
+                                                               table.fields).to_dict()
+                max_values = GenericRowDeserializer.from_bytes(split.files[0].key_stats.max_values.data,
+                                                               table.fields).to_dict()
                 self.assertTrue(min_values["key1"] == 5 and min_values["key2"] == "a"
                                 and max_values["key1"] == 8 and max_values["key2"] == "d")
             elif split.partition.values == ["p1", 1]:
                 count += 1
-                min_values = split.files[0].key_stats.min_values.to_dict()
-                max_values = split.files[0].key_stats.max_values.to_dict()
+                min_values = GenericRowDeserializer.from_bytes(split.files[0].key_stats.min_values.data,
+                                                               table.fields).to_dict()
+                max_values = GenericRowDeserializer.from_bytes(split.files[0].key_stats.max_values.data,
+                                                               table.fields).to_dict()
                 self.assertTrue(min_values["key1"] == max_values["key1"] == 7
                                 and max_values["key2"] == max_values["key2"] == "b")
         self.assertEqual(count, 3)
