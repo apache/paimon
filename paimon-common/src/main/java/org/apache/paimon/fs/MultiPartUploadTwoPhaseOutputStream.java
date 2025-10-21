@@ -220,5 +220,10 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
                 LOG.warn("Failed to discard multipart upload with ID: {}", uploadId, e);
             }
         }
+
+        @Override
+        public String targetFilePath() {
+            return objectName;
+        }
     }
 }

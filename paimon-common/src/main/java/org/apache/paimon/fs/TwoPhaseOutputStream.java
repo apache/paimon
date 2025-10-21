@@ -51,5 +51,7 @@ public abstract class TwoPhaseOutputStream extends PositionOutputStream {
          * @throws IOException if an I/O error occurs during discard
          */
         void discard() throws IOException;
+
+        String targetFilePath();
     }
 }

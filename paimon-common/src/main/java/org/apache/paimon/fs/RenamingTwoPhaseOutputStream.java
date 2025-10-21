@@ -143,5 +143,10 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
                 discarded = true;
             }
         }
+
+        @Override
+        public String targetFilePath() {
+            return targetPath.toString();
+        }
     }
 }

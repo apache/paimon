@@ -47,6 +47,7 @@ import org.apache.spark.sql.sources.{And, Filter}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
+import java.io.FileNotFoundException
 import java.util
 
 import scala.collection.JavaConverters._
@@ -328,7 +329,7 @@ case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: Struc
 
   override def build: Write = new Write() {
     override def toBatch: BatchWrite = {
-      FormatTableBatchWrite(table, writeSchema)
+      FormatTableBatchWrite(table, writeSchema, overwritePartitions)
     }
 
     override def toStreaming: StreamingWrite = {
@@ -370,7 +371,10 @@ case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: Struc
   }
 }
 
-private case class FormatTableBatchWrite(table: FormatTable, writeSchema: StructType)
+private case class FormatTableBatchWrite(
+    table: FormatTable,
+    writeSchema: StructType,
+    overwritePartitions: Option[Map[String, String]])
   extends BatchWrite
   with Logging {
 
@@ -393,12 +397,49 @@ private case class FormatTableBatchWrite(table: FormatTable, writeSchema: Struct
 
     try {
       val start = System.currentTimeMillis()
+      if (overwritePartitions.isDefined && overwritePartitions.get.nonEmpty) {
+        val child = org.apache.paimon.partition.PartitionUtils
+          .buildPartitionName(overwritePartitions.get.asJava)
+        val partitionPath = new org.apache.paimon.fs.Path(table.location(), child)
+        deletePreviousDataFile(partitionPath)
+      } else if (overwritePartitions.isDefined && overwritePartitions.get.isEmpty) {
+        committers.foreach(
+          c => {
+            val filePath = c.targetFilePath()
+            val lastSeparatorIndex = filePath.lastIndexOf("/")
+            if (lastSeparatorIndex > 0) {
+              val partitionPath =
+                new org.apache.paimon.fs.Path(filePath.substring(0, lastSeparatorIndex))
+              deletePreviousDataFile(partitionPath)
+            }
+          })
+      }
       committers.foreach(_.commit())
       logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
     } catch {
       case e: Exception =>
         logError("Failed to commit FormatTable writes", e)
         throw e
+    }
+  }
+
+  def deletePreviousDataFile(partitionPath: org.apache.paimon.fs.Path): Unit = {
+    if (table.fileIO().exists(partitionPath)) {
+      val files = table.fileIO().listFiles(partitionPath, true)
+      files
+        .filter(f => !f.getPath.getName.startsWith(".") && !f.getPath.getName.startsWith("_"))
+        .foreach(
+          f => {
+            if (table.fileIO().exists(f.getPath)) {
+              try {
+                table.fileIO().deleteQuietly(f.getPath)
+              } catch {
+                case e: FileNotFoundException =>
+                  logInfo(s"Failed to delete file: ${f.getPath} as it does not exist")
+                case other => throw new RuntimeException(other)
+              }
+            }
+          })
     }
   }
 
