@@ -21,12 +21,14 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any, List, Union
 
+from dataclasses import dataclass
+
 from pypaimon.schema.data_types import AtomicType, DataField, DataType
 from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.internal_row import InternalRow, RowKind
 from pypaimon.table.row.blob import BlobData
 
-
+@dataclass
 class GenericRow(InternalRow):
 
     def __init__(self, values: List[Any], fields: List[DataField], row_kind: RowKind = RowKind.INSERT):
