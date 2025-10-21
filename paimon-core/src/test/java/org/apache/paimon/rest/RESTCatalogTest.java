@@ -29,6 +29,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.Function;
@@ -2566,6 +2567,104 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     @Override
     @Test
     public void testTableUUID() {}
+
+    @Test
+    public void testCreateExternalTable(@TempDir java.nio.file.Path path) throws Exception {
+        // Create external table with specified location
+        Path externalTablePath = new Path(path.toString(), "external_table_location");
+
+        Map<String, String> options = new HashMap<>();
+        options.put("type", TableType.TABLE.toString());
+        options.put("path", externalTablePath.toString());
+
+        Schema externalTableSchema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "name", DataTypes.STRING()),
+                                new DataField(2, "age", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "External table for testing");
+
+        // Create database and external table
+        restCatalog.createDatabase("test_external_table_db", true);
+        Identifier identifier = Identifier.create("test_external_table_db", "external_test_table");
+        catalog.createTable(identifier, externalTableSchema, false);
+
+        // Verify table exists
+        Table table = catalog.getTable(identifier);
+        assertThat(table).isNotNull();
+
+        // Verify table is external (path should be the specified external path)
+        FileIO fileIO = table.fileIO();
+        assertTrue(fileIO.exists(externalTablePath), "External table path should exist");
+
+        // Verify table metadata
+        assertThat(table.comment()).isEqualTo(Optional.of("External table for testing"));
+        assertThat(table.rowType().getFieldCount()).isEqualTo(3);
+        assertThat(table.rowType().getFieldNames()).containsExactly("id", "name", "age");
+
+        // Test writing data to external table
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        BatchTableCommit commit = writeBuilder.newCommit();
+
+        // Write test data
+        InternalRowSerializer serializer = InternalSerializers.create(table.rowType());
+        InternalRow row1 = GenericRow.of(100, BinaryString.fromString("Alice"), 25);
+        InternalRow row2 = GenericRow.of(200, BinaryString.fromString("Bob"), 30);
+
+        write.write(row1);
+        write.write(row2);
+        List<CommitMessage> commitMessages = write.prepareCommit();
+        commit.commit(commitMessages);
+        write.close();
+        commit.close();
+
+        // Verify data can be read from external table
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableRead read = readBuilder.newRead();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+
+        List<InternalRow> results = new ArrayList<>();
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader = read.createReader(split)) {
+                reader.forEachRemaining(results::add);
+            }
+        }
+
+        // Verify we can read data from external table (at least one row)
+        assertThat(results).isNotEmpty();
+
+        // Verify the data structure is correct
+        for (InternalRow row : results) {
+            assertThat(row.getInt(0)).isGreaterThan(0); // id should be positive
+            assertThat(row.getString(1).toString()).isNotEmpty(); // name should not be empty
+            assertThat(row.getInt(2)).isGreaterThan(0); // age should be positive
+        }
+
+        // Verify external table path still exists after operations
+        assertTrue(
+                fileIO.exists(externalTablePath),
+                "External table path should still exist after operations");
+
+        // Test dropping external table - data should remain
+        catalog.dropTable(identifier, false);
+
+        // Verify external table path still exists after drop (external table behavior)
+        assertTrue(
+                fileIO.exists(externalTablePath),
+                "External table path should still exist after drop");
+
+        // Clean up
+        try {
+            fileIO.deleteQuietly(externalTablePath);
+        } catch (Exception e) {
+            // Ignore cleanup errors
+        }
+    }
 
     protected void createTable(
             Identifier identifier, Map<String, String> options, List<String> partitionKeys)
