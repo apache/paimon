@@ -36,14 +36,12 @@ class BatchTableWrite:
         self.row_key_extractor = self.table.create_row_key_extractor()
         self.batch_committed = False
 
-    def write_arrow(self, table: pa.Table, row_kind: List[int] = None):
-        # TODO: support row_kind
+    def write_arrow(self, table: pa.Table):
         batches_iterator = table.to_batches()
         for batch in batches_iterator:
             self.write_arrow_batch(batch)
 
-    def write_arrow_batch(self, data: pa.RecordBatch, row_kind: List[int] = None):
-        # TODO: support row_kind
+    def write_arrow_batch(self, data: pa.RecordBatch):
         self._validate_pyarrow_schema(data.schema)
         partitions, buckets = self.row_key_extractor.extract_partition_bucket_batch(data)
 
