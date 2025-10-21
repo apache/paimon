@@ -23,6 +23,8 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.DataEvolutionFileReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -31,6 +33,7 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -383,6 +386,37 @@ public class DataEvolutionTableTest extends TableTestBase {
                     assertThat(r.getString(2).toString()).isEqualTo("c" + i.get());
                     i.incrementAndGet();
                 });
+    }
+
+    @Test
+    public void testPredicate() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("a"), BinaryString.fromString("b")));
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write.prepareCommit();
+            commit.commit(commitables);
+        }
+
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            write1.write(GenericRow.of(BinaryString.fromString("c")));
+
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, 0L);
+            commit.commit(commitables);
+        }
+
+        ReadBuilder readBuilder = getTableDefault().newReadBuilder();
+        PredicateBuilder predicateBuilder = new PredicateBuilder(schema.rowType());
+        Predicate predicate = predicateBuilder.notEqual(2, BinaryString.fromString("b"));
+        readBuilder.withFilter(predicate);
+        assertThat(((DataSplit) readBuilder.newScan().plan().splits().get(0)).dataFiles().size())
+                .isEqualTo(2);
     }
 
     protected Schema schemaDefault() {
