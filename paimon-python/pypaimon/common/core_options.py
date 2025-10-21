@@ -51,3 +51,7 @@ class CoreOptions(str, Enum):
     COMMIT_USER_PREFIX = "commit.user-prefix"
     ROW_TRACKING_ENABLED = "row-tracking.enabled"
     DATA_EVOLUTION_ENABLED = "data-evolution.enabled"
+
+    @staticmethod
+    def get_blob_as_descriptor(options: dict) -> bool:
+        return options.get(CoreOptions.FILE_BLOB_AS_DESCRIPTOR, "false").lower() == 'true'

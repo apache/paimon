@@ -419,7 +419,7 @@ class PredicateTest(unittest.TestCase):
         table_commit.close()
 
         # test filter by partition
-        predicate_builder: PredicateBuilder = table.new_read_builder().new_predicate_builder()
+        predicate_builder = table.new_read_builder().new_predicate_builder()
         p1 = predicate_builder.startswith('dt1', "p1")
         p2 = predicate_builder.is_in('dt1', ["p2"])
         p3 = predicate_builder.or_predicates([p1, p2])
@@ -433,7 +433,7 @@ class PredicateTest(unittest.TestCase):
         self.assertEqual(splits[1].partition.to_dict()["dt2"], 2)
 
         # test filter by stats
-        predicate_builder: PredicateBuilder = table.new_read_builder().new_predicate_builder()
+        predicate_builder = table.new_read_builder().new_predicate_builder()
         p1 = predicate_builder.equal('key1', 7)
         p2 = predicate_builder.is_in('key2', ["e", "f"])
         p3 = predicate_builder.or_predicates([p1, p2])
@@ -454,20 +454,20 @@ class PredicateTest(unittest.TestCase):
             if split.partition.values == ["p1", 2]:
                 count += 1
                 self.assertEqual(len(split.files), 1)
-                min_values = split.files[0].value_stats.min_values.to_dict()
-                max_values = split.files[0].value_stats.max_values.to_dict()
+                min_values = split.files[0].key_stats.min_values.to_dict()
+                max_values = split.files[0].key_stats.max_values.to_dict()
                 self.assertTrue(min_values["key1"] == 1 and min_values["key2"] == "e"
                                 and max_values["key1"] == 4 and max_values["key2"] == "h")
             elif split.partition.values == ["p2", 2]:
                 count += 1
-                min_values = split.files[0].value_stats.min_values.to_dict()
-                max_values = split.files[0].value_stats.max_values.to_dict()
+                min_values = split.files[0].key_stats.min_values.to_dict()
+                max_values = split.files[0].key_stats.max_values.to_dict()
                 self.assertTrue(min_values["key1"] == 5 and min_values["key2"] == "a"
                                 and max_values["key1"] == 8 and max_values["key2"] == "d")
             elif split.partition.values == ["p1", 1]:
                 count += 1
-                min_values = split.files[0].value_stats.min_values.to_dict()
-                max_values = split.files[0].value_stats.max_values.to_dict()
+                min_values = split.files[0].key_stats.min_values.to_dict()
+                max_values = split.files[0].key_stats.max_values.to_dict()
                 self.assertTrue(min_values["key1"] == max_values["key1"] == 7
                                 and max_values["key2"] == max_values["key2"] == "b")
         self.assertEqual(count, 3)

@@ -18,22 +18,28 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.table.InnerTable
+import org.apache.paimon.table.FormatTable
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.connector.read.Scan
-import org.apache.spark.sql.sources.Filter
+import org.apache.spark.sql.connector.read.{ScanBuilder, SupportsPushDownRequiredColumns}
+import org.apache.spark.sql.types.StructType
 
 import java.util.{List => JList}
 
-class PaimonScanBuilder(table: InnerTable)
-  extends PaimonBaseScanBuilder(table)
-  with PaimonBasePushDown {
+case class FormatTableScanBuilder(table: FormatTable)
+  extends ScanBuilder
+  with PaimonBasePushDown
+  with SupportsPushDownRequiredColumns {
 
   override protected var partitionKeys: JList[String] = table.partitionKeys()
   override protected var rowType: RowType = table.rowType()
 
-  override def build(): Scan = {
-    PaimonScan(table, requiredSchema, pushedPaimonPredicates, reservedFilters, None, pushDownTopN)
+  protected var requiredSchema: StructType = SparkTypeUtils.fromPaimonRowType(rowType)
+
+  override def build(): PaimonFormatTableScan =
+    PaimonFormatTableScan(table, requiredSchema, pushedPaimonPredicates, pushDownLimit)
+
+  override def pruneColumns(requiredSchema: StructType): Unit = {
+    this.requiredSchema = requiredSchema
   }
 }

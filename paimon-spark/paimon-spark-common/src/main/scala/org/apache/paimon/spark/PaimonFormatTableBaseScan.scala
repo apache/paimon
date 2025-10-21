@@ -24,29 +24,23 @@ import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.source.Split
 
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
-import org.apache.spark.sql.connector.read.{Batch, Scan, ScanBuilder}
+import org.apache.spark.sql.connector.read.Batch
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
-/** A ScanBuilder implementation for {@link FormatTable} that supports basic scan operations. */
-case class PaimonFormatTableScanBuilder(
+/** Base Scan implementation for {@link FormatTable}. */
+abstract class PaimonFormatTableBaseScan(
     table: FormatTable,
     requiredSchema: StructType,
-    filters: Seq[Predicate])
-  extends ScanBuilder {
-  override def build() = PaimonFormatTableScan(table, requiredSchema, filters)
-}
-
-case class PaimonFormatTableScan(
-    table: FormatTable,
-    requiredSchema: StructType,
-    filters: Seq[Predicate])
+    filters: Seq[Predicate],
+    pushDownLimit: Option[Int])
   extends ColumnPruningAndPushDown
   with ScanHelper {
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
   protected var inputSplits: Array[Split] = _
+  protected var inputPartitions: Seq[PaimonInputPartition] = _
 
   def getOriginSplits: Array[Split] = {
     if (inputSplits == null) {
@@ -60,12 +54,15 @@ case class PaimonFormatTableScan(
     inputSplits
   }
 
+  final def lazyInputPartitions: Seq[PaimonInputPartition] = {
+    if (inputPartitions == null) {
+      inputPartitions = getInputPartitions(getOriginSplits)
+    }
+    inputPartitions
+  }
+
   override def toBatch: Batch = {
-    PaimonBatch(
-      getInputPartitions(getOriginSplits),
-      readBuilder,
-      coreOptions.blobAsDescriptor(),
-      metadataColumns)
+    PaimonBatch(lazyInputPartitions, readBuilder, coreOptions.blobAsDescriptor(), metadataColumns)
   }
 
   override def supportedCustomMetrics: Array[CustomMetric] = {

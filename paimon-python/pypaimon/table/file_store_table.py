@@ -46,6 +46,7 @@ class FileStoreTable(Table):
 
         self.table_schema = table_schema
         self.fields = table_schema.fields
+        self.field_names = [field.name for field in table_schema.fields]
         self.field_dict = {field.name: field for field in self.fields}
         self.primary_keys = table_schema.primary_keys
         self.partition_keys = table_schema.partition_keys

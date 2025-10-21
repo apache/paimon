@@ -19,13 +19,14 @@
 import os
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Any
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
+from pypaimon.read.push_down_utils import trim_predicate_by_fields
 from pypaimon.read.reader.concat_batch_reader import ConcatBatchReader, ShardBatchReader, MergeAllBatchReader
 from pypaimon.read.reader.concat_record_reader import ConcatRecordReader
 from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
@@ -54,20 +55,30 @@ NULL_FIELD_INDEX = -1
 class SplitRead(ABC):
     """Abstract base class for split reading operations."""
 
-    def __init__(self, table, predicate: Optional[Predicate], push_down_predicate,
-                 read_type: List[DataField], split: Split):
+    def __init__(self, table, predicate: Optional[Predicate], read_type: List[DataField], split: Split):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.predicate = predicate
-        self.push_down_predicate = push_down_predicate
+        self.push_down_predicate = self._push_down_predicate()
         self.split = split
         self.value_arity = len(read_type)
 
-        self.trimmed_primary_key = [field.name for field in self.table.table_schema.get_trimmed_primary_key_fields()]
+        self.trimmed_primary_key = self.table.table_schema.get_trimmed_primary_keys()
         self.read_fields = read_type
         if isinstance(self, MergeFileSplitRead):
             self.read_fields = self._create_key_value_fields(read_type)
+
+    def _push_down_predicate(self) -> Any:
+        if self.predicate is None:
+            return None
+        elif self.table.is_primary_key_table:
+            pk_predicate = trim_predicate_by_fields(self.predicate, self.table.primary_keys)
+            if not pk_predicate:
+                return None
+            return pk_predicate.to_arrow()
+        else:
+            return self.predicate.to_arrow()
 
     @abstractmethod
     def create_reader(self) -> RecordReader:
@@ -82,7 +93,7 @@ class SplitRead(ABC):
             format_reader = FormatAvroReader(self.table.file_io, file_path, read_fields,
                                              self.read_fields, self.push_down_predicate)
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
-            blob_as_descriptor = self.table.options.get(CoreOptions.FILE_BLOB_AS_DESCRIPTOR, False)
+            blob_as_descriptor = CoreOptions.get_blob_as_descriptor(self.table.options)
             format_reader = FormatBlobReader(self.table.file_io, file_path, read_fields,
                                              self.read_fields, self.push_down_predicate, blob_as_descriptor)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:

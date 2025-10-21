@@ -15,15 +15,13 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from typing import Any, Iterator, List, Optional
+from typing import Iterator, List, Optional
 
 import pandas
 import pyarrow
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
-from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.push_down_utils import extract_predicate_to_list
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.split_read import (MergeFileSplitRead, RawFileSplitRead,
@@ -40,7 +38,6 @@ class TableRead:
 
         self.table: FileStoreTable = table
         self.predicate = predicate
-        self.push_down_predicate = self._push_down_predicate()
         self.read_type = read_type
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
@@ -109,27 +106,11 @@ class TableRead:
 
         return ray.data.from_arrow(self.to_arrow(splits))
 
-    def _push_down_predicate(self) -> Any:
-        if self.predicate is None:
-            return None
-        elif self.table.is_primary_key_table:
-            result = []
-            extract_predicate_to_list(result, self.predicate, self.table.primary_keys)
-            if result:
-                # the field index is unused for arrow field
-                pk_predicates = (PredicateBuilder(self.table.fields).and_predicates(result)).to_arrow()
-                return pk_predicates
-            else:
-                return None
-        else:
-            return self.predicate.to_arrow()
-
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
             return MergeFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,
-                push_down_predicate=self.push_down_predicate,
                 read_type=self.read_type,
                 split=split
             )
@@ -137,7 +118,6 @@ class TableRead:
             return DataEvolutionSplitRead(
                 table=self.table,
                 predicate=self.predicate,
-                push_down_predicate=self.push_down_predicate,
                 read_type=self.read_type,
                 split=split
             )
@@ -145,7 +125,6 @@ class TableRead:
             return RawFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,
-                push_down_predicate=self.push_down_predicate,
                 read_type=self.read_type,
                 split=split
             )
