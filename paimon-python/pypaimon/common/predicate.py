@@ -19,7 +19,6 @@
 from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
 from functools import reduce
-from typing import Any, List, Optional
 from typing import Any, Dict, List, Optional
 from typing import ClassVar
 
@@ -168,7 +167,6 @@ class RegisterMeta(ABCMeta):
 
 
 class Tester(ABC, metaclass=RegisterMeta):
-
     name = None
 
     @abstractmethod
@@ -191,7 +189,6 @@ class Tester(ABC, metaclass=RegisterMeta):
 
 
 class Equal(Tester):
-
     name = 'equal'
 
     def test_by_value(self, val, literals) -> bool:
@@ -205,7 +202,6 @@ class Equal(Tester):
 
 
 class NotEqual(Tester):
-
     name = "notEqual"
 
     def test_by_value(self, val, literals) -> bool:
@@ -219,7 +215,6 @@ class NotEqual(Tester):
 
 
 class LessThan(Tester):
-
     name = "lessThan"
 
     def test_by_value(self, val, literals) -> bool:
@@ -233,7 +228,6 @@ class LessThan(Tester):
 
 
 class LessOrEqual(Tester):
-
     name = "lessOrEqual"
 
     def test_by_value(self, val, literals) -> bool:
@@ -247,7 +241,6 @@ class LessOrEqual(Tester):
 
 
 class GreaterThan(Tester):
-
     name = "greaterThan"
 
     def test_by_value(self, val, literals) -> bool:
@@ -261,7 +254,6 @@ class GreaterThan(Tester):
 
 
 class GreaterOrEqual(Tester):
-
     name = "greaterOrEqual"
 
     def test_by_value(self, val, literals) -> bool:
@@ -275,7 +267,6 @@ class GreaterOrEqual(Tester):
 
 
 class In(Tester):
-
     name = "in"
 
     def test_by_value(self, val, literals) -> bool:
@@ -289,7 +280,6 @@ class In(Tester):
 
 
 class NotIn(Tester):
-
     name = "notIn"
 
     def test_by_value(self, val, literals) -> bool:
@@ -303,7 +293,6 @@ class NotIn(Tester):
 
 
 class Between(Tester):
-
     name = "between"
 
     def test_by_value(self, val, literals) -> bool:
@@ -317,7 +306,6 @@ class Between(Tester):
 
 
 class StartsWith(Tester):
-
     name = "startsWith"
 
     def test_by_value(self, val, literals) -> bool:
@@ -333,7 +321,6 @@ class StartsWith(Tester):
 
 
 class EndsWith(Tester):
-
     name = "endsWith"
 
     def test_by_value(self, val, literals) -> bool:
@@ -347,7 +334,6 @@ class EndsWith(Tester):
 
 
 class Contains(Tester):
-
     name = "contains"
 
     def test_by_value(self, val, literals) -> bool:
@@ -361,7 +347,6 @@ class Contains(Tester):
 
 
 class IsNull(Tester):
-
     name = "isNull"
 
     def test_by_value(self, val, literals) -> bool:
@@ -375,7 +360,6 @@ class IsNull(Tester):
 
 
 class IsNotNull(Tester):
-
     name = "isNotNull"
 
     def test_by_value(self, val, literals) -> bool:

@@ -20,7 +20,6 @@ from typing import Callable, List, Optional
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
-from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -232,7 +231,7 @@ class FullStartingScanner(StartingScanner):
             return False
 
         # Get SimpleStatsEvolution for this schema
-        evolution = self.simple_stats_evolutions.get_or_create(file_entry.file.schema_id)
+        evolution = self.simple_stats_evolutions.get_or_create(entry.file.schema_id)
 
         # Apply evolution to stats
         if self.table.is_primary_key_table:
@@ -246,7 +245,8 @@ class FullStartingScanner(StartingScanner):
                 stats_fields = entry.file.write_cols
             else:
                 stats_fields = entry.file.value_stats_cols
-
+        if not predicate:
+            return True
         evolved_stats = evolution.evolution(
             stats,
             entry.file.row_count,

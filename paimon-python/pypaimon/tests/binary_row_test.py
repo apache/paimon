@@ -113,7 +113,8 @@ class BinaryRowTest(unittest.TestCase):
     def test_is_not_null_append(self):
         table = self.catalog.get_table('default.test_append')
         starting_scanner = FullStartingScanner(table, None, None)
-        manifest_files = starting_scanner._read_manifest_files()
+        latest_snapshot = starting_scanner.snapshot_manager.get_latest_snapshot()
+        manifest_files = starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = starting_scanner.manifest_file_manager.read(manifest_files[0].file_name)
         self._transform_manifest_entries(manifest_entries, [])
         l = ['abc', 'abbc', 'bc', 'd', None]
@@ -152,7 +153,7 @@ class BinaryRowTest(unittest.TestCase):
         predicate = predicate_builder.equal('f2', 6)
         splits, actual = self._read_result(read_builder.with_filter(predicate))
         expected = self.data.slice(0, 1)
-        self.assertEqual(actual, expected)
+        self.assertEqual(expected, actual)
         self.assertEqual(len(splits), len(expected))  # test partition filter when filtering ManifestEntry
 
     def test_not_equal_pk(self):
@@ -249,7 +250,8 @@ class BinaryRowTest(unittest.TestCase):
         table_commit.close()
 
         starting_scanner = FullStartingScanner(table, None, None)
-        manifest_files = starting_scanner._read_manifest_files()
+        latest_snapshot = starting_scanner.snapshot_manager.get_latest_snapshot()
+        manifest_files = starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = starting_scanner.manifest_file_manager.read(manifest_files[0].file_name)
         self._transform_manifest_entries(manifest_entries, [])
         for i, entry in enumerate(manifest_entries):
@@ -287,7 +289,8 @@ class BinaryRowTest(unittest.TestCase):
         self.assertEqual(expected_data, actual.to_pydict())
 
         starting_scanner = FullStartingScanner(table, None, None)
-        manifest_files = starting_scanner._read_manifest_files()
+        latest_snapshot = starting_scanner.snapshot_manager.get_latest_snapshot()
+        manifest_files = starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = starting_scanner.manifest_file_manager.read(manifest_files[0].file_name)
         self._transform_manifest_entries(manifest_entries, [])
         for i, entry in enumerate(manifest_entries):
@@ -317,7 +320,8 @@ class BinaryRowTest(unittest.TestCase):
 
     def _overwrite_manifest_entry(self, table):
         starting_scanner = FullStartingScanner(table, None, None)
-        manifest_files = starting_scanner._read_manifest_files()
+        latest_snapshot = starting_scanner.snapshot_manager.get_latest_snapshot()
+        manifest_files = starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = starting_scanner.manifest_file_manager.read(manifest_files[0].file_name)
         self._transform_manifest_entries(manifest_entries, [])
         for i, entry in enumerate(manifest_entries):
