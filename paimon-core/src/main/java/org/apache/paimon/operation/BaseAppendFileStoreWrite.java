@@ -122,6 +122,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 schemaId,
                 fileFormat,
                 options.targetFileSize(false),
+                options.blobTargetFileSize(),
                 writeType,
                 writeCols,
                 restoredMaxSeqNumber,

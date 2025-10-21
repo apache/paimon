@@ -693,6 +693,7 @@ public class AppendOnlyWriterTest {
                         SCHEMA_ID,
                         fileFormat,
                         targetFileSize,
+                        targetFileSize,
                         AppendOnlyWriterTest.SCHEMA,
                         null,
                         getMaxSequenceNumber(toCompact),
