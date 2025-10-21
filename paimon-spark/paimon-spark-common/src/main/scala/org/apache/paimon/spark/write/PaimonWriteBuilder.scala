@@ -26,7 +26,7 @@ import org.apache.spark.sql.connector.write.{SupportsOverwrite, WriteBuilder}
 import org.apache.spark.sql.sources._
 
 class PaimonWriteBuilder(table: FileStoreTable, options: Options)
-  extends BaseWriteBuilder(table)
+  extends BaseWriteBuilder(table.schema().logicalPartitionType())
   with SupportsOverwrite {
 
   private var saveMode: SaveMode = InsertInto

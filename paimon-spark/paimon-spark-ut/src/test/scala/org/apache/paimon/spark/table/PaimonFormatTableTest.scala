@@ -70,6 +70,9 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
            |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon', 'file.compression'='none')
            |PARTITIONED BY (id INT)
            |""".stripMargin)
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      table.fileIO().mkdirs(new Path(table.location()))
       val columns = spark.catalog.listColumns(tableName).collect()
       columns.foreach {
         col =>
@@ -78,9 +81,6 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
 
       val partitionColumns = columns.filter(_.isPartition).map(_.name)
       println(s"partition: ${partitionColumns.mkString(", ")}")
-      val table =
-        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
-      table.fileIO().mkdirs(new Path(table.location()))
       spark.sql(s"INSERT INTO $tableName PARTITION (id = 1) VALUES (5, 'Ben'), (7, 'Larry')")
       spark.sql(s"INSERT OVERWRITE $tableName PARTITION (id = 1) VALUES (5, 'Jerry'), (7, 'Tom')")
       checkAnswer(

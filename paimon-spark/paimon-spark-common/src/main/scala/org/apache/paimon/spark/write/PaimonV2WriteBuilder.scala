@@ -26,7 +26,7 @@ import org.apache.spark.sql.sources.{And, Filter}
 import org.apache.spark.sql.types.StructType
 
 class PaimonV2WriteBuilder(table: FileStoreTable, dataSchema: StructType, options: Options)
-  extends BaseWriteBuilder(table)
+  extends BaseWriteBuilder(table.schema().logicalPartitionType())
   with SupportsOverwrite
   with SupportsDynamicOverwrite {
 

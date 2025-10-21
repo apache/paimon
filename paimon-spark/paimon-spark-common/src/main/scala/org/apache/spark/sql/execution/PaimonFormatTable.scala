@@ -19,8 +19,8 @@
 package org.apache.spark.sql.execution
 
 import org.apache.paimon.fs.TwoPhaseOutputStream
-import org.apache.paimon.spark.{FormatTableScanBuilder, SparkInternalRowWrapper, SparkTypeUtils}
-import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
+import org.apache.paimon.spark.{FormatTableScanBuilder, SparkInternalRowWrapper}
+import org.apache.paimon.spark.write.BaseWriteBuilder
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.TwoPhaseCommitMessage
 import org.apache.paimon.table.sink.BatchTableWrite
@@ -29,7 +29,7 @@ import org.apache.paimon.utils.StringUtils
 import org.apache.hadoop.fs.Path
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.{InternalRow, SQLConfHelper}
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Literal}
 import org.apache.spark.sql.connector.catalog.{SupportsPartitionManagement, SupportsRead, SupportsWrite, TableCapability}
 import org.apache.spark.sql.connector.catalog.TableCapability.{ACCEPT_ANY_SCHEMA, BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
@@ -319,9 +319,7 @@ class PartitionedJsonTable(
 }
 
 case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: StructType)
-  extends WriteBuilder
-  with ExpressionHelper
-  with SQLConfHelper
+  extends BaseWriteBuilder(table.partitionType())
   with SupportsOverwrite
   with SupportsDynamicOverwrite {
 
@@ -342,6 +340,8 @@ case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: Struc
     if (overwriteDynamic) {
       throw new IllegalArgumentException("Cannot overwrite dynamically and by filter both")
     }
+
+    failIfCanNotOverwrite(filters)
 
     val conjunctiveFilters = if (filters.nonEmpty) {
       Some(filters.reduce((l, r) => And(l, r)))
@@ -367,11 +367,6 @@ case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: Struc
     overwriteDynamic = true
     overwritePartitions = Option.apply(Map.empty[String, String])
     this
-  }
-
-  protected def failWithReason(filter: Filter): Unit = {
-    throw new RuntimeException(
-      s"Only support Overwrite filters with Equal and EqualNullSafe, but got: $filter")
   }
 }
 

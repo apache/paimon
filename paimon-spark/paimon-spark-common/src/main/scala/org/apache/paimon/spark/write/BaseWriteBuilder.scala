@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.connector.write.WriteBuilder
@@ -27,7 +27,7 @@ import org.apache.spark.sql.sources._
 
 import scala.collection.JavaConverters._
 
-abstract class BaseWriteBuilder(table: FileStoreTable)
+abstract class BaseWriteBuilder(partitionRowType: RowType)
   extends WriteBuilder
   with ExpressionHelper
   with SQLConfHelper {
@@ -59,7 +59,6 @@ abstract class BaseWriteBuilder(table: FileStoreTable)
     //
     // Fast fail for other custom filters which through v2 write interface, e.g.,
     // `dataframe.writeTo(T).overwrite(...)`
-    val partitionRowType = table.schema.logicalPartitionType()
     val partitionNames = partitionRowType.getFieldNames.asScala
     val allReferences = filters.flatMap(_.references)
     val containsDataColumn = allReferences.exists {
