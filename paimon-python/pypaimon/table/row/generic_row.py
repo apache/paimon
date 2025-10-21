@@ -263,19 +263,19 @@ class GenericRowSerializer:
     MAX_FIX_PART_DATA_SIZE = 7
 
     @classmethod
-    def to_bytes(cls, binary_row: Union[GenericRow, BinaryRow]) -> bytes:
-        if isinstance(binary_row, BinaryRow):
-            return binary_row.data
-        arity = len(binary_row.fields)
+    def to_bytes(cls, row: Union[GenericRow, BinaryRow]) -> bytes:
+        if isinstance(row, BinaryRow):
+            return row.data
+        arity = len(row.fields)
         null_bits_size_in_bytes = cls._calculate_bit_set_width_in_bytes(arity)
         fixed_part_size = null_bits_size_in_bytes + arity * 8
         fixed_part = bytearray(fixed_part_size)
-        fixed_part[0] = binary_row.row_kind.value
+        fixed_part[0] = row.row_kind.value
 
         variable_part_data = []
         current_variable_offset = 0
 
-        for i, (value, field) in enumerate(zip(binary_row.values, binary_row.fields)):
+        for i, (value, field) in enumerate(zip(row.values, row.fields)):
             field_fixed_offset = null_bits_size_in_bytes + i * 8
 
             if value is None:

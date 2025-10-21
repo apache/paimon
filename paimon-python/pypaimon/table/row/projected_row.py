@@ -19,7 +19,6 @@
 from typing import Any, List
 from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.row_kind import RowKind
-from pypaimon.schema.data_types import DataType
 
 
 class ProjectedRow(InternalRow):
@@ -44,12 +43,12 @@ class ProjectedRow(InternalRow):
         self.row = row
         return self
 
-    def get_field_by_type(self, pos: int, field_type: DataType) -> Any:
+    def get_field(self, pos: int) -> Any:
         """Returns the value at the given position."""
         if self.index_mapping[pos] < 0:
             # TODO move this logical to hive
             return None
-        return self.row.get_field_by_type(self.index_mapping[pos], field_type)
+        return self.row.get_field(self.index_mapping[pos])
 
     def is_null_at(self, pos: int) -> bool:
         """Returns true if the element is null at the given position."""
@@ -64,7 +63,7 @@ class ProjectedRow(InternalRow):
 
     def __len__(self) -> int:
         """Returns the number of fields in this row."""
-        return len(self.index_mapping)
+        return len(self.row)
 
     def __str__(self) -> str:
         """String representation of the projected row."""

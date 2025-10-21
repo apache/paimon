@@ -88,8 +88,8 @@ class Predicate:
 
         if not isinstance(stat.min_values, GenericRow):
             # Parse field values using BinaryRow's direct field access by name
-            min_value = stat.min_values.get_field_by_type(self.index, self.field_type)
-            max_value = stat.max_values.get_field_by_type(self.index, self.field_type)
+            min_value = stat.min_values.get_field(self.index)
+            max_value = stat.max_values.get_field(self.index)
         else:
             # TODO transform partition to BinaryRow
             min_values = stat.min_values.to_dict()

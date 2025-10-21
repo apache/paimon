@@ -16,10 +16,9 @@
 # limitations under the License.
 ################################################################################
 
-from abc import ABC
+from abc import ABC, abstractmethod
 from typing import Any
 
-from pypaimon.schema.data_types import DataType
 from pypaimon.table.row.row_kind import RowKind
 
 
@@ -28,26 +27,25 @@ class InternalRow(ABC):
     Base interface for an internal data structure representing data of RowType.
     """
 
+    @abstractmethod
     def get_field(self, pos: int) -> Any:
         """
         Returns the value at the given position.
         """
 
-    def get_field_by_type(self, pos: int, field_type: DataType) -> Any:
-        """
-        Returns the value at the given position.
-        """
-
+    @abstractmethod
     def is_null_at(self, pos: int) -> bool:
         """
         Returns true if the element is null at the given position.
         """
 
+    @abstractmethod
     def get_row_kind(self) -> RowKind:
         """
         Returns the kind of change that this row describes in a changelog.
         """
 
+    @abstractmethod
     def __len__(self) -> int:
         """
         Returns the number of fields in this row.

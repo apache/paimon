@@ -17,17 +17,17 @@
 ################################################################################
 
 from dataclasses import dataclass
-from typing import List, Optional, Union
+from typing import List, Optional
 from typing import ClassVar
 
-from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.internal_row import InternalRow
 
 
 @dataclass
 class SimpleStats:
-    min_values: Union[GenericRow, BinaryRow]
-    max_values: Union[GenericRow, BinaryRow]
+    min_values: InternalRow
+    max_values: InternalRow
     null_counts: Optional[List[int]]
 
     _empty_stats: ClassVar[object] = None
