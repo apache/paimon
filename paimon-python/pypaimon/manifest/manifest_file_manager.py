@@ -26,6 +26,7 @@ from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.generic_row import (GenericRowDeserializer,
                                             GenericRowSerializer)
+from pypaimon.table.row.binary_row import BinaryRow
 
 
 class ManifestFileManager:
@@ -54,12 +55,11 @@ class ManifestFileManager:
             file_dict = dict(record['_FILE'])
             key_dict = dict(file_dict['_KEY_STATS'])
             key_stats = SimpleStats(
-                min_values=GenericRowDeserializer.from_bytes(key_dict['_MIN_VALUES'],
-                                                             self.trimmed_primary_key_fields),
-                max_values=GenericRowDeserializer.from_bytes(key_dict['_MAX_VALUES'],
-                                                             self.trimmed_primary_key_fields),
+                min_values=BinaryRow(key_dict['_MIN_VALUES'], self.trimmed_primary_key_fields),
+                max_values=BinaryRow(key_dict['_MAX_VALUES'], self.trimmed_primary_key_fields),
                 null_counts=key_dict['_NULL_COUNTS'],
             )
+
             value_dict = dict(file_dict['_VALUE_STATS'])
             if file_dict['_VALUE_STATS_COLS'] is None:
                 if file_dict['_WRITE_COLS'] is None:
@@ -72,8 +72,8 @@ class ManifestFileManager:
             else:
                 fields = [self.table.field_dict[col] for col in file_dict['_VALUE_STATS_COLS']]
             value_stats = SimpleStats(
-                min_values=GenericRowDeserializer.from_bytes(value_dict['_MIN_VALUES'], fields),
-                max_values=GenericRowDeserializer.from_bytes(value_dict['_MAX_VALUES'], fields),
+                min_values=BinaryRow(value_dict['_MIN_VALUES'], fields),
+                max_values=BinaryRow(value_dict['_MAX_VALUES'], fields),
                 null_counts=value_dict['_NULL_COUNTS'],
             )
             file_meta = DataFileMeta(
