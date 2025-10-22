@@ -354,7 +354,7 @@ public class RESTCatalog implements Catalog {
         try {
             return api.commitSnapshot(identifier, tableUuid, snapshot, statistics);
         } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
+            throw new TableNotExistException(identifier, e);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (BadRequestException e) {
