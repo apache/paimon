@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
@@ -32,6 +33,8 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -58,11 +61,17 @@ public class IncrementalClusterManager {
     private int maxLevel;
 
     public IncrementalClusterManager(FileStoreTable table) {
+        this(table, null);
+    }
+
+    public IncrementalClusterManager(
+            FileStoreTable table, @Nullable PartitionPredicate specifiedPartitions) {
         checkArgument(
                 table.bucketMode() == BucketMode.BUCKET_UNAWARE,
                 "only append unaware-bucket table support incremental clustering.");
         // drop stats to reduce memory usage
-        this.snapshotReader = table.newSnapshotReader().dropStats();
+        this.snapshotReader =
+                table.newSnapshotReader().withPartitionFilter(specifiedPartitions).dropStats();
         CoreOptions options = table.coreOptions();
         checkArgument(
                 options.clusteringIncrementalEnabled(),
