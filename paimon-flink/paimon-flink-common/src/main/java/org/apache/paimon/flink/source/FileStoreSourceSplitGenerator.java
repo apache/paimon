@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 
 import java.util.List;
@@ -35,7 +36,11 @@ public class FileStoreSourceSplitGenerator {
     private final AtomicInteger idCounter = new AtomicInteger(1);
 
     public List<FileStoreSourceSplit> createSplits(TableScan.Plan plan) {
-        return plan.splits().stream()
+        return createSplits(plan.splits());
+    }
+
+    public List<FileStoreSourceSplit> createSplits(List<Split> splits) {
+        return splits.stream()
                 .map(s -> new FileStoreSourceSplit(getNextId(), s))
                 .collect(Collectors.toList());
     }
