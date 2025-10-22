@@ -15,14 +15,16 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
-from typing import List
+from typing import List, Tuple, Set
 
 import fastavro
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
+from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.generic_row import (GenericRowDeserializer,
                                             GenericRowSerializer)
@@ -41,6 +43,41 @@ class ManifestFileManager:
         self.partition_keys_fields = self.table.partition_keys_fields
         self.primary_keys_fields = self.table.primary_keys_fields
         self.trimmed_primary_keys_fields = self.table.trimmed_primary_keys_fields
+
+    def read_entries_parallel(self, manifest_files: List[ManifestFileMeta], manifest_file_filter=None,
+                              manifest_entry_filter=None, drop_stats=True, max_workers=8) -> List[ManifestEntry]:
+
+        def _process_single_manifest(manifest_file: ManifestFileMeta) -> Tuple[List[ManifestEntry], Set[tuple]]:
+            local_added = []
+            local_deleted_keys = set()
+            if manifest_file_filter and not manifest_file_filter(manifest_file):
+                return local_added, local_deleted_keys
+            manifest_entries = self.read(manifest_file.file_name, manifest_entry_filter, drop_stats)
+            for entry in manifest_entries:
+                if entry.kind == 0:
+                    local_added.append(entry)
+                else:
+                    key = (tuple(entry.partition.values), entry.bucket, entry.file.file_name)
+                    local_deleted_keys.add(key)
+            local_final_added = [
+                entry for entry in local_added
+                if (tuple(entry.partition.values), entry.bucket, entry.file.file_name) not in local_deleted_keys
+            ]
+            return local_final_added, local_deleted_keys
+
+        deleted_entry_keys = set()
+        added_entries = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_results = executor.map(_process_single_manifest, manifest_files)
+            for added, deleted_keys in future_results:
+                added_entries.extend(added)
+                deleted_entry_keys.update(deleted_keys)
+
+        final_entries = [
+            entry for entry in added_entries
+            if (tuple(entry.partition.values), entry.bucket, entry.file.file_name) not in deleted_entry_keys
+        ]
+        return final_entries
 
     def read(self, manifest_file_name: str, manifest_entry_filter=None, drop_stats=True) -> List[ManifestEntry]:
         manifest_file_path = self.manifest_path / manifest_file_name
