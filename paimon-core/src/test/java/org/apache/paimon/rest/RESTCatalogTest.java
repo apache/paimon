@@ -308,7 +308,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 () -> restCatalog.fastForward(identifier, "test_branch"));
         assertThrows(
                 Catalog.TableNoPermissionException.class,
-                () -> restCatalog.loadTableToken(identifier));
+                () -> restCatalog.api().loadTableToken(identifier));
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> restCatalog.loadSnapshot(identifier));
