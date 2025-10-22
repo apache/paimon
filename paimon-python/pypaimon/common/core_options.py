@@ -33,7 +33,7 @@ class CoreOptions(str, Enum):
     BUCKET = "bucket"
     BUCKET_KEY = "bucket-key"
     WAREHOUSE = "warehouse"
-    MANIFEST_READ_THREADS = "manifest_read_threads"
+    SCAN_MANIFEST_PARALLELISM = "scan.manifest.parallelism"
     # File format options
     FILE_FORMAT = "file.format"
     FILE_FORMAT_ORC = "orc"

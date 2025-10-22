@@ -53,7 +53,8 @@ class SimpleStatsEvolutions:
         self.evolutions[data_schema_id] = evolution
         return evolution
 
-    def _create_index_cast_mapping(self, table_fields: List[DataField],
+    @staticmethod
+    def _create_index_cast_mapping(table_fields: List[DataField],
                                    data_fields: List[DataField]) -> Dict[str, Optional[List[int]]]:
         """
         Create index and cast mapping between table fields and data fields.
