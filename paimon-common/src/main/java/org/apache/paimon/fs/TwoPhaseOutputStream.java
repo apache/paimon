@@ -43,14 +43,14 @@ public abstract class TwoPhaseOutputStream extends PositionOutputStream {
          *
          * @throws IOException if an I/O error occurs during commit
          */
-        void commit() throws IOException;
+        void commit(FileIO fileIO) throws IOException;
 
         /**
          * Discards the written data, cleaning up any temporary files or resources.
          *
          * @throws IOException if an I/O error occurs during discard
          */
-        void discard() throws IOException;
+        void discard(FileIO fileIO) throws IOException;
 
         String targetFilePath();
     }

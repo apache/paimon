@@ -18,34 +18,32 @@
 
 package org.apache.paimon.s3;
 
+import org.apache.paimon.fs.BaseMultiPartUploadCommitter;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.MultiPartUploadStore;
-import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
+import org.apache.paimon.fs.Path;
 
 import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
 import com.amazonaws.services.s3.model.PartETag;
+import org.apache.hadoop.fs.s3a.S3AFileSystem;
 
 import java.io.IOException;
 import java.util.List;
 
-/** S3 implementation of TwoPhaseOutputStream using multipart upload. */
-public class S3TwoPhaseOutputStream
-        extends MultiPartUploadTwoPhaseOutputStream<PartETag, CompleteMultipartUploadResult> {
-
-    public S3TwoPhaseOutputStream(
-            MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore,
-            org.apache.hadoop.fs.Path hadoopPath)
-            throws IOException {
-        super(multiPartUploadStore, hadoopPath);
-    }
-
-    @Override
-    public long partSizeThreshold() {
-        return 5L << 20;
-    }
-
-    @Override
-    public Committer committer(
+/** S3 implementation of MultiPartUploadCommitter. */
+public class S3MultiPartUploadCommitter
+        extends BaseMultiPartUploadCommitter<PartETag, CompleteMultipartUploadResult> {
+    public S3MultiPartUploadCommitter(
             String uploadId, List<PartETag> uploadedParts, String objectName, long position) {
-        return new S3MultiPartUploadCommitter(uploadId, uploadedParts, objectName, position);
+        super(uploadId, uploadedParts, objectName, position);
+    }
+
+    @Override
+    protected MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore(
+            FileIO fileIO, String targetPath) throws IOException {
+        S3FileIO s3FileIO = (S3FileIO) fileIO;
+        org.apache.hadoop.fs.Path hadoopPath = s3FileIO.path(new Path(targetPath));
+        S3AFileSystem fs = (S3AFileSystem) s3FileIO.getFileSystem(hadoopPath);
+        return new S3MultiPartUpload(fs, fs.getConf());
     }
 }

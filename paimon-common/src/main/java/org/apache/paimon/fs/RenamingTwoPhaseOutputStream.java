@@ -81,7 +81,7 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
     @Override
     public Committer closeForCommit() throws IOException {
         close();
-        return new TempFileCommitter(fileIO, tempPath, targetPath);
+        return new TempFileCommitter(tempPath, targetPath);
     }
 
     /**
@@ -98,20 +98,18 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
         private final Path tempPath;
         private final Path targetPath;
         private boolean committed = false;
         private boolean discarded = false;
 
-        public TempFileCommitter(FileIO fileIO, Path tempPath, Path targetPath) {
-            this.fileIO = fileIO;
+        public TempFileCommitter(Path tempPath, Path targetPath) {
             this.tempPath = tempPath;
             this.targetPath = targetPath;
         }
 
         @Override
-        public void commit() throws IOException {
+        public void commit(FileIO fileIO) throws IOException {
             if (committed || discarded) {
                 throw new IOException("Committer has already been used");
             }
@@ -137,7 +135,7 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
         }
 
         @Override
-        public void discard() {
+        public void discard(FileIO fileIO) {
             if (!committed && !discarded) {
                 fileIO.deleteQuietly(tempPath);
                 discarded = true;
