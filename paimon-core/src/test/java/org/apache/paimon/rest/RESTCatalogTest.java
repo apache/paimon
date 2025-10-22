@@ -22,6 +22,7 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
@@ -44,6 +45,7 @@ import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
@@ -2598,6 +2600,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         } catch (Exception e) {
             // Ignore drop errors - table might not exist
         }
+
+        // Pre-create external table directory and schema files (simulating existing external table)
+        createExternalTableDirectory(externalTablePath, externalTableSchema);
+
         catalog.createTable(identifier, externalTableSchema, false);
 
         // Verify table exists
@@ -2748,5 +2754,20 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
         String tokenStr = RESTApi.toJson(token);
         FileUtils.writeStringToFile(tokenFile, tokenStr);
+    }
+
+    private void createExternalTableDirectory(Path externalTablePath, Schema schema)
+            throws Exception {
+        // Create external table directory structure
+        FileIO fileIO = FileIO.get(externalTablePath, CatalogContext.create(new Options()));
+
+        // Create the external table directory
+        if (!fileIO.exists(externalTablePath)) {
+            fileIO.mkdirs(externalTablePath);
+        }
+
+        // Create schema file in the external table directory
+        SchemaManager schemaManager = new SchemaManager(fileIO, externalTablePath);
+        schemaManager.createTable(schema, true); // true indicates external table
     }
 }
