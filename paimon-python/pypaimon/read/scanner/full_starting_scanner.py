@@ -15,6 +15,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import os
 from collections import defaultdict
 from typing import Callable, List, Optional
 
@@ -81,35 +82,12 @@ class FullStartingScanner(StartingScanner):
         if not latest_snapshot:
             return []
         manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
-        return self.read_manifest_entries(manifest_files)
 
-    def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
-        def filter_manifest_file(file: ManifestFileMeta) -> bool:
-            if not self.partition_key_predicate:
-                return True
-            return self.partition_key_predicate.test_by_simple_stats(
-                file.partition_stats,
-                file.num_added_files + file.num_deleted_files)
-
-        deleted_entries = set()
-        added_entries = []
-        for manifest_file in manifest_files:
-            if not filter_manifest_file(manifest_file):
-                continue
-            manifest_entries = self.manifest_file_manager.read(
-                manifest_file.file_name,
-                lambda row: self._filter_manifest_entry(row))
-            for entry in manifest_entries:
-                if entry.kind == 0:
-                    added_entries.append(entry)
-                else:
-                    deleted_entries.add((tuple(entry.partition.values), entry.bucket, entry.file.file_name))
-
-        file_entries = [
-            entry for entry in added_entries
-            if (tuple(entry.partition.values), entry.bucket, entry.file.file_name) not in deleted_entries
-        ]
-        return file_entries
+        max_workers = int(self.table.options.get(CoreOptions.MANIFEST_READ_THREADS, (os.cpu_count() or 4) * 2))
+        return self.manifest_file_manager.read_entries_parallel(manifest_files,
+                                                                self._filter_manifest_file,
+                                                                self._filter_manifest_entry,
+                                                                max_workers=max_workers)
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'FullStartingScanner':
         if idx_of_this_subtask >= number_of_para_subtasks:
@@ -209,6 +187,13 @@ class FullStartingScanner(StartingScanner):
                     return limited_splits
 
         return limited_splits
+
+    def _filter_manifest_file(self, file: ManifestFileMeta) -> bool:
+        if not self.partition_key_predicate:
+            return True
+        return self.partition_key_predicate.test_by_simple_stats(
+            file.partition_stats,
+            file.num_added_files + file.num_deleted_files)
 
     def _filter_manifest_entry(self, entry: ManifestEntry) -> bool:
         if self.only_read_real_buckets and entry.bucket < 0:
