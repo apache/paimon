@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.spark.PaimonSparkTestBase
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
@@ -27,6 +28,11 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 
 /** IT Case for [[ExpirePartitionsProcedure]]. */
 class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest {
+
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf
+      .set("spark.paimon.write.use-v2-write", "false")
+  }
 
   import testImplicits._
 
