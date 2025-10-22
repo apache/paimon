@@ -320,6 +320,48 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testClusterSpecifyPartition() throws Exception {
+        FileStoreTable table = createTable("pt", 1);
+
+        BinaryString randomStr = BinaryString.fromString(randomString(150));
+        List<CommitMessage> messages = new ArrayList<>();
+
+        // first write
+        List<String> expected1 = new ArrayList<>();
+        for (int pt = 0; pt < 2; pt++) {
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    messages.addAll(write(GenericRow.of(i, j, (pt == 0) ? randomStr : null, pt)));
+                    expected1.add(String.format("+I[%s, %s, %s]", i, j, pt));
+                }
+            }
+        }
+        commit(messages);
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0, 1, 3});
+        List<String> result1 =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        readBuilder.readType());
+        assertThat(result1).containsExactlyElementsOf(expected1);
+
+        runAction(Lists.newArrayList("--partition", "pt=0", "--compact_strategy", "full"));
+        checkSnapshot(table);
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThat(splits.size()).isEqualTo(2);
+        for (Split split : splits) {
+            DataSplit dataSplit = (DataSplit) split;
+            if (dataSplit.partition().getInt(0) == 0) {
+                assertThat(dataSplit.dataFiles().size()).isEqualTo(1);
+                assertThat(dataSplit.dataFiles().get(0).level()).isEqualTo(5);
+            } else {
+                assertThat(dataSplit.dataFiles().size()).isGreaterThan(1);
+                assertThat(dataSplit.dataFiles().get(0).level()).isEqualTo(0);
+            }
+        }
+    }
+
+    @Test
     public void testClusterOnEmptyData() throws Exception {
         createTable("pt", 1);
         assertThatCode(() -> runAction(Collections.emptyList())).doesNotThrowAnyException();

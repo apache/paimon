@@ -212,15 +212,12 @@ public class CompactAction extends TableActionBase {
     }
 
     private boolean buildForIncrementalClustering(
-            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming) {
+            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
+            throws Exception {
         checkArgument(!isStreaming, "Incremental clustering currently only supports batch mode");
-        checkArgument(
-                partitions == null,
-                "Incremental clustering currently does not support specifying partitions");
-        checkArgument(
-                whereSql == null, "Incremental clustering currently does not support predicates");
 
-        IncrementalClusterManager incrementalClusterManager = new IncrementalClusterManager(table);
+        IncrementalClusterManager incrementalClusterManager =
+                new IncrementalClusterManager(table, getPartitionPredicate());
 
         // non-full strategy as default for incremental clustering
         if (fullCompaction == null) {
