@@ -180,6 +180,8 @@ public class RESTCatalogServer {
 
     private final ResourcePaths resourcePaths;
 
+    private final List<Map<String, String>> receivedHeaders = new ArrayList<>();
+
     public RESTCatalogServer(
             String dataPath, AuthProvider authProvider, ConfigResponse config, String warehouse) {
         this.warehouse = warehouse;
@@ -275,6 +277,7 @@ public class RESTCatalogServer {
                 RESTResponse response;
                 try {
                     Map<String, String> headers = getHeader(request);
+                    receivedHeaders.add(new HashMap<>(headers));
                     String[] paths = request.getPath().split("\\?");
                     String resourcePath = paths[0];
                     Map<String, String> parameters =
@@ -2374,5 +2377,13 @@ public class RESTCatalogServer {
                                 "Invalid input for queryParameter maxResults: %s", maxResults),
                         400),
                 400);
+    }
+
+    public List<Map<String, String>> getReceivedHeaders() {
+        return receivedHeaders;
+    }
+
+    public void clearReceivedHeaders() {
+        receivedHeaders.clear();
     }
 }

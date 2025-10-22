@@ -53,7 +53,7 @@ public class RowDataVectorizer extends Vectorizer<InternalRow> {
     @Override
     public void vectorize(InternalRow row, VectorizedRowBatch batch) {
         int rowId = batch.size++;
-        for (int i = 0; i < row.getFieldCount(); ++i) {
+        for (int i = 0; i < fieldNames.length; ++i) {
             ColumnVector fieldColumn = batch.cols[i];
             if (row.isNullAt(i)) {
                 if (!isNullable[i]) {

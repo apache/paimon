@@ -70,23 +70,27 @@ public class FileStoreSourceSplitGeneratorTest {
                                 o -> ((DataSplit) ((FileStoreSourceSplit) o).split()).bucket()));
 
         // splitId should be the input order!
-        assertSplit(splits.get(0), "0000000001", 1, 0, Arrays.asList("f0", "f1"));
-        assertSplit(splits.get(1), "0000000002", 1, 1, Collections.singletonList("f2"));
-        assertSplit(splits.get(2), "0000000003", 2, 0, Arrays.asList("f3", "f4", "f5"));
-        assertSplit(splits.get(3), "0000000004", 2, 1, Collections.singletonList("f6"));
-        assertSplit(splits.get(4), "0000000005", 3, 0, Collections.singletonList("f7"));
-        assertSplit(splits.get(5), "0000000006", 3, 1, Collections.singletonList("f8"));
-        assertSplit(splits.get(6), "0000000007", 4, 0, Collections.singletonList("f9"));
-        assertSplit(splits.get(7), "0000000008", 4, 1, Collections.singletonList("f10"));
-        assertSplit(splits.get(8), "0000000009", 5, 0, Collections.singletonList("f11"));
-        assertSplit(splits.get(9), "0000000010", 5, 1, Collections.singletonList("f12"));
-        assertSplit(splits.get(10), "0000000011", 6, 0, Collections.singletonList("f13"));
-        assertSplit(splits.get(11), "0000000012", 6, 1, Collections.singletonList("f14"));
+        assertSplit(splits.get(0), "-1", 1, 0, Arrays.asList("f0", "f1"));
+        assertSplit(splits.get(1), "-2", 1, 1, Collections.singletonList("f2"));
+        assertSplit(splits.get(2), "-3", 2, 0, Arrays.asList("f3", "f4", "f5"));
+        assertSplit(splits.get(3), "-4", 2, 1, Collections.singletonList("f6"));
+        assertSplit(splits.get(4), "-5", 3, 0, Collections.singletonList("f7"));
+        assertSplit(splits.get(5), "-6", 3, 1, Collections.singletonList("f8"));
+        assertSplit(splits.get(6), "-7", 4, 0, Collections.singletonList("f9"));
+        assertSplit(splits.get(7), "-8", 4, 1, Collections.singletonList("f10"));
+        assertSplit(splits.get(8), "-9", 5, 0, Collections.singletonList("f11"));
+        assertSplit(splits.get(9), "-10", 5, 1, Collections.singletonList("f12"));
+        assertSplit(splits.get(10), "-11", 6, 0, Collections.singletonList("f13"));
+        assertSplit(splits.get(11), "-12", 6, 1, Collections.singletonList("f14"));
     }
 
     private void assertSplit(
-            FileStoreSourceSplit split, String splitId, int part, int bucket, List<String> files) {
-        assertThat(split.splitId()).isEqualTo(splitId);
+            FileStoreSourceSplit split,
+            String splitIdSuffix,
+            int part,
+            int bucket,
+            List<String> files) {
+        assertThat(split.splitId()).endsWith(splitIdSuffix);
         assertThat(((DataSplit) split.split()).partition().getInt(0)).isEqualTo(part);
         assertThat(((DataSplit) split.split()).bucket()).isEqualTo(bucket);
         assertThat(

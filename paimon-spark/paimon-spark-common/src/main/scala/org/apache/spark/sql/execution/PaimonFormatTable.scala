@@ -18,17 +18,22 @@
 
 package org.apache.spark.sql.execution
 
-import org.apache.paimon.spark.{PaimonFormatTableScanBuilder, SparkTypeUtils}
+import org.apache.paimon.fs.TwoPhaseOutputStream
+import org.apache.paimon.spark.{FormatTableScanBuilder, SparkInternalRowWrapper, SparkTypeUtils}
 import org.apache.paimon.table.FormatTable
+import org.apache.paimon.table.format.{FormatBatchWriteBuilder, TwoPhaseCommitMessage}
+import org.apache.paimon.table.sink.BatchTableWrite
 
 import org.apache.hadoop.fs.Path
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
 import org.apache.spark.sql.connector.catalog.{SupportsPartitionManagement, SupportsRead, SupportsWrite, TableCapability}
-import org.apache.spark.sql.connector.catalog.TableCapability.BATCH_READ
+import org.apache.spark.sql.connector.catalog.TableCapability.{BATCH_READ, BATCH_WRITE}
 import org.apache.spark.sql.connector.read.ScanBuilder
-import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
+import org.apache.spark.sql.connector.write.{BatchWrite, DataWriter, DataWriterFactory, LogicalWriteInfo, PhysicalWriteInfo, Write, WriteBuilder, WriterCommitMessage}
+import org.apache.spark.sql.connector.write.streaming.StreamingWrite
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.datasources.v2.csv.{CSVScanBuilder, CSVTable}
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
@@ -186,15 +191,17 @@ case class PaimonFormatTable(
   }
 
   override def capabilities(): util.Set[TableCapability] = {
-    util.EnumSet.of(BATCH_READ)
+    util.EnumSet.of(BATCH_READ, BATCH_WRITE)
   }
 
   override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
-    PaimonFormatTableScanBuilder(table.copy(caseInsensitiveStringMap), schema, Seq.empty)
+    val scanBuilder = FormatTableScanBuilder(table.copy(caseInsensitiveStringMap))
+    scanBuilder.pruneColumns(schema)
+    scanBuilder
   }
 
   override def newWriteBuilder(logicalWriteInfo: LogicalWriteInfo): WriteBuilder = {
-    throw new UnsupportedOperationException()
+    PaimonFormatTableWriterBuilder(table, schema)
   }
 }
 
@@ -295,5 +302,142 @@ class PartitionedJsonTable(
       paths,
       userSpecifiedSchema,
       partitionSchema())
+  }
+}
+
+case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: StructType)
+  extends WriteBuilder {
+  override def build: Write = new Write() {
+    override def toBatch: BatchWrite = {
+      FormatTableBatchWrite(table, writeSchema)
+    }
+
+    override def toStreaming: StreamingWrite = {
+      throw new UnsupportedOperationException("FormatTable doesn't support streaming write")
+    }
+  }
+}
+
+private case class FormatTableBatchWrite(table: FormatTable, writeSchema: StructType)
+  extends BatchWrite
+  with Logging {
+
+  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
+    FormatTableWriterFactory(table, writeSchema)
+
+  override def useCommitCoordinator(): Boolean = false
+
+  override def commit(messages: Array[WriterCommitMessage]): Unit = {
+    logInfo(s"Committing to FormatTable ${table.name()}")
+
+    val committers = messages
+      .collect {
+        case taskCommit: FormatTableTaskCommit => taskCommit.committers()
+        case other =>
+          throw new IllegalArgumentException(s"${other.getClass.getName} is not supported")
+      }
+      .flatten
+      .toSeq
+
+    try {
+      val start = System.currentTimeMillis()
+      committers.foreach(_.commit())
+      logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
+    } catch {
+      case e: Exception =>
+        logError("Failed to commit FormatTable writes", e)
+        throw e
+    }
+  }
+
+  override def abort(messages: Array[WriterCommitMessage]): Unit = {
+    logInfo(s"Aborting write to FormatTable ${table.name()}")
+    val committers = messages.collect {
+      case taskCommit: FormatTableTaskCommit => taskCommit.committers()
+    }.flatten
+
+    committers.foreach {
+      committer =>
+        try {
+          committer.discard()
+        } catch {
+          case e: Exception => logWarning(s"Failed to abort committer: ${e.getMessage}")
+        }
+    }
+  }
+}
+
+private case class FormatTableWriterFactory(table: FormatTable, writeSchema: StructType)
+  extends DataWriterFactory {
+
+  override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
+    val formatTableWrite = table.newBatchWriteBuilder().newWrite()
+    new FormatTableDataWriter(table, formatTableWrite, writeSchema)
+  }
+}
+
+private class FormatTableDataWriter(
+    table: FormatTable,
+    formatTableWrite: BatchTableWrite,
+    writeSchema: StructType)
+  extends DataWriter[InternalRow]
+  with Logging {
+
+  private val rowConverter: InternalRow => org.apache.paimon.data.InternalRow = {
+    val numFields = writeSchema.fields.length
+    record => {
+      new SparkInternalRowWrapper(-1, writeSchema, numFields).replace(record)
+    }
+  }
+
+  override def write(record: InternalRow): Unit = {
+    val paimonRow = rowConverter.apply(record)
+    formatTableWrite.write(paimonRow)
+  }
+
+  override def commit(): WriterCommitMessage = {
+    try {
+      val committers = formatTableWrite
+        .prepareCommit()
+        .asScala
+        .map {
+          case committer: TwoPhaseCommitMessage => committer.getCommitter
+          case other =>
+            throw new IllegalArgumentException(
+              "Unsupported commit message type: " + other.getClass.getSimpleName)
+        }
+        .toSeq
+      FormatTableTaskCommit(committers)
+    } finally {
+      close()
+    }
+  }
+
+  override def abort(): Unit = {
+    logInfo("Aborting FormatTable data writer")
+    close()
+  }
+
+  override def close(): Unit = {
+    try {
+      formatTableWrite.close()
+    } catch {
+      case e: Exception =>
+        logError("Error closing FormatTableDataWriter", e)
+        throw new RuntimeException(e)
+    }
+  }
+}
+
+/** Commit message container for FormatTable writes, holding committers that need to be executed. */
+class FormatTableTaskCommit private (private val _committers: Seq[TwoPhaseOutputStream.Committer])
+  extends WriterCommitMessage {
+
+  def committers(): Seq[TwoPhaseOutputStream.Committer] = _committers
+}
+
+object FormatTableTaskCommit {
+  def apply(committers: Seq[TwoPhaseOutputStream.Committer]): FormatTableTaskCommit = {
+    new FormatTableTaskCommit(committers)
   }
 }

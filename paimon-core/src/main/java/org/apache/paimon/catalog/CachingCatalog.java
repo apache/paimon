@@ -134,6 +134,11 @@ public class CachingCatalog extends DelegateCatalog {
                                 .build();
     }
 
+    @VisibleForTesting
+    public Cache<Identifier, Table> tableCache() {
+        return tableCache;
+    }
+
     public static Catalog tryToCreate(Catalog catalog, Options options) {
         if (!options.get(CACHE_ENABLED)) {
             return catalog;

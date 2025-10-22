@@ -16,42 +16,34 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.fs;
+package org.apache.paimon.data;
+
+import org.apache.paimon.fs.SeekableInputStream;
 
 import java.io.IOException;
-import java.io.InputStream;
+import java.util.function.Supplier;
 
-/** A {@link SeekableInputStream} wrapped {@link InputStream} without seek. */
-public class LimitedSeekableInputStream extends SeekableInputStream {
+/** Blob supplied by stream. */
+public class BlobStream implements Blob {
 
-    private final InputStream in;
+    private final Supplier<SeekableInputStream> inputStreamSupplier;
 
-    public LimitedSeekableInputStream(InputStream in) {
-        this.in = in;
+    public BlobStream(Supplier<SeekableInputStream> inputStreamSupplier) {
+        this.inputStreamSupplier = inputStreamSupplier;
     }
 
     @Override
-    public void seek(long desired) throws IOException {
-        throw new UnsupportedOperationException();
+    public byte[] toData() {
+        throw new UnsupportedOperationException("Blob stream can not convert to data.");
     }
 
     @Override
-    public long getPos() throws IOException {
-        throw new UnsupportedOperationException();
+    public BlobDescriptor toDescriptor() {
+        throw new UnsupportedOperationException("Blob stream can not convert to descriptor.");
     }
 
     @Override
-    public int read() throws IOException {
-        return in.read();
-    }
-
-    @Override
-    public int read(byte[] b, int off, int len) throws IOException {
-        return in.read(b, off, len);
-    }
-
-    @Override
-    public void close() throws IOException {
-        in.close();
+    public SeekableInputStream newInputStream() throws IOException {
+        return inputStreamSupplier.get();
     }
 }

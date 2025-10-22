@@ -90,9 +90,10 @@ public class CreateFunctionProcedure extends BaseProcedure {
     @Override
     public InternalRow[] call(InternalRow args) {
         Catalog paimonCatalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
+        String paimonCatalogName = ((WithPaimonCatalog) tableCatalog()).paimonCatalogName();
         org.apache.spark.sql.connector.catalog.Identifier ident =
                 toIdentifier(args.getString(0), PARAMETERS[0].name());
-        Identifier function = CatalogUtils.toIdentifier(ident);
+        Identifier function = CatalogUtils.toIdentifier(ident, paimonCatalogName);
         List<DataField> inputParams = getDataFieldsFromArguments(1, args);
         List<DataField> returnParams = getDataFieldsFromArguments(2, args);
         boolean deterministic = args.isNullAt(3) ? true : args.getBoolean(3);

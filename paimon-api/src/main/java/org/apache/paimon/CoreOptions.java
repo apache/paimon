@@ -623,6 +623,16 @@ public class CoreOptions implements Serializable {
                                             text("append table: the default value is 256 MB."))
                                     .build());
 
+    public static final ConfigOption<MemorySize> BLOB_TARGET_FILE_SIZE =
+            key("blob.target-file-size")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Target size of a blob file. Default is value of TARGET_FILE_SIZE.")
+                                    .build());
+
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
             key("num-sorted-run.compaction-trigger")
                     .intType()
@@ -1316,6 +1326,13 @@ public class CoreOptions implements Serializable {
                             "Used to specify the end tag (inclusive), and Paimon will find an earlier tag and return changes between them. "
                                     + "If the tag doesn't exist or the earlier tag doesn't exist, return empty. "
                                     + "This option requires 'tag.creation-period' and 'tag.period-formatter' configured.");
+
+    public static final ConfigOption<Boolean> INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT =
+            key("incremental-between-tag-to-snapshot")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to read incremental changes between the snapshot corresponding to the tag.");
 
     public static final ConfigOption<Boolean> END_INPUT_CHECK_PARTITION_EXPIRE =
             key("end-input.check-partition-expire")
@@ -2438,6 +2455,12 @@ public class CoreOptions implements Serializable {
                 .getBytes();
     }
 
+    public long blobTargetFileSize() {
+        return options.getOptional(BLOB_TARGET_FILE_SIZE)
+                .map(MemorySize::getBytes)
+                .orElse(targetFileSize(false));
+    }
+
     public long compactionFileSize(boolean hasPrimaryKey) {
         // file size to join the compaction, we don't process on middle file size to avoid
         // compact a same file twice (the compression is not calculate so accurately. the output
@@ -2671,6 +2694,10 @@ public class CoreOptions implements Serializable {
 
     public String incrementalToAutoTag() {
         return options.get(INCREMENTAL_TO_AUTO_TAG);
+    }
+
+    public boolean incrementalBetweenTagToSnapshot() {
+        return options.get(INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT);
     }
 
     public Integer scanManifestParallelism() {

@@ -21,13 +21,14 @@ import uuid
 from pathlib import Path
 from typing import List
 
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.table_scan import TableScan
+from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
@@ -66,7 +67,7 @@ class FileStoreCommit:
 
         commit_entries = []
         for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.table_schema.get_partition_key_fields())
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,
@@ -88,7 +89,7 @@ class FileStoreCommit:
         partition_filter = None
         # sanity check, all changes must be done within the given partition, meanwhile build a partition filter
         if len(overwrite_partition) > 0:
-            predicate_builder = PredicateBuilder(self.table.table_schema.get_partition_key_fields())
+            predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
             sub_predicates = []
             for key, value in overwrite_partition.items():
                 sub_predicates.append(predicate_builder.equal(key, value))
@@ -101,12 +102,12 @@ class FileStoreCommit:
                                        f"in {msg.partition} does not belong to this partition")
 
         commit_entries = []
-        current_entries = TableScan(self.table, partition_filter, None, []).plan_files()
+        current_entries = FullStartingScanner(self.table, partition_filter, None).plan_files()
         for entry in current_entries:
             entry.kind = 1
             commit_entries.append(entry)
         for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.table_schema.get_partition_key_fields())
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,
@@ -130,6 +131,24 @@ class FileStoreCommit:
         added_file_count = 0
         deleted_file_count = 0
         delta_record_count = 0
+        # process snapshot
+        new_snapshot_id = self._generate_snapshot_id()
+
+        # Check if row tracking is enabled
+        row_tracking_enabled = self.table.options.get(CoreOptions.ROW_TRACKING_ENABLED, 'false').lower() == 'true'
+
+        # Apply row tracking logic if enabled
+        next_row_id = None
+        if row_tracking_enabled:
+            # Assign snapshot ID to delta files
+            commit_entries = self._assign_snapshot_id(new_snapshot_id, commit_entries)
+
+            # Get the next row ID start from the latest snapshot
+            first_row_id_start = self._get_next_row_id_start()
+
+            # Assign row IDs to new files and get the next row ID for the snapshot
+            commit_entries, next_row_id = self._assign_row_tracking_meta(first_row_id_start, commit_entries)
+
         for entry in commit_entries:
             if entry.kind == 0:
                 added_file_count += 1
@@ -155,11 +174,11 @@ class FileStoreCommit:
             partition_stats=SimpleStats(
                 min_values=GenericRow(
                     values=partition_min_stats,
-                    fields=self.table.table_schema.get_partition_key_fields(),
+                    fields=self.table.partition_keys_fields
                 ),
                 max_values=GenericRow(
                     values=partition_max_stats,
-                    fields=self.table.table_schema.get_partition_key_fields(),
+                    fields=self.table.partition_keys_fields
                 ),
                 null_counts=partition_null_counts,
             ),
@@ -194,6 +213,7 @@ class FileStoreCommit:
             commit_identifier=commit_identifier,
             commit_kind=commit_kind,
             time_millis=int(time.time() * 1000),
+            next_row_id=next_row_id,
         )
 
         # Generate partition statistics for the commit
@@ -314,3 +334,59 @@ class FileStoreCommit:
             )
             for stats in partition_stats.values()
         ]
+
+    def _assign_snapshot_id(self, snapshot_id: int, commit_entries: List[ManifestEntry]) -> List[ManifestEntry]:
+        """Assign snapshot ID to all commit entries."""
+        return [entry.assign_sequence_number(snapshot_id, snapshot_id) for entry in commit_entries]
+
+    def _get_next_row_id_start(self) -> int:
+        """Get the next row ID start from the latest snapshot."""
+        latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+        if latest_snapshot and hasattr(latest_snapshot, 'next_row_id') and latest_snapshot.next_row_id is not None:
+            return latest_snapshot.next_row_id
+        return 0
+
+    def _assign_row_tracking_meta(self, first_row_id_start: int, commit_entries: List[ManifestEntry]):
+        """
+        Assign row tracking metadata (first_row_id) to new files.
+        This follows the Java implementation logic from FileStoreCommitImpl.assignRowTrackingMeta.
+        """
+        if not commit_entries:
+            return commit_entries, first_row_id_start
+
+        row_id_assigned = []
+        start = first_row_id_start
+        blob_start = first_row_id_start
+
+        for entry in commit_entries:
+            # Check if this is an append file that needs row ID assignment
+            if (entry.kind == 0 and  # ADD kind
+                    entry.file.file_source == "APPEND" and  # APPEND file source
+                    entry.file.first_row_id is None):  # No existing first_row_id
+
+                if self._is_blob_file(entry.file.file_name):
+                    # Handle blob files specially
+                    if blob_start >= start:
+                        raise RuntimeError(
+                            f"This is a bug, blobStart {blob_start} should be less than start {start} "
+                            f"when assigning a blob entry file."
+                        )
+                    row_count = entry.file.row_count
+                    row_id_assigned.append(entry.assign_first_row_id(blob_start))
+                    blob_start += row_count
+                else:
+                    # Handle regular files
+                    row_count = entry.file.row_count
+                    row_id_assigned.append(entry.assign_first_row_id(start))
+                    blob_start = start
+                    start += row_count
+            else:
+                # For compact files or files that already have first_row_id, don't assign
+                row_id_assigned.append(entry)
+
+        return row_id_assigned, start
+
+    @staticmethod
+    def _is_blob_file(file_name: str) -> bool:
+        """Check if a file is a blob file based on its extension."""
+        return file_name.endswith('.blob')

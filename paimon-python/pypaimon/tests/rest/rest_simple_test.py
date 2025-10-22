@@ -24,7 +24,8 @@ from pypaimon import Schema
 from pypaimon.catalog.catalog_exception import DatabaseAlreadyExistException, TableAlreadyExistException, \
     DatabaseNotExistException, TableNotExistException
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
-from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor, DynamicBucketRowKeyExtractor
+from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor, DynamicBucketRowKeyExtractor, \
+    UnawareBucketRowKeyExtractor
 
 
 class RESTSimpleTest(RESTBaseTest):
@@ -101,6 +102,56 @@ class RESTSimpleTest(RESTBaseTest):
         # Concatenate the three tables
         actual = pa.concat_tables([actual1, actual2, actual3]).sort_by('user_id')
         expected = self._read_test_table(read_builder).sort_by('user_id')
+        self.assertEqual(actual, expected)
+
+    def test_with_shard_ao_unaware_bucket_manual(self):
+        """Test shard_ao_unaware_bucket with setting bucket -1 manually"""
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'],
+                                            options={'bucket': '-1'})
+        self.rest_catalog.create_table('default.test_with_shard_ao_unaware_bucket_manual', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_shard_ao_unaware_bucket_manual')
+        write_builder = table.new_batch_write_builder()
+
+        # Write data with single partition
+        table_write = write_builder.new_write()
+        self.assertIsInstance(table_write.row_key_extractor, UnawareBucketRowKeyExtractor)
+
+        table_commit = write_builder.new_commit()
+        data = {
+            'user_id': [1, 2, 3, 4, 5, 6],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006],
+            'behavior': ['a', 'b', 'c', 'd', 'e', 'f'],
+            'dt': ['p1', 'p1', 'p1', 'p1', 'p1', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+
+        # Test first shard (0, 2) - should get first 3 rows
+        plan = read_builder.new_scan().with_shard(0, 2).plan()
+        actual = table_read.to_arrow(plan.splits()).sort_by('user_id')
+        expected = pa.Table.from_pydict({
+            'user_id': [1, 2, 3],
+            'item_id': [1001, 1002, 1003],
+            'behavior': ['a', 'b', 'c'],
+            'dt': ['p1', 'p1', 'p1'],
+        }, schema=self.pa_schema)
+        self.assertEqual(actual, expected)
+
+        # Test second shard (1, 2) - should get last 3 rows
+        plan = read_builder.new_scan().with_shard(1, 2).plan()
+        actual = table_read.to_arrow(plan.splits()).sort_by('user_id')
+        expected = pa.Table.from_pydict({
+            'user_id': [4, 5, 6],
+            'item_id': [1004, 1005, 1006],
+            'behavior': ['d', 'e', 'f'],
+            'dt': ['p1', 'p1', 'p1'],
+        }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
     def test_with_shard_ao_fixed_bucket(self):

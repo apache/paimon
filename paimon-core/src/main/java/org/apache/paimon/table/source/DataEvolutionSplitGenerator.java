@@ -97,6 +97,8 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                                             f2.maxSequenceNumber(), f1.maxSequenceNumber());
                                 }));
 
+        files = filterBlob(files);
+
         // Split files by firstRowId
         long lastRowId = -1;
         long checkRowIdStart = 0;
@@ -127,5 +129,27 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         }
 
         return splitByRowId;
+    }
+
+    private static List<DataFileMeta> filterBlob(List<DataFileMeta> files) {
+        List<DataFileMeta> result = new ArrayList<>();
+        long rowIdStart = -1;
+        long rowIdEnd = -1;
+        for (DataFileMeta file : files) {
+            if (file.firstRowId() == null) {
+                result.add(file);
+                continue;
+            }
+            if (!isBlobFile(file.fileName())) {
+                rowIdStart = file.firstRowId();
+                rowIdEnd = file.firstRowId() + file.rowCount();
+                result.add(file);
+            } else {
+                if (file.firstRowId() >= rowIdStart && file.firstRowId() < rowIdEnd) {
+                    result.add(file);
+                }
+            }
+        }
+        return result;
     }
 }

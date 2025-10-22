@@ -36,14 +36,12 @@ class BatchTableWrite:
         self.row_key_extractor = self.table.create_row_key_extractor()
         self.batch_committed = False
 
-    def write_arrow(self, table: pa.Table, row_kind: List[int] = None):
-        # TODO: support row_kind
+    def write_arrow(self, table: pa.Table):
         batches_iterator = table.to_batches()
         for batch in batches_iterator:
             self.write_arrow_batch(batch)
 
-    def write_arrow_batch(self, data: pa.RecordBatch, row_kind: List[int] = None):
-        # TODO: support row_kind
+    def write_arrow_batch(self, data: pa.RecordBatch):
         self._validate_pyarrow_schema(data.schema)
         partitions, buckets = self.row_key_extractor.extract_partition_bucket_batch(data)
 
@@ -67,10 +65,21 @@ class BatchTableWrite:
         self.batch_committed = True
         return self.file_store_write.prepare_commit()
 
+    def with_write_type(self, write_cols: List[str]):
+        for col in write_cols:
+            if col not in self.table_pyarrow_schema.names:
+                raise ValueError(f"Column {col} is not in table schema.")
+        if len(write_cols) == len(self.table_pyarrow_schema.names):
+            write_cols = None
+        self.file_store_write.write_cols = write_cols
+        return self
+
     def close(self):
         self.file_store_write.close()
 
-    def _validate_pyarrow_schema(self, data_schema):
-        if data_schema != self.table_pyarrow_schema:
-            raise ValueError(f"Input schema isn't consistent with table schema. "
-                             f"Table schema is: {data_schema} Input schema is: {self.table_pyarrow_schema}")
+    def _validate_pyarrow_schema(self, data_schema: pa.Schema):
+        if data_schema != self.table_pyarrow_schema and data_schema.names != self.file_store_write.write_cols:
+            raise ValueError(f"Input schema isn't consistent with table schema and write cols. "
+                             f"Input schema is: {data_schema} "
+                             f"Table schema is: {self.table_pyarrow_schema} "
+                             f"Write cols is: {self.file_store_write.write_cols}")

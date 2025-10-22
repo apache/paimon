@@ -52,8 +52,7 @@ class ReadBuilder:
         return TableScan(
             table=self.table,
             predicate=self._predicate,
-            limit=self._limit,
-            read_type=self.read_type()
+            limit=self._limit
         )
 
     def new_read(self) -> TableRead:

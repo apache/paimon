@@ -801,6 +801,47 @@ public class IcebergMigrateTest {
                                 record.toString().replaceAll("\\bRecord\\b", "")));
     }
 
+    @Test
+    public void testMigrateTableWithProperties() throws Exception {
+        // Create Iceberg table with custom properties
+        org.apache.iceberg.catalog.Catalog icebergCatalog = createIcebergCatalog();
+        TableIdentifier icebergIdentifier = TableIdentifier.of(iceDatabase, iceTable);
+
+        Map<String, String> tableProperties = new HashMap<>();
+        tableProperties.put("write.format.default", "parquet");
+        tableProperties.put("comment", "description");
+
+        Table icebergTable =
+                icebergCatalog
+                        .buildTable(icebergIdentifier, iceSchema)
+                        .withPartitionSpec(PartitionSpec.unpartitioned())
+                        .withProperties(tableProperties)
+                        .create();
+
+        // Verify Iceberg table has the properties set
+        assertThat(icebergTable.properties()).containsAllEntriesOf(tableProperties);
+        String format = "parquet";
+        writeInitialData(icebergTable, format, false);
+
+        // Execute migration
+        IcebergMigrator icebergMigrator =
+                new IcebergMigrator(
+                        paiCatalog,
+                        paiDatabase,
+                        paiTable,
+                        iceDatabase,
+                        iceTable,
+                        new Options(icebergProperties),
+                        1,
+                        Collections.emptyMap());
+        icebergMigrator.executeMigrate();
+
+        // Verify Paimon table with the same properties
+        FileStoreTable paimonTable =
+                (FileStoreTable) paiCatalog.getTable(Identifier.create(paiDatabase, paiTable));
+        assertThat(paimonTable.options()).containsAllEntriesOf(tableProperties);
+    }
+
     private org.apache.iceberg.catalog.Catalog createIcebergCatalog() {
         Map<String, String> icebergCatalogOptions = new HashMap<>();
         icebergCatalogOptions.put("type", "hadoop");

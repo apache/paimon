@@ -40,6 +40,7 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.DLFToken;
 import org.apache.paimon.rest.exceptions.BadRequestException;
+import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -306,9 +307,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> restCatalog.fastForward(identifier, "test_branch"));
-        assertThrows(
-                Catalog.TableNoPermissionException.class,
-                () -> restCatalog.loadTableToken(identifier));
+        assertThrows(ForbiddenException.class, () -> restCatalog.api().loadTableToken(identifier));
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> restCatalog.loadSnapshot(identifier));

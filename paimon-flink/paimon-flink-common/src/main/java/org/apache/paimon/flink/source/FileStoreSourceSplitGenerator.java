@@ -18,10 +18,11 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -30,11 +31,8 @@ import java.util.stream.Collectors;
  */
 public class FileStoreSourceSplitGenerator {
 
-    /**
-     * The current Id as a mutable string representation. This covers more values than the integer
-     * value range, so we should never overflow.
-     */
-    private final char[] currentId = "0000000000".toCharArray();
+    private final String uuid = UUID.randomUUID().toString();
+    private final AtomicInteger idCounter = new AtomicInteger(1);
 
     public List<FileStoreSourceSplit> createSplits(TableScan.Plan plan) {
         return plan.splits().stream()
@@ -42,32 +40,7 @@ public class FileStoreSourceSplitGenerator {
                 .collect(Collectors.toList());
     }
 
-    public List<FileStoreSourceSplit> createSplits(List<Split> splits) {
-        return splits.stream()
-                .map(s -> new FileStoreSourceSplit(getNextId(), s))
-                .collect(Collectors.toList());
-    }
-
     protected final String getNextId() {
-        // because we just increment numbers, we increment the char representation directly,
-        // rather than incrementing an integer and converting it to a string representation
-        // every time again (requires quite some expensive conversion logic).
-        incrementCharArrayByOne(currentId, currentId.length - 1);
-        return new String(currentId);
-    }
-
-    private static void incrementCharArrayByOne(char[] array, int pos) {
-        if (pos < 0) {
-            throw new RuntimeException("Produce too many splits.");
-        }
-
-        char c = array[pos];
-        c++;
-
-        if (c > '9') {
-            c = '0';
-            incrementCharArrayByOne(array, pos - 1);
-        }
-        array[pos] = c;
+        return uuid + "-" + idCounter.getAndIncrement();
     }
 }
