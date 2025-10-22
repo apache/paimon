@@ -256,11 +256,11 @@ public class CatalogUtils {
                 new CatalogEnvironment(
                         tableIdentifier,
                         metadata.uuid(),
-                        metadata.isExternal() ? null : catalog.catalogLoader(),
+                        catalog.catalogLoader(),
                         lockFactory,
                         lockContext,
                         catalogContext,
-                        catalog.supportsVersionManagement());
+                        catalog.supportsVersionManagement() && !metadata.isExternal());
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);

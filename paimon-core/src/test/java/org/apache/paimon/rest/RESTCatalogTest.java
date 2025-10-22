@@ -2592,8 +2592,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         // Create database and external table
         restCatalog.createDatabase("test_external_table_db", true);
-        Identifier identifier =
-                Identifier.create("test_external_table_db", "external_test_table_with_oss");
+        Identifier identifier = Identifier.create("test_external_table_db", "external_test_table");
 
         try {
             catalog.dropTable(identifier, true);
@@ -2658,6 +2657,39 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             assertThat(row.getInt(2)).isGreaterThan(0); // age should be positive
         }
 
+        // Test snapshot reading functionality - should read from client side, not server side
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
+
+        // Verify that snapshot manager can read latest snapshot ID from file system
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        assertThat(latestSnapshotId).isNotNull();
+        assertThat(latestSnapshotId).isPositive();
+
+        // Verify that snapshot manager can read the latest snapshot from file system
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        assertThat(latestSnapshot).isNotNull();
+        assertThat(latestSnapshot.id()).isEqualTo(latestSnapshotId);
+
+        // Verify that snapshot manager can read specific snapshot from file system
+        Snapshot specificSnapshot = snapshotManager.snapshot(latestSnapshotId);
+        assertThat(specificSnapshot).isNotNull();
+        assertThat(specificSnapshot.id()).isEqualTo(latestSnapshotId);
+
+        // Verify snapshot contains our committed data
+        assertThat(latestSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+
+        // Test that external table can be listed in catalog
+        List<String> tables = catalog.listTables("test_external_table_db");
+        assertThat(tables).contains("external_test_table");
+
+        // Test that external table can be accessed again after operations
+        Table tableAgain = catalog.getTable(identifier);
+        assertThat(tableAgain).isNotNull();
+        assertThat(tableAgain.comment()).isEqualTo(Optional.of("External table for testing"));
+
+        testReadSystemTables();
+
         // Verify external table path still exists after operations
         assertTrue(
                 fileIO.exists(externalTablePath),
@@ -2676,6 +2708,44 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             fileIO.deleteQuietly(externalTablePath);
         } catch (Exception e) {
             // Ignore cleanup errors
+        }
+    }
+
+    private void testReadSystemTables() throws IOException, Catalog.TableNotExistException {
+        Identifier allTablesIdentifier = Identifier.create("sys", "tables");
+        Table allTablesTable = catalog.getTable(allTablesIdentifier);
+
+        if (allTablesTable != null) {
+            ReadBuilder allTablesReadBuilder = allTablesTable.newReadBuilder();
+            TableRead allTablesRead = allTablesReadBuilder.newRead();
+            List<Split> allTablesSplits = allTablesReadBuilder.newScan().plan().splits();
+
+            List<InternalRow> allTablesResults = new ArrayList<>();
+            for (Split split : allTablesSplits) {
+                try (RecordReader<InternalRow> reader = allTablesRead.createReader(split)) {
+                    reader.forEachRemaining(allTablesResults::add);
+                }
+            }
+
+            // Verify that our external table appears in ALL_TABLES
+            assertThat(allTablesResults).isNotEmpty();
+
+            // Find our external table in the results
+            boolean foundExternalTable = false;
+            for (InternalRow row : allTablesResults) {
+                String tableName = row.getString(1).toString(); // table_name column
+                String databaseName = row.getString(0).toString(); // database_name column
+                if ("external_test_table".equals(tableName)
+                        && "test_external_table_db".equals(databaseName)) {
+                    foundExternalTable = true;
+                    // Verify table properties
+                    String tableType = row.getString(2).toString(); // table_type column
+                    assertThat(tableType)
+                            .isEqualTo("table"); // External tables are still MANAGED type
+                    break;
+                }
+            }
+            assertThat(foundExternalTable).isTrue();
         }
     }
 
