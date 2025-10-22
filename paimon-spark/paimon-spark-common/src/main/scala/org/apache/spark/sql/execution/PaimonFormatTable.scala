@@ -413,7 +413,7 @@ private case class FormatTableBatchWrite(
             }
           })
       }
-      committers.foreach(_.commit())
+      committers.foreach(c => c.commit(table.fileIO()))
       logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
     } catch {
       case e: Exception =>
@@ -451,7 +451,7 @@ private case class FormatTableBatchWrite(
     committers.foreach {
       committer =>
         try {
-          committer.discard()
+          committer.discard(table.fileIO())
         } catch {
           case e: Exception => logWarning(s"Failed to abort committer: ${e.getMessage}")
         }
