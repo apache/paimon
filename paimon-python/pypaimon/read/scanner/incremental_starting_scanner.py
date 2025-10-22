@@ -15,8 +15,10 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import os
 from typing import List, Optional
 
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner
@@ -43,7 +45,11 @@ class IncrementalStartingScanner(FullStartingScanner):
         for snapshot in snapshots_in_range:
             # Get manifest files for this snapshot
             manifest_files = self.manifest_list_manager.read_delta(snapshot)
-            file_entries.extend(self.read_manifest_entries(manifest_files))
+            max_workers = int(self.table.options.get(CoreOptions.MANIFEST_READ_THREADS, (os.cpu_count() or 4) * 2))
+            file_entries.extend(self.manifest_file_manager.read_entries_parallel(manifest_files,
+                                                                                 self._filter_manifest_file,
+                                                                                 self._filter_manifest_entry,
+                                                                                 max_workers=max_workers))
         return file_entries
 
     @staticmethod
