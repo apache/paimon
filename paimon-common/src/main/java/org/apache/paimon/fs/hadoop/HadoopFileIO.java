@@ -211,9 +211,6 @@ public class HadoopFileIO implements FileIO {
 
     protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
         Configuration conf = hadoopConf.get();
-        if (conf == null) {
-            conf = new Configuration();
-        }
         FileSystem fileSystem = path.getFileSystem(conf);
         fileSystem = HadoopSecuredFileSystem.trySecureFileSystem(fileSystem, options, conf);
         return fileSystem;

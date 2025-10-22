@@ -23,7 +23,7 @@ import org.apache.paimon.spark.{FormatTableScanBuilder, SparkInternalRowWrapper}
 import org.apache.paimon.spark.write.BaseWriteBuilder
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.TwoPhaseCommitMessage
-import org.apache.paimon.table.sink.BatchTableWrite
+import org.apache.paimon.table.sink.{BatchTableWrite, CommitMessageSerializer, TwoPhaseCommitterSerializer}
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.StringUtils
 
@@ -48,10 +48,11 @@ import org.apache.spark.sql.sources.{And, Filter}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import java.io.FileNotFoundException
+import java.io.{FileNotFoundException, IOException, UncheckedIOException}
 import java.util
 
 import scala.collection.JavaConverters._
+import scala.util.{Failure, Success, Try}
 
 object PaimonFormatTable {
 
@@ -526,14 +527,36 @@ private class FormatTableDataWriter(
 }
 
 /** Commit message container for FormatTable writes, holding committers that need to be executed. */
-class FormatTableTaskCommit private (private val _committers: Seq[TwoPhaseOutputStream.Committer])
+class FormatTableTaskCommit private (private val serializedMessageBytes: Seq[Array[Byte]])
   extends WriterCommitMessage {
 
-  def committers(): Seq[TwoPhaseOutputStream.Committer] = _committers
+  def committers(): Seq[TwoPhaseOutputStream.Committer] = {
+    val deserializer = new TwoPhaseCommitterSerializer()
+    serializedMessageBytes.map {
+      bytes =>
+        Try(deserializer.deserialize(deserializer.getVersion, bytes)) match {
+          case Success(committer) => committer
+          case Failure(e: IOException) => throw new UncheckedIOException(e)
+          case Failure(e) => throw e
+        }
+    }
+  }
 }
 
 object FormatTableTaskCommit {
   def apply(committers: Seq[TwoPhaseOutputStream.Committer]): FormatTableTaskCommit = {
-    new FormatTableTaskCommit(committers)
+    val serializer = new TwoPhaseCommitterSerializer()
+    val serializedBytes: Seq[Array[Byte]] = Option(committers)
+      .filter(_.nonEmpty)
+      .map(_.map {
+        committer =>
+          Try(serializer.serialize(committer)) match {
+            case Success(serializedBytes) => serializedBytes
+            case Failure(e: IOException) => throw new UncheckedIOException(e)
+            case Failure(e) => throw e
+          }
+      })
+      .getOrElse(Seq.empty)
+    new FormatTableTaskCommit(serializedBytes)
   }
 }

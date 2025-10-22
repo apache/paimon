@@ -62,7 +62,7 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
   }
 
   test("PaimonFormatTableRead table: csv insert overwrite") {
-    val tableName = "paimon_overwrite_yt"
+    val tableName = "paimon_overwrite_test"
     withTable(tableName) {
       spark.sql(
         s"""
