@@ -256,7 +256,7 @@ public class CatalogUtils {
                 new CatalogEnvironment(
                         tableIdentifier,
                         metadata.uuid(),
-                        catalog.catalogLoader(),
+                        metadata.isExternal() ? null : catalog.catalogLoader(),
                         lockFactory,
                         lockContext,
                         catalogContext,
