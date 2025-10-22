@@ -33,24 +33,25 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
-    private final BucketSelectConverter bucketSelectConverter;
-    private final SimpleStatsEvolutions simpleStatsEvolutions;
+    protected final BucketSelectConverter bucketSelectConverter;
+    protected final SimpleStatsEvolutions simpleStatsEvolutions;
 
-    private final boolean fileIndexReadEnabled;
+    protected final boolean fileIndexReadEnabled;
 
-    private Predicate inputFilter;
+    protected Predicate inputFilter;
 
     // cache not evolved filter by schema id
-    private final Map<Long, Predicate> notEvolvedFilterMapping = new ConcurrentHashMap<>();
+    protected final Map<Long, Predicate> notEvolvedFilterMapping = new ConcurrentHashMap<>();
 
     // cache evolved filter by schema id
-    private final Map<Long, Predicate> evolvedFilterMapping = new ConcurrentHashMap<>();
+    protected final Map<Long, Predicate> evolvedFilterMapping = new ConcurrentHashMap<>();
 
     public AppendOnlyFileStoreScan(
             ManifestsReader manifestsReader,
@@ -119,6 +120,11 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         }
 
         return testFileIndex(entry.file().embeddedIndex(), entry);
+    }
+
+    @Override
+    protected List<ManifestEntry> postFilter(List<ManifestEntry> entries) {
+        return entries;
     }
 
     private boolean testFileIndex(@Nullable byte[] embeddedIndexBytes, ManifestEntry entry) {

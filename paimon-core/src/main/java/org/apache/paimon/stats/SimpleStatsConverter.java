@@ -86,7 +86,7 @@ public class SimpleStatsConverter {
                         serializer.toBinaryRow(GenericRow.of(minValues.toArray())).copy(),
                         serializer.toBinaryRow(GenericRow.of(maxValues.toArray())).copy(),
                         BinaryArray.fromLongArray(nullCounts.toArray(new Long[0])));
-        return Pair.of(fields.size() == rowType.getFieldCount() ? null : fields, simpleStats);
+        return Pair.of(fields, simpleStats);
     }
 
     public SimpleStats toBinaryAllMode(SimpleColStats[] stats) {

@@ -76,8 +76,8 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         return splitForBatch(files);
     }
 
-    public static List<List<DataFileMeta>> split(List<DataFileMeta> files) {
-        List<List<DataFileMeta>> splitByRowId = new ArrayList<>();
+    public static <T extends DataFileMeta> List<List<T>> split(List<T> files) {
+        List<List<T>> splitByRowId = new ArrayList<>();
         // Sort files by firstRowId and then by maxSequenceNumber
         files.sort(
                 Comparator.comparingLong(
@@ -101,9 +101,9 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         // Split files by firstRowId
         long lastRowId = -1;
         long checkRowIdStart = 0;
-        List<DataFileMeta> currentSplit = new ArrayList<>();
+        List<T> currentSplit = new ArrayList<>();
         for (int i = 0; i < files.size(); i++) {
-            DataFileMeta file = files.get(i);
+            T file = files.get(i);
             Long firstRowId = file.firstRowId();
             if (firstRowId == null) {
                 splitByRowId.add(Collections.singletonList(file));
@@ -135,11 +135,11 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         return splitByRowId;
     }
 
-    private static List<DataFileMeta> filterBlob(List<DataFileMeta> files) {
-        List<DataFileMeta> result = new ArrayList<>();
+    private static <T extends DataFileMeta> List<T> filterBlob(List<T> files) {
+        List<T> result = new ArrayList<>();
         long rowIdStart = -1;
         long rowIdEnd = -1;
-        for (DataFileMeta file : files) {
+        for (T file : files) {
             if (file.firstRowId() == null) {
                 result.add(file);
                 continue;
