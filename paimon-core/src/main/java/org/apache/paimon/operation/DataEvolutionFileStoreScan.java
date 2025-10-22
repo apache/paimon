@@ -38,7 +38,7 @@ import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.jetbrains.annotations.Nullable;
+import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.List;
