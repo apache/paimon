@@ -71,7 +71,9 @@ public class HintFileUtils {
         int retryNumber = 0;
         while (retryNumber++ < READ_HINT_RETRY_NUM) {
             try {
-                return fileIO.readOverwrittenFileUtf8(path).map(Long::parseLong).orElse(null);
+                if (fileIO.exists(path)) {
+                    return fileIO.readOverwrittenFileUtf8(path).map(Long::parseLong).orElse(null);
+                }
             } catch (Exception ignored) {
             }
             try {
