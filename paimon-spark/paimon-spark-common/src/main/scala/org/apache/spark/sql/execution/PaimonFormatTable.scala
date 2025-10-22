@@ -202,12 +202,7 @@ case class PaimonFormatTable(
   }
 
   override def capabilities(): util.Set[TableCapability] = {
-    util.EnumSet.of(
-      BATCH_READ,
-      BATCH_WRITE,
-      OVERWRITE_DYNAMIC,
-      ACCEPT_ANY_SCHEMA,
-      OVERWRITE_BY_FILTER)
+    util.EnumSet.of(BATCH_READ, BATCH_WRITE, OVERWRITE_DYNAMIC, OVERWRITE_BY_FILTER)
   }
 
   override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
@@ -216,8 +211,8 @@ case class PaimonFormatTable(
     scanBuilder
   }
 
-  override def newWriteBuilder(logicalWriteInfo: LogicalWriteInfo): WriteBuilder = {
-    PaimonFormatTableWriterBuilder(table, schema)
+  override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
+    PaimonFormatTableWriterBuilder(table, info.schema)
   }
 }
 
