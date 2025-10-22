@@ -96,10 +96,14 @@ class FullStartingScanner(StartingScanner):
         if not latest_snapshot:
             return []
         manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
+        return self.read_manifest_entries(manifest_files)
 
-        max_workers = int(self.table.options.get(CoreOptions.MANIFEST_READ_THREADS, (os.cpu_count() or 4) * 2))
+    def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
+        max_workers = int(self.table.options.get(CoreOptions.SCAN_MANIFEST_PARALLELISM, os.cpu_count() or 8))
+        if max_workers < 8:
+            max_workers = 8
+        manifest_files = [entry for entry in manifest_files if self._filter_manifest_file(entry)]
         return self.manifest_file_manager.read_entries_parallel(manifest_files,
-                                                                self._filter_manifest_file,
                                                                 self._filter_manifest_entry,
                                                                 max_workers=max_workers)
 
