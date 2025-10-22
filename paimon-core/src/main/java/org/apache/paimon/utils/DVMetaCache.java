@@ -20,7 +20,6 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.table.source.DeletionFile;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -40,7 +39,11 @@ public class DVMetaCache {
 
     public DVMetaCache(long maxElementSize) {
         this.cache =
-                Caffeine.newBuilder().maximumSize(maxElementSize).executor(Runnable::run).build();
+                Caffeine.newBuilder()
+                        .maximumSize(maxElementSize)
+                        .softValues()
+                        .executor(Runnable::run)
+                        .build();
     }
 
     @Nullable
@@ -55,12 +58,12 @@ public class DVMetaCache {
         cacheValue.forEach(
                 dvMeta ->
                         dvFilesMap.put(
-                                dvMeta.getFileName(),
+                                dvMeta.getDataFileName(),
                                 new DeletionFile(
-                                        dvMeta.dataFileName(),
-                                        dvMeta.offset(),
-                                        dvMeta.length(),
-                                        dvMeta.cardinality())));
+                                        dvMeta.getDeletionFilePath(),
+                                        dvMeta.getOffset(),
+                                        dvMeta.getLength(),
+                                        dvMeta.getCardinality())));
         return dvFilesMap;
     }
 
@@ -69,54 +72,76 @@ public class DVMetaCache {
         DVMetaCacheKey key = new DVMetaCacheKey(path, partition, bucket);
         List<DVMetaCacheValue> cacheValue = new ArrayList<>();
         dvFilesMap.forEach(
-                (fileName, file) -> {
+                (dataFileName, deletionFile) -> {
                     DVMetaCacheValue dvMetaCacheValue =
                             new DVMetaCacheValue(
-                                    fileName,
-                                    file.path(),
-                                    (int) file.offset(),
-                                    (int) file.length(),
-                                    file.cardinality());
+                                    dataFileName,
+                                    deletionFile.path(),
+                                    (int) deletionFile.offset(),
+                                    (int) deletionFile.length(),
+                                    deletionFile.cardinality());
                     cacheValue.add(dvMetaCacheValue);
                 });
         this.cache.put(key, cacheValue);
     }
 
-    private static class DVMetaCacheValue extends DeletionVectorMeta {
-        private final String fileName;
+    private static class DVMetaCacheValue {
+        private final String dataFileName;
+        private final String deletionFilePath;
+        private final int offset;
+        private final int length;
+        @Nullable private final Long cardinality;
 
         public DVMetaCacheValue(
-                String fileName,
                 String dataFileName,
+                String deletionFilePath,
                 int start,
                 int length,
                 @Nullable Long cardinality) {
-            super(dataFileName, start, length, cardinality);
-            this.fileName = fileName;
+            this.dataFileName = dataFileName;
+            this.deletionFilePath = deletionFilePath;
+            this.offset = start;
+            this.length = length;
+            this.cardinality = cardinality;
         }
 
-        public String getFileName() {
-            return fileName;
+        public String getDataFileName() {
+            return dataFileName;
+        }
+
+        public String getDeletionFilePath() {
+            return deletionFilePath;
+        }
+
+        public int getOffset() {
+            return offset;
+        }
+
+        public int getLength() {
+            return length;
+        }
+
+        @Nullable
+        public Long getCardinality() {
+            return cardinality;
         }
 
         @Override
         public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (!(o instanceof DVMetaCacheValue)) {
-                return false;
-            }
-            if (!super.equals(o)) {
+            if (o == null || getClass() != o.getClass()) {
                 return false;
             }
             DVMetaCacheValue that = (DVMetaCacheValue) o;
-            return Objects.equals(fileName, that.fileName);
+            return offset == that.offset
+                    && length == that.length
+                    && Objects.equals(dataFileName, that.dataFileName)
+                    && Objects.equals(deletionFilePath, that.deletionFilePath)
+                    && Objects.equals(cardinality, that.cardinality);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(super.hashCode(), fileName);
+            return Objects.hash(dataFileName, deletionFilePath, offset, length, cardinality);
         }
     }
 

@@ -360,23 +360,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                             e.getValue().keySet().stream()
                                                     .map(bucket -> Pair.of(e.getKey(), bucket)))
                             .collect(Collectors.toSet());
-            // to avoid cache being frequently evicted,
-            //  currently we only read from cache when bucket number is 1
-            if (indexFileHandler.isEnableDVMetaCache() && partitionBuckets.size() == 1) {
-                Pair<BinaryRow, Integer> partitionBucket = partitionBuckets.iterator().next();
-                Map<String, DeletionFile> deletionFiles =
-                        indexFileHandler.scanDVIndexWithCache(
-                                snapshot, partitionBucket.getLeft(), partitionBucket.getRight());
-                if (deletionFiles != null && deletionFiles.size() > 0) {
-                    deletionFilesMap = new HashMap<>();
-                    deletionFilesMap.put(partitionBucket, deletionFiles);
-                }
-            } else {
-                deletionFilesMap =
-                        deletionVectors && snapshot != null
-                                ? indexFileHandler.scanDVIndex(snapshot, partitionBuckets)
-                                : Collections.emptyMap();
-            }
+            deletionFilesMap =
+                    deletionVectors && snapshot != null
+                            ? indexFileHandler.scanDVIndex(snapshot, partitionBuckets)
+                            : Collections.emptyMap();
         }
         for (Map.Entry<BinaryRow, Map<Integer, List<ManifestEntry>>> entry :
                 groupedManifestEntries.entrySet()) {

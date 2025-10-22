@@ -18,14 +18,12 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -38,7 +36,6 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /** Index manifest file. */
 public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
@@ -66,22 +63,8 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
         this.dvMetaCache = dvMetaCache;
     }
 
-    @Nullable
-    public Map<String, DeletionFile> readFromDVMetaCache(
-            String fileName, BinaryRow partition, int bucket) {
-        Path path = pathFactory.toPath(fileName);
-        if (this.dvMetaCache != null) {
-            return this.dvMetaCache.read(path, partition, bucket);
-        }
-        return null;
-    }
-
-    public void fillDVMetaCache(
-            String fileName, BinaryRow partition, int bucket, Map<String, DeletionFile> dvMetas) {
-        Path path = pathFactory.toPath(fileName);
-        if (this.dvMetaCache != null) {
-            this.dvMetaCache.put(path, partition, bucket, dvMetas);
-        }
+    public Path indexManifestFilePath(String fileName) {
+        return pathFactory.toPath(fileName);
     }
 
     /** Write new index files to index manifest. */

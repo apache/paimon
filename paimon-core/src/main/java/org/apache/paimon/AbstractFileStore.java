@@ -224,15 +224,14 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public IndexFileHandler newIndexFileHandler() {
-        boolean enableDVMetaCache = this.dvMetaCache != null;
         return new IndexFileHandler(
                 fileIO,
                 snapshotManager(),
                 indexManifestFileFactory().create(),
                 new IndexFilePathFactories(pathFactory()),
                 options.dvIndexFileTargetSize(),
-                options.deletionVectorBitmap64(),
-                enableDVMetaCache);
+                this.dvMetaCache,
+                options.deletionVectorBitmap64());
     }
 
     @Override

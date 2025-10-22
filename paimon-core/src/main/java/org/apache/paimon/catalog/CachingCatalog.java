@@ -44,7 +44,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.options.CatalogOptions.CACHE_DV_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.CACHE_DV_MAX_NUM;
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_ACCESS;
@@ -100,8 +99,10 @@ public class CachingCatalog extends DelegateCatalog {
         this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
 
         this.cachedPartitionMaxNum = options.get(CACHE_PARTITION_MAX_NUM);
-        if (options.get(CACHE_DV_ENABLED)) {
-            this.dvMetaCache = new DVMetaCache(options.get(CACHE_DV_MAX_NUM));
+
+        int cacheDvMaxNum = options.get(CACHE_DV_MAX_NUM);
+        if (cacheDvMaxNum > 0) {
+            this.dvMetaCache = new DVMetaCache(cacheDvMaxNum);
         }
         init(Ticker.systemTicker());
     }

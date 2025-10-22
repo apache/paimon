@@ -193,8 +193,15 @@ public class IndexManifestFileHandlerTest {
                         indexManifestFile,
                         new IndexFilePathFactories(fileStore.pathFactory()),
                         MemorySize.ofMebiBytes(2),
-                        false,
-                        true);
+                        dvMetaCache,
+                        false);
+
+        Map<String, DeletionFile> expectedPartition1Bucket0Files =
+                indexFileHandler.extractDeletionFileByMeta(partition1, 0, entry1.indexFile());
+        Map<String, DeletionFile> expectedPartition1Bucket1Files =
+                indexFileHandler.extractDeletionFileByMeta(partition1, 1, entry2.indexFile());
+        Map<String, DeletionFile> expectedPartition2Bucket0Files =
+                indexFileHandler.extractDeletionFileByMeta(partition2, 0, entry3.indexFile());
 
         CacheMetrics cacheMetrics = new CacheMetrics();
         indexFileHandler.withCacheMetrics(cacheMetrics);
@@ -202,55 +209,67 @@ public class IndexManifestFileHandlerTest {
         Snapshot snapshot = snapshot(indexManifestFileName);
 
         // Test 1: First access should miss cache
-        Map<String, DeletionFile> deletionFiles1 =
-                indexFileHandler.scanDVIndexWithCache(snapshot, partition1, 0);
+        Set<Pair<BinaryRow, Integer>> partitionBuckets = new HashSet<>();
+        partitionBuckets.add(Pair.of(partition1, 0));
+        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> deletionFiles1 =
+                indexFileHandler.scanDVIndex(snapshot, partitionBuckets);
         assertThat(deletionFiles1).isNotNull();
+        assertThat(deletionFiles1.containsKey(Pair.of(partition1, 0))).isTrue();
         assertThat(cacheMetrics.getMissedObject().get()).isEqualTo(1);
         assertThat(cacheMetrics.getHitObject().get()).isEqualTo(0);
+        Map<String, DeletionFile> actualPartition1Bucket0Files =
+                deletionFiles1.get(Pair.of(partition1, 0));
+        assertThat(actualPartition1Bucket0Files).isEqualTo(expectedPartition1Bucket0Files);
 
         // Test 2: Second access to same partition/bucket should hit cache
-        Map<String, DeletionFile> deletionFiles2 =
-                indexFileHandler.scanDVIndexWithCache(snapshot, partition1, 0);
+        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> deletionFiles2 =
+                indexFileHandler.scanDVIndex(snapshot, partitionBuckets);
         assertThat(deletionFiles2).isNotNull();
         assertThat(deletionFiles1).isEqualTo(deletionFiles2);
         assertThat(cacheMetrics.getHitObject().get()).isEqualTo(1);
+        Map<String, DeletionFile> cachedPartition1Bucket0Files =
+                deletionFiles2.get(Pair.of(partition1, 0));
+        assertThat(cachedPartition1Bucket0Files).isEqualTo(expectedPartition1Bucket0Files);
 
         // Test 3: Access different bucket in same partition should hit cache
-        Map<String, DeletionFile> deletionFiles3 =
-                indexFileHandler.scanDVIndexWithCache(snapshot, partition1, 1);
+        partitionBuckets.clear();
+        partitionBuckets.add(Pair.of(partition1, 1));
+        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> deletionFiles3 =
+                indexFileHandler.scanDVIndex(snapshot, partitionBuckets);
         assertThat(deletionFiles3).isNotNull();
         assertThat(cacheMetrics.getHitObject().get()).isEqualTo(2);
-        assertThat(cacheMetrics.getMissedObject().get()).isEqualTo(1); // Still only 1 miss
+        assertThat(cacheMetrics.getMissedObject().get()).isEqualTo(1);
+        Map<String, DeletionFile> actualPartition1Bucket1Files =
+                deletionFiles3.get(Pair.of(partition1, 1));
+        assertThat(actualPartition1Bucket1Files).isEqualTo(expectedPartition1Bucket1Files);
 
         // Test 4: Access different partition should miss cache
-        Map<String, DeletionFile> deletionFiles4 =
-                indexFileHandler.scanDVIndexWithCache(snapshot, partition2, 0);
+        partitionBuckets.clear();
+        partitionBuckets.add(Pair.of(partition2, 0));
+        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> deletionFiles4 =
+                indexFileHandler.scanDVIndex(snapshot, partitionBuckets);
         assertThat(deletionFiles4).isNotNull();
         assertThat(cacheMetrics.getMissedObject().get()).isEqualTo(2); // Now 2 misses total
+        Map<String, DeletionFile> actualPartition2Bucket0Files =
+                deletionFiles4.get(Pair.of(partition2, 0));
+        assertThat(actualPartition2Bucket0Files).isEqualTo(expectedPartition2Bucket0Files);
 
-        // Test 5: Verify cache consistency with non-cache method
-        Set<Pair<BinaryRow, Integer>> partitionBuckets = new HashSet<>();
+        // Test 5: Test non-cache path by requesting multiple partition buckets
+        partitionBuckets.clear();
         partitionBuckets.add(Pair.of(partition1, 0));
-        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> nonCacheResult =
+        partitionBuckets.add(Pair.of(partition2, 0)); // Multiple buckets to avoid cache path
+        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> deletionFiles5 =
                 indexFileHandler.scanDVIndex(snapshot, partitionBuckets);
-        Map<String, DeletionFile> nonCacheDeletionFiles =
-                nonCacheResult.get(Pair.of(partition1, 0));
+        assertThat(deletionFiles5).isNotNull();
+        assertThat(deletionFiles5.containsKey(Pair.of(partition1, 0))).isTrue();
+        assertThat(deletionFiles5.containsKey(Pair.of(partition2, 0))).isTrue();
 
-        assertThat(deletionFiles1).isEqualTo(nonCacheDeletionFiles);
-
-        // Test 6: Verify extractDeletionFileByMeta works correctly
-        List<IndexManifestEntry> entries = indexManifestFile.read(indexManifestFileName);
-        IndexManifestEntry targetEntry =
-                entries.stream()
-                        .filter(e -> e.partition().equals(partition1) && e.bucket() == 0)
-                        .findFirst()
-                        .orElse(null);
-        assertThat(targetEntry).isNotNull();
-
-        Map<String, DeletionFile> extractedFiles =
-                indexFileHandler.extractDeletionFileByMeta(partition1, 0, targetEntry.indexFile());
-        assertThat(extractedFiles).isNotNull();
-        assertThat(extractedFiles.size()).isGreaterThan(0);
+        Map<String, DeletionFile> nonCachePartition1Bucket0Files =
+                deletionFiles5.get(Pair.of(partition1, 0));
+        Map<String, DeletionFile> nonCachePartition2Bucket0Files =
+                deletionFiles5.get(Pair.of(partition2, 0));
+        assertThat(nonCachePartition1Bucket0Files).isEqualTo(expectedPartition1Bucket0Files);
+        assertThat(nonCachePartition2Bucket0Files).isEqualTo(expectedPartition2Bucket0Files);
     }
 
     // ============================ Test utils ===================================
