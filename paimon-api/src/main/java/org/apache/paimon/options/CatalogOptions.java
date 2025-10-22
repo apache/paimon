@@ -139,7 +139,7 @@ public class CatalogOptions {
     public static final ConfigOption<Integer> CACHE_DV_MAX_NUM =
             key("cache.deletion-vectors.max-bucket-num")
                     .intType()
-                    .defaultValue(100000)
+                    .defaultValue(20000)
                     .withDescription(
                             "Controls the maximum number of bucket-level deletion vector meta that can be cached.");
 
