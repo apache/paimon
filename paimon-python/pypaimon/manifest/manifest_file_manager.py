@@ -58,7 +58,11 @@ class ManifestFileManager:
                 else:
                     key = (tuple(entry.partition.values), entry.bucket, entry.file.file_name)
                     local_deleted_keys.add(key)
-            return local_added, local_deleted_keys
+            local_final_added = [
+                entry for entry in local_added
+                if (tuple(entry.partition.values), entry.bucket, entry.file.file_name) not in local_deleted_keys
+            ]
+            return local_final_added, local_deleted_keys
 
         deleted_entry_keys = set()
         added_entries = []
