@@ -39,7 +39,7 @@ class TableRead:
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.read_type = read_type
-        self.schema_fields_cache = {}
+        self.schema_fields_cache = ({}, {})
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
         def _record_generator():
