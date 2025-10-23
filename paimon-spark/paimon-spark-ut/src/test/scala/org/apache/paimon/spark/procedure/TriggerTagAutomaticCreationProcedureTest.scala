@@ -73,7 +73,7 @@ class TriggerTagAutomaticCreationProcedureTest extends PaimonSparkTestBase {
       """alter table T_FORCE_AUTO_TAG_IGNORE_DELAY set tblproperties(
         |'tag.automatic-creation'='process-time',
         |'tag.creation-period'='daily',
-        |'tag.creation-delay'='2 d',  -- make sure it's before delay when triggering auto tag creation
+        |'tag.creation-delay'='2 d',
         |'tag.num-retained-max'='90'
         |)""".stripMargin)
 
