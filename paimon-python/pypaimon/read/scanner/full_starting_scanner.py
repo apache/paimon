@@ -64,13 +64,8 @@ class FullStartingScanner(StartingScanner):
             self.table.options.get('bucket', -1)) == BucketMode.POSTPONE_BUCKET.value else False
         self.data_evolution = self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true'
 
-        self._schema_cache = {}
-
         def schema_fields_func(schema_id: int):
-            if schema_id not in self._schema_cache:
-                schema = self.table.schema_manager.read_schema(schema_id)
-                self._schema_cache[schema_id] = schema
-            return self._schema_cache[schema_id].fields if self._schema_cache[schema_id] else []
+            return self.table.schema_manager.get_schema(schema_id).fields
 
         self.simple_stats_evolutions = SimpleStatsEvolutions(
             schema_fields_func,

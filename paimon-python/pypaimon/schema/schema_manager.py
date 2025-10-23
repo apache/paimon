@@ -31,6 +31,7 @@ class SchemaManager:
         self.file_io = file_io
         self.table_path = table_path
         self.schema_path = table_path / "schema"
+        self.schema_cache = {}
 
     def latest(self) -> Optional['TableSchema']:
         try:
@@ -39,7 +40,7 @@ class SchemaManager:
                 return None
 
             max_version = max(versions)
-            return self.read_schema(max_version)
+            return self.get_schema(max_version)
         except Exception as e:
             raise RuntimeError(f"Failed to load schema from path: {self.schema_path}") from e
 
@@ -57,19 +58,24 @@ class SchemaManager:
     def commit(self, new_schema: TableSchema) -> bool:
         schema_path = self._to_schema_path(new_schema.id)
         try:
-            return self.file_io.try_to_write_atomic(schema_path, JSON.to_json(new_schema, indent=2))
+            result = self.file_io.try_to_write_atomic(schema_path, JSON.to_json(new_schema, indent=2))
+            if result:
+                self.schema_cache[new_schema.id] = new_schema
+            return result
         except Exception as e:
             raise RuntimeError(f"Failed to commit schema: {e}") from e
 
     def _to_schema_path(self, schema_id: int) -> Path:
         return self.schema_path / f"{self.schema_prefix}{schema_id}"
 
-    def read_schema(self, schema_id: int) -> Optional['TableSchema']:
-        schema_path = self._to_schema_path(schema_id)
-        if not self.file_io.exists(schema_path):
-            return None
-
-        return TableSchema.from_path(self.file_io, schema_path)
+    def get_schema(self, schema_id: int) -> Optional[TableSchema]:
+        if schema_id not in self.schema_cache:
+            schema_path = self._to_schema_path(schema_id)
+            if not self.file_io.exists(schema_path):
+                return None
+            schema = TableSchema.from_path(self.file_io, schema_path)
+            self.schema_cache[schema_id] = schema
+        return self.schema_cache[schema_id]
 
     def _list_versioned_files(self) -> List[int]:
         if not self.file_io.exists(self.schema_path):
