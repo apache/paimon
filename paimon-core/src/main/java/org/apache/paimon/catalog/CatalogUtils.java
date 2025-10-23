@@ -274,6 +274,7 @@ public class CatalogUtils {
 
     /**
      *
+     *
      * <ul>
      *   <li>External tables with version management: null (use filesystem-based snapshot
      *       management).
