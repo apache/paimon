@@ -39,12 +39,10 @@ class SimpleStatsEvolutions:
         if self.table_schema_id == data_schema_id:
             evolution = SimpleStatsEvolution(self.schema_fields(data_schema_id), None, None)
         else:
-
             data_fields = self.schema_fields(data_schema_id)
             index_cast_mapping = self._create_index_cast_mapping(self.table_fields, data_fields)
             index_mapping = index_cast_mapping.get('index_mapping')
             cast_mapping = index_cast_mapping.get('cast_mapping')
-
             evolution = SimpleStatsEvolution(data_fields, index_mapping, cast_mapping)
 
         self.evolutions[data_schema_id] = evolution

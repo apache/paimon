@@ -65,11 +65,7 @@ class FullStartingScanner(StartingScanner):
         self.data_evolution = self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true'
 
         def schema_fields_func(schema_id: int):
-            if schema_id not in self.manifest_file_manager.schema_cache:
-                schema = self.table.schema_manager.read_schema(schema_id)
-                self.manifest_file_manager.schema_cache[schema_id] = schema
-            return self.manifest_file_manager.schema_cache[schema_id].fields if self.manifest_file_manager.schema_cache[
-                schema_id] else []
+            return self.table.schema_manager.get_schema(schema_id).fields
 
         self.simple_stats_evolutions = SimpleStatsEvolutions(
             schema_fields_func,
