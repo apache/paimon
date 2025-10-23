@@ -2020,6 +2020,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
 
+    public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
+            key("commit.discard-duplicate-files")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether discard duplicate files in commit.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -2917,6 +2923,10 @@ public class CoreOptions implements Serializable {
 
     public Map<String, String> tagCallbacks() {
         return callbacks(TAG_CALLBACKS, TAG_CALLBACK_PARAM);
+    }
+
+    public boolean commitDiscardDuplicateFiles() {
+        return options.get(COMMIT_DISCARD_DUPLICATE_FILES);
     }
 
     private Map<String, String> callbacks(
