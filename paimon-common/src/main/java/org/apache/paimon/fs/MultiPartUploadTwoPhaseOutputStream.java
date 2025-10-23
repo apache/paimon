@@ -89,10 +89,34 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         if (closed) {
             throw new IOException("Stream is closed");
         }
-        buffer.write(b, off, len);
-        position += len;
-        if (buffer.size() >= partSizeThreshold()) {
-            uploadPart();
+        int remaining = len;
+        int offset = off;
+        final long threshold = partSizeThreshold();
+
+        while (remaining > 0) {
+            if (buffer.size() >= threshold) {
+                uploadPart();
+            }
+
+            int currentSize = buffer.size();
+            long spaceLong = threshold - currentSize;
+            int space =
+                    spaceLong <= 0
+                            ? 0
+                            : (spaceLong > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) spaceLong);
+            if (space == 0) {
+                uploadPart();
+                continue;
+            }
+            int count = Math.min(remaining, space);
+            buffer.write(b, offset, count);
+            offset += count;
+            remaining -= count;
+            position += count;
+
+            if (buffer.size() >= threshold) {
+                uploadPart();
+            }
         }
     }
 
@@ -133,9 +157,11 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         }
 
         File tempFile = null;
+        int partNumber = uploadedParts.size() + 1;
         try {
             byte[] data = buffer.toByteArray();
             tempFile = Files.createTempFile("multi-part-" + UUID.randomUUID(), ".tmp").toFile();
+            tempFile.deleteOnExit();
             try (FileOutputStream fos = new FileOutputStream(tempFile)) {
                 fos.write(data);
                 fos.flush();
@@ -147,11 +173,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             buffer.reset();
         } catch (Exception e) {
             throw new IOException(
-                    "Failed to upload part "
-                            + (uploadedParts.size() + 1)
-                            + " for upload ID: "
-                            + uploadId,
-                    e);
+                    "Failed to upload part " + partNumber + " for upload ID: " + uploadId, e);
         } finally {
             if (tempFile != null && tempFile.exists()) {
                 if (!tempFile.delete()) {

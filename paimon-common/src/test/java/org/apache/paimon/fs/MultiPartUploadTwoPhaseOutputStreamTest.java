@@ -66,7 +66,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
                 .isEqualTo("hello world!".getBytes(StandardCharsets.UTF_8).length);
 
         TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
-        assertThat(store.getUploadedParts()).hasSize(2);
+        assertThat(store.getUploadedParts()).hasSize(3);
         assertThat(committer.targetFilePath().toString()).isEqualTo(store.getStartedObjectName());
 
         committer.commit(fileIO);
@@ -120,6 +120,35 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("already closed");
         first.commit(fileIO);
+    }
+
+    @Test
+    void testBigWriteSplitByThreshold() throws IOException {
+        TestMultiPartUploadTwoPhaseOutputStream stream =
+                new TestMultiPartUploadTwoPhaseOutputStream(store, objectPath, 5);
+
+        byte[] data = "abcdefghij".getBytes(StandardCharsets.UTF_8); // 10 bytes, threshold=5
+        stream.write(data);
+
+        assertThat(store.getUploadedParts()).hasSize(2);
+        assertThat(store.getUploadedParts())
+                .extracting(TestPart::getPartNumber)
+                .containsExactly(1, 2);
+        assertThat(store.getUploadedParts())
+                .extracting(TestPart::getContent)
+                .containsExactly("abcde", "fghij");
+        assertThat(stream.getPos()).isEqualTo(data.length);
+
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+        assertThat(store.getUploadedParts()).hasSize(2);
+
+        committer.commit(fileIO);
+
+        assertThat(store.getCompletedUploadId()).isEqualTo(store.getStartedUploadId());
+        assertThat(store.getCompletedObjectName()).isEqualTo(store.getStartedObjectName());
+        assertThat(store.getCompletedParts()).containsExactlyElementsOf(store.getUploadedParts());
+        assertThat(store.getCompletedBytes()).isEqualTo(stream.getPos());
+        assertThat(store.getAbortedUploadId()).isNull();
     }
 
     /** Fake store implementation for testing. */
@@ -307,10 +336,6 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
 
         String getContent() {
             return content;
-        }
-
-        long getByteLength() {
-            return byteLength;
         }
     }
 }
