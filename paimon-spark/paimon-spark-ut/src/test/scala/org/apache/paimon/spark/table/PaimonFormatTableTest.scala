@@ -61,7 +61,31 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
-  test("PaimonFormatTableRead table: csv insert overwrite") {
+  test("PaimonFormatTable non partition table overwrite: csv") {
+    val tableName = "paimon_non_partiiton_overwrite_test"
+    withTable(tableName) {
+      spark.sql(
+        s"""
+           |CREATE TABLE $tableName (age INT, name STRING)
+           |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon', 'file.compression'='none')
+           |""".stripMargin)
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      table.fileIO().mkdirs(new Path(table.location()))
+      spark.sql(s"INSERT INTO $tableName  VALUES (5, 'Ben'), (7, 'Larry')")
+      checkAnswer(
+        spark.sql(s"SELECT age, name FROM $tableName ORDER BY age"),
+        Row(5, "Ben") :: Row(7, "Larry") :: Nil
+      )
+      spark.sql(s"INSERT OVERWRITE $tableName VALUES (5, 'Jerry'), (7, 'Tom')")
+      checkAnswer(
+        spark.sql(s"SELECT age, name FROM $tableName ORDER BY age"),
+        Row(5, "Jerry") :: Row(7, "Tom") :: Nil
+      )
+    }
+  }
+
+  test("PaimonFormatTable partition table overwrite: csv") {
     val tableName = "paimon_overwrite_test"
     withTable(tableName) {
       spark.sql(
@@ -73,14 +97,6 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
       val table =
         paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
       table.fileIO().mkdirs(new Path(table.location()))
-      val columns = spark.catalog.listColumns(tableName).collect()
-      columns.foreach {
-        col =>
-          println(s"Column: ${col.name}, Type: ${col.dataType}, IsPartition: ${col.isPartition}")
-      }
-
-      val partitionColumns = columns.filter(_.isPartition).map(_.name)
-      println(s"partition: ${partitionColumns.mkString(", ")}")
       spark.sql(s"INSERT INTO $tableName PARTITION (id = 1) VALUES (5, 'Ben'), (7, 'Larry')")
       spark.sql(s"INSERT OVERWRITE $tableName PARTITION (id = 1) VALUES (5, 'Jerry'), (7, 'Tom')")
       checkAnswer(

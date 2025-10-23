@@ -124,7 +124,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         return getFileSystem(hadoopSrc).rename(hadoopSrc, hadoopDst);
     }
 
-    public final org.apache.hadoop.fs.Path path(Path path) {
+    protected final org.apache.hadoop.fs.Path path(Path path) {
         return new org.apache.hadoop.fs.Path(path.toUri());
     }
 

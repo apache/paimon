@@ -52,6 +52,6 @@ public abstract class TwoPhaseOutputStream extends PositionOutputStream {
          */
         void discard(FileIO fileIO) throws IOException;
 
-        String targetFilePath();
+        Path targetFilePath();
     }
 }

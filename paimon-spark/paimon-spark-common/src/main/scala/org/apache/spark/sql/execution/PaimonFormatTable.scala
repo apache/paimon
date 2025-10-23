@@ -18,9 +18,10 @@
 
 package org.apache.spark.sql.execution
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.fs.TwoPhaseOutputStream
 import org.apache.paimon.spark.{FormatTableScanBuilder, SparkInternalRowWrapper}
-import org.apache.paimon.spark.write.BaseWriteBuilder
+import org.apache.paimon.spark.write.{BaseV2WriteBuilder, BaseWriteBuilder}
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.TwoPhaseCommitMessage
 import org.apache.paimon.table.sink.{BatchTableWrite, CommitMessageSerializer, TwoPhaseCommitterSerializer}
@@ -317,65 +318,32 @@ class PartitionedJsonTable(
 }
 
 case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: StructType)
-  extends BaseWriteBuilder(table)
-  with SupportsOverwrite
-  with SupportsDynamicOverwrite {
-
-  private var overwriteDynamic = false
-  private var overwritePartitions: Option[Map[String, String]] = None
+  extends BaseV2WriteBuilder(table) {
 
   override def partitionRowType(): RowType = table.partitionType
 
   override def build: Write = new Write() {
     override def toBatch: BatchWrite = {
-      FormatTableBatchWrite(table, writeSchema, overwritePartitions)
+      FormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
     }
 
     override def toStreaming: StreamingWrite = {
       throw new UnsupportedOperationException("FormatTable doesn't support streaming write")
     }
   }
-
-  override def overwrite(filters: Array[Filter]): WriteBuilder = {
-    if (overwriteDynamic) {
-      throw new IllegalArgumentException("Cannot overwrite dynamically and by filter both")
-    }
-
-    failIfCanNotOverwrite(filters)
-
-    val conjunctiveFilters = if (filters.nonEmpty) {
-      Some(filters.reduce((l, r) => And(l, r)))
-    } else {
-      None
-    }
-
-    if (isTruncate(conjunctiveFilters.get)) {
-      overwritePartitions = Option.apply(Map.empty[String, String])
-    } else {
-      overwritePartitions =
-        Option.apply(convertPartitionFilterToMap(conjunctiveFilters.get, table.partitionType()))
-    }
-
-    this
-  }
-
-  override def overwriteDynamicPartitions(): WriteBuilder = {
-    if (overwritePartitions.exists(_.nonEmpty)) {
-      throw new IllegalArgumentException("Cannot overwrite dynamically and by filter both")
-    }
-
-    overwriteDynamic = true
-    overwritePartitions = Option.apply(Map.empty[String, String])
-    this
-  }
 }
 
 private case class FormatTableBatchWrite(
     table: FormatTable,
-    writeSchema: StructType,
-    overwritePartitions: Option[Map[String, String]])
+    overwriteDynamic: Boolean,
+    overwritePartitions: Option[Map[String, String]],
+    writeSchema: StructType)
   extends BatchWrite
   with Logging {
+
+  assert(
+    !(overwriteDynamic && overwritePartitions.exists(_.nonEmpty)),
+    "Cannot overwrite dynamically and by filter both")
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
     FormatTableWriterFactory(table, writeSchema)
@@ -402,16 +370,10 @@ private case class FormatTableBatchWrite(
         val partitionPath = new org.apache.paimon.fs.Path(table.location(), child)
         deletePreviousDataFile(partitionPath)
       } else if (overwritePartitions.isDefined && overwritePartitions.get.isEmpty) {
-        committers.foreach(
-          c => {
-            val filePath = c.targetFilePath()
-            val lastSeparatorIndex = filePath.lastIndexOf("/")
-            if (lastSeparatorIndex > 0) {
-              val partitionPath =
-                new org.apache.paimon.fs.Path(filePath.substring(0, lastSeparatorIndex))
-              deletePreviousDataFile(partitionPath)
-            }
-          })
+        committers
+          .map(c => c.targetFilePath().getParent)
+          .distinct
+          .foreach(deletePreviousDataFile)
       }
       committers.foreach(c => c.commit(table.fileIO()))
       logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
@@ -498,7 +460,6 @@ private class FormatTableDataWriter(
             throw new IllegalArgumentException(
               "Unsupported commit message type: " + other.getClass.getSimpleName)
         }
-        .toSeq
       FormatTableTaskCommit(committers)
     } finally {
       close()

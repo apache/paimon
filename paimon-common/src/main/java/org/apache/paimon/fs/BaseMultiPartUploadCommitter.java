@@ -95,7 +95,7 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     }
 
     @Override
-    public String targetFilePath() {
-        return objectName;
+    public Path targetFilePath() {
+        return new Path(objectName);
     }
 }

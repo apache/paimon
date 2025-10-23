@@ -27,48 +27,10 @@ import org.apache.spark.sql.sources.{And, Filter}
 import org.apache.spark.sql.types.StructType
 
 class PaimonV2WriteBuilder(table: FileStoreTable, dataSchema: StructType, options: Options)
-  extends BaseWriteBuilder(table)
-  with SupportsOverwrite
-  with SupportsDynamicOverwrite {
-
-  private var overwriteDynamic = false
-  private var overwritePartitions: Option[Map[String, String]] = None
+  extends BaseV2WriteBuilder(table) {
 
   override def build =
     new PaimonV2Write(table, overwriteDynamic, overwritePartitions, dataSchema, options)
 
   override def partitionRowType(): RowType = table.schema().logicalPartitionType()
-
-  override def overwrite(filters: Array[Filter]): WriteBuilder = {
-    if (overwriteDynamic) {
-      throw new IllegalArgumentException("Cannot overwrite dynamically and by filter both")
-    }
-
-    failIfCanNotOverwrite(filters)
-
-    val conjunctiveFilters = if (filters.nonEmpty) {
-      Some(filters.reduce((l, r) => And(l, r)))
-    } else {
-      None
-    }
-
-    if (isTruncate(conjunctiveFilters.get)) {
-      overwritePartitions = Option.apply(Map.empty[String, String])
-    } else {
-      overwritePartitions = Option.apply(
-        convertPartitionFilterToMap(conjunctiveFilters.get, table.schema.logicalPartitionType()))
-    }
-
-    this
-  }
-
-  override def overwriteDynamicPartitions(): WriteBuilder = {
-    if (overwritePartitions.exists(_.nonEmpty)) {
-      throw new IllegalArgumentException("Cannot overwrite dynamically and by filter both")
-    }
-
-    overwriteDynamic = true
-    overwritePartitions = Option.apply(Map.empty[String, String])
-    this
-  }
 }
