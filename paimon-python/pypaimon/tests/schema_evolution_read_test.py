@@ -195,11 +195,13 @@ class SchemaEvolutionReadTest(unittest.TestCase):
 
         table_read = read_builder.new_read()
         actual = table_read.to_arrow(splits)
+        # 'behavior' is not included in the file. In order to filter more conservatively, we choose to discard the
+        # filtering criteria for 'behavior'
         expected = pa.Table.from_pydict({
-            'user_id': [5, 8, 6],
-            'item_id': [1005, 1008, 1006],
-            'dt': ["p2", "p2", "p1"],
-            'behavior': ["e", "h", "f"],
+            'user_id': [1, 2, 4, 3, 5, 8, 6],
+            'item_id': [1001, 1002, 1004, 1003, 1005, 1008, 1006],
+            'dt': ["p1", "p1", "p1", "p2", "p2", "p2", "p1"],
+            'behavior': [None, None, None, None, "e", "h", "f"],
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
         # user_id filter

@@ -94,10 +94,10 @@ class Predicate:
 
     def to_arrow(self) -> Any:
         if self.method == 'and':
-            return reduce(lambda x, y: (x[0] & y[0], x[1] | y[1]),
+            return reduce(lambda x, y: x & y,
                           [p.to_arrow() for p in self.literals])
         if self.method == 'or':
-            return reduce(lambda x, y: (x[0] | y[0], x[1] | y[1]),
+            return reduce(lambda x, y: x | y,
                           [p.to_arrow() for p in self.literals])
 
         if self.method == 'startsWith':
@@ -108,11 +108,10 @@ class Predicate:
                 # Ensure the field is cast to string type
                 string_field = field_ref.cast(pyarrow.string())
                 result = pyarrow_compute.starts_with(string_field, pattern)
-                return result, {self.field}
+                return result
             except Exception:
                 # Fallback to True
-                return (pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null(),
-                        {self.field})
+                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
         if self.method == 'endsWith':
             pattern = self.literals[0]
             # For PyArrow compatibility
@@ -121,11 +120,10 @@ class Predicate:
                 # Ensure the field is cast to string type
                 string_field = field_ref.cast(pyarrow.string())
                 result = pyarrow_compute.ends_with(string_field, pattern)
-                return result, {self.field}
+                return result
             except Exception:
                 # Fallback to True
-                return (pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null(),
-                        {self.field})
+                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
         if self.method == 'contains':
             pattern = self.literals[0]
             # For PyArrow compatibility
@@ -134,16 +132,15 @@ class Predicate:
                 # Ensure the field is cast to string type
                 string_field = field_ref.cast(pyarrow.string())
                 result = pyarrow_compute.match_substring(string_field, pattern)
-                return result, {self.field}
+                return result
             except Exception:
                 # Fallback to True
-                return (pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null(),
-                        {self.field})
+                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
 
         field = pyarrow_dataset.field(self.field)
         tester = Predicate.testers.get(self.method)
         if tester:
-            return tester.test_by_arrow(field, self.literals), {self.field}
+            return tester.test_by_arrow(field, self.literals)
 
         raise ValueError("Unsupported predicate method: {}".format(self.method))
 
