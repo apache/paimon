@@ -661,6 +661,9 @@ public class SchemaValidation {
                     schema.primaryKeys().isEmpty(),
                     "Cannot define %s for incremental clustering table.",
                     PRIMARY_KEY.key());
+            checkArgument(
+                    !options.deletionVectorsEnabled(),
+                    "Cannot enable deletion vectors mode for incremental clustering table.");
         }
     }
 }
