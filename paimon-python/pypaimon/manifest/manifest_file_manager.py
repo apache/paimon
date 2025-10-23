@@ -26,7 +26,6 @@ from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import (GenericRowDeserializer,
                                             GenericRowSerializer)
 from pypaimon.table.row.binary_row import BinaryRow
@@ -44,7 +43,6 @@ class ManifestFileManager:
         self.partition_keys_fields = self.table.partition_keys_fields
         self.primary_keys_fields = self.table.primary_keys_fields
         self.trimmed_primary_keys_fields = self.table.trimmed_primary_keys_fields
-        self.schema_cache = {}
 
     def read_entries_parallel(self, manifest_files: List[ManifestFileMeta], manifest_entry_filter=None,
                               drop_stats=True, max_workers=8) -> List[ManifestEntry]:
@@ -88,7 +86,7 @@ class ManifestFileManager:
                 null_counts=key_dict['_NULL_COUNTS'],
             )
 
-            schema_fields = self._get_schema(file_dict['_SCHEMA_ID']).fields
+            schema_fields = self.table.schema_manager.get_schema(file_dict['_SCHEMA_ID']).fields
             fields = self._get_value_stats_fields(file_dict, schema_fields)
             value_dict = dict(file_dict['_VALUE_STATS'])
             value_stats = SimpleStats(
@@ -147,14 +145,6 @@ class ManifestFileManager:
         else:
             fields = [self.table.field_dict[col] for col in file_dict['_VALUE_STATS_COLS']]
         return fields
-
-    def _get_schema(self, schema_id: int) -> TableSchema:
-        if schema_id not in self.schema_cache:
-            schema = self.table.schema_manager.read_schema(schema_id)
-            if schema is None:
-                raise ValueError(f"Schema {schema_id} not found")
-            self.schema_cache[schema_id] = schema
-        return self.schema_cache[schema_id]
 
     def write(self, file_name, entries: List[ManifestEntry]):
         avro_records = []

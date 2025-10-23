@@ -19,7 +19,7 @@
 import os
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import List, Optional, Tuple, Any, Dict
+from typing import List, Optional, Tuple, Any
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
@@ -46,7 +46,6 @@ from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
 from pypaimon.read.reader.sort_merge_reader import SortMergeReaderWithMinHeap
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon.schema.table_schema import TableSchema
 
 KEY_PREFIX = "_KEY_"
 KEY_FIELD_ID_START = 1000000
@@ -56,8 +55,7 @@ NULL_FIELD_INDEX = -1
 class SplitRead(ABC):
     """Abstract base class for split reading operations."""
 
-    def __init__(self, table, predicate: Optional[Predicate], read_type: List[DataField], split: Split,
-                 schema_fields_cache: Dict):
+    def __init__(self, table, predicate: Optional[Predicate], read_type: List[DataField], split: Split):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -71,7 +69,6 @@ class SplitRead(ABC):
         self.read_fields = read_type
         if isinstance(self, MergeFileSplitRead):
             self.read_fields = self._create_key_value_fields(read_type)
-        self.schema_fields_cache = schema_fields_cache
 
     def _push_down_predicate(self) -> Any:
         if self.predicate is None:
@@ -89,9 +86,14 @@ class SplitRead(ABC):
         """Create a record reader for the given split."""
 
     def file_reader_supplier(self, file: DataFileMeta, for_merge_read: bool, read_fields: List[str]):
-        read_file_fields, file_filter = self._get_schema(file.schema_id, read_fields)
-        if not file_filter:
+        schema = self.table.schema_manager.get_schema(file.schema_id)
+        schema_field_names = set(field.name for field in schema.fields)
+        if self.table.is_primary_key_table:
+            schema_field_names.add('_SEQUENCE_NUMBER')
+            schema_field_names.add('_VALUE_KIND')
+        if self.predicate_fields and self.predicate_fields - schema_field_names:
             return None
+        read_file_fields = [read_field for read_field in read_fields if read_field in schema_field_names]
 
         file_path = file.file_path
         _, extension = os.path.splitext(file_path)
@@ -119,24 +121,6 @@ class SplitRead(ABC):
         else:
             return DataFileBatchReader(format_reader, index_mapping, partition_info, None,
                                        self.table.table_schema.fields)
-
-    def _get_schema(self, schema_id: int, read_fields) -> TableSchema:
-        if schema_id not in self.schema_fields_cache[0]:
-            schema = self.table.schema_manager.read_schema(schema_id)
-            if schema is None:
-                raise ValueError(f"Schema {schema_id} not found")
-            self.schema_fields_cache[0][schema_id] = schema
-        schema = self.schema_fields_cache[0][schema_id]
-        fields_key = (schema_id, tuple(read_fields))
-        if fields_key not in self.schema_fields_cache[1]:
-            schema_field_names = set(field.name for field in schema.fields)
-            if self.table.is_primary_key_table:
-                schema_field_names.add('_SEQUENCE_NUMBER')
-                schema_field_names.add('_VALUE_KIND')
-            self.schema_fields_cache[1][fields_key] = (
-                [read_field for read_field in read_fields if read_field in schema_field_names],
-                False if self.predicate_fields and self.predicate_fields - schema_field_names else True)
-        return self.schema_fields_cache[1][fields_key]
 
     @abstractmethod
     def _get_all_data_fields(self):
