@@ -121,19 +121,22 @@ class SplitRead(ABC):
                                        self.table.table_schema.fields)
 
     def _get_schema(self, schema_id: int, read_fields) -> TableSchema:
-        cache_key = (schema_id, tuple(read_fields))
-        if cache_key not in self.schema_fields_cache:
+        if schema_id not in self.schema_fields_cache[0]:
             schema = self.table.schema_manager.read_schema(schema_id)
             if schema is None:
                 raise ValueError(f"Schema {schema_id} not found")
+            self.schema_fields_cache[0][schema_id] = schema
+        schema = self.schema_fields_cache[0][schema_id]
+        fields_key = (schema_id, tuple(read_fields))
+        if fields_key not in self.schema_fields_cache[1]:
             schema_field_names = set(field.name for field in schema.fields)
             if self.table.is_primary_key_table:
                 schema_field_names.add('_SEQUENCE_NUMBER')
                 schema_field_names.add('_VALUE_KIND')
-            self.schema_fields_cache[cache_key] = (
+            self.schema_fields_cache[1][fields_key] = (
                 [read_field for read_field in read_fields if read_field in schema_field_names],
                 False if self.predicate_fields and self.predicate_fields - schema_field_names else True)
-        return self.schema_fields_cache[cache_key]
+        return self.schema_fields_cache[1][fields_key]
 
     @abstractmethod
     def _get_all_data_fields(self):
