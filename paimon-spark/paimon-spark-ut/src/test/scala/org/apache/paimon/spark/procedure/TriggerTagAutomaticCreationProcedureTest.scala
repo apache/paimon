@@ -72,7 +72,7 @@ class TriggerTagAutomaticCreationProcedureTest extends PaimonSparkTestBase {
     spark.sql("""alter table T_FORCE_AUTO_TAG_IGNORE_DELAY set tblproperties(
                 |'tag.automatic-creation'='process-time',
                 |'tag.creation-period'='daily',
-                |'tag.creation-delay'='1 d',
+                |'tag.creation-delay'='86399999',
                 |'tag.num-retained-max'='90'
                 |)""".stripMargin)
 
