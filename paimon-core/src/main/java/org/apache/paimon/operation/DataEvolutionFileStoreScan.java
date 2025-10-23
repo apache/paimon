@@ -74,6 +74,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     @Override
     protected List<ManifestEntry> postFilter(List<ManifestEntry> entries) {
+        if (inputFilter == null) {
+            return entries;
+        }
         List<List<FakeDataFileMeta>> splitByRowId =
                 DataEvolutionSplitGenerator.split(
                         entries.stream().map(FakeDataFileMeta::new).collect(Collectors.toList()));
