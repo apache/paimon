@@ -103,10 +103,11 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
         spark.sql(s"SELECT id, age, name FROM $tableName ORDER BY id, age"),
         Row(1, 5, "Jerry") :: Row(1, 7, "Tom") :: Nil
       )
+      spark.sql(s"INSERT INTO $tableName PARTITION (id = 3) VALUES (5, 'Alice')")
       spark.sql(s"INSERT OVERWRITE $tableName VALUES (5, 'Jerry', 1), (7, 'Tom', 2)")
       checkAnswer(
         spark.sql(s"SELECT id, age, name FROM $tableName ORDER BY id, age"),
-        Row(1, 5, "Jerry") :: Row(2, 7, "Tom") :: Nil
+        Row(1, 5, "Jerry") :: Row(2, 7, "Tom") :: Row(3, 5, "Alice") :: Nil
       )
     }
   }
