@@ -38,7 +38,7 @@ class AoReaderTest(unittest.TestCase):
         cls.catalog = CatalogFactory.create({
             'warehouse': cls.warehouse
         })
-        cls.catalog.create_database('default', False)
+        cls.catalog.create_database('default', True)
 
         cls.pa_schema = pa.schema([
             ('user_id', pa.int32()),

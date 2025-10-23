@@ -151,7 +151,8 @@ class PVFSTest(unittest.TestCase):
         self.assertEqual(table_virtual_path, self.pvfs.info(table_virtual_path).get('name'))
         self.assertEqual(True, self.pvfs.exists(database_virtual_path))
         user_dirs = self.pvfs.ls(f"pvfs://{self.catalog}/{self.database}/{self.table}", detail=False)
-        self.assertSetEqual(set(user_dirs), {f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}'})
+        self.assertSetEqual(set(user_dirs), {f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}',
+                                             f'pvfs://{self.catalog}/{self.database}/{self.table}/schema'})
 
         data_file_name = 'data.txt'
         data_file_path = f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}'

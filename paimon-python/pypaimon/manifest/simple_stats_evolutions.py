@@ -28,8 +28,7 @@ class SimpleStatsEvolutions:
     def __init__(self, schema_fields: Callable[[int], List[DataField]], table_schema_id: int):
         self.schema_fields = schema_fields
         self.table_schema_id = table_schema_id
-        self.table_data_fields = schema_fields(table_schema_id)
-        self.table_fields = None
+        self.table_fields = schema_fields(table_schema_id)
         self.evolutions: Dict[int, SimpleStatsEvolution] = {}
 
     def get_or_create(self, data_schema_id: int) -> SimpleStatsEvolution:
@@ -40,8 +39,6 @@ class SimpleStatsEvolutions:
         if self.table_schema_id == data_schema_id:
             evolution = SimpleStatsEvolution(self.schema_fields(data_schema_id), None, None)
         else:
-            if self.table_fields is None:
-                self.table_fields = self.table_data_fields
 
             data_fields = self.schema_fields(data_schema_id)
             index_cast_mapping = self._create_index_cast_mapping(self.table_fields, data_fields)
