@@ -1024,46 +1024,42 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         List<SimpleFileEntry> baseDataFiles = new ArrayList<>();
-        if (latestSnapshot != null) {
-            boolean checkDuplicate = discardDuplicateFiles && commitKind == CommitKind.APPEND;
-            boolean checkConflict = conflictCheck.shouldCheck(latestSnapshot.id());
-            if (checkDuplicate || checkConflict) {
-                // latestSnapshotId is different from the snapshot id we've checked for conflicts,
-                // so we have to check again
-                List<BinaryRow> changedPartitions =
-                        changedPartitions(deltaFiles, Collections.emptyList(), indexFiles);
-                if (retryResult != null && retryResult.latestSnapshot != null) {
-                    baseDataFiles = new ArrayList<>(retryResult.baseDataFiles);
-                    List<SimpleFileEntry> incremental =
-                            readIncrementalChanges(
-                                    retryResult.latestSnapshot, latestSnapshot, changedPartitions);
-                    if (!incremental.isEmpty()) {
-                        baseDataFiles.addAll(incremental);
-                        baseDataFiles = new ArrayList<>(FileEntry.mergeEntries(baseDataFiles));
-                    }
-                } else {
-                    baseDataFiles =
-                            readAllEntriesFromChangedPartitions(latestSnapshot, changedPartitions);
+        boolean discardDuplicate = discardDuplicateFiles && commitKind == CommitKind.APPEND;
+        if (latestSnapshot != null
+                && (discardDuplicate || conflictCheck.shouldCheck(latestSnapshot.id()))) {
+            // latestSnapshotId is different from the snapshot id we've checked for conflicts,
+            // so we have to check again
+            List<BinaryRow> changedPartitions =
+                    changedPartitions(deltaFiles, Collections.emptyList(), indexFiles);
+            if (retryResult != null && retryResult.latestSnapshot != null) {
+                baseDataFiles = new ArrayList<>(retryResult.baseDataFiles);
+                List<SimpleFileEntry> incremental =
+                        readIncrementalChanges(
+                                retryResult.latestSnapshot, latestSnapshot, changedPartitions);
+                if (!incremental.isEmpty()) {
+                    baseDataFiles.addAll(incremental);
+                    baseDataFiles = new ArrayList<>(FileEntry.mergeEntries(baseDataFiles));
                 }
-                if (checkDuplicate) {
-                    Set<FileEntry.Identifier> baseIdentifiers =
-                            baseDataFiles.stream()
-                                    .map(FileEntry::identifier)
-                                    .collect(Collectors.toSet());
-                    deltaFiles =
-                            deltaFiles.stream()
-                                    .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
-                                    .collect(Collectors.toList());
-                }
-                if (checkConflict) {
-                    conflictDetection.checkNoConflictsOrFail(
-                            latestSnapshot,
-                            baseDataFiles,
-                            SimpleFileEntry.from(deltaFiles),
-                            indexFiles,
-                            commitKind);
-                }
+            } else {
+                baseDataFiles =
+                        readAllEntriesFromChangedPartitions(latestSnapshot, changedPartitions);
             }
+            if (discardDuplicate) {
+                Set<FileEntry.Identifier> baseIdentifiers =
+                        baseDataFiles.stream()
+                                .map(FileEntry::identifier)
+                                .collect(Collectors.toSet());
+                deltaFiles =
+                        deltaFiles.stream()
+                                .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
+                                .collect(Collectors.toList());
+            }
+            conflictDetection.checkNoConflictsOrFail(
+                    latestSnapshot,
+                    baseDataFiles,
+                    SimpleFileEntry.from(deltaFiles),
+                    indexFiles,
+                    commitKind);
         }
 
         Snapshot newSnapshot;
