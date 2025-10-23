@@ -69,13 +69,12 @@ class TriggerTagAutomaticCreationProcedureTest extends PaimonSparkTestBase {
 
     assertResult(0)(spark.sql("show tags T_FORCE_AUTO_TAG_IGNORE_DELAY").count())
 
-    spark.sql(
-      """alter table T_FORCE_AUTO_TAG_IGNORE_DELAY set tblproperties(
-        |'tag.automatic-creation'='process-time',
-        |'tag.creation-period'='daily',
-        |'tag.creation-delay'='2 d',
-        |'tag.num-retained-max'='90'
-        |)""".stripMargin)
+    spark.sql("""alter table T_FORCE_AUTO_TAG_IGNORE_DELAY set tblproperties(
+                |'tag.automatic-creation'='process-time',
+                |'tag.creation-period'='daily',
+                |'tag.creation-delay'='2 d',
+                |'tag.num-retained-max'='90'
+                |)""".stripMargin)
 
     // Triggering before delay should create no auto-tag
     spark.sql(
