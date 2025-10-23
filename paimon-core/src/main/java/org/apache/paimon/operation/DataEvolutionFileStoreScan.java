@@ -48,6 +48,8 @@ import java.util.stream.Collectors;
 /** {@link FileStoreScan} for data-evolution enabled table. */
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
+    private boolean dropStats = false;
+
     public DataEvolutionFileStoreScan(
             ManifestsReader manifestsReader,
             BucketSelectConverter bucketSelectConverter,
@@ -67,6 +69,18 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 false);
     }
 
+    @Override
+    public FileStoreScan dropStats() {
+        this.dropStats = true;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan keepStats() {
+        this.dropStats = false;
+        return this;
+    }
+
     public DataEvolutionFileStoreScan withFilter(Predicate predicate) {
         this.inputFilter = predicate;
         return this;
@@ -84,6 +98,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         return splitByRowId.stream()
                 .filter(this::filterByStats)
                 .flatMap(s -> s.stream().map(r -> r.entry))
+                .map(entry -> dropStats ? dropStats(entry) : entry)
                 .collect(Collectors.toList());
     }
 
