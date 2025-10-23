@@ -40,18 +40,18 @@ import java.util.concurrent.ConcurrentHashMap;
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
-    protected final BucketSelectConverter bucketSelectConverter;
-    protected final SimpleStatsEvolutions simpleStatsEvolutions;
+    private final BucketSelectConverter bucketSelectConverter;
+    private final SimpleStatsEvolutions simpleStatsEvolutions;
 
-    protected final boolean fileIndexReadEnabled;
+    private final boolean fileIndexReadEnabled;
 
     protected Predicate inputFilter;
 
     // cache not evolved filter by schema id
-    protected final Map<Long, Predicate> notEvolvedFilterMapping = new ConcurrentHashMap<>();
+    private final Map<Long, Predicate> notEvolvedFilterMapping = new ConcurrentHashMap<>();
 
     // cache evolved filter by schema id
-    protected final Map<Long, Predicate> evolvedFilterMapping = new ConcurrentHashMap<>();
+    private final Map<Long, Predicate> evolvedFilterMapping = new ConcurrentHashMap<>();
 
     public AppendOnlyFileStoreScan(
             ManifestsReader manifestsReader,
