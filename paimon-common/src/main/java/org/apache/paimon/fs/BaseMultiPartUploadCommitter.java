@@ -35,10 +35,10 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     private final String uploadId;
     private final String objectName;
     private final List<T> uploadedParts;
-    private final long byteLength;
+    private final int byteLength;
 
     public BaseMultiPartUploadCommitter(
-            String uploadId, List<T> uploadedParts, String objectName, long byteLength) {
+            String uploadId, List<T> uploadedParts, String objectName, int byteLength) {
         this.uploadId = uploadId;
         this.objectName = objectName;
         this.uploadedParts = new ArrayList<>(uploadedParts);

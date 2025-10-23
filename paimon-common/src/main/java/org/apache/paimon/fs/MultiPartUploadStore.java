@@ -43,7 +43,7 @@ public interface MultiPartUploadStore<T, C> {
             String objectName, String uploadId, List<T> partETags, long numBytesInParts)
             throws IOException;
 
-    T uploadPart(String objectName, String uploadId, int partNumber, File file, long byteLength)
+    T uploadPart(String objectName, String uploadId, int partNumber, File file, int byteLength)
             throws IOException;
 
     void abortMultipartUpload(String objectName, String uploadId) throws IOException;

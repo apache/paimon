@@ -60,7 +60,7 @@ public class OSSMultiPartUpload
 
     @Override
     public PartETag uploadPart(
-            String objectName, String uploadId, int partNumber, File file, long byteLength)
+            String objectName, String uploadId, int partNumber, File file, int byteLength)
             throws IOException {
         return store.uploadPart(file, objectName, uploadId, partNumber);
     }
