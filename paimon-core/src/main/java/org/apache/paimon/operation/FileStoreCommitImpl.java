@@ -287,10 +287,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             LOG.debug("Ready to commit\n{}", committable);
         }
 
-        if (discardDuplicateFiles) {
-            checkAppendFiles = true;
-        }
-
         long started = System.nanoTime();
         int generatedSnapshot = 0;
         int attempts = 0;
@@ -333,6 +329,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     conflictCheck = mustConflictCheck();
                 }
 
+                boolean discardDuplicate = discardDuplicateFiles && commitKind == CommitKind.APPEND;
+                if (discardDuplicate) {
+                    checkAppendFiles = true;
+                }
+
                 if (latestSnapshot != null && checkAppendFiles) {
                     // it is possible that some partitions only have compact changes,
                     // so we need to contain all changes
@@ -343,7 +344,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                             appendTableFiles,
                                             compactTableFiles,
                                             appendIndexFiles)));
-                    if (discardDuplicateFiles && commitKind == CommitKind.APPEND) {
+                    if (discardDuplicate) {
                         Set<FileEntry.Identifier> baseIdentifiers =
                                 baseEntries.stream()
                                         .map(FileEntry::identifier)
