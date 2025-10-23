@@ -256,7 +256,7 @@ public class CatalogUtils {
                 new CatalogEnvironment(
                         tableIdentifier,
                         metadata.uuid(),
-                        catalog.catalogLoader(),
+                        getCatalogLoaderForTable(catalog, metadata),
                         lockFactory,
                         lockContext,
                         catalogContext,
@@ -270,6 +270,21 @@ public class CatalogUtils {
         }
 
         return table;
+    }
+
+    /**
+     * For internal tables or catalogs without version management support, returns the catalog's
+     * loader to enable proper catalog-based snapshot management.
+     *
+     * <p>For external tables with version management support, returns null to ensure that snapshot
+     * is management operations like commitSnapshot use rename-based operations instead of
+     * catalog-based operations.
+     */
+    @Nullable
+    private static CatalogLoader getCatalogLoaderForTable(Catalog catalog, TableMetadata metadata) {
+        return catalog.supportsVersionManagement() && metadata.isExternal()
+                ? null
+                : catalog.catalogLoader();
     }
 
     private static Table createGlobalSystemTable(String tableName, Catalog catalog)

@@ -115,7 +115,7 @@ public class CatalogEnvironment implements Serializable {
 
     @Nullable
     public SnapshotLoader snapshotLoader() {
-        if (catalogLoader == null || !supportsVersionManagement) {
+        if (catalogLoader == null) {
             return null;
         }
         return new SnapshotLoaderImpl(catalogLoader, identifier);
