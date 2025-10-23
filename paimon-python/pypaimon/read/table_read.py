@@ -57,7 +57,11 @@ class TableRead:
         batch_iterator = self._arrow_batch_generator(splits, schema)
         return pyarrow.ipc.RecordBatchReader.from_batches(schema, batch_iterator)
 
-    def _pad_batch_to_schema(self, batch: pyarrow.RecordBatch, target_schema):
+    @staticmethod
+    def _try_to_pad_batch_by_schema(batch: pyarrow.RecordBatch, target_schema):
+        if batch.schema.names == target_schema.names:
+            return batch
+
         columns = []
         num_rows = batch.num_rows
 
@@ -76,8 +80,7 @@ class TableRead:
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         table_list = []
         for batch in iter(batch_reader.read_next_batch, None):
-            table_list.append(batch) if schema == batch.schema \
-                else table_list.append(self._pad_batch_to_schema(batch, schema))
+            table_list.append(self._try_to_pad_batch_by_schema(batch, schema))
 
         if not table_list:
             return pyarrow.Table.from_arrays([pyarrow.array([], type=field.type) for field in schema], schema=schema)
