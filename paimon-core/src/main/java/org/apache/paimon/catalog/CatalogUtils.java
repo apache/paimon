@@ -273,12 +273,14 @@ public class CatalogUtils {
     }
 
     /**
-     * For internal tables or catalogs without version management support, returns the catalog's
-     * loader to enable proper catalog-based snapshot management.
      *
-     * <p>For external tables with version management support, returns null to ensure that snapshot
-     * is management operations like commitSnapshot use rename-based operations instead of
-     * catalog-based operations.
+     *
+     * <ul>
+     *   <li>External tables with version management: null (use filesystem-based snapshot
+     *       management)
+     *   <li>Internal tables or no version management: catalog loader (use catalog-based snapshot
+     *       management)
+     * </ul>
      */
     @Nullable
     private static CatalogLoader getCatalogLoaderForTable(Catalog catalog, TableMetadata metadata) {
