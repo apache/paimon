@@ -41,6 +41,8 @@ import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.util.functions.StreamingFunctionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -56,6 +58,8 @@ import static org.apache.paimon.CoreOptions.LOG_IGNORE_DELETE;
 public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
 
     private static final long serialVersionUID = 3L;
+
+    private static final Logger LOG = LoggerFactory.getLogger(RowDataStoreWriteOperator.class);
 
     @Nullable private final LogSinkFunction logSinkFunction;
     private transient SimpleContext sinkContext;
@@ -96,7 +100,9 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
     public void open() throws Exception {
         super.open();
 
-        if (table.initPostponeRealNumBuckets(getRuntimeContext().getNumberOfParallelSubtasks())) {
+        int sinkParallelism = getRuntimeContext().getNumberOfParallelSubtasks();
+        if (table.initPostponeRealNumBuckets(sinkParallelism)) {
+            LOG.info("Initializing Postpone sink realNumBuckets to {}.", sinkParallelism);
             // to recreate postpone writer
             this.write.replace(table);
         }

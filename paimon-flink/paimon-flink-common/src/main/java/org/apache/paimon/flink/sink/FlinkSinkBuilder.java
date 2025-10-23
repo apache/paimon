@@ -317,7 +317,7 @@ public class FlinkSinkBuilder {
             } else {
                 realNumBuckets = null;
             }
-            LOG.info("Building Postpone sink, initializing realNumBuckets to {}.", realNumBuckets);
+            LOG.info("Initializing Postpone sink realNumBuckets to {}.", realNumBuckets);
             table.initPostponeRealNumBuckets(realNumBuckets);
         }
 
