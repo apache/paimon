@@ -96,8 +96,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
     public void open() throws Exception {
         super.open();
 
-        if (table.initPostponeRealNumBuckets(
-                getRuntimeContext().getTaskInfo().getNumberOfParallelSubtasks())) {
+        if (table.initPostponeRealNumBuckets(getRuntimeContext().getNumberOfParallelSubtasks())) {
             // to recreate postpone writer
             this.write.replace(table);
         }
