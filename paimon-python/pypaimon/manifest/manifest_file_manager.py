@@ -86,17 +86,9 @@ class ManifestFileManager:
                 null_counts=key_dict['_NULL_COUNTS'],
             )
 
+            schema_fields = self.table.schema_manager.get_schema(file_dict['_SCHEMA_ID']).fields
+            fields = self._get_value_stats_fields(file_dict, schema_fields)
             value_dict = dict(file_dict['_VALUE_STATS'])
-            if file_dict['_VALUE_STATS_COLS'] is None:
-                if file_dict['_WRITE_COLS'] is None:
-                    fields = self.table.table_schema.fields
-                else:
-                    read_fields = file_dict['_WRITE_COLS']
-                    fields = [self.table.field_dict[col] for col in read_fields]
-            elif not file_dict['_VALUE_STATS_COLS']:
-                fields = []
-            else:
-                fields = [self.table.field_dict[col] for col in file_dict['_VALUE_STATS_COLS']]
             value_stats = SimpleStats(
                 min_values=BinaryRow(value_dict['_MIN_VALUES'], fields),
                 max_values=BinaryRow(value_dict['_MAX_VALUES'], fields),
@@ -121,8 +113,8 @@ class ManifestFileManager:
                 file_source=file_dict['_FILE_SOURCE'],
                 value_stats_cols=file_dict.get('_VALUE_STATS_COLS'),
                 external_path=file_dict.get('_EXTERNAL_PATH'),
-                first_row_id=file_dict['_FIRST_ROW_ID'],
-                write_cols=file_dict['_WRITE_COLS'],
+                first_row_id=file_dict['_FIRST_ROW_ID'] if '_FIRST_ROW_ID' in file_dict else None,
+                write_cols=file_dict['_WRITE_COLS'] if '_WRITE_COLS' in file_dict else None,
             )
             entry = ManifestEntry(
                 kind=record['_KIND'],
@@ -137,6 +129,22 @@ class ManifestFileManager:
                 entry = entry.copy_without_stats()
             entries.append(entry)
         return entries
+
+    def _get_value_stats_fields(self, file_dict: dict, schema_fields: list) -> List:
+        if file_dict['_VALUE_STATS_COLS'] is None:
+            if '_WRITE_COLS' in file_dict:
+                if file_dict['_WRITE_COLS'] is None:
+                    fields = schema_fields
+                else:
+                    read_fields = file_dict['_WRITE_COLS']
+                    fields = [self.table.field_dict[col] for col in read_fields]
+            else:
+                fields = schema_fields
+        elif not file_dict['_VALUE_STATS_COLS']:
+            fields = []
+        else:
+            fields = [self.table.field_dict[col] for col in file_dict['_VALUE_STATS_COLS']]
+        return fields
 
     def write(self, file_name, entries: List[ManifestEntry]):
         avro_records = []
