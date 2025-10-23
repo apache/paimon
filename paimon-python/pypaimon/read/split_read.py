@@ -19,7 +19,7 @@
 import os
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import List, Optional, Tuple, Any
+from typing import List, Optional, Tuple
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
@@ -60,8 +60,7 @@ class SplitRead(ABC):
 
         self.table: FileStoreTable = table
         self.predicate = predicate
-        predicate_tuple = self._push_down_predicate()
-        self.push_down_predicate, self.predicate_fields = predicate_tuple if predicate_tuple else (None, None)
+        self.push_down_predicate = self._push_down_predicate()
         self.split = split
         self.value_arity = len(read_type)
 
@@ -69,31 +68,25 @@ class SplitRead(ABC):
         self.read_fields = read_type
         if isinstance(self, MergeFileSplitRead):
             self.read_fields = self._create_key_value_fields(read_type)
+        self.schema_id_2_fields = {}
 
-    def _push_down_predicate(self) -> Any:
+    def _push_down_predicate(self) -> Optional[Predicate]:
         if self.predicate is None:
             return None
         elif self.table.is_primary_key_table:
             pk_predicate = trim_predicate_by_fields(self.predicate, self.table.primary_keys)
             if not pk_predicate:
                 return None
-            return pk_predicate.to_arrow()
+            return pk_predicate
         else:
-            return self.predicate.to_arrow()
+            return self.predicate
 
     @abstractmethod
     def create_reader(self) -> RecordReader:
         """Create a record reader for the given split."""
 
     def file_reader_supplier(self, file: DataFileMeta, for_merge_read: bool, read_fields: List[str]):
-        schema = self.table.schema_manager.get_schema(file.schema_id)
-        schema_field_names = set(field.name for field in schema.fields)
-        if self.table.is_primary_key_table:
-            schema_field_names.add('_SEQUENCE_NUMBER')
-            schema_field_names.add('_VALUE_KIND')
-        if self.predicate_fields and self.predicate_fields - schema_field_names:
-            return None
-        read_file_fields = [read_field for read_field in read_fields if read_field in schema_field_names]
+        (read_file_fields, read_arrow_predicate) = self._get_fields_and_predicate(file.schema_id, read_fields)
 
         file_path = file.file_path
         _, extension = os.path.splitext(file_path)
@@ -102,14 +95,14 @@ class SplitRead(ABC):
         format_reader: RecordBatchReader
         if file_format == CoreOptions.FILE_FORMAT_AVRO:
             format_reader = FormatAvroReader(self.table.file_io, file_path, read_file_fields,
-                                             self.read_fields, self.push_down_predicate)
+                                             self.read_fields, read_arrow_predicate)
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
             blob_as_descriptor = CoreOptions.get_blob_as_descriptor(self.table.options)
             format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
-                                             self.read_fields, self.push_down_predicate, blob_as_descriptor)
+                                             self.read_fields, read_arrow_predicate, blob_as_descriptor)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path,
-                                                read_file_fields, self.push_down_predicate)
+                                                read_file_fields, read_arrow_predicate)
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
@@ -121,6 +114,20 @@ class SplitRead(ABC):
         else:
             return DataFileBatchReader(format_reader, index_mapping, partition_info, None,
                                        self.table.table_schema.fields)
+
+    def _get_fields_and_predicate(self, schema_id: int, read_fields):
+        key = (schema_id, tuple(read_fields))
+        if key not in self.schema_id_2_fields:
+            schema = self.table.schema_manager.get_schema(schema_id)
+            schema_field_names = set(field.name for field in schema.fields)
+            if self.table.is_primary_key_table:
+                schema_field_names.add('_SEQUENCE_NUMBER')
+                schema_field_names.add('_VALUE_KIND')
+            read_file_fields = [read_field for read_field in read_fields if read_field in schema_field_names]
+            read_predicate = trim_predicate_by_fields(self.push_down_predicate, read_file_fields)
+            read_arrow_predicate = read_predicate.to_arrow() if read_predicate else None
+            self.schema_id_2_fields[key] = (read_file_fields, read_arrow_predicate)
+        return self.schema_id_2_fields[key]
 
     @abstractmethod
     def _get_all_data_fields(self):
