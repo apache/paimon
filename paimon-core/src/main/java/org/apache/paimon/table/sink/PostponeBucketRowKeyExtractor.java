@@ -18,8 +18,11 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+
+import javax.annotation.Nullable;
 
 /**
  * {@link RowKeyExtractor} for postpone bucket tables. The bucket is always {@link
@@ -27,12 +30,29 @@ import org.apache.paimon.table.BucketMode;
  */
 public class PostponeBucketRowKeyExtractor extends RowKeyExtractor {
 
-    public PostponeBucketRowKeyExtractor(TableSchema schema) {
+    @Nullable private FixedBucketRowKeyExtractor realBucketExtractor;
+
+    public PostponeBucketRowKeyExtractor(TableSchema schema, @Nullable Integer realNumBuckets) {
         super(schema);
+        if (realNumBuckets != null) {
+            this.realBucketExtractor = new FixedBucketRowKeyExtractor(schema, realNumBuckets);
+        }
+    }
+
+    @Override
+    public void setRecord(InternalRow record) {
+        super.setRecord(record);
+        if (realBucketExtractor != null) {
+            realBucketExtractor.setRecord(record);
+        }
     }
 
     @Override
     public int bucket() {
-        return BucketMode.POSTPONE_BUCKET;
+        if (realBucketExtractor != null) {
+            return realBucketExtractor.bucket();
+        } else {
+            return BucketMode.POSTPONE_BUCKET;
+        }
     }
 }

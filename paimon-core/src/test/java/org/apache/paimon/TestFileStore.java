@@ -139,7 +139,9 @@ public class TestFileStore extends KeyValueFileStore {
                 keyValueFieldsExtractor,
                 mfFactory,
                 (new Path(root)).getName(),
-                CatalogEnvironment.empty());
+                CatalogEnvironment.empty(),
+                false,
+                null);
         this.root = root;
         this.fileIO = FileIOFinder.find(new Path(root));
         this.keySerializer = new InternalRowSerializer(keyType);

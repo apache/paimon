@@ -89,6 +89,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final Path path;
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
+    protected boolean postponeWriteRealBucket = false;
+    @Nullable protected Integer postponeRealNumBuckets;
 
     @Nullable protected transient SegmentsCache<Path> manifestCache;
     @Nullable protected transient Cache<Path, Snapshot> snapshotCache;
@@ -233,6 +235,23 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return catalogEnvironment;
     }
 
+    @Override
+    public void setPostponeWriteRealBucket() {
+        Preconditions.checkArgument(
+                bucketMode() == BucketMode.POSTPONE_MODE
+                        && new CoreOptions(options()).postponeBatchWriteRealBucket());
+        postponeWriteRealBucket = true;
+    }
+
+    @Override
+    public boolean initPostponeRealNumBuckets(@Nullable Integer postponeRealNumBuckets) {
+        if (this.postponeWriteRealBucket && this.postponeRealNumBuckets == null) {
+            this.postponeRealNumBuckets = postponeRealNumBuckets;
+            return true;
+        }
+        return false;
+    }
+
     public RowKeyExtractor createRowKeyExtractor() {
         switch (bucketMode()) {
             case HASH_FIXED:
@@ -243,7 +262,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             case BUCKET_UNAWARE:
                 return new AppendTableRowKeyExtractor(schema());
             case POSTPONE_MODE:
-                return new PostponeBucketRowKeyExtractor(schema());
+                return new PostponeBucketRowKeyExtractor(schema(), postponeRealNumBuckets);
             default:
                 throw new UnsupportedOperationException("Unsupported mode: " + bucketMode());
         }

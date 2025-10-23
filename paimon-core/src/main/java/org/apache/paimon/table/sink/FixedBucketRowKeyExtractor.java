@@ -38,13 +38,18 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
     private final BucketFunction bucketFunction;
 
     public FixedBucketRowKeyExtractor(TableSchema schema) {
+        this(schema, new CoreOptions(schema.options()).bucket());
+    }
+
+    public FixedBucketRowKeyExtractor(TableSchema schema, int numBuckets) {
         super(schema);
-        numBuckets = new CoreOptions(schema.options()).bucket();
-        bucketFunction =
+        this.numBuckets = numBuckets;
+        this.bucketFunction =
                 BucketFunction.create(
                         new CoreOptions(schema.options()), schema.logicalBucketKeyType());
-        sameBucketKeyAndTrimmedPrimaryKey = schema.bucketKeys().equals(schema.trimmedPrimaryKeys());
-        bucketKeyProjection =
+        this.sameBucketKeyAndTrimmedPrimaryKey =
+                schema.bucketKeys().equals(schema.trimmedPrimaryKeys());
+        this.bucketKeyProjection =
                 CodeGenUtils.newProjection(
                         schema.logicalRowType(), schema.projection(schema.bucketKeys()));
     }

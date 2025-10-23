@@ -44,7 +44,7 @@ public class PostponeBucketChannelComputer implements ChannelComputer<InternalRo
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        this.extractor = new PostponeBucketRowKeyExtractor(schema);
+        this.extractor = new PostponeBucketRowKeyExtractor(schema, null);
     }
 
     @Override

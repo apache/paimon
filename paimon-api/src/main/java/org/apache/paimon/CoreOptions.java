@@ -2020,6 +2020,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
 
+    public static final ConfigOption<Boolean> POSTPONE_BATCH_WRITE_REAL_BUCKET =
+            key("postpone.batch-write-real-bucket")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to write the data into real bucket for batch writing a postpone bucket table.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3107,6 +3114,10 @@ public class CoreOptions implements Serializable {
 
     public boolean blobAsDescriptor() {
         return options.get(BLOB_AS_DESCRIPTOR);
+    }
+
+    public boolean postponeBatchWriteRealBucket() {
+        return options.get(POSTPONE_BATCH_WRITE_REAL_BUCKET);
     }
 
     /** Specifies the merge engine for table with primary key. */
