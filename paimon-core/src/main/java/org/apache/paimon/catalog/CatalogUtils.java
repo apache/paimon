@@ -274,12 +274,11 @@ public class CatalogUtils {
 
     /**
      *
-     *
      * <ul>
      *   <li>External tables with version management: null (use filesystem-based snapshot
-     *       management)
+     *       management).
      *   <li>Internal tables or no version management: catalog loader (use catalog-based snapshot
-     *       management)
+     *       management).
      * </ul>
      */
     @Nullable
