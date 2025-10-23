@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.log.LogWriteCallback;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -100,7 +101,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
     public void open() throws Exception {
         super.open();
 
-        int sinkParallelism = getRuntimeContext().getNumberOfParallelSubtasks();
+        int sinkParallelism = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
         if (table.initPostponeRealNumBuckets(sinkParallelism)) {
             LOG.info("Initializing Postpone sink realNumBuckets to {}.", sinkParallelism);
             // to recreate postpone writer
