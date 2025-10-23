@@ -36,6 +36,7 @@ import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.write._
 import org.apache.spark.sql.execution.SQLExecution
 import org.apache.spark.sql.execution.metric.SQLMetrics
+import org.apache.spark.sql.execution.ui.SQLPlanMetric
 import org.apache.spark.sql.types.StructType
 
 import java.io.{IOException, UncheckedIOException}
@@ -229,7 +230,7 @@ private case class PaimonDataWriter(
   override def commit(): WriterCommitMessage = {
     try {
       preFinish()
-      val commitMessages = write.prepareCommit().asScala
+      val commitMessages = write.prepareCommit().asScala.toSeq
       TaskCommit(commitMessages)
     } finally {
       close()

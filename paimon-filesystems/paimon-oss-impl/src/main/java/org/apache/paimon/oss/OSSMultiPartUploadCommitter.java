@@ -40,9 +40,9 @@ public class OSSMultiPartUploadCommitter
 
     @Override
     protected MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore(
-            FileIO fileIO, String targetPath) throws IOException {
+            FileIO fileIO, Path targetPath) throws IOException {
         OSSFileIO ossFileIO = (OSSFileIO) fileIO;
-        org.apache.hadoop.fs.Path hadoopPath = ossFileIO.path(new Path(targetPath));
+        org.apache.hadoop.fs.Path hadoopPath = ossFileIO.path(targetPath);
         FileSystem fs = ossFileIO.getFileSystem(hadoopPath);
         return new OSSMultiPartUpload((org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs);
     }

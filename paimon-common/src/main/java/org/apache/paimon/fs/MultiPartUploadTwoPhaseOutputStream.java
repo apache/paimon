@@ -127,7 +127,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         return committer(uploadId, uploadedParts, objectName, position);
     }
 
-    protected void uploadPart() throws IOException {
+    private void uploadPart() throws IOException {
         if (buffer.size() == 0) {
             return;
         }

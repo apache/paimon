@@ -36,8 +36,6 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     private final String objectName;
     private final List<T> uploadedParts;
     private final long byteLength;
-    private boolean committed = false;
-    private boolean discarded = false;
 
     public BaseMultiPartUploadCommitter(
             String uploadId, List<T> uploadedParts, String objectName, long byteLength) {
@@ -48,23 +46,15 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     }
 
     protected abstract MultiPartUploadStore<T, C> multiPartUploadStore(
-            FileIO fileIO, String targetPath) throws IOException;
+            FileIO fileIO, Path targetPath) throws IOException;
 
     @Override
     public void commit(FileIO fileIO) throws IOException {
-        if (committed) {
-            return;
-        }
-        if (discarded) {
-            throw new IOException("Cannot commit: committer has been discarded");
-        }
-
         try {
             MultiPartUploadStore<T, C> multiPartUploadStore =
-                    multiPartUploadStore(fileIO, objectName);
+                    multiPartUploadStore(fileIO, targetFilePath());
             multiPartUploadStore.completeMultipartUpload(
                     objectName, uploadId, uploadedParts, byteLength);
-            committed = true;
             LOG.info(
                     "Successfully committed multipart upload with ID: {} for objectName: {}",
                     uploadId,
@@ -76,15 +66,10 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
 
     @Override
     public void discard(FileIO fileIO) throws IOException {
-        if (discarded) {
-            return;
-        }
-
         try {
             MultiPartUploadStore<T, C> multiPartUploadStore =
-                    multiPartUploadStore(fileIO, objectName);
+                    multiPartUploadStore(fileIO, targetFilePath());
             multiPartUploadStore.abortMultipartUpload(objectName, uploadId);
-            discarded = true;
             LOG.info(
                     "Successfully discarded multipart upload with ID: {} for objectName: {}",
                     uploadId,

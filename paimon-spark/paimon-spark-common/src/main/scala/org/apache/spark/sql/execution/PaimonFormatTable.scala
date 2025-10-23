@@ -18,13 +18,12 @@
 
 package org.apache.spark.sql.execution
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.fs.TwoPhaseOutputStream
 import org.apache.paimon.spark.{FormatTableScanBuilder, SparkInternalRowWrapper}
-import org.apache.paimon.spark.write.{BaseV2WriteBuilder, BaseWriteBuilder}
+import org.apache.paimon.spark.write.BaseV2WriteBuilder
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.TwoPhaseCommitMessage
-import org.apache.paimon.table.sink.{BatchTableWrite, CommitMessageSerializer, TwoPhaseCommitterSerializer}
+import org.apache.paimon.table.sink.BatchTableWrite
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.StringUtils
 
@@ -32,28 +31,26 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Literal}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
 import org.apache.spark.sql.connector.catalog.{SupportsPartitionManagement, SupportsRead, SupportsWrite, TableCapability}
-import org.apache.spark.sql.connector.catalog.TableCapability.{ACCEPT_ANY_SCHEMA, BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
+import org.apache.spark.sql.connector.catalog.TableCapability.{BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
 import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.connector.read.ScanBuilder
-import org.apache.spark.sql.connector.write.{BatchWrite, DataWriter, DataWriterFactory, LogicalWriteInfo, PhysicalWriteInfo, SupportsDynamicOverwrite, SupportsOverwrite, Write, WriteBuilder, WriterCommitMessage}
+import org.apache.spark.sql.connector.write.{BatchWrite, DataWriter, DataWriterFactory, LogicalWriteInfo, PhysicalWriteInfo, Write, WriteBuilder, WriterCommitMessage}
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite
-import org.apache.spark.sql.execution.datasources._
+import org.apache.spark.sql.execution.datasources.{DataSource, FileFormat, FileStatusCache, InMemoryFileIndex, NoopCache, PartitioningAwareFileIndex, PartitionSpec}
 import org.apache.spark.sql.execution.datasources.v2.csv.{CSVScanBuilder, CSVTable}
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable
 import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
-import org.apache.spark.sql.sources.{And, Filter}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import java.io.{FileNotFoundException, IOException, UncheckedIOException}
+import java.io.FileNotFoundException
 import java.util
 
 import scala.collection.JavaConverters._
-import scala.util.{Failure, Success, Try}
 
 object PaimonFormatTable {
 
@@ -150,7 +147,7 @@ trait PartitionedFormatTable extends SupportsPartitionManagement {
     val partitionFilters = names.zipWithIndex.map {
       case (name, index) =>
         val f = partitionSchema().apply(name)
-        org.apache.spark.sql.catalyst.expressions.EqualTo(
+        EqualTo(
           AttributeReference(f.name, f.dataType, f.nullable)(),
           Literal(ident.get(index, f.dataType), f.dataType))
     }.toSeq
@@ -460,6 +457,7 @@ private class FormatTableDataWriter(
             throw new IllegalArgumentException(
               "Unsupported commit message type: " + other.getClass.getSimpleName)
         }
+        .toSeq
       FormatTableTaskCommit(committers)
     } finally {
       close()
@@ -483,36 +481,14 @@ private class FormatTableDataWriter(
 }
 
 /** Commit message container for FormatTable writes, holding committers that need to be executed. */
-class FormatTableTaskCommit private (private val serializedMessageBytes: Seq[Array[Byte]])
+class FormatTableTaskCommit private (private val _committers: Seq[TwoPhaseOutputStream.Committer])
   extends WriterCommitMessage {
 
-  def committers(): Seq[TwoPhaseOutputStream.Committer] = {
-    val deserializer = new TwoPhaseCommitterSerializer()
-    serializedMessageBytes.map {
-      bytes =>
-        Try(deserializer.deserialize(deserializer.getVersion, bytes)) match {
-          case Success(committer) => committer
-          case Failure(e: IOException) => throw new UncheckedIOException(e)
-          case Failure(e) => throw e
-        }
-    }
-  }
+  def committers(): Seq[TwoPhaseOutputStream.Committer] = _committers
 }
 
 object FormatTableTaskCommit {
   def apply(committers: Seq[TwoPhaseOutputStream.Committer]): FormatTableTaskCommit = {
-    val serializer = new TwoPhaseCommitterSerializer()
-    val serializedBytes: Seq[Array[Byte]] = Option(committers)
-      .filter(_.nonEmpty)
-      .map(_.map {
-        committer =>
-          Try(serializer.serialize(committer)) match {
-            case Success(serializedBytes) => serializedBytes
-            case Failure(e: IOException) => throw new UncheckedIOException(e)
-            case Failure(e) => throw e
-          }
-      })
-      .getOrElse(Seq.empty)
-    new FormatTableTaskCommit(serializedBytes)
+    new FormatTableTaskCommit(committers)
   }
 }

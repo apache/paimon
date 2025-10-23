@@ -40,9 +40,9 @@ public class S3MultiPartUploadCommitter
 
     @Override
     protected MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore(
-            FileIO fileIO, String targetPath) throws IOException {
+            FileIO fileIO, Path targetPath) throws IOException {
         S3FileIO s3FileIO = (S3FileIO) fileIO;
-        org.apache.hadoop.fs.Path hadoopPath = s3FileIO.path(new Path(targetPath));
+        org.apache.hadoop.fs.Path hadoopPath = s3FileIO.path(targetPath);
         S3AFileSystem fs = (S3AFileSystem) s3FileIO.getFileSystem(hadoopPath);
         return new S3MultiPartUpload(fs, fs.getConf());
     }
