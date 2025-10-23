@@ -302,6 +302,7 @@ public class FlinkSinkBuilder {
         }
         DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
 
+        PostponeBucketSink sink;
         if (!isStreaming(input) && table.coreOptions().postponeBatchWriteRealBucket()) {
             table.setPostponeWriteRealBucket();
 
@@ -319,9 +320,11 @@ public class FlinkSinkBuilder {
             }
             LOG.info("Initializing Postpone sink realNumBuckets to {}.", realNumBuckets);
             table.initPostponeRealNumBuckets(realNumBuckets);
+            sink = new PostponeBucketSink(table, overwritePartition, true);
+        } else {
+            sink = new PostponeBucketSink(table, overwritePartition, false);
         }
 
-        PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
         return sink.sinkFrom(partitioned);
     }
 

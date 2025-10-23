@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
@@ -28,24 +29,44 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_ENABLED;
+
 /** {@link FlinkSink} for writing records into fixed bucket Paimon table. */
 public class PostponeBucketSink extends FlinkWriteSink<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
+    private final boolean writeRealBucket;
+
     public PostponeBucketSink(
-            FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
+            FileStoreTable table,
+            @Nullable Map<String, String> overwritePartition,
+            boolean writeRealBucket) {
         super(table, overwritePartition);
+        this.writeRealBucket = writeRealBucket;
     }
 
     @Override
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return createNoStateRowWriteOperatorFactory(table, null, writeProvider, commitUser);
+        if (writeRealBucket) {
+            Options options = table.coreOptions().toConfiguration();
+            boolean coordinatorEnabled = options.get(SINK_WRITER_COORDINATOR_ENABLED);
+            return coordinatorEnabled
+                    ? new RowDataStoreWriteOperator.CoordinatedFactory(
+                            table, null, writeProvider, commitUser)
+                    : new RowDataStoreWriteOperator.Factory(table, null, writeProvider, commitUser);
+        } else {
+            return createNoStateRowWriteOperatorFactory(table, null, writeProvider, commitUser);
+        }
     }
 
     @Override
     protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
-        return createRestoreOnlyCommittableStateManager(table);
+        if (writeRealBucket) {
+            return super.createCommittableStateManager();
+        } else {
+            return createRestoreOnlyCommittableStateManager(table);
+        }
     }
 }

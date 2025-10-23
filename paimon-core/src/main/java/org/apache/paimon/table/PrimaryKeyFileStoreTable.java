@@ -114,7 +114,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             // recreate the store to pass postponeRealNumBuckets
             this.lazyStore = null;
         }
-        return true;
+        return initialized;
     }
 
     @Override
