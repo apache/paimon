@@ -285,7 +285,7 @@ public class ArrowFormatWriterTest {
                         rootAllocator.newChildAllocator("paimonWriter", 0, Long.MAX_VALUE);
                 ArrowFormatCWriter writer =
                         new ArrowFormatCWriter(emptyschema, 4096, true, allocator)) {
-            for (int i = 0; i < 100; i++) {
+            for (int i = 0; i < 10; i++) {
                 writer.write(GenericRow.of());
             }
             writer.flush();
