@@ -106,7 +106,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
 
     @Override
     public void close() throws IOException {
-        if (!closed) {
+        if (!closed && this.committer == null) {
             this.committer = closeForCommit();
         }
     }

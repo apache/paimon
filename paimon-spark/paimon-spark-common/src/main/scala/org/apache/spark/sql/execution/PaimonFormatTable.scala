@@ -388,14 +388,11 @@ private case class FormatTableBatchWrite(
         .filter(f => !f.getPath.getName.startsWith(".") && !f.getPath.getName.startsWith("_"))
         .foreach(
           f => {
-            if (table.fileIO().exists(f.getPath)) {
-              try {
-                table.fileIO().deleteQuietly(f.getPath)
-              } catch {
-                case e: FileNotFoundException =>
-                  logInfo(s"Failed to delete file: ${f.getPath} as it does not exist")
-                case other => throw new RuntimeException(other)
-              }
+            try {
+              table.fileIO().deleteQuietly(f.getPath)
+            } catch {
+              case e: FileNotFoundException => logInfo(s"File ${f.getPath} already deleted")
+              case other => throw new RuntimeException(other)
             }
           })
     }

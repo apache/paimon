@@ -113,11 +113,19 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
             if (!fileIO.rename(tempPath, targetPath)) {
                 throw new IOException("Failed to rename " + tempPath + " to " + targetPath);
             }
+            if (fileIO.exists(tempPath)) {
+                fileIO.deleteQuietly(tempPath);
+            }
         }
 
         @Override
-        public void discard(FileIO fileIO) {
-            fileIO.deleteQuietly(tempPath);
+        public void discard(FileIO fileIO) throws IOException {
+            if (fileIO.exists(targetPath)) {
+                fileIO.deleteQuietly(targetPath);
+            }
+            if (fileIO.exists(tempPath)) {
+                fileIO.deleteQuietly(tempPath);
+            }
         }
 
         @Override
