@@ -138,24 +138,21 @@ class TableRead:
                 table=self.table,
                 predicate=self.predicate,
                 read_type=self.read_type,
-                split=split,
-                schema_fields_cache=self.schema_fields_cache
+                split=split
             )
         elif self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true':
             return DataEvolutionSplitRead(
                 table=self.table,
                 predicate=self.predicate,
                 read_type=self.read_type,
-                split=split,
-                schema_fields_cache=self.schema_fields_cache
+                split=split
             )
         else:
             return RawFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,
                 read_type=self.read_type,
-                split=split,
-                schema_fields_cache=self.schema_fields_cache
+                split=split
             )
 
     @staticmethod
