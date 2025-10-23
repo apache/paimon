@@ -21,6 +21,7 @@ import shutil
 import tempfile
 import unittest
 
+import pandas
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
@@ -130,19 +131,20 @@ class SchemaEvolutionReadTest(unittest.TestCase):
     def test_schema_evolution_type(self):
         # schema 0
         pa_schema = pa.schema([
-            ('user_id', pa.float32()),
-            ('item_id', pa.int64()),
+            ('user_id', pa.int64()),
+            ('time', pa.timestamp('s')),
             ('dt', pa.string())
         ])
         schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
-        self.catalog.create_table('default.test_sample', schema, False)
-        table1 = self.catalog.get_table('default.test_sample')
+        self.catalog.create_table('default.schema_evolution_type', schema, False)
+        table1 = self.catalog.get_table('default.schema_evolution_type')
         write_builder = table1.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
         data1 = {
-            'user_id': [1.2, 2.4, 3, 4],
-            'item_id': [1001, 1002, 1003, 1004],
+            'user_id': [1, 2, 3, 4],
+            'time': [pandas.Timestamp("2025-01-01 00:00:00"), pandas.Timestamp("2025-01-02 00:02:00"),
+                     pandas.Timestamp("2025-01-03 00:03:00"), pandas.Timestamp("2025-01-04 00:04:00")],
             'dt': ['p1', 'p1', 'p2', 'p1'],
         }
         pa_table = pa.Table.from_pydict(data1, schema=pa_schema)
@@ -154,20 +156,21 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         # schema 1  add behavior column
         pa_schema = pa.schema([
             ('user_id', pa.int8()),
-            ('item_id', pa.int32()),
+            ('time', pa.timestamp('ms')),
             ('dt', pa.string()),
             ('behavior', pa.string())
         ])
         schema2 = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
-        self.catalog.create_table('default.test_schema_evolution', schema2, False)
-        table2 = self.catalog.get_table('default.test_schema_evolution')
+        self.catalog.create_table('default.schema_evolution_type2', schema2, False)
+        table2 = self.catalog.get_table('default.schema_evolution_type2')
         table2.table_schema.id = 1
         write_builder = table2.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
         data2 = {
             'user_id': [5, 6, 7, 8],
-            'item_id': [1005, 1006, 1007, 1008],
+            'time': [pandas.Timestamp("2025-01-05 00:05:00"), pandas.Timestamp("2025-01-06 00:06:00"),
+                     pandas.Timestamp("2025-01-07 00:07:00"), pandas.Timestamp("2025-01-08 00:08:00")],
             'dt': ['p2', 'p1', 'p2', 'p2'],
             'behavior': ['e', 'f', 'g', 'h'],
         }
@@ -191,7 +194,10 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         actual = table_read.to_arrow(splits)
         expected = pa.Table.from_pydict({
             'user_id': [1, 2, 4, 3, 5, 7, 8, 6],
-            'item_id': [1001, 1002, 1004, 1003, 1005, 1007, 1008, 1006],
+            'time': [pandas.Timestamp("2025-01-01 00:00:00"), pandas.Timestamp("2025-01-02 00:02:00"),
+                     pandas.Timestamp("2025-01-04 00:04:00"), pandas.Timestamp("2025-01-03 00:03:00"),
+                     pandas.Timestamp("2025-01-05 00:05:00"), pandas.Timestamp("2025-01-07 00:07:00"),
+                     pandas.Timestamp("2025-01-08 00:08:00"), pandas.Timestamp("2025-01-06 00:06:00"), ],
             'dt': ["p1", "p1", "p1", "p2", "p2", "p2", "p2", "p1"],
             'behavior': [None, None, None, None, "e", "g", "h", "f"],
         }, schema=pa_schema)
@@ -316,6 +322,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         schema_manager = SchemaManager(table2.file_io, table2.table_path)
         schema_manager.commit(TableSchema.from_schema(schema_id=0, schema=schema))
         schema_manager.commit(TableSchema.from_schema(schema_id=1, schema=schema2))
+
         # behavior or user_id filter
         splits = self._scan_table(table1.new_read_builder())
         read_builder = table2.new_read_builder()
@@ -338,6 +345,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
             'behavior': [None, None, None, None, "e", "g"],
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
+
         # behavior and user_id filter
         splits = self._scan_table(table1.new_read_builder())
 
@@ -361,6 +369,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
             'behavior': [None, None, None, None, "g"],
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
+
         # user_id filter
         splits = self._scan_table(table1.new_read_builder())
 
