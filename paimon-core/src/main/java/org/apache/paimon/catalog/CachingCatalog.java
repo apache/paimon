@@ -28,6 +28,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.SegmentsCache;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
@@ -43,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.options.CatalogOptions.CACHE_DV_MAX_NUM;
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_ACCESS;
 import static org.apache.paimon.options.CatalogOptions.CACHE_EXPIRE_AFTER_WRITE;
@@ -66,9 +68,9 @@ public class CachingCatalog extends DelegateCatalog {
     protected Cache<String, Database> databaseCache;
     protected Cache<Identifier, Table> tableCache;
     @Nullable protected final SegmentsCache<Path> manifestCache;
-
     // partition cache will affect data latency
     @Nullable protected Cache<Identifier, List<Partition>> partitionCache;
+    @Nullable protected DVMetaCache dvMetaCache;
 
     public CachingCatalog(Catalog wrapped, Options options) {
         super(wrapped);
@@ -97,6 +99,11 @@ public class CachingCatalog extends DelegateCatalog {
         this.manifestCache = SegmentsCache.create(manifestMaxMemory, manifestCacheThreshold);
 
         this.cachedPartitionMaxNum = options.get(CACHE_PARTITION_MAX_NUM);
+
+        int cacheDvMaxNum = options.get(CACHE_DV_MAX_NUM);
+        if (cacheDvMaxNum > 0) {
+            this.dvMetaCache = new DVMetaCache(cacheDvMaxNum);
+        }
         init(Ticker.systemTicker());
     }
 
@@ -270,6 +277,9 @@ public class CachingCatalog extends DelegateCatalog {
                             .build());
             if (manifestCache != null) {
                 storeTable.setManifestCache(manifestCache);
+            }
+            if (dvMetaCache != null) {
+                storeTable.setDVMetaCache(dvMetaCache);
             }
         }
 

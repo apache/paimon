@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
@@ -39,6 +40,8 @@ import java.util.List;
 /** Index manifest file. */
 public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
 
+    private final DVMetaCache dvMetaCache;
+
     private IndexManifestFile(
             FileIO fileIO,
             RowType schema,
@@ -46,7 +49,8 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
             FormatWriterFactory writerFactory,
             String compression,
             PathFactory pathFactory,
-            @Nullable SegmentsCache<Path> cache) {
+            @Nullable SegmentsCache<Path> cache,
+            @Nullable DVMetaCache dvMetaCache) {
         super(
                 fileIO,
                 new IndexManifestEntrySerializer(),
@@ -56,6 +60,11 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
                 compression,
                 pathFactory,
                 cache);
+        this.dvMetaCache = dvMetaCache;
+    }
+
+    public Path indexManifestFilePath(String fileName) {
+        return pathFactory.toPath(fileName);
     }
 
     /** Write new index files to index manifest. */
@@ -79,18 +88,21 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
         private final String compression;
         private final FileStorePathFactory pathFactory;
         @Nullable private final SegmentsCache<Path> cache;
+        @Nullable private final DVMetaCache dvMetaCache;
 
         public Factory(
                 FileIO fileIO,
                 FileFormat fileFormat,
                 String compression,
                 FileStorePathFactory pathFactory,
-                @Nullable SegmentsCache<Path> cache) {
+                @Nullable SegmentsCache<Path> cache,
+                @Nullable DVMetaCache dvMetaCache) {
             this.fileIO = fileIO;
             this.fileFormat = fileFormat;
             this.compression = compression;
             this.pathFactory = pathFactory;
             this.cache = cache;
+            this.dvMetaCache = dvMetaCache;
         }
 
         public IndexManifestFile create() {
@@ -102,7 +114,8 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
                     fileFormat.createWriterFactory(schema),
                     compression,
                     pathFactory.indexManifestFileFactory(),
-                    cache);
+                    cache,
+                    dvMetaCache);
         }
     }
 }

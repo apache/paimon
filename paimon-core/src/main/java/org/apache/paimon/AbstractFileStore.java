@@ -59,6 +59,7 @@ import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -97,6 +98,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Nullable private SegmentsCache<Path> readManifestCache;
     @Nullable private Cache<Path, Snapshot> snapshotCache;
+    @Nullable private DVMetaCache dvMetaCache;
 
     protected AbstractFileStore(
             FileIO fileIO,
@@ -216,7 +218,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 FileFormat.manifestFormat(options),
                 options.manifestCompression(),
                 pathFactory(),
-                readManifestCache);
+                readManifestCache,
+                dvMetaCache);
     }
 
     @Override
@@ -227,6 +230,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 indexManifestFileFactory().create(),
                 new IndexFilePathFactories(pathFactory()),
                 options.dvIndexFileTargetSize(),
+                this.dvMetaCache,
                 options.deletionVectorBitmap64());
     }
 
@@ -487,5 +491,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public void setSnapshotCache(Cache<Path, Snapshot> cache) {
         this.snapshotCache = cache;
+    }
+
+    @Override
+    public void setDVMetaCache(DVMetaCache dvMetaCache) {
+        this.dvMetaCache = dvMetaCache;
     }
 }
