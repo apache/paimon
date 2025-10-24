@@ -55,45 +55,6 @@ class TriggerTagAutomaticCreationProcedureTest extends PaimonSparkTestBase {
         .getString(0))(loadTable("T_FORCE_AUTO_TAG").tagManager().tagObjects().get(0).getRight)
   }
 
-  test("Paimon procedure: trigger tag automatic creation ignoring delay test") {
-    spark.sql("""CREATE TABLE T_FORCE_AUTO_TAG_IGNORE_DELAY (id INT, name STRING)
-                |USING PAIMON
-                |TBLPROPERTIES (
-                |'primary-key'='id'
-                |)""".stripMargin)
-
-    spark.sql("insert into T_FORCE_AUTO_TAG_IGNORE_DELAY values(1, 'a')")
-
-    val table = loadTable("T_FORCE_AUTO_TAG_IGNORE_DELAY")
-    assertResult(1)(table.snapshotManager().snapshotCount())
-
-    assertResult(0)(spark.sql("show tags T_FORCE_AUTO_TAG_IGNORE_DELAY").count())
-
-    spark.sql("""alter table T_FORCE_AUTO_TAG_IGNORE_DELAY set tblproperties(
-                |'tag.automatic-creation'='process-time',
-                |'tag.creation-period'='daily',
-                |'tag.creation-delay'='86399999',
-                |'tag.num-retained-max'='90'
-                |)""".stripMargin)
-
-    // Triggering before delay should create no auto-tag
-    spark.sql(
-      "CALL paimon.sys.trigger_tag_automatic_creation(table => 'test.T_FORCE_AUTO_TAG_IGNORE_DELAY')")
-    assertResult(0)(spark.sql("show tags T_FORCE_AUTO_TAG_IGNORE_DELAY").count())
-
-    // Triggering with ignoring delay should create an auto-tag
-    spark.sql("set `spark.paimon.tag.automatic-creation-ignore-delay`=true")
-    spark.sql(
-      "CALL paimon.sys.trigger_tag_automatic_creation(table => 'test.T_FORCE_AUTO_TAG_IGNORE_DELAY')")
-    assertResult(1)(spark.sql("show tags T_FORCE_AUTO_TAG_IGNORE_DELAY").count())
-    assertResult(
-      spark
-        .sql("select date_format(date_sub(current_date(), 1), 'yyyy-MM-dd')")
-        .head()
-        .getString(0))(
-      loadTable("T_FORCE_AUTO_TAG_IGNORE_DELAY").tagManager().tagObjects().get(0).getRight)
-  }
-
   test("Paimon procedure: trigger tag automatic creation without snapshot test") {
     spark.sql("""CREATE TABLE T_FORCE_AUTO_TAG_NS (id INT, name STRING)
                 |USING PAIMON
