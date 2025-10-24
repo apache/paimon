@@ -20,6 +20,7 @@ package org.apache.paimon.postpone;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManager;
@@ -29,6 +30,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
+import org.apache.paimon.mergetree.MergeTreeWriter;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
@@ -43,8 +45,10 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.KeyComparatorSupplier;
+import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,6 +68,8 @@ import java.util.function.Function;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
 import static org.apache.paimon.utils.FileStorePathFactory.createFormatPathFactories;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** {@link FileStoreWrite} for {@code bucket = -2} tables. */
 public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
@@ -76,6 +82,10 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
     private final FileStorePathFactory pathFactory;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
+    private final boolean writeFixedBucket;
+    private final Integer fixedBuckets;
+    private final RowType keyType;
+    private final RowType valueType;
 
     private boolean forceBufferSpill = false;
 
@@ -94,12 +104,18 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
             FileStoreScan scan,
             CoreOptions options,
             String tableName,
-            @Nullable Integer writeId) {
+            @Nullable Integer writeId,
+            boolean writeFixedBucket,
+            @Nullable Integer fixedBuckets) {
         super(snapshotManager, scan, options, partitionType, null, null, tableName);
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.mfFactory = mfFactory;
         this.readerFactoryBuilder = readerFactoryBuilder;
+        this.writeFixedBucket = writeFixedBucket;
+        this.fixedBuckets = fixedBuckets;
+        this.keyType = keyType;
+        this.valueType = valueType;
 
         Options newOptions = new Options(options.toMap());
         try {
@@ -137,7 +153,9 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
                         createFormatPathFactories(this.options, formatPathFactory),
                         this.options.targetFileSize(true));
 
-        // Ignoring previous files saves scanning time.
+        // If writing fixed buckets, we should scan previous files like KeyValueFileStoreWrite.
+        //
+        // If not, ignoring previous files saves scanning time.
         //
         // For postpone bucket tables, we only append new files to bucket = -2 directories.
         //
@@ -146,7 +164,9 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
         // normal bucket writers.
         //
         // Because there is no merging when reading, sequence id across files are useless.
-        withIgnorePreviousFiles(true);
+        if (!writeFixedBucket) {
+            withIgnorePreviousFiles(true);
+        }
     }
 
     @Override
@@ -178,13 +198,22 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
     }
 
     @Override
-    public void withIgnorePreviousFiles(boolean ignorePrevious) {
-        // see comments in constructor
-        super.withIgnorePreviousFiles(true);
+    public int getTotalBuckets() {
+        if (writeFixedBucket) {
+            return checkNotNull(fixedBuckets);
+        } else {
+            return -2;
+        }
     }
 
     @Override
-    protected PostponeBucketWriter createWriter(
+    public void withIgnorePreviousFiles(boolean ignorePrevious) {
+        // see comments in constructor
+        super.withIgnorePreviousFiles(!writeFixedBucket || ignorePrevious);
+    }
+
+    @Override
+    protected RecordWriter<KeyValue> createWriter(
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoreFiles,
@@ -192,24 +221,44 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
             @Nullable BucketedDvMaintainer deletionVectorsMaintainer) {
-        Preconditions.checkArgument(bucket == BucketMode.POSTPONE_BUCKET);
-        Preconditions.checkArgument(
-                restoreFiles.isEmpty(),
-                "Postpone bucket writers should not restore previous files. This is unexpected.");
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
-        return new PostponeBucketWriter(
-                fileIO,
-                pathFactory.createDataFilePathFactory(partition, bucket),
-                options.spillCompressOptions(),
-                options.writeBufferSpillDiskSize(),
-                ioManager,
-                mfFactory.create(),
-                writerFactory,
-                files -> newFileRead(partition, bucket, files),
-                forceBufferSpill,
-                forceBufferSpill,
-                restoreIncrement);
+        if (writeFixedBucket) {
+            checkArgument(bucket >= 0);
+            // no compaction
+            return new MergeTreeWriter(
+                    options.writeBufferSpillable(),
+                    options.writeBufferSpillDiskSize(),
+                    options.localSortMaxNumFileHandles(),
+                    options.spillCompressOptions(),
+                    ioManager,
+                    new NoopCompactManager(),
+                    restoredMaxSeqNumber,
+                    new KeyComparatorSupplier(keyType).get(),
+                    mfFactory.create(),
+                    writerFactory,
+                    false,
+                    options.changelogProducer(),
+                    restoreIncrement,
+                    UserDefinedSeqComparator.create(valueType, options));
+        } else {
+            checkArgument(bucket == BucketMode.POSTPONE_BUCKET);
+            checkArgument(
+                    restoreFiles.isEmpty(),
+                    "Postpone bucket writers should not restore previous files. This is unexpected.");
+            return new PostponeBucketWriter(
+                    fileIO,
+                    pathFactory.createDataFilePathFactory(partition, bucket),
+                    options.spillCompressOptions(),
+                    options.writeBufferSpillDiskSize(),
+                    ioManager,
+                    mfFactory.create(),
+                    writerFactory,
+                    files -> newFileRead(partition, bucket, files),
+                    forceBufferSpill,
+                    forceBufferSpill,
+                    restoreIncrement);
+        }
     }
 
     private RecordReaderIterator<KeyValue> newFileRead(

@@ -75,10 +75,6 @@ public interface StoreSinkWrite {
      * newWriteProvider}. The state of the old {@link TableWriteImpl} will also be transferred to
      * the new {@link TableWriteImpl} by {@link TableWriteImpl#checkpoint()} and {@link
      * TableWriteImpl#restore(List)}.
-     *
-     * <p>Currently, this method is only used by CDC sinks because they need to deal with schema
-     * changes. {@link TableWriteImpl} with the new schema will be provided by {@code
-     * newWriteProvider}.
      */
     void replace(FileStoreTable newTable) throws Exception;
 

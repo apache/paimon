@@ -89,6 +89,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final Path path;
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
+    protected boolean postponeWriteFixedBucket = false;
+    @Nullable protected Integer postponeFixedBuckets;
 
     @Nullable protected transient SegmentsCache<Path> manifestCache;
     @Nullable protected transient Cache<Path, Snapshot> snapshotCache;
@@ -233,6 +235,23 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return catalogEnvironment;
     }
 
+    @Override
+    public void setPostponeWriteFixedBucket() {
+        Preconditions.checkArgument(
+                bucketMode() == BucketMode.POSTPONE_MODE
+                        && new CoreOptions(options()).postponeBatchWriteFixedBucket());
+        postponeWriteFixedBucket = true;
+    }
+
+    @Override
+    public boolean initPostponeFixedBuckets(@Nullable Integer postponeFixedBuckets) {
+        if (this.postponeWriteFixedBucket && this.postponeFixedBuckets == null) {
+            this.postponeFixedBuckets = postponeFixedBuckets;
+            return true;
+        }
+        return false;
+    }
+
     public RowKeyExtractor createRowKeyExtractor() {
         switch (bucketMode()) {
             case HASH_FIXED:
@@ -243,7 +262,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             case BUCKET_UNAWARE:
                 return new AppendTableRowKeyExtractor(schema());
             case POSTPONE_MODE:
-                return new PostponeBucketRowKeyExtractor(schema());
+                return new PostponeBucketRowKeyExtractor(schema(), postponeFixedBuckets);
             default:
                 throw new UnsupportedOperationException("Unsupported mode: " + bucketMode());
         }
@@ -456,7 +475,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 options.snapshotExpireExecutionMode(),
                 name(),
                 options.forceCreatingSnapshot(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                postponeWriteFixedBucket);
     }
 
     @Override

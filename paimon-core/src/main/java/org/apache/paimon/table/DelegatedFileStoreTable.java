@@ -325,6 +325,16 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void setPostponeWriteFixedBucket() {
+        wrapped.setPostponeWriteFixedBucket();
+    }
+
+    @Override
+    public boolean initPostponeFixedBuckets(@Nullable Integer postponeFixedBuckets) {
+        return wrapped.initPostponeFixedBuckets(postponeFixedBuckets);
+    }
+
+    @Override
     public RowKeyExtractor createRowKeyExtractor() {
         return wrapped.createRowKeyExtractor();
     }

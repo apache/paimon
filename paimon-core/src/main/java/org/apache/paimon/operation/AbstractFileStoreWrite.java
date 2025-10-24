@@ -149,6 +149,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.closeCompactExecutorWhenLeaving = false;
     }
 
+    protected int getTotalBuckets() {
+        return numBuckets;
+    }
+
     @Override
     public void write(BinaryRow partition, int bucket, T data) throws Exception {
         WriterContainer<T> container = getWriterWrapper(partition, bucket);
@@ -459,7 +463,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         Snapshot previousSnapshot = restored.snapshot();
         return new WriterContainer<>(
                 writer,
-                firstNonNull(restored.totalBuckets(), numBuckets),
+                firstNonNull(restored.totalBuckets(), getTotalBuckets()),
                 indexMaintainer,
                 dvMaintainer,
                 previousSnapshot == null ? null : previousSnapshot.id());
@@ -483,25 +487,24 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         dbMaintainerFactory != null,
                         dvMaintainerFactory != null);
         Integer restoredTotalBuckets = restored.totalBuckets();
-        int totalBuckets = numBuckets;
+        int totalBuckets = getTotalBuckets();
         if (restoredTotalBuckets != null) {
-            totalBuckets = restoredTotalBuckets;
-        }
-        if (!ignoreNumBucketCheck && totalBuckets != numBuckets) {
-            String partInfo =
-                    partitionType.getFieldCount() > 0
-                            ? "partition "
-                                    + getPartitionComputer(
-                                                    partitionType,
-                                                    PARTITION_DEFAULT_NAME.defaultValue(),
-                                                    legacyPartitionName)
-                                            .generatePartValues(partition)
-                            : "table";
-            throw new RuntimeException(
-                    String.format(
-                            "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
-                                    + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
-                            partInfo, numBuckets, totalBuckets));
+            if (!ignoreNumBucketCheck && restoredTotalBuckets != totalBuckets) {
+                String partInfo =
+                        partitionType.getFieldCount() > 0
+                                ? "partition "
+                                        + getPartitionComputer(
+                                                        partitionType,
+                                                        PARTITION_DEFAULT_NAME.defaultValue(),
+                                                        legacyPartitionName)
+                                                .generatePartValues(partition)
+                                : "table";
+                throw new RuntimeException(
+                        String.format(
+                                "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
+                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
+                                partInfo, totalBuckets, restoredTotalBuckets));
+            }
         }
         return restored;
     }

@@ -66,6 +66,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
     private final Supplier<RecordEqualiser> logDedupEqualSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
+    private final boolean postponeWriteFixedBucket;
+    @Nullable private final Integer postponeFixedBuckets;
 
     public KeyValueFileStore(
             FileIO fileIO,
@@ -80,7 +82,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             MergeFunctionFactory<KeyValue> mfFactory,
             String tableName,
-            CatalogEnvironment catalogEnvironment) {
+            CatalogEnvironment catalogEnvironment,
+            boolean postponeWriteFixedBucket,
+            @Nullable Integer postponeFixedBuckets) {
         super(fileIO, schemaManager, schema, tableName, options, partitionType, catalogEnvironment);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
@@ -94,6 +98,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options.changelogRowDeduplicate()
                         ? ValueEqualiserSupplier.fromIgnoreFields(valueType, logDedupIgnoreFields)
                         : () -> null;
+        this.postponeWriteFixedBucket = postponeWriteFixedBucket;
+        this.postponeFixedBuckets = postponeFixedBuckets;
     }
 
     @Override
@@ -169,7 +175,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     newScan(),
                     options,
                     tableName,
-                    writeId);
+                    writeId,
+                    postponeWriteFixedBucket,
+                    postponeFixedBuckets);
         }
         DynamicBucketIndexMaintainer.Factory indexFactory = null;
         if (bucketMode() == BucketMode.HASH_DYNAMIC) {

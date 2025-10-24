@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.log.LogWriteCallback;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -41,6 +42,8 @@ import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.util.functions.StreamingFunctionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -56,6 +59,8 @@ import static org.apache.paimon.CoreOptions.LOG_IGNORE_DELETE;
 public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
 
     private static final long serialVersionUID = 3L;
+
+    private static final Logger LOG = LoggerFactory.getLogger(RowDataStoreWriteOperator.class);
 
     @Nullable private final LogSinkFunction logSinkFunction;
     private transient SimpleContext sinkContext;
@@ -96,6 +101,15 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
     public void open() throws Exception {
         super.open();
 
+        int sinkParallelism = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
+        if (table.initPostponeFixedBuckets(sinkParallelism)) {
+            LOG.info(
+                    "Initializing Postpone table {} batch write fixed buckets to {}.",
+                    table.name(),
+                    sinkParallelism);
+            // to recreate postpone writer
+            this.write.replace(table);
+        }
         this.sinkContext = new SimpleContext(getProcessingTimeService());
         if (logSinkFunction != null) {
             openFunction(logSinkFunction);

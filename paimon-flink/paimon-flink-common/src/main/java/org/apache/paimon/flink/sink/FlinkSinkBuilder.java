@@ -28,6 +28,7 @@ import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
+import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -300,6 +301,29 @@ public class FlinkSinkBuilder {
             channelComputer = new PostponeBucketChannelComputer(table.schema());
         }
         DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
+
+        if (!isStreaming(input) && table.coreOptions().postponeBatchWriteFixedBucket()) {
+            table.setPostponeWriteFixedBucket();
+
+            // If data exists, use the current bucket number; otherwise, use sink.parallelism if
+            // set. If neither is set, use Flink's parallelism (get at runtime).
+            Integer fixedBuckets;
+            List<SimpleFileEntry> simpleFileEntries =
+                    table.store().newScan().onlyReadRealBuckets().readSimpleEntries();
+            if (!simpleFileEntries.isEmpty()) {
+                fixedBuckets = simpleFileEntries.get(0).totalBuckets();
+            } else if (parallelism != null) {
+                fixedBuckets = parallelism;
+            } else {
+                fixedBuckets = null;
+            }
+            LOG.info(
+                    "Initializing Postpone table {} batch write fixed buckets to {}.",
+                    table.name(),
+                    fixedBuckets);
+            table.initPostponeFixedBuckets(fixedBuckets);
+        }
+
         PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
         return sink.sinkFrom(partitioned);
     }

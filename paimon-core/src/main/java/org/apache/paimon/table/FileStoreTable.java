@@ -125,6 +125,11 @@ public interface FileStoreTable extends DataTable {
 
     boolean supportStreamingReadOverwrite();
 
+    void setPostponeWriteFixedBucket();
+
+    // return if the postpone fixed buckets number is initialized
+    boolean initPostponeFixedBuckets(@Nullable Integer postponeFixedBuckets);
+
     RowKeyExtractor createRowKeyExtractor();
 
     /**
