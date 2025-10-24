@@ -31,7 +31,6 @@ import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Append data evolution table split generator, which implementation of {@link SplitGenerator}. */
 public class DataEvolutionSplitGenerator implements SplitGenerator {
@@ -103,7 +102,8 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         long lastRowId = -1;
         long checkRowIdStart = 0;
         List<DataFileMeta> currentSplit = new ArrayList<>();
-        for (DataFileMeta file : files) {
+        for (int i = 0; i < files.size(); i++) {
+            DataFileMeta file = files.get(i);
             Long firstRowId = file.firstRowId();
             if (firstRowId == null) {
                 splitByRowId.add(Collections.singletonList(file));
@@ -113,11 +113,15 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                 if (!currentSplit.isEmpty()) {
                     splitByRowId.add(currentSplit);
                 }
-                checkArgument(
-                        firstRowId >= checkRowIdStart,
-                        "There are overlapping files in the split: \n %s, the wrong file is: \n %s",
-                        files.stream().map(DataFileMeta::toString).collect(Collectors.joining(",")),
-                        file);
+                if (firstRowId < checkRowIdStart) {
+                    throw new IllegalStateException(
+                            String.format(
+                                    "There are overlapping files in the split: \n %s, the wrong file is: \n %s",
+                                    files.subList(Math.max(0, i - 20), i).stream()
+                                            .map(DataFileMeta::toString)
+                                            .collect(Collectors.joining(",")),
+                                    file));
+                }
                 currentSplit = new ArrayList<>();
                 lastRowId = firstRowId;
                 checkRowIdStart = firstRowId + file.rowCount();
