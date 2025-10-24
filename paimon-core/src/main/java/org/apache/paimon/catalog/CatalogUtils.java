@@ -429,7 +429,7 @@ public class CatalogUtils {
 
     /**
      * External tables with version management: null (use filesystem-based snapshot management).
-     * Internal tables or no version management: catalog loader (use catalog-based snapshot
+     * Managed tables or no version management: catalog loader (use catalog-based snapshot
      * management).
      */
     @Nullable
