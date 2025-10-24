@@ -3,8 +3,9 @@ title: "DLF Token"
 weight: 3
 type: docs
 aliases:
-- /concepts/rest/dlf.html
+  - /concepts/rest/dlf.html
 ---
+
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -50,6 +51,14 @@ WITH (
     'dlf.access-key-secret'='<access-key-secret>',
 );
 ```
+
+- `uri`: Access the URI of the DLF Rest Catalog Server.
+- `warehouse`: DLF Catalog name
+- `token.provider`: token provider
+- `dlf.access-key-id`: The Access Key ID required to access the DLF service, usually referring to the AccessKey of your
+  RAM
+  user
+- `dlf.access-key-secret`:The Access Key Secret required to access the DLF service
 
 You can grant specific permissions to a RAM user and use the RAM user's access key for long-term access to your DLF
 resources. Compared to using the Alibaba Cloud account access key, accessing DLF resources with a RAM user access key
