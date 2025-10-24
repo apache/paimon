@@ -56,8 +56,7 @@ WITH (
 - `warehouse`: DLF Catalog name
 - `token.provider`: token provider
 - `dlf.access-key-id`: The Access Key ID required to access the DLF service, usually referring to the AccessKey of your
-  RAM
-  user
+  RAM user
 - `dlf.access-key-secret`:The Access Key Secret required to access the DLF service
 
 You can grant specific permissions to a RAM user and use the RAM user's access key for long-term access to your DLF
