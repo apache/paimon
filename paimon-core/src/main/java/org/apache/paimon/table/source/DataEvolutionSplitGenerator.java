@@ -50,7 +50,13 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
 
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> input) {
-        List<List<DataFileMeta>> files = split(input);
+        List<List<DataFileMeta>> files =
+                split(
+                        input,
+                        DataFileMeta::fileName,
+                        DataFileMeta::firstRowId,
+                        DataFileMeta::rowCount,
+                        DataFileMeta::maxSequenceNumber);
         Function<List<DataFileMeta>, Long> weightFunc =
                 file ->
                         Math.max(
@@ -76,27 +82,33 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         return splitForBatch(files);
     }
 
-    public static <T extends DataFileMeta> List<List<T>> split(List<T> files) {
+    public static <T> List<List<T>> split(
+            List<T> files,
+            Function<T, String> fileNameF,
+            Function<T, Long> firstRowIdF,
+            Function<T, Long> rowCountF,
+            Function<T, Long> maxSequenceNumberF) {
         List<List<T>> splitByRowId = new ArrayList<>();
         // Sort files by firstRowId and then by maxSequenceNumber
         files.sort(
                 Comparator.comparingLong(
-                                (ToLongFunction<DataFileMeta>)
+                                (ToLongFunction<T>)
                                         value ->
-                                                value.firstRowId() == null
+                                                firstRowIdF.apply(value) == null
                                                         ? Long.MIN_VALUE
-                                                        : value.firstRowId())
-                        .thenComparingInt(f -> isBlobFile(f.fileName()) ? 1 : 0)
+                                                        : firstRowIdF.apply(value))
+                        .thenComparingInt(f -> isBlobFile(fileNameF.apply(f)) ? 1 : 0)
                         .thenComparing(
                                 (f1, f2) -> {
                                     // If firstRowId is the same, we should read the file with
                                     // larger sequence number first. Because larger sequence number
                                     // file is more fresh
                                     return Long.compare(
-                                            f2.maxSequenceNumber(), f1.maxSequenceNumber());
+                                            maxSequenceNumberF.apply(f2),
+                                            maxSequenceNumberF.apply(f1));
                                 }));
 
-        files = filterBlob(files);
+        files = filterBlob(files, fileNameF, firstRowIdF, rowCountF);
 
         // Split files by firstRowId
         long lastRowId = -1;
@@ -104,12 +116,12 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         List<T> currentSplit = new ArrayList<>();
         for (int i = 0; i < files.size(); i++) {
             T file = files.get(i);
-            Long firstRowId = file.firstRowId();
+            Long firstRowId = firstRowIdF.apply(file);
             if (firstRowId == null) {
                 splitByRowId.add(Collections.singletonList(file));
                 continue;
             }
-            if (!isBlobFile(file.fileName()) && firstRowId != lastRowId) {
+            if (!isBlobFile(fileNameF.apply(file)) && firstRowId != lastRowId) {
                 if (!currentSplit.isEmpty()) {
                     splitByRowId.add(currentSplit);
                 }
@@ -118,13 +130,13 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                             String.format(
                                     "There are overlapping files in the split: \n %s, the wrong file is: \n %s",
                                     files.subList(Math.max(0, i - 20), i).stream()
-                                            .map(DataFileMeta::toString)
+                                            .map(Object::toString)
                                             .collect(Collectors.joining(",")),
                                     file));
                 }
                 currentSplit = new ArrayList<>();
                 lastRowId = firstRowId;
-                checkRowIdStart = firstRowId + file.rowCount();
+                checkRowIdStart = firstRowId + rowCountF.apply(file);
             }
             currentSplit.add(file);
         }
@@ -135,21 +147,25 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         return splitByRowId;
     }
 
-    private static <T extends DataFileMeta> List<T> filterBlob(List<T> files) {
+    private static <T> List<T> filterBlob(
+            List<T> files,
+            Function<T, String> fileNameF,
+            Function<T, Long> firstRowIdF,
+            Function<T, Long> rowCountF) {
         List<T> result = new ArrayList<>();
         long rowIdStart = -1;
         long rowIdEnd = -1;
         for (T file : files) {
-            if (file.firstRowId() == null) {
+            if (firstRowIdF.apply(file) == null) {
                 result.add(file);
                 continue;
             }
-            if (!isBlobFile(file.fileName())) {
-                rowIdStart = file.firstRowId();
-                rowIdEnd = file.firstRowId() + file.rowCount();
+            if (!isBlobFile(fileNameF.apply(file))) {
+                rowIdStart = firstRowIdF.apply(file);
+                rowIdEnd = firstRowIdF.apply(file) + rowCountF.apply(file);
                 result.add(file);
             } else {
-                if (file.firstRowId() >= rowIdStart && file.firstRowId() < rowIdEnd) {
+                if (firstRowIdF.apply(file) >= rowIdStart && firstRowIdF.apply(file) < rowIdEnd) {
                     result.add(file);
                 }
             }

@@ -19,11 +19,8 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryArray;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.predicate.Predicate;
@@ -38,11 +35,9 @@ import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.SnapshotManager;
 
-import javax.annotation.Nullable;
-
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
@@ -91,19 +86,23 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         if (inputFilter == null) {
             return entries;
         }
-        List<List<FakeDataFileMeta>> splitByRowId =
+        List<List<ManifestEntry>> splitByRowId =
                 DataEvolutionSplitGenerator.split(
-                        entries.stream().map(FakeDataFileMeta::new).collect(Collectors.toList()));
+                        entries,
+                        entry -> entry.file().fileName(),
+                        entry -> entry.file().firstRowId(),
+                        entry -> entry.file().rowCount(),
+                        entry -> entry.file().maxSequenceNumber());
 
         return splitByRowId.stream()
                 .filter(this::filterByStats)
-                .flatMap(s -> s.stream().map(r -> r.entry))
+                .flatMap(Collection::stream)
                 .map(entry -> dropStats ? dropStats(entry) : entry)
                 .collect(Collectors.toList());
     }
 
-    private boolean filterByStats(List<FakeDataFileMeta> metas) {
-        long rowCount = metas.get(0).rowCount();
+    private boolean filterByStats(List<ManifestEntry> metas) {
+        long rowCount = metas.get(0).file().rowCount();
         SimpleStatsEvolution.Result evolutionResult = evolutionStats(metas);
         return inputFilter.test(
                 rowCount,
@@ -112,7 +111,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 evolutionResult.nullCounts());
     }
 
-    private SimpleStatsEvolution.Result evolutionStats(List<FakeDataFileMeta> metas) {
+    private SimpleStatsEvolution.Result evolutionStats(List<ManifestEntry> metas) {
         int[] allFields = schema.fields().stream().mapToInt(DataField::id).toArray();
         int fieldsCount = schema.fields().size();
         int[] rowOffsets = new int[fieldsCount];
@@ -125,14 +124,14 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         BinaryArray[] nullCounts = new BinaryArray[metas.size()];
 
         for (int i = 0; i < metas.size(); i++) {
-            SimpleStats stats = metas.get(i).valueStats();
+            SimpleStats stats = metas.get(i).file().valueStats();
             min[i] = stats.minValues();
             max[i] = stats.maxValues();
             nullCounts[i] = stats.nullCounts();
         }
 
         for (int i = 0; i < metas.size(); i++) {
-            FakeDataFileMeta fileMeta = metas.get(i);
+            DataFileMeta fileMeta = metas.get(i).file();
             TableSchema dataFileSchema =
                     scanTableSchema(fileMeta.schemaId())
                             .project(
@@ -178,172 +177,5 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
         return true;
-    }
-
-    private static class FakeDataFileMeta implements DataFileMeta {
-        private final ManifestEntry entry;
-
-        FakeDataFileMeta(ManifestEntry entry) {
-            this.entry = entry;
-        }
-
-        public ManifestEntry entry() {
-            return entry;
-        }
-
-        @Override
-        public String fileName() {
-            return entry.file().fileName();
-        }
-
-        @Override
-        public long fileSize() {
-            return entry.file().fileSize();
-        }
-
-        @Override
-        public long rowCount() {
-            return entry.file().rowCount();
-        }
-
-        @Override
-        public Optional<Long> deleteRowCount() {
-            return entry.file().deleteRowCount();
-        }
-
-        @Override
-        public byte[] embeddedIndex() {
-            return entry.file().embeddedIndex();
-        }
-
-        @Override
-        public BinaryRow minKey() {
-            return entry.file().minKey();
-        }
-
-        @Override
-        public BinaryRow maxKey() {
-            return entry.file().maxKey();
-        }
-
-        @Override
-        public SimpleStats keyStats() {
-            return entry.file().keyStats();
-        }
-
-        @Override
-        public SimpleStats valueStats() {
-            return entry.file().valueStats();
-        }
-
-        @Override
-        public long minSequenceNumber() {
-            return entry.file().minSequenceNumber();
-        }
-
-        @Override
-        public long maxSequenceNumber() {
-            return entry.file().maxSequenceNumber();
-        }
-
-        @Override
-        public long schemaId() {
-            return entry.file().schemaId();
-        }
-
-        @Override
-        public int level() {
-            return entry.file().level();
-        }
-
-        @Override
-        public List<String> extraFiles() {
-            return entry.file().extraFiles();
-        }
-
-        @Override
-        public Timestamp creationTime() {
-            return entry.file().creationTime();
-        }
-
-        @Override
-        public long creationTimeEpochMillis() {
-            return entry.file().creationTimeEpochMillis();
-        }
-
-        @Override
-        public String fileFormat() {
-            return entry.file().fileFormat();
-        }
-
-        @Override
-        public Optional<String> externalPath() {
-            return entry.file().externalPath();
-        }
-
-        @Override
-        public Optional<String> externalPathDir() {
-            return entry.file().externalPathDir();
-        }
-
-        @Override
-        public Optional<FileSource> fileSource() {
-            return entry.file().fileSource();
-        }
-
-        @Override
-        public @Nullable List<String> valueStatsCols() {
-            return entry.file().valueStatsCols();
-        }
-
-        @Override
-        public @Nullable Long firstRowId() {
-            return entry.file().firstRowId();
-        }
-
-        @Override
-        public @Nullable List<String> writeCols() {
-            return entry.file().writeCols();
-        }
-
-        @Override
-        public DataFileMeta upgrade(int newLevel) {
-            return entry.file().upgrade(newLevel);
-        }
-
-        @Override
-        public DataFileMeta rename(String newFileName) {
-            return entry.file().rename(newFileName);
-        }
-
-        @Override
-        public DataFileMeta copyWithoutStats() {
-            return entry.file().copyWithoutStats();
-        }
-
-        @Override
-        public DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber) {
-            return entry.file().assignSequenceNumber(minSequenceNumber, maxSequenceNumber);
-        }
-
-        @Override
-        public DataFileMeta assignFirstRowId(long firstRowId) {
-            return entry.file().assignFirstRowId(firstRowId);
-        }
-
-        @Override
-        public DataFileMeta copy(List<String> newExtraFiles) {
-            return entry.file().copy(newExtraFiles);
-        }
-
-        @Override
-        public DataFileMeta newExternalPath(String newExternalPath) {
-            return entry.file().newExternalPath(newExternalPath);
-        }
-
-        @Override
-        public DataFileMeta copy(byte[] newEmbeddedIndex) {
-            return entry.file().copy(newEmbeddedIndex);
-        }
     }
 }
