@@ -362,8 +362,10 @@ class DataEvolutionSplitRead(SplitRead):
                 suppliers.append(
                     lambda files=need_merge_files: self._create_union_reader(files)
                 )
-
-        return ConcatBatchReader(suppliers)
+        if self.split.split_start_row is not None:
+            return ShardBatchReader(suppliers, self.split.split_start_row, self.split.split_end_row)
+        else:
+            return ConcatBatchReader(suppliers)
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
         """Split files by firstRowId for data evolution."""
