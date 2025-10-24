@@ -61,6 +61,57 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
+  test("PaimonFormatTable non partition table overwrite: csv") {
+    val tableName = "paimon_non_partiiton_overwrite_test"
+    withTable(tableName) {
+      spark.sql(
+        s"""
+           |CREATE TABLE $tableName (age INT, name STRING)
+           |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon', 'file.compression'='none')
+           |""".stripMargin)
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      table.fileIO().mkdirs(new Path(table.location()))
+      spark.sql(s"INSERT INTO $tableName  VALUES (5, 'Ben'), (7, 'Larry')")
+      checkAnswer(
+        spark.sql(s"SELECT age, name FROM $tableName ORDER BY age"),
+        Row(5, "Ben") :: Row(7, "Larry") :: Nil
+      )
+      spark.sql(s"INSERT OVERWRITE $tableName VALUES (5, 'Jerry'), (7, 'Tom')")
+      checkAnswer(
+        spark.sql(s"SELECT age, name FROM $tableName ORDER BY age"),
+        Row(5, "Jerry") :: Row(7, "Tom") :: Nil
+      )
+    }
+  }
+
+  test("PaimonFormatTable partition table overwrite: csv") {
+    val tableName = "paimon_overwrite_test"
+    withTable(tableName) {
+      spark.sql(
+        s"""
+           |CREATE TABLE $tableName (age INT, name STRING)
+           |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon', 'file.compression'='none')
+           |PARTITIONED BY (id INT)
+           |""".stripMargin)
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      table.fileIO().mkdirs(new Path(table.location()))
+      spark.sql(s"INSERT INTO $tableName PARTITION (id = 1) VALUES (5, 'Ben'), (7, 'Larry')")
+      spark.sql(s"INSERT OVERWRITE $tableName PARTITION (id = 1) VALUES (5, 'Jerry'), (7, 'Tom')")
+      checkAnswer(
+        spark.sql(s"SELECT id, age, name FROM $tableName ORDER BY id, age"),
+        Row(1, 5, "Jerry") :: Row(1, 7, "Tom") :: Nil
+      )
+      spark.sql(s"INSERT INTO $tableName PARTITION (id = 3) VALUES (5, 'Alice')")
+      spark.sql(s"INSERT OVERWRITE $tableName VALUES (5, 'Jerry', 1), (7, 'Tom', 2)")
+      checkAnswer(
+        spark.sql(s"SELECT id, age, name FROM $tableName ORDER BY id, age"),
+        Row(1, 5, "Jerry") :: Row(2, 7, "Tom") :: Row(3, 5, "Alice") :: Nil
+      )
+    }
+  }
+
   test("PaimonFormatTableRead table: csv with field-delimiter") {
     val tableName = "paimon_format_test_csv_options"
     withTable(tableName) {

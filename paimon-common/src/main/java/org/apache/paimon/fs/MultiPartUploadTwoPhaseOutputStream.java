@@ -44,6 +44,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
     private String uploadId;
     private long position;
     private boolean closed = false;
+    private Committer committer;
 
     public MultiPartUploadTwoPhaseOutputStream(
             MultiPartUploadStore<T, C> multiPartUploadStore, org.apache.hadoop.fs.Path hadoopPath)
@@ -57,6 +58,9 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
     }
 
     public abstract long partSizeThreshold();
+
+    public abstract Committer committer(
+            String uploadId, List<T> uploadedParts, String objectName, long position);
 
     @Override
     public long getPos() throws IOException {
@@ -97,20 +101,22 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         if (closed) {
             throw new IOException("Stream is closed");
         }
+        uploadPart();
     }
 
     @Override
     public void close() throws IOException {
-        if (!closed) {
-            Committer committer = closeForCommit();
-            committer.commit();
+        if (!closed && this.committer == null) {
+            this.committer = closeForCommit();
         }
     }
 
     @Override
     public Committer closeForCommit() throws IOException {
-        if (closed) {
-            throw new IOException("Stream is already closed");
+        if (closed && this.committer != null) {
+            return this.committer;
+        } else if (closed) {
+            throw new IOException("Stream is already closed but committer is null");
         }
         closed = true;
 
@@ -118,8 +124,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             uploadPart();
         }
 
-        return new MultiPartUploadCommitter(
-                multiPartUploadStore, uploadId, uploadedParts, objectName, position);
+        return committer(uploadId, uploadedParts, objectName, position);
     }
 
     private void uploadPart() throws IOException {
@@ -152,72 +157,6 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
                 if (!tempFile.delete()) {
                     LOG.warn("Failed to delete temporary file: {}", tempFile.getAbsolutePath());
                 }
-            }
-        }
-    }
-
-    private static class MultiPartUploadCommitter<T, C> implements Committer {
-
-        private static final long serialVersionUID = 1L;
-
-        private final MultiPartUploadStore<T, C> multiPartUploadStore;
-        private final String uploadId;
-        private final String objectName;
-        private final List<T> uploadedParts;
-        private final long byteLength;
-        private boolean committed = false;
-        private boolean discarded = false;
-
-        public MultiPartUploadCommitter(
-                MultiPartUploadStore<T, C> multiPartUploadStore,
-                String uploadId,
-                List<T> uploadedParts,
-                String objectName,
-                long byteLength) {
-            this.multiPartUploadStore = multiPartUploadStore;
-            this.uploadId = uploadId;
-            this.objectName = objectName;
-            this.uploadedParts = new ArrayList<>(uploadedParts);
-            this.byteLength = byteLength;
-        }
-
-        @Override
-        public void commit() throws IOException {
-            if (committed) {
-                return;
-            }
-            if (discarded) {
-                throw new IOException("Cannot commit: committer has been discarded");
-            }
-
-            try {
-                multiPartUploadStore.completeMultipartUpload(
-                        objectName, uploadId, uploadedParts, byteLength);
-                committed = true;
-                LOG.info(
-                        "Successfully committed multipart upload with ID: {} for objectName: {}",
-                        uploadId,
-                        objectName);
-            } catch (Exception e) {
-                throw new IOException("Failed to commit multipart upload with ID: " + uploadId, e);
-            }
-        }
-
-        @Override
-        public void discard() throws IOException {
-            if (discarded) {
-                return;
-            }
-
-            try {
-                multiPartUploadStore.abortMultipartUpload(objectName, uploadId);
-                discarded = true;
-                LOG.info(
-                        "Successfully discarded multipart upload with ID: {} for objectName: {}",
-                        uploadId,
-                        objectName);
-            } catch (Exception e) {
-                LOG.warn("Failed to discard multipart upload with ID: {}", uploadId, e);
             }
         }
     }

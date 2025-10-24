@@ -19,10 +19,13 @@
 package org.apache.spark.sql.execution
 
 import org.apache.paimon.fs.TwoPhaseOutputStream
-import org.apache.paimon.spark.{FormatTableScanBuilder, SparkInternalRowWrapper, SparkTypeUtils}
+import org.apache.paimon.spark.{FormatTableScanBuilder, SparkInternalRowWrapper}
+import org.apache.paimon.spark.write.BaseV2WriteBuilder
 import org.apache.paimon.table.FormatTable
-import org.apache.paimon.table.format.{FormatBatchWriteBuilder, TwoPhaseCommitMessage}
+import org.apache.paimon.table.format.TwoPhaseCommitMessage
 import org.apache.paimon.table.sink.BatchTableWrite
+import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.StringUtils
 
 import org.apache.hadoop.fs.Path
 import org.apache.spark.internal.Logging
@@ -30,11 +33,12 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
 import org.apache.spark.sql.connector.catalog.{SupportsPartitionManagement, SupportsRead, SupportsWrite, TableCapability}
-import org.apache.spark.sql.connector.catalog.TableCapability.{BATCH_READ, BATCH_WRITE}
+import org.apache.spark.sql.connector.catalog.TableCapability.{BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
+import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{BatchWrite, DataWriter, DataWriterFactory, LogicalWriteInfo, PhysicalWriteInfo, Write, WriteBuilder, WriterCommitMessage}
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite
-import org.apache.spark.sql.execution.datasources._
+import org.apache.spark.sql.execution.datasources.{DataSource, FileFormat, FileStatusCache, InMemoryFileIndex, NoopCache, PartitioningAwareFileIndex, PartitionSpec}
 import org.apache.spark.sql.execution.datasources.v2.csv.{CSVScanBuilder, CSVTable}
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
@@ -43,6 +47,7 @@ import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFile
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
+import java.io.FileNotFoundException
 import java.util
 
 import scala.collection.JavaConverters._
@@ -132,6 +137,10 @@ trait PartitionedFormatTable extends SupportsPartitionManagement {
 
   override def partitionSchema(): StructType = partitionSchema_
 
+  override def partitioning(): Array[Transform] = {
+    partitionSchema().fields.map(f => Expressions.identity(StringUtils.quote(f.name))).toArray
+  }
+
   override def listPartitionIdentifiers(
       names: Array[String],
       ident: InternalRow): Array[InternalRow] = {
@@ -191,7 +200,7 @@ case class PaimonFormatTable(
   }
 
   override def capabilities(): util.Set[TableCapability] = {
-    util.EnumSet.of(BATCH_READ, BATCH_WRITE)
+    util.EnumSet.of(BATCH_READ, BATCH_WRITE, OVERWRITE_DYNAMIC, OVERWRITE_BY_FILTER)
   }
 
   override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
@@ -200,8 +209,8 @@ case class PaimonFormatTable(
     scanBuilder
   }
 
-  override def newWriteBuilder(logicalWriteInfo: LogicalWriteInfo): WriteBuilder = {
-    PaimonFormatTableWriterBuilder(table, schema)
+  override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
+    PaimonFormatTableWriterBuilder(table, info.schema)
   }
 }
 
@@ -306,10 +315,13 @@ class PartitionedJsonTable(
 }
 
 case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: StructType)
-  extends WriteBuilder {
+  extends BaseV2WriteBuilder(table) {
+
+  override def partitionRowType(): RowType = table.partitionType
+
   override def build: Write = new Write() {
     override def toBatch: BatchWrite = {
-      FormatTableBatchWrite(table, writeSchema)
+      FormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
     }
 
     override def toStreaming: StreamingWrite = {
@@ -318,9 +330,17 @@ case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: Struc
   }
 }
 
-private case class FormatTableBatchWrite(table: FormatTable, writeSchema: StructType)
+private case class FormatTableBatchWrite(
+    table: FormatTable,
+    overwriteDynamic: Boolean,
+    overwritePartitions: Option[Map[String, String]],
+    writeSchema: StructType)
   extends BatchWrite
   with Logging {
+
+  assert(
+    !(overwriteDynamic && overwritePartitions.exists(_.nonEmpty)),
+    "Cannot overwrite dynamically and by filter both")
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
     FormatTableWriterFactory(table, writeSchema)
@@ -341,12 +361,40 @@ private case class FormatTableBatchWrite(table: FormatTable, writeSchema: Struct
 
     try {
       val start = System.currentTimeMillis()
-      committers.foreach(_.commit())
+      if (overwritePartitions.isDefined && overwritePartitions.get.nonEmpty) {
+        val child = org.apache.paimon.partition.PartitionUtils
+          .buildPartitionName(overwritePartitions.get.asJava)
+        val partitionPath = new org.apache.paimon.fs.Path(table.location(), child)
+        deletePreviousDataFile(partitionPath)
+      } else if (overwritePartitions.isDefined && overwritePartitions.get.isEmpty) {
+        committers
+          .map(c => c.targetFilePath().getParent)
+          .distinct
+          .foreach(deletePreviousDataFile)
+      }
+      committers.foreach(c => c.commit(table.fileIO()))
       logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
     } catch {
       case e: Exception =>
         logError("Failed to commit FormatTable writes", e)
         throw e
+    }
+  }
+
+  def deletePreviousDataFile(partitionPath: org.apache.paimon.fs.Path): Unit = {
+    if (table.fileIO().exists(partitionPath)) {
+      val files = table.fileIO().listFiles(partitionPath, true)
+      files
+        .filter(f => !f.getPath.getName.startsWith(".") && !f.getPath.getName.startsWith("_"))
+        .foreach(
+          f => {
+            try {
+              table.fileIO().deleteQuietly(f.getPath)
+            } catch {
+              case e: FileNotFoundException => logInfo(s"File ${f.getPath} already deleted")
+              case other => throw new RuntimeException(other)
+            }
+          })
     }
   }
 
@@ -359,7 +407,7 @@ private case class FormatTableBatchWrite(table: FormatTable, writeSchema: Struct
     committers.foreach {
       committer =>
         try {
-          committer.discard()
+          committer.discard(table.fileIO())
         } catch {
           case e: Exception => logWarning(s"Failed to abort committer: ${e.getMessage}")
         }

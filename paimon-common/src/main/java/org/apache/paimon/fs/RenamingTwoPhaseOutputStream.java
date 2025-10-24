@@ -30,7 +30,6 @@ import java.util.UUID;
 @Public
 public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
 
-    private final FileIO fileIO;
     private final Path targetPath;
     private final Path tempPath;
     private final PositionOutputStream tempOutputStream;
@@ -40,7 +39,6 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
         if (!overwrite && fileIO.exists(targetPath)) {
             throw new IOException("File " + targetPath + " already exists.");
         }
-        this.fileIO = fileIO;
         this.targetPath = targetPath;
         this.tempPath = generateTempPath(targetPath);
 
@@ -81,7 +79,7 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
     @Override
     public Committer closeForCommit() throws IOException {
         close();
-        return new TempFileCommitter(fileIO, tempPath, targetPath);
+        return new TempFileCommitter(tempPath, targetPath);
     }
 
     /**
@@ -98,50 +96,41 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
         private final Path tempPath;
         private final Path targetPath;
-        private boolean committed = false;
-        private boolean discarded = false;
 
-        public TempFileCommitter(FileIO fileIO, Path tempPath, Path targetPath) {
-            this.fileIO = fileIO;
+        public TempFileCommitter(Path tempPath, Path targetPath) {
             this.tempPath = tempPath;
             this.targetPath = targetPath;
         }
 
         @Override
-        public void commit() throws IOException {
-            if (committed || discarded) {
-                throw new IOException("Committer has already been used");
+        public void commit(FileIO fileIO) throws IOException {
+            Path parentDir = targetPath.getParent();
+            if (parentDir != null && !fileIO.exists(parentDir)) {
+                fileIO.mkdirs(parentDir);
             }
-
-            try {
-                Path parentDir = targetPath.getParent();
-                if (parentDir != null && !fileIO.exists(parentDir)) {
-                    fileIO.mkdirs(parentDir);
-                }
-
-                if (!fileIO.rename(tempPath, targetPath)) {
-                    throw new IOException("Failed to rename " + tempPath + " to " + targetPath);
-                }
-
-                committed = true;
-
-            } catch (IOException e) {
-                // Clean up temp file on failure
+            if (!fileIO.rename(tempPath, targetPath)) {
+                throw new IOException("Failed to rename " + tempPath + " to " + targetPath);
+            }
+            if (fileIO.exists(tempPath)) {
                 fileIO.deleteQuietly(tempPath);
-                throw new IOException(
-                        "Failed to commit temporary file " + tempPath + " to " + targetPath, e);
             }
         }
 
         @Override
-        public void discard() {
-            if (!committed && !discarded) {
-                fileIO.deleteQuietly(tempPath);
-                discarded = true;
+        public void discard(FileIO fileIO) throws IOException {
+            if (fileIO.exists(targetPath)) {
+                fileIO.deleteQuietly(targetPath);
             }
+            if (fileIO.exists(tempPath)) {
+                fileIO.deleteQuietly(tempPath);
+            }
+        }
+
+        @Override
+        public Path targetFilePath() {
+            return targetPath;
         }
     }
 }
