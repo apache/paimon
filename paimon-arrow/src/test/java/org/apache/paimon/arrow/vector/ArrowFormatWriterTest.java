@@ -276,6 +276,25 @@ public class ArrowFormatWriterTest {
         }
     }
 
+    @Test
+    public void testArrowFormatCWriterWithEmptySchema() {
+        RowType emptyschema = new RowType(new ArrayList<>());
+
+        try (RootAllocator rootAllocator = new RootAllocator();
+                BufferAllocator allocator =
+                        rootAllocator.newChildAllocator("paimonWriter", 0, Long.MAX_VALUE);
+                ArrowFormatCWriter writer =
+                        new ArrowFormatCWriter(emptyschema, 4096, true, allocator)) {
+            for (int i = 0; i < 100; i++) {
+                writer.write(GenericRow.of());
+            }
+            writer.flush();
+            ArrowCStruct cStruct = writer.toCStruct();
+            Assertions.assertThat(cStruct).isNotNull();
+            writer.release();
+        }
+    }
+
     private void writeAndCheck(ArrowFormatCWriter writer) {
         List<InternalRow> list = new ArrayList<>();
         List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();

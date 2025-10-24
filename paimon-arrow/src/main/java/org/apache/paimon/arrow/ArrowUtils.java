@@ -208,8 +208,10 @@ public class ArrowUtils {
     }
 
     public static ArrowCStruct serializeToCStruct(
-            VectorSchemaRoot vsr, ArrowArray array, ArrowSchema schema) {
-        BufferAllocator bufferAllocator = vsr.getVector(0).getAllocator();
+            VectorSchemaRoot vsr,
+            ArrowArray array,
+            ArrowSchema schema,
+            BufferAllocator bufferAllocator) {
         Data.exportVectorSchemaRoot(bufferAllocator, vsr, null, array, schema);
         return ArrowCStruct.of(array, schema);
     }
