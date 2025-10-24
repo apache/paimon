@@ -30,6 +30,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -162,7 +163,6 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
     private static class FakeMultiPartUploadStore
             implements MultiPartUploadStore<TestPart, String> {
 
-        private int uploadCounter = 0;
         private final List<TestPart> uploadedParts = new ArrayList<>();
         private String startedUploadId;
         private String startedObjectName;
@@ -180,7 +180,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         @Override
         public String startMultiPartUpload(String objectName) {
             this.startedObjectName = objectName;
-            this.startedUploadId = "upload-" + (++uploadCounter);
+            this.startedUploadId = UUID.randomUUID().toString();
             this.uploadedParts.clear();
             this.completedUploadId = null;
             this.completedObjectName = null;
@@ -284,7 +284,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         private final String uploadId;
         private final List<TestPart> parts;
         private final String objectName;
-        private final int byteLength;
+        private final long byteLength;
         private boolean committed;
         private boolean discarded;
 
@@ -298,7 +298,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
             this.uploadId = uploadId;
             this.parts = new ArrayList<>(parts);
             this.objectName = objectName;
-            this.byteLength = (int) position;
+            this.byteLength = position;
         }
 
         @Override
