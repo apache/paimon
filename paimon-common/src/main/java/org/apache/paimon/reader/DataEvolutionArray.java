@@ -26,39 +26,30 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
-import org.apache.paimon.types.RowKind;
 
-/** The row which is made up by several rows. */
-public class DataEvolutionRow implements InternalRow {
+/** The array which is made up by several rows. */
+public class DataEvolutionArray implements InternalArray {
 
-    private final InternalRow[] rows;
+    private final InternalArray[] rows;
     private final int[] rowOffsets;
     private final int[] fieldOffsets;
-    private RowKind rowKind;
 
-    public DataEvolutionRow(int rowNumber, int[] rowOffsets, int[] fieldOffsets) {
-        this.rows = new InternalRow[rowNumber];
+    public DataEvolutionArray(int rowNumber, int[] rowOffsets, int[] fieldOffsets) {
+        this.rows = new InternalArray[rowNumber];
         this.rowOffsets = rowOffsets;
         this.fieldOffsets = fieldOffsets;
     }
 
-    public int rowNumber() {
-        return rows.length;
-    }
-
-    public void setRow(int pos, InternalRow row) {
+    public void setRow(int pos, InternalArray row) {
         if (pos >= rows.length) {
             throw new IndexOutOfBoundsException(
                     "Position " + pos + " is out of bounds for rows size " + rows.length);
         } else {
-            if (rowKind == null) {
-                this.rowKind = row.getRowKind();
-            }
             rows[pos] = row;
         }
     }
 
-    public void setRows(InternalRow[] rows) {
+    public void setRows(InternalArray[] rows) {
         if (rows.length != this.rows.length) {
             throw new IllegalArgumentException(
                     "The length of input rows "
@@ -71,7 +62,7 @@ public class DataEvolutionRow implements InternalRow {
         }
     }
 
-    private InternalRow chooseRow(int pos) {
+    private InternalArray chooseArray(int pos) {
         return rows[(rowOffsets[pos])];
     }
 
@@ -80,105 +71,158 @@ public class DataEvolutionRow implements InternalRow {
     }
 
     @Override
-    public int getFieldCount() {
-        return fieldOffsets.length;
-    }
-
-    @Override
-    public RowKind getRowKind() {
-        return rowKind;
-    }
-
-    @Override
-    public void setRowKind(RowKind kind) {
-        this.rowKind = kind;
-    }
-
-    @Override
     public boolean isNullAt(int pos) {
         if (rowOffsets[pos] == -1) {
             return true;
         }
-        return chooseRow(pos).isNullAt(offsetInRow(pos));
+        return chooseArray(pos).isNullAt(offsetInRow(pos));
     }
 
     @Override
     public boolean getBoolean(int pos) {
-        return chooseRow(pos).getBoolean(offsetInRow(pos));
+        return chooseArray(pos).getBoolean(offsetInRow(pos));
     }
 
     @Override
     public byte getByte(int pos) {
-        return chooseRow(pos).getByte(offsetInRow(pos));
+        return chooseArray(pos).getByte(offsetInRow(pos));
     }
 
     @Override
     public short getShort(int pos) {
-        return chooseRow(pos).getShort(offsetInRow(pos));
+        return chooseArray(pos).getShort(offsetInRow(pos));
     }
 
     @Override
     public int getInt(int pos) {
-        return chooseRow(pos).getInt(offsetInRow(pos));
+        return chooseArray(pos).getInt(offsetInRow(pos));
     }
 
     @Override
     public long getLong(int pos) {
-        return chooseRow(pos).getLong(offsetInRow(pos));
+        return chooseArray(pos).getLong(offsetInRow(pos));
     }
 
     @Override
     public float getFloat(int pos) {
-        return chooseRow(pos).getFloat(offsetInRow(pos));
+        return chooseArray(pos).getFloat(offsetInRow(pos));
     }
 
     @Override
     public double getDouble(int pos) {
-        return chooseRow(pos).getDouble(offsetInRow(pos));
+        return chooseArray(pos).getDouble(offsetInRow(pos));
     }
 
     @Override
     public BinaryString getString(int pos) {
-        return chooseRow(pos).getString(offsetInRow(pos));
+        return chooseArray(pos).getString(offsetInRow(pos));
     }
 
     @Override
     public Decimal getDecimal(int pos, int precision, int scale) {
-        return chooseRow(pos).getDecimal(offsetInRow(pos), precision, scale);
+        return chooseArray(pos).getDecimal(offsetInRow(pos), precision, scale);
     }
 
     @Override
     public Timestamp getTimestamp(int pos, int precision) {
-        return chooseRow(pos).getTimestamp(offsetInRow(pos), precision);
+        return chooseArray(pos).getTimestamp(offsetInRow(pos), precision);
     }
 
     @Override
     public byte[] getBinary(int pos) {
-        return chooseRow(pos).getBinary(offsetInRow(pos));
+        return chooseArray(pos).getBinary(offsetInRow(pos));
     }
 
     @Override
     public Variant getVariant(int pos) {
-        return chooseRow(pos).getVariant(offsetInRow(pos));
+        return chooseArray(pos).getVariant(offsetInRow(pos));
     }
 
     @Override
     public Blob getBlob(int pos) {
-        return chooseRow(pos).getBlob(offsetInRow(pos));
+        return chooseArray(pos).getBlob(offsetInRow(pos));
     }
 
     @Override
     public InternalArray getArray(int pos) {
-        return chooseRow(pos).getArray(offsetInRow(pos));
+        return chooseArray(pos).getArray(offsetInRow(pos));
     }
 
     @Override
     public InternalMap getMap(int pos) {
-        return chooseRow(pos).getMap(offsetInRow(pos));
+        return chooseArray(pos).getMap(offsetInRow(pos));
     }
 
     @Override
     public InternalRow getRow(int pos, int numFields) {
-        return chooseRow(pos).getRow(offsetInRow(pos), numFields);
+        return chooseArray(pos).getRow(offsetInRow(pos), numFields);
+    }
+
+    @Override
+    public int size() {
+        return rowOffsets.length;
+    }
+
+    @Override
+    public boolean[] toBooleanArray() {
+        boolean[] result = new boolean[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
+            result[i] = getBoolean(i);
+        }
+        return result;
+    }
+
+    @Override
+    public byte[] toByteArray() {
+        byte[] result = new byte[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
+            result[i] = getByte(i);
+        }
+        return result;
+    }
+
+    @Override
+    public short[] toShortArray() {
+        short[] result = new short[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
+            result[i] = getShort(i);
+        }
+        return result;
+    }
+
+    @Override
+    public int[] toIntArray() {
+        int[] result = new int[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
+            result[i] = getInt(i);
+        }
+        return result;
+    }
+
+    @Override
+    public long[] toLongArray() {
+        long[] result = new long[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
+            result[i] = getLong(i);
+        }
+        return result;
+    }
+
+    @Override
+    public float[] toFloatArray() {
+        float[] result = new float[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
+            result[i] = getFloat(i);
+        }
+        return result;
+    }
+
+    @Override
+    public double[] toDoubleArray() {
+        double[] result = new double[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
+            result[i] = getDouble(i);
+        }
+        return result;
     }
 }

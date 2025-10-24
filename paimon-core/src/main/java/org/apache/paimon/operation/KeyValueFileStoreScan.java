@@ -154,6 +154,11 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     }
 
     @Override
+    protected List<ManifestEntry> postFilter(List<ManifestEntry> entries) {
+        return entries;
+    }
+
+    @Override
     protected ManifestEntry dropStats(ManifestEntry entry) {
         if (!isValueFilterEnabled() && wholeBucketFilterEnabled()) {
             return new FilteredManifestEntry(entry.copyWithoutStats(), filterByValueFilter(entry));
