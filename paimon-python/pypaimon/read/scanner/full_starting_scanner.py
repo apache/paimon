@@ -157,6 +157,66 @@ class FullStartingScanner(StartingScanner):
 
         return filtered_partitioned_files, plan_start_row, plan_end_row
 
+    def _data_evolution_filter_by_shard(self, partitioned_files: defaultdict) -> (defaultdict, int, int):
+        total_row = 0
+        first_row_id_set = set()
+        # Sort by file creation time to ensure consistent sharding
+        for key, file_entries in partitioned_files.items():
+            for entry in file_entries:
+                if entry.file.first_row_id is None:
+                    total_row += entry.file.row_count
+                elif entry.file.first_row_id not in first_row_id_set:
+                    first_row_id_set.add(entry.file.first_row_id)
+                    total_row += entry.file.row_count
+
+        # Calculate number of rows this shard should process
+        # Last shard handles all remaining rows (handles non-divisible cases)
+        if self.idx_of_this_subtask == self.number_of_para_subtasks - 1:
+            num_row = total_row - total_row // self.number_of_para_subtasks * self.idx_of_this_subtask
+        else:
+            num_row = total_row // self.number_of_para_subtasks
+        # Calculate start row and end row position for current shard in all data
+        start_row = self.idx_of_this_subtask * (total_row // self.number_of_para_subtasks)
+        end_row = start_row + num_row
+
+        plan_start_row = 0
+        plan_end_row = 0
+        entry_end_row = 0  # end row position of current file in all data
+        splits_start_row = 0
+        filtered_partitioned_files = defaultdict(list)
+        # Iterate through all file entries to find files that overlap with current shard range
+        for key, file_entries in partitioned_files.items():
+            filtered_entries = []
+            first_row_id_set = set()
+            for entry in file_entries:
+                if entry.file.first_row_id is not None:
+                    if entry.file.first_row_id in first_row_id_set:
+                        filtered_entries.append(entry)
+                        continue
+                    else:
+                        first_row_id_set.add(entry.file.first_row_id)
+                entry_begin_row = entry_end_row  # Starting row position of current file in all data
+                entry_end_row += entry.file.row_count  # Update to row position after current file
+
+                # If current file is completely after shard range, stop iteration
+                if entry_begin_row >= end_row:
+                    break
+                # If current file is completely before shard range, skip it
+                if entry_end_row <= start_row:
+                    continue
+                if entry_begin_row <= start_row < entry_end_row:
+                    splits_start_row = entry_begin_row
+                    plan_start_row = start_row - entry_begin_row
+                # If shard end position is within current file, record relative end position
+                if entry_begin_row < end_row <= entry_end_row:
+                    plan_end_row = end_row - splits_start_row
+                # Add files that overlap with shard range to result
+                filtered_entries.append(entry)
+            if filtered_entries:
+                filtered_partitioned_files[key] = filtered_entries
+
+        return filtered_partitioned_files, plan_start_row, plan_end_row
+
     def _compute_split_start_end_row(self, splits: List[Split], plan_start_row, plan_end_row):
         file_end_row = 0  # end row position of current file in all data
         for split in splits:
@@ -356,7 +416,7 @@ class FullStartingScanner(StartingScanner):
             partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
         if self.idx_of_this_subtask is not None:
-            partitioned_files, plan_start_row, plan_end_row = self._append_only_filter_by_shard(partitioned_files)
+            partitioned_files, plan_start_row, plan_end_row = self._data_evolution_filter_by_shard(partitioned_files)
 
         def weight_func(file_list: List[DataFileMeta]) -> int:
             return max(sum(f.file_size for f in file_list), self.open_file_cost)
