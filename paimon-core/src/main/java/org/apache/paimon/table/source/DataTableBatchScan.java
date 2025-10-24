@@ -41,7 +41,7 @@ import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 public class DataTableBatchScan extends AbstractDataTableScan {
 
     private StartingScanner startingScanner;
-    private boolean hasNext;
+    protected boolean hasNext;
 
     private Integer pushDownLimit;
     private TopN topN;
@@ -198,4 +198,6 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         snapshotReader.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
         return this;
     }
+
+    public void clear() {}
 }

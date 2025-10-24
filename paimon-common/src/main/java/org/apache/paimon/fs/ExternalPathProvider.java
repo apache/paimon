@@ -48,4 +48,8 @@ public class ExternalPathProvider implements Serializable {
         }
         return new Path(new Path(externalTablePaths.get(position), relativeBucketPath), fileName);
     }
+
+    public ExternalPathProvider withBucketPath(Path relativeBucketPath) {
+        return new ExternalPathProvider(externalTablePaths, relativeBucketPath);
+    }
 }

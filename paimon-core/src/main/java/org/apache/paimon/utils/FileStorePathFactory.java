@@ -26,8 +26,11 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexInDataFileDirPathFactory;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.io.ChainReadDataFilePathFactory;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.ChainDataSplit;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -173,6 +176,27 @@ public class FileStorePathFactory {
                 createExternalPathProvider(partition, bucket));
     }
 
+    public DataFilePathFactory createDataFilePathFactory(
+            BinaryRow partition, int bucket, Map<String, String> tblOptions, DataSplit split) {
+        if (ChainTableUtils.isScanFallbackChainRead(tblOptions)
+                && split instanceof ChainDataSplit) {
+            return createChainReadDataFilePathFactory(split);
+        }
+        return createDataFilePathFactory(partition, bucket);
+    }
+
+    public DataFilePathFactory createChainReadDataFilePathFactory(DataSplit split) {
+        return new ChainReadDataFilePathFactory(
+                root,
+                formatIdentifier,
+                dataFilePrefix,
+                changelogFilePrefix,
+                fileSuffixIncludeCompression,
+                fileCompression,
+                createExternalPathProvider(),
+                split.fileBucketPathMapping());
+    }
+
     public DataFilePathFactory createFormatTableDataFilePathFactory(
             BinaryRow partition, boolean onlyValue) {
         return new DataFilePathFactory(
@@ -228,6 +252,14 @@ public class FileStorePathFactory {
         }
 
         return new ExternalPathProvider(externalPaths, relativeBucketPath(partition, bucket));
+    }
+
+    @Nullable
+    private ExternalPathProvider createExternalPathProvider() {
+        if (externalPaths == null || externalPaths.isEmpty()) {
+            return null;
+        }
+        return new ExternalPathProvider(externalPaths, null);
     }
 
     public List<Path> getExternalPaths() {

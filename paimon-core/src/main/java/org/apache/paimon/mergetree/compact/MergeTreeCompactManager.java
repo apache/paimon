@@ -70,6 +70,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
 
+    private final boolean forceKeepDelete;
+
     public MergeTreeCompactManager(
             ExecutorService executor,
             Levels levels,
@@ -83,7 +85,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             boolean lazyGenDeletionFile,
             boolean needLookup,
             @Nullable RecordLevelExpire recordLevelExpire,
-            boolean forceRewriteAllFiles) {
+            boolean forceRewriteAllFiles,
+            boolean forceKeepDelete) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -97,7 +100,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.recordLevelExpire = recordLevelExpire;
         this.needLookup = needLookup;
         this.forceRewriteAllFiles = forceRewriteAllFiles;
-
+        this.forceKeepDelete = forceKeepDelete;
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
 
@@ -171,7 +174,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                      * See CompactStrategy.pick.
                      */
                     boolean dropDelete =
-                            unit.outputLevel() != 0
+                            !forceKeepDelete
+                                    && unit.outputLevel() != 0
                                     && (unit.outputLevel() >= levels.nonEmptyHighestLevel()
                                             || dvMaintainer != null);
 
