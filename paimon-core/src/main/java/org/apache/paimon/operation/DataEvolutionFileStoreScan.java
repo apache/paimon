@@ -87,12 +87,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             return entries;
         }
         List<List<ManifestEntry>> splitByRowId =
-                DataEvolutionSplitGenerator.split(
-                        entries,
-                        entry -> entry.file().fileName(),
-                        entry -> entry.file().firstRowId(),
-                        entry -> entry.file().rowCount(),
-                        entry -> entry.file().maxSequenceNumber());
+                DataEvolutionSplitGenerator.splitManifests(entries);
 
         return splitByRowId.stream()
                 .filter(this::filterByStats)

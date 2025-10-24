@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.utils.BinPacking;
 
 import java.util.ArrayList;
@@ -50,13 +51,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
 
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> input) {
-        List<List<DataFileMeta>> files =
-                split(
-                        input,
-                        DataFileMeta::fileName,
-                        DataFileMeta::firstRowId,
-                        DataFileMeta::rowCount,
-                        DataFileMeta::maxSequenceNumber);
+        List<List<DataFileMeta>> files = split(input);
         Function<List<DataFileMeta>, Long> weightFunc =
                 file ->
                         Math.max(
@@ -80,6 +75,24 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
     @Override
     public List<SplitGroup> splitForStreaming(List<DataFileMeta> files) {
         return splitForBatch(files);
+    }
+
+    public static List<List<DataFileMeta>> split(List<DataFileMeta> files) {
+        return split(
+                files,
+                DataFileMeta::fileName,
+                DataFileMeta::firstRowId,
+                DataFileMeta::rowCount,
+                DataFileMeta::maxSequenceNumber);
+    }
+
+    public static List<List<ManifestEntry>> splitManifests(List<ManifestEntry> entries) {
+        return split(
+                entries,
+                entry -> entry.file().fileName(),
+                entry -> entry.file().firstRowId(),
+                entry -> entry.file().rowCount(),
+                entry -> entry.file().maxSequenceNumber());
     }
 
     public static <T> List<List<T>> split(
