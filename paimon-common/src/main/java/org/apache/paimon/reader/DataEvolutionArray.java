@@ -164,13 +164,13 @@ public class DataEvolutionArray implements InternalArray {
 
     @Override
     public int size() {
-        return rows.length;
+        return rowOffsets.length;
     }
 
     @Override
     public boolean[] toBooleanArray() {
-        boolean[] result = new boolean[rows.length];
-        for (int i = 0; i < rows.length; i++) {
+        boolean[] result = new boolean[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
             result[i] = getBoolean(i);
         }
         return result;
@@ -178,8 +178,8 @@ public class DataEvolutionArray implements InternalArray {
 
     @Override
     public byte[] toByteArray() {
-        byte[] result = new byte[rows.length];
-        for (int i = 0; i < rows.length; i++) {
+        byte[] result = new byte[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
             result[i] = getByte(i);
         }
         return result;
@@ -187,8 +187,8 @@ public class DataEvolutionArray implements InternalArray {
 
     @Override
     public short[] toShortArray() {
-        short[] result = new short[rows.length];
-        for (int i = 0; i < rows.length; i++) {
+        short[] result = new short[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
             result[i] = getShort(i);
         }
         return result;
@@ -196,8 +196,8 @@ public class DataEvolutionArray implements InternalArray {
 
     @Override
     public int[] toIntArray() {
-        int[] result = new int[rows.length];
-        for (int i = 0; i < rows.length; i++) {
+        int[] result = new int[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
             result[i] = getInt(i);
         }
         return result;
@@ -205,8 +205,8 @@ public class DataEvolutionArray implements InternalArray {
 
     @Override
     public long[] toLongArray() {
-        long[] result = new long[rows.length];
-        for (int i = 0; i < rows.length; i++) {
+        long[] result = new long[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
             result[i] = getLong(i);
         }
         return result;
@@ -214,8 +214,8 @@ public class DataEvolutionArray implements InternalArray {
 
     @Override
     public float[] toFloatArray() {
-        float[] result = new float[rows.length];
-        for (int i = 0; i < rows.length; i++) {
+        float[] result = new float[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
             result[i] = getFloat(i);
         }
         return result;
@@ -223,8 +223,8 @@ public class DataEvolutionArray implements InternalArray {
 
     @Override
     public double[] toDoubleArray() {
-        double[] result = new double[rows.length];
-        for (int i = 0; i < rows.length; i++) {
+        double[] result = new double[rowOffsets.length];
+        for (int i = 0; i < rowOffsets.length; i++) {
             result[i] = getDouble(i);
         }
         return result;
