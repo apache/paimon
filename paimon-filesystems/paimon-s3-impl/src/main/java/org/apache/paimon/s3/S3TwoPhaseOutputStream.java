@@ -39,8 +39,8 @@ public class S3TwoPhaseOutputStream
     }
 
     @Override
-    public long partSizeThreshold() {
-        return 5L << 20;
+    public int partSizeThreshold() {
+        return 5 << 20;
     }
 
     @Override

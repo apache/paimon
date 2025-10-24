@@ -57,7 +57,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         this.position = 0;
     }
 
-    public abstract long partSizeThreshold();
+    public abstract int partSizeThreshold();
 
     public abstract Committer committer(
             String uploadId, List<T> uploadedParts, String objectName, long position);
@@ -89,10 +89,19 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         if (closed) {
             throw new IOException("Stream is closed");
         }
-        buffer.write(b, off, len);
-        position += len;
-        if (buffer.size() >= partSizeThreshold()) {
-            uploadPart();
+        int remaining = len;
+        int offset = off;
+        while (remaining > 0) {
+            if (buffer.size() >= partSizeThreshold()) {
+                uploadPart();
+            }
+            int currentSize = buffer.size();
+            int space = partSizeThreshold() - currentSize;
+            int count = Math.min(remaining, space);
+            buffer.write(b, offset, count);
+            offset += count;
+            remaining -= count;
+            position += count;
         }
     }
 
@@ -133,6 +142,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         }
 
         File tempFile = null;
+        int partNumber = uploadedParts.size() + 1;
         try {
             byte[] data = buffer.toByteArray();
             tempFile = Files.createTempFile("multi-part-" + UUID.randomUUID(), ".tmp").toFile();
@@ -147,11 +157,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             buffer.reset();
         } catch (Exception e) {
             throw new IOException(
-                    "Failed to upload part "
-                            + (uploadedParts.size() + 1)
-                            + " for upload ID: "
-                            + uploadId,
-                    e);
+                    "Failed to upload part " + partNumber + " for upload ID: " + uploadId, e);
         } finally {
             if (tempFile != null && tempFile.exists()) {
                 if (!tempFile.delete()) {
