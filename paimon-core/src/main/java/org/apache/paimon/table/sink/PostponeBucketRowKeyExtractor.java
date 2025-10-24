@@ -30,27 +30,27 @@ import javax.annotation.Nullable;
  */
 public class PostponeBucketRowKeyExtractor extends RowKeyExtractor {
 
-    @Nullable private FixedBucketRowKeyExtractor realBucketExtractor;
+    @Nullable private FixedBucketRowKeyExtractor fixedBucketExtractor;
 
-    public PostponeBucketRowKeyExtractor(TableSchema schema, @Nullable Integer realNumBuckets) {
+    public PostponeBucketRowKeyExtractor(TableSchema schema, @Nullable Integer fixedBuckets) {
         super(schema);
-        if (realNumBuckets != null) {
-            this.realBucketExtractor = new FixedBucketRowKeyExtractor(schema, realNumBuckets);
+        if (fixedBuckets != null) {
+            this.fixedBucketExtractor = new FixedBucketRowKeyExtractor(schema, fixedBuckets);
         }
     }
 
     @Override
     public void setRecord(InternalRow record) {
         super.setRecord(record);
-        if (realBucketExtractor != null) {
-            realBucketExtractor.setRecord(record);
+        if (fixedBucketExtractor != null) {
+            fixedBucketExtractor.setRecord(record);
         }
     }
 
     @Override
     public int bucket() {
-        if (realBucketExtractor != null) {
-            return realBucketExtractor.bucket();
+        if (fixedBucketExtractor != null) {
+            return fixedBucketExtractor.bucket();
         } else {
             return BucketMode.POSTPONE_BUCKET;
         }

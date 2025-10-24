@@ -101,17 +101,17 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             mfFactory,
                             name(),
                             catalogEnvironment,
-                            postponeWriteRealBucket,
-                            postponeRealNumBuckets);
+                            postponeWriteFixedBucket,
+                            postponeFixedBuckets);
         }
         return lazyStore;
     }
 
     @Override
-    public boolean initPostponeRealNumBuckets(@Nullable Integer postponeRealNumBuckets) {
-        boolean initialized = super.initPostponeRealNumBuckets(postponeRealNumBuckets);
+    public boolean initPostponeFixedBuckets(@Nullable Integer postponeFixedBuckets) {
+        boolean initialized = super.initPostponeFixedBuckets(postponeFixedBuckets);
         if (initialized) {
-            // recreate the store to pass postponeRealNumBuckets
+            // recreate the store to pass postponeFixedBuckets
             this.lazyStore = null;
         }
         return initialized;

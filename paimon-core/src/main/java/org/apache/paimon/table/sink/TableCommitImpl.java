@@ -87,6 +87,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private final String tableName;
     private final boolean forceCreatingSnapshot;
     private final ThreadPoolExecutor fileCheckExecutor;
+    private final boolean postponeWriteFixedBucket;
 
     @Nullable private Map<String, String> overwritePartition = null;
     private boolean batchCommitted = false;
@@ -102,7 +103,8 @@ public class TableCommitImpl implements InnerTableCommit {
             ExpireExecutionMode expireExecutionMode,
             String tableName,
             boolean forceCreatingSnapshot,
-            int threadNum) {
+            int threadNum,
+            boolean postponeWriteFixedBucket) {
         if (partitionExpire != null) {
             commit.withPartitionExpire(partitionExpire);
         }
@@ -126,6 +128,7 @@ public class TableCommitImpl implements InnerTableCommit {
         this.tableName = tableName;
         this.forceCreatingSnapshot = forceCreatingSnapshot;
         this.fileCheckExecutor = FileOperationThreadPool.getExecutorService(threadNum);
+        this.postponeWriteFixedBucket = postponeWriteFixedBucket;
     }
 
     public boolean forceCreatingSnapshot() {
@@ -215,6 +218,7 @@ public class TableCommitImpl implements InnerTableCommit {
         for (CommitMessage commitMessage : commitMessages) {
             committable.addFileCommittable(commitMessage);
         }
+        addProperty(committable);
         return committable;
     }
 
@@ -223,6 +227,10 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
+        for (ManifestCommittable committable : committables) {
+            addProperty(committable);
+        }
+
         if (overwritePartition == null) {
             int newSnapshots = 0;
             for (ManifestCommittable committable : committables) {
@@ -270,6 +278,9 @@ public class TableCommitImpl implements InnerTableCommit {
                         .sorted(Comparator.comparingLong(ManifestCommittable::identifier))
                         .collect(Collectors.toList());
         List<ManifestCommittable> retryCommittables = commit.filterCommitted(sortedCommittables);
+        for (ManifestCommittable committable : retryCommittables) {
+            addProperty(committable);
+        }
 
         if (!retryCommittables.isEmpty()) {
             checkFilesExistence(retryCommittables);
@@ -391,6 +402,12 @@ public class TableCommitImpl implements InnerTableCommit {
     public void expireSnapshots() {
         if (expireSnapshots != null) {
             expireSnapshots.run();
+        }
+    }
+
+    private void addProperty(ManifestCommittable committable) {
+        if (postponeWriteFixedBucket) {
+            committable.addProperty("postpone.batch-write-fixed-bucket", "true");
         }
     }
 

@@ -302,23 +302,26 @@ public class FlinkSinkBuilder {
         }
         DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
 
-        if (!isStreaming(input) && table.coreOptions().postponeBatchWriteRealBucket()) {
-            table.setPostponeWriteRealBucket();
+        if (!isStreaming(input) && table.coreOptions().postponeBatchWriteFixedBucket()) {
+            table.setPostponeWriteFixedBucket();
 
             // If data exists, use the current bucket number; otherwise, use sink.parallelism if
             // set. If neither is set, use Flink's parallelism (get at runtime).
-            Integer realNumBuckets;
+            Integer fixedBuckets;
             List<SimpleFileEntry> simpleFileEntries =
                     table.store().newScan().onlyReadRealBuckets().readSimpleEntries();
             if (!simpleFileEntries.isEmpty()) {
-                realNumBuckets = simpleFileEntries.get(0).totalBuckets();
+                fixedBuckets = simpleFileEntries.get(0).totalBuckets();
             } else if (parallelism != null) {
-                realNumBuckets = parallelism;
+                fixedBuckets = parallelism;
             } else {
-                realNumBuckets = null;
+                fixedBuckets = null;
             }
-            LOG.info("Initializing Postpone sink realNumBuckets to {}.", realNumBuckets);
-            table.initPostponeRealNumBuckets(realNumBuckets);
+            LOG.info(
+                    "Initializing Postpone table {} batch write fixed buckets to {}.",
+                    table.name(),
+                    fixedBuckets);
+            table.initPostponeFixedBuckets(fixedBuckets);
         }
 
         PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);

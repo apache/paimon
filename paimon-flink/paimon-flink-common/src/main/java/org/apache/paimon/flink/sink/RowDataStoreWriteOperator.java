@@ -102,8 +102,11 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
         super.open();
 
         int sinkParallelism = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
-        if (table.initPostponeRealNumBuckets(sinkParallelism)) {
-            LOG.info("Initializing Postpone sink realNumBuckets to {}.", sinkParallelism);
+        if (table.initPostponeFixedBuckets(sinkParallelism)) {
+            LOG.info(
+                    "Initializing Postpone table {} batch write fixed buckets to {}.",
+                    table.name(),
+                    sinkParallelism);
             // to recreate postpone writer
             this.write.replace(table);
         }

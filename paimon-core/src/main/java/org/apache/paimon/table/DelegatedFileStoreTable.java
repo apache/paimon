@@ -325,13 +325,13 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public void setPostponeWriteRealBucket() {
-        wrapped.setPostponeWriteRealBucket();
+    public void setPostponeWriteFixedBucket() {
+        wrapped.setPostponeWriteFixedBucket();
     }
 
     @Override
-    public boolean initPostponeRealNumBuckets(@Nullable Integer postponeRealNumBuckets) {
-        return wrapped.initPostponeRealNumBuckets(postponeRealNumBuckets);
+    public boolean initPostponeFixedBuckets(@Nullable Integer postponeFixedBuckets) {
+        return wrapped.initPostponeFixedBuckets(postponeFixedBuckets);
     }
 
     @Override

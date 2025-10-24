@@ -82,8 +82,8 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
     private final FileStorePathFactory pathFactory;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
-    private final boolean writeRealBucket;
-    private final Integer realNumBuckets;
+    private final boolean writeFixedBucket;
+    private final Integer fixedBuckets;
     private final RowType keyType;
     private final RowType valueType;
 
@@ -105,15 +105,15 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
             CoreOptions options,
             String tableName,
             @Nullable Integer writeId,
-            boolean writeRealBucket,
-            @Nullable Integer realNumBuckets) {
+            boolean writeFixedBucket,
+            @Nullable Integer fixedBuckets) {
         super(snapshotManager, scan, options, partitionType, null, null, tableName);
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.mfFactory = mfFactory;
         this.readerFactoryBuilder = readerFactoryBuilder;
-        this.writeRealBucket = writeRealBucket;
-        this.realNumBuckets = realNumBuckets;
+        this.writeFixedBucket = writeFixedBucket;
+        this.fixedBuckets = fixedBuckets;
         this.keyType = keyType;
         this.valueType = valueType;
 
@@ -153,7 +153,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
                         createFormatPathFactories(this.options, formatPathFactory),
                         this.options.targetFileSize(true));
 
-        // If writing real buckets, we should scan previous files like KeyValueFileStoreWrite.
+        // If writing fixed buckets, we should scan previous files like KeyValueFileStoreWrite.
         //
         // If not, ignoring previous files saves scanning time.
         //
@@ -164,7 +164,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
         // normal bucket writers.
         //
         // Because there is no merging when reading, sequence id across files are useless.
-        if (!writeRealBucket) {
+        if (!writeFixedBucket) {
             withIgnorePreviousFiles(true);
         }
     }
@@ -199,8 +199,8 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
 
     @Override
     public int getTotalBuckets() {
-        if (writeRealBucket) {
-            return checkNotNull(realNumBuckets);
+        if (writeFixedBucket) {
+            return checkNotNull(fixedBuckets);
         } else {
             return -2;
         }
@@ -209,7 +209,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
     @Override
     public void withIgnorePreviousFiles(boolean ignorePrevious) {
         // see comments in constructor
-        super.withIgnorePreviousFiles(!writeRealBucket || ignorePrevious);
+        super.withIgnorePreviousFiles(!writeFixedBucket || ignorePrevious);
     }
 
     @Override
@@ -223,7 +223,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
             @Nullable BucketedDvMaintainer deletionVectorsMaintainer) {
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
-        if (writeRealBucket) {
+        if (writeFixedBucket) {
             checkArgument(bucket >= 0);
             // no compaction
             return new MergeTreeWriter(

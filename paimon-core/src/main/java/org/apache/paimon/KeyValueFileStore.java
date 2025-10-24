@@ -66,8 +66,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
     private final Supplier<RecordEqualiser> logDedupEqualSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
-    private final boolean postponeWriteRealBucket;
-    @Nullable private final Integer postponeRealNumBuckets;
+    private final boolean postponeWriteFixedBucket;
+    @Nullable private final Integer postponeFixedBuckets;
 
     public KeyValueFileStore(
             FileIO fileIO,
@@ -83,8 +83,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             MergeFunctionFactory<KeyValue> mfFactory,
             String tableName,
             CatalogEnvironment catalogEnvironment,
-            boolean postponeWriteRealBucket,
-            @Nullable Integer postponeRealNumBuckets) {
+            boolean postponeWriteFixedBucket,
+            @Nullable Integer postponeFixedBuckets) {
         super(fileIO, schemaManager, schema, tableName, options, partitionType, catalogEnvironment);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
@@ -98,8 +98,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options.changelogRowDeduplicate()
                         ? ValueEqualiserSupplier.fromIgnoreFields(valueType, logDedupIgnoreFields)
                         : () -> null;
-        this.postponeWriteRealBucket = postponeWriteRealBucket;
-        this.postponeRealNumBuckets = postponeRealNumBuckets;
+        this.postponeWriteFixedBucket = postponeWriteFixedBucket;
+        this.postponeFixedBuckets = postponeFixedBuckets;
     }
 
     @Override
@@ -176,8 +176,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     options,
                     tableName,
                     writeId,
-                    postponeWriteRealBucket,
-                    postponeRealNumBuckets);
+                    postponeWriteFixedBucket,
+                    postponeFixedBuckets);
         }
         DynamicBucketIndexMaintainer.Factory indexFactory = null;
         if (bucketMode() == BucketMode.HASH_DYNAMIC) {
