@@ -256,7 +256,7 @@ public class CatalogUtils {
                 new CatalogEnvironment(
                         tableIdentifier,
                         metadata.uuid(),
-                        catalog.catalogLoader(),
+                        getCatalogLoaderForTable(catalog, metadata),
                         lockFactory,
                         lockContext,
                         catalogContext,
@@ -425,5 +425,17 @@ public class CatalogUtils {
                 .options(options)
                 .comment(schema.comment())
                 .build();
+    }
+
+    /**
+     * External tables with version management: null (use filesystem-based snapshot management).
+     * Managed tables or no version management: catalog loader (use catalog-based snapshot
+     * management).
+     */
+    @Nullable
+    private static CatalogLoader getCatalogLoaderForTable(Catalog catalog, TableMetadata metadata) {
+        return catalog.supportsVersionManagement() && metadata.isExternal()
+                ? null
+                : catalog.catalogLoader();
     }
 }

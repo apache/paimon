@@ -24,7 +24,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
-import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
@@ -162,7 +161,7 @@ public class RESTCatalogServer {
     private final String databaseUri;
 
     private final CatalogContext catalogContext;
-    private final FileSystemCatalog catalog;
+    private final RESTFileSystemCatalog catalog;
     private final MockWebServer server;
 
     private final Map<String, Database> databaseStore = new HashMap<>();
@@ -202,7 +201,7 @@ public class RESTCatalogServer {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        this.catalog = new FileSystemCatalog(fileIO, warehousePath, catalogContext);
+        this.catalog = new RESTFileSystemCatalog(fileIO, warehousePath, catalogContext);
         Dispatcher dispatcher = initDispatcher(authProvider);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
