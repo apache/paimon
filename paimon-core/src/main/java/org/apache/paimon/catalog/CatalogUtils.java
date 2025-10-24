@@ -272,23 +272,6 @@ public class CatalogUtils {
         return table;
     }
 
-    /**
-     *
-     *
-     * <ul>
-     *   <li>External tables with version management: null (use filesystem-based snapshot
-     *       management).
-     *   <li>Internal tables or no version management: catalog loader (use catalog-based snapshot
-     *       management).
-     * </ul>
-     */
-    @Nullable
-    private static CatalogLoader getCatalogLoaderForTable(Catalog catalog, TableMetadata metadata) {
-        return catalog.supportsVersionManagement() && metadata.isExternal()
-                ? null
-                : catalog.catalogLoader();
-    }
-
     private static Table createGlobalSystemTable(String tableName, Catalog catalog)
             throws Catalog.TableNotExistException {
         switch (tableName.toLowerCase()) {
@@ -442,5 +425,17 @@ public class CatalogUtils {
                 .options(options)
                 .comment(schema.comment())
                 .build();
+    }
+
+    /**
+     * External tables with version management: null (use filesystem-based snapshot management).
+     * Internal tables or no version management: catalog loader (use catalog-based snapshot
+     * management).
+     */
+    @Nullable
+    private static CatalogLoader getCatalogLoaderForTable(Catalog catalog, TableMetadata metadata) {
+        return catalog.supportsVersionManagement() && metadata.isExternal()
+                ? null
+                : catalog.catalogLoader();
     }
 }
