@@ -40,10 +40,6 @@ public class DataEvolutionArray implements InternalArray {
         this.fieldOffsets = fieldOffsets;
     }
 
-    public int rowNumber() {
-        return rows.length;
-    }
-
     public void setRow(int pos, InternalArray row) {
         if (pos >= rows.length) {
             throw new IndexOutOfBoundsException(
