@@ -165,9 +165,10 @@ This section introduce all available spark procedures about paimon.
       <td>trigger_tag_automatic_creation</td>
       <td>
          Trigger the tag automatic creation. Arguments:
-            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>table: the target table identifier. Cannot be empty.</li> 
       </td>
       <td>
+         set `spark.paimon.tag.automatic-creation-without-delay`=true; -- enable automatic creation without delay<br/><br/>
          CALL sys.trigger_tag_automatic_creation(table => 'default.T')
       </td>
     </tr>
