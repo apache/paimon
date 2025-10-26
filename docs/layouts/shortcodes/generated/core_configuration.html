@@ -165,10 +165,28 @@ under the License.
             <td>Specifies the column name(s) used for comparison during range partitioning, in the format 'columnName1,columnName2'. If not set or set to an empty string, it indicates that the range partitioning feature is not enabled. This option will be effective only for append table without primary keys and batch execution mode.</td>
         </tr>
         <tr>
+            <td><h5>clustering.history-partition.auto.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether enable automatically performing full clustering for history partition.</td>
+        </tr>
+        <tr>
+            <td><h5>clustering.history-partition.limit</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>The limit of history partition number for automatically performing full clustering.</td>
+        </tr>
+        <tr>
             <td><h5>clustering.incremental</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether enable incremental clustering.</td>
+        </tr>
+        <tr>
+            <td><h5>clustering.partition.idle-time</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The duration after which a partition without new updates is considered a historical partition. Historical partitions will be automatically fully clustered during the cluster operation.This option takes effects when 'clustering.history-partition.auto.enabled' is true.</td>
         </tr>
         <tr>
             <td><h5>clustering.strategy</h5></td>
