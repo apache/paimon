@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -30,18 +31,25 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.CLUSTERING_INCREMENTAL;
@@ -51,6 +59,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class IncrementalClusterManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(IncrementalClusterManager.class);
+    private final InternalRowPartitionComputer partitionComputer;
 
     private final SnapshotReader snapshotReader;
 
@@ -58,6 +67,11 @@ public class IncrementalClusterManager {
     private final CoreOptions.OrderType clusterCurve;
     private final List<String> clusterKeys;
 
+    private final boolean historyPartitionAutoCluster;
+    @Nullable private final Duration partitionIdleTime;
+    private final int historyPartitionLimit;
+
+    @Nullable private final PartitionPredicate specifiedPartitions;
     private int maxLevel;
 
     public IncrementalClusterManager(FileStoreTable table) {
@@ -69,14 +83,35 @@ public class IncrementalClusterManager {
         checkArgument(
                 table.bucketMode() == BucketMode.BUCKET_UNAWARE,
                 "only append unaware-bucket table support incremental clustering.");
-        // drop stats to reduce memory usage
-        this.snapshotReader =
-                table.newSnapshotReader().withPartitionFilter(specifiedPartitions).dropStats();
         CoreOptions options = table.coreOptions();
         checkArgument(
                 options.clusteringIncrementalEnabled(),
                 "Only support incremental clustering when '%s' is true.",
                 CLUSTERING_INCREMENTAL.key());
+
+        this.partitionComputer =
+                new InternalRowPartitionComputer(
+                        table.coreOptions().partitionDefaultName(),
+                        table.store().partitionType(),
+                        table.partitionKeys().toArray(new String[0]),
+                        table.coreOptions().legacyPartitionName());
+
+        this.specifiedPartitions = specifiedPartitions;
+
+        // config for history partition auto clustering
+        this.historyPartitionAutoCluster = options.clusteringHistoryPartitionAutoEnabled();
+        this.partitionIdleTime = options.clusteringPartitionIdleTime();
+        this.historyPartitionLimit = options.clusteringHistoryPartitionLimit();
+
+        if (historyPartitionAutoCluster) {
+            checkArgument(
+                    partitionIdleTime != null,
+                    "'clustering.partition.idle-time' is required when 'clustering.history-partition.auto.enabled' is true.");
+            this.snapshotReader = table.newSnapshotReader().dropStats();
+        } else {
+            this.snapshotReader =
+                    table.newSnapshotReader().dropStats().withPartitionFilter(specifiedPartitions);
+        }
         this.incrementalClusterStrategy =
                 new IncrementalClusterStrategy(
                         table.schemaManager(),
@@ -106,7 +141,7 @@ public class IncrementalClusterManager {
                                         .collect(Collectors.joining(","));
                         LOG.debug(
                                 "Partition {} has {} runs: [{}]",
-                                partition,
+                                partitionComputer.generatePartValues(partition),
                                 levelSortedRuns.size(),
                                 runsInfo);
                     });
@@ -118,11 +153,27 @@ public class IncrementalClusterManager {
                         .collect(
                                 Collectors.toMap(
                                         Map.Entry::getKey,
-                                        entry ->
-                                                incrementalClusterStrategy.pick(
-                                                        maxLevel,
-                                                        entry.getValue(),
-                                                        fullCompaction)));
+                                        entry -> {
+                                            if (fullCompaction) {
+                                                return incrementalClusterStrategy.pick(
+                                                        maxLevel, entry.getValue(), true);
+                                            } else {
+                                                // if clustering is not in full mode, then specified
+                                                // partitions should perform incremental clustering
+                                                // and history partitions should perform full
+                                                // clustering
+                                                if (specifiedPartitions != null
+                                                        && historyPartitionAutoCluster
+                                                        && (!specifiedPartitions.test(
+                                                                entry.getKey()))) {
+                                                    return incrementalClusterStrategy.pick(
+                                                            maxLevel, entry.getValue(), true);
+                                                } else {
+                                                    return incrementalClusterStrategy.pick(
+                                                            maxLevel, entry.getValue(), false);
+                                                }
+                                            }
+                                        }));
 
         // 3. filter out empty units
         Map<BinaryRow, CompactUnit> filteredUnits =
@@ -146,7 +197,7 @@ public class IncrementalClusterManager {
                                         .collect(Collectors.joining(", "));
                         LOG.debug(
                                 "Partition {}, outputLevel:{}, clustered with {} files: [{}]",
-                                partition,
+                                partitionComputer.generatePartValues(partition),
                                 compactUnit.outputLevel(),
                                 compactUnit.files().size(),
                                 filesInfo);
@@ -174,6 +225,23 @@ public class IncrementalClusterManager {
             partitionFiles
                     .computeIfAbsent(dataSplit.partition(), k -> new ArrayList<>())
                     .addAll(dataSplit.dataFiles());
+        }
+
+        if (specifiedPartitions != null
+                && historyPartitionAutoCluster
+                && historyPartitionLimit > 0) {
+            List<PartitionEntry> partitionEntries = snapshotReader.partitionEntries();
+            // sort by last file creation time, and we will pick the oldest N partitions
+            partitionEntries.sort(Comparator.comparingLong(PartitionEntry::lastFileCreationTime));
+            Set<BinaryRow> historyPartitions =
+                    findHistoryPartitions(partitionEntries, partitionFiles);
+            partitionFiles =
+                    partitionFiles.entrySet().stream()
+                            .filter(
+                                    entry ->
+                                            specifiedPartitions.test(entry.getKey())
+                                                    || historyPartitions.contains(entry.getKey()))
+                            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         }
 
         return partitionFiles.entrySet().stream()
@@ -233,6 +301,52 @@ public class IncrementalClusterManager {
         }
 
         return splits;
+    }
+
+    private Set<BinaryRow> findHistoryPartitions(
+            List<PartitionEntry> partitionEntries,
+            Map<BinaryRow, List<DataFileMeta>> partitionFiles) {
+        Set<BinaryRow> partitions = new HashSet<>();
+
+        checkArgument(partitionIdleTime != null);
+        long historyMilli =
+                LocalDateTime.now()
+                        .minus(partitionIdleTime)
+                        .atZone(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli();
+        // Partitions that meet all the following conditions will be full clustered:
+        // 1. the partition is not specified in specifiedPartitions
+        // 2. the last update time for history partition should be before (currentTime -
+        // partitionIdleTime)
+        // 3. the min file level in partition should be less than Math.ceil(maxLevel/2)
+        for (PartitionEntry partitionEntry : partitionEntries) {
+            BinaryRow partition = partitionEntry.partition();
+            if (!specifiedPartitions.test(partition)
+                    && partitionEntry.lastFileCreationTime() <= historyMilli) {
+                List<DataFileMeta> files =
+                        partitionFiles.getOrDefault(partition, Collections.emptyList());
+                if (!files.isEmpty()) {
+                    int partitionMinLevel = maxLevel + 1;
+                    for (DataFileMeta file : files) {
+                        partitionMinLevel = Math.min(partitionMinLevel, file.level());
+                    }
+                    if (partitionMinLevel < Math.ceil((double) maxLevel / 2)) {
+                        partitions.add(partition);
+                        if (partitions.size() >= historyPartitionLimit) {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        LOG.info(
+                "Find {} history partitions for full clustering, the history partitions are {}",
+                partitions.size(),
+                partitions.stream()
+                        .map(partitionComputer::generatePartValues)
+                        .collect(Collectors.toSet()));
+        return partitions;
     }
 
     public static List<DataFileMeta> upgrade(

@@ -143,7 +143,7 @@ public class IncrementalClusterManagerTest {
         // Test upgrading to level 3
         int outputLevel = 3;
         List<DataFileMeta> upgradedFiles =
-                incrementalClusterManager.upgrade(filesAfterCluster, outputLevel);
+                IncrementalClusterManager.upgrade(filesAfterCluster, outputLevel);
 
         // Verify the results
         assertThat(upgradedFiles).hasSize(3);

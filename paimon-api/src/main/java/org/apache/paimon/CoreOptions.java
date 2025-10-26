@@ -1957,6 +1957,29 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable incremental clustering.");
 
+    public static final ConfigOption<Boolean> CLUSTERING_HISTORY_PARTITION_AUTO =
+            key("clustering.history-partition.auto.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether enable automatically performing full clustering for history partition.");
+
+    public static final ConfigOption<Integer> CLUSTERING_HISTORY_PARTITION_LIMIT =
+            key("clustering.history-partition.limit")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription(
+                            "The limit of history partition number for automatically performing full clustering.");
+
+    public static final ConfigOption<Duration> CLUSTERING_PARTITION_IDLE_TIME =
+            key("clustering.partition.idle-time")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The duration after which a partition without new updates is considered a historical partition. "
+                                    + "Historical partitions will be automatically fully clustered during the cluster operation."
+                                    + "This option takes effects when 'clustering.history-partition.auto.enabled' is true.");
+
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
                     .booleanType()
@@ -3062,6 +3085,18 @@ public class CoreOptions implements Serializable {
 
     public boolean clusteringIncrementalEnabled() {
         return options.get(CLUSTERING_INCREMENTAL);
+    }
+
+    public boolean clusteringHistoryPartitionAutoEnabled() {
+        return options.get(CLUSTERING_HISTORY_PARTITION_AUTO);
+    }
+
+    public Duration clusteringPartitionIdleTime() {
+        return options.get(CLUSTERING_PARTITION_IDLE_TIME);
+    }
+
+    public int clusteringHistoryPartitionLimit() {
+        return options.get(CLUSTERING_HISTORY_PARTITION_LIMIT);
     }
 
     public OrderType clusteringStrategy(int columnSize) {
