@@ -32,8 +32,6 @@ implementation of the brand new PyPaimon does not require JDK installation.
 
 ## Environment Settings
 
-### SDK Installing
-
 SDK is published at [pypaimon](https://pypi.org/project/pypaimon/). You can install by
 
 ```shell
@@ -44,6 +42,8 @@ pip install pypaimon
 
 Before coming into contact with the Table, you need to create a Catalog.
 
+{{< tabs "create-catalog" >}}
+{{< tab "filesystem" >}}
 ```python
 from pypaimon import CatalogFactory
 
@@ -53,14 +53,33 @@ catalog_options = {
 }
 catalog = CatalogFactory.create(catalog_options)
 ```
+{{< /tab >}}
+{{< tab "rest catalog" >}}
+The sample code is as follows. The detailed meaning of option can be found in [DLF Token](../concepts/rest/dlf.md).
+
+```python
+from pypaimon import CatalogFactory
+
+# Note that keys and values are all string
+catalog_options = {
+  'metastore': 'rest',
+  'warehouse': 'xxx',
+  'uri': 'xxx',
+  'dlf.region': 'xxx',
+  'token.provider': 'xxx',
+  'dlf.access-key-id': 'xxx',
+  'dlf.access-key-secret': 'xxx'
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+{{< /tab >}}
+{{< /tabs >}}
 
 Currently, PyPaimon only support filesystem catalog and rest catalog. See [Catalog]({{< ref "concepts/catalog" >}}).
 
-## Create Database & Table
-
 You can use the catalog to create table for writing data.
 
-### Create Database (optional)
+## Create Database
 
 Table is located in a database. If you want to create table in a new database, you should create it.
 
@@ -72,7 +91,7 @@ catalog.create_database(
 )
 ```
 
-### Create Schema
+## Create Table
 
 Table schema contains fields definition, partition keys, primary keys, table options and comment.
 The field definition is described by `pyarrow.Schema`. All arguments except fields definition are optional.
@@ -131,8 +150,6 @@ schema = Schema.from_pyarrow_schema(
 )
 ```
 
-### Create Table
-
 After building table schema, you can create corresponding table:
 
 ```python
@@ -142,13 +159,8 @@ catalog.create_table(
     schema=schema,
     ignore_if_exists=True  # To raise error if the table exists, set False
 )
-```
 
-## Get Table
-
-The Table interface provides tools to read and write table.
-
-```python
+# Get Table
 table = catalog.get_table('database_name.table_name')
 ```
 
@@ -203,7 +215,7 @@ write_builder = table.new_batch_write_builder().overwrite({'dt': '2024-01-01'})
 
 ## Batch Read
 
-### Get ReadBuilder and Perform pushdown
+### Predicate pushdown
 
 A `ReadBuilder` is used to build reading utils and perform filter and projection pushdown.
 
@@ -238,7 +250,7 @@ You can also pushdown projection by `ReadBuilder`:
 read_builder = read_builder.with_projection(['f3', 'f2'])
 ```
 
-### Scan Plan
+### Generate Splits
 
 Then you can step into Scan Plan stage to get `splits`:
 
@@ -247,11 +259,9 @@ table_scan = read_builder.new_scan()
 splits = table_scan.plan().splits()
 ```
 
-### Read Splits
-
 Finally, you can read data from the `splits` to various data format.
 
-#### Apache Arrow
+### Read Apache Arrow
 
 This requires `pyarrow` to be installed.
 
@@ -285,7 +295,7 @@ for batch in table_read.to_arrow_batch_reader(splits):
 # f1: ["a","b","c"]
 ```
 
-#### Python Iterator
+### Read Python Iterator
 
 You can read the data row by row into a native Python iterator.
 This is convenient for custom row-based processing logic.
@@ -299,7 +309,7 @@ for row in table_read.to_iterator(splits):
 # ["a","b","c"]
 ```
 
-#### Pandas
+### Read Pandas
 
 This requires `pandas` to be installed.
 
@@ -318,7 +328,7 @@ print(df)
 # ...
 ```
 
-#### DuckDB
+### Read DuckDB
 
 This requires `duckdb` to be installed.
 
@@ -341,7 +351,7 @@ print(duckdb_con.query("SELECT * FROM duckdb_table WHERE f0 = 1").fetchdf())
 # 0   1  a
 ```
 
-#### Ray
+### Read Ray
 
 This requires `ray` to be installed.
 
@@ -366,7 +376,7 @@ print(ray_dataset.to_pandas())
 # ...
 ```
 
-### Incremental Read Between Timestamps
+### Incremental Read
 
 This API allows reading data committed between two snapshot timestamps. The steps are as follows.
 
@@ -518,97 +528,6 @@ Key points about shard read:
 - **Data Distribution**: Data is distributed evenly across shards, with remainder rows going to the last shard
 - **Parallel Processing**: Each shard can be processed independently for better performance
 - **Consistency**: Combining all shards should produce the complete table data
-
-## REST API
-
-### Create Catalog
-
-The sample code is as follows. The detailed meaning of option can be found in [DLF Token](../concepts/rest/dlf.md).
-
-```python
-from pypaimon import CatalogFactory
-
-# Note that keys and values are all string
-catalog_options = {
-    'metastore': 'rest',
-    'warehouse': 'xxx',
-    'uri': 'xxx',
-    'dlf.region': 'xxx',
-    'token.provider': 'xxx',
-    'dlf.access-key-id': 'xxx',
-    'dlf.access-key-secret': 'xxx'
-}
-catalog = CatalogFactory.create(catalog_options)
-```
-
-### Write And Read
-
-Write and read operations with RESTCatalog is exactly the same as that of FileSystemCatalog.
-
-```python
-import pyarrow as pa
-from pypaimon.api.options import Options
-from pypaimon.catalog.catalog_context import CatalogContext
-from pypaimon.catalog.rest.rest_catalog import RESTCatalog
-from pypaimon.schema.schema import Schema
-
-
-def write_test_table(table):
-    write_builder = table.new_batch_write_builder()
-
-    # first write
-    table_write = write_builder.new_write()
-    table_commit = write_builder.new_commit()
-    data1 = {
-        'user_id': [1, 2, 3, 4],
-        'item_id': [1001, 1002, 1003, 1004],
-        'behavior': ['a', 'b', 'c', 'd'],
-        'dt': ['12', '34', '56', '78'],
-    }
-    pa_table = pa.Table.from_pydict(data1, schema=pa_schema)
-    table_write.write_arrow(pa_table)
-    table_commit.commit(table_write.prepare_commit())
-    table_write.close()
-    table_commit.close()
-
-
-def read_test_table(read_builder):
-    table_read = read_builder.new_read()
-    splits = read_builder.new_scan().plan().splits()
-    return table_read.to_arrow(splits)
-
-
-options = {
-    'metastore': 'rest',
-    'warehouse': 'xxx',
-    'uri': 'xxx',
-    'dlf.region': 'xxx',
-    'token.provider': 'xxx',
-    'dlf.access-key-id': 'xxx',
-    'dlf.access-key-secret': 'xxx'
-}
-
-rest_catalog = RESTCatalog(CatalogContext.create_from_options(Options(options)))
-print("rest catalog create success")
-pa_schema = pa.schema([
-    ('user_id', pa.int32()),
-    ('item_id', pa.int64()),
-    ('behavior', pa.string()),
-    ('dt', pa.string()),
-])
-
-# test parquet append only read
-schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
-rest_catalog.create_table('default.test_t', schema, True)
-table = rest_catalog.get_table('default.test_t')
-write_test_table(table)
-print("write success")
-
-read_builder = table.new_read_builder()
-actual = read_test_table(read_builder)
-print("read data:")
-print(actual)
-```
 
 ## Data Types
 
