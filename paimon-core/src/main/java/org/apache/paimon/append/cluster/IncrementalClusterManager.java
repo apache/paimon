@@ -19,6 +19,7 @@
 package org.apache.paimon.append.cluster;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -303,7 +304,8 @@ public class IncrementalClusterManager {
         return splits;
     }
 
-    private Set<BinaryRow> findHistoryPartitions(
+    @VisibleForTesting
+    protected Set<BinaryRow> findHistoryPartitions(
             List<PartitionEntry> partitionEntries,
             Map<BinaryRow, List<DataFileMeta>> partitionFiles) {
         Set<BinaryRow> partitions = new HashSet<>();

@@ -19,26 +19,38 @@
 package org.apache.paimon.append.cluster;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.mergetree.LevelSortedRun;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -154,6 +166,133 @@ public class IncrementalClusterManagerTest {
         }
     }
 
+    @Test
+    public void testFindHistoryPartitions() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_AUTO.key(), "true");
+        options.put(CoreOptions.CLUSTERING_PARTITION_IDLE_TIME.key(), "1s");
+        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_LIMIT.key(), "1");
+
+        FileStoreTable table = createTable(options, Collections.emptyList());
+        long now = LocalDateTime.now().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        Map<BinaryRow, List<DataFileMeta>> partitionFiles = new HashMap<>();
+
+        // specified partition
+        BinaryRow partition1 = BinaryRow.singleColumn(1);
+        PartitionEntry partitionEntry1 = new PartitionEntry(partition1, 0, 0, 0, now + 10000);
+        partitionFiles.put(partition1, Lists.newArrayList(createFile(100, 1, 0)));
+        // not history partition
+        BinaryRow partition2 = BinaryRow.singleColumn(2);
+        PartitionEntry partitionEntry2 = new PartitionEntry(partition2, 0, 0, 0, now + 10000);
+        partitionFiles.put(partition2, Lists.newArrayList(createFile(100, 1, 0)));
+        // history partition, but has no low-level files
+        BinaryRow partition3 = BinaryRow.singleColumn(3);
+        PartitionEntry partitionEntry3 = new PartitionEntry(partition3, 0, 0, 0, now - 10000);
+        partitionFiles.put(
+                partition3, Lists.newArrayList(createFile(100, 1, 3), createFile(100, 1, 5)));
+        // history partition, has low-level files
+        BinaryRow partition4 = BinaryRow.singleColumn(4);
+        PartitionEntry partitionEntry4 = new PartitionEntry(partition4, 0, 0, 0, now - 10000);
+        partitionFiles.put(
+                partition4, Lists.newArrayList(createFile(100, 1, 0), createFile(100, 1, 2)));
+        // history partition, has low-level files
+        BinaryRow partition5 = BinaryRow.singleColumn(5);
+        PartitionEntry partitionEntry5 = new PartitionEntry(partition5, 0, 0, 0, now - 10000);
+        partitionFiles.put(
+                partition5, Lists.newArrayList(createFile(100, 1, 0), createFile(100, 1, 2)));
+
+        IncrementalClusterManager incrementalClusterManager =
+                new IncrementalClusterManager(
+                        table,
+                        PartitionPredicate.fromMultiple(
+                                RowType.of(DataTypes.INT()), Lists.newArrayList(partition1)));
+        Set<BinaryRow> selectedPartitions =
+                incrementalClusterManager.findHistoryPartitions(
+                        Lists.newArrayList(
+                                partitionEntry1,
+                                partitionEntry2,
+                                partitionEntry3,
+                                partitionEntry4,
+                                partitionEntry5),
+                        partitionFiles);
+
+        assertThat(selectedPartitions).contains(partition4);
+    }
+
+    @Test
+    public void testHistoryPartitionAutoClustering() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_AUTO.key(), "true");
+        options.put(CoreOptions.CLUSTERING_PARTITION_IDLE_TIME.key(), "2s");
+        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_LIMIT.key(), "1");
+
+        FileStoreTable table = createTable(options, Collections.singletonList("f2"));
+        writeOnce(
+                table,
+                GenericRow.of(
+                        1, 1, BinaryString.fromString("pt1"), BinaryString.fromString("test")));
+        writeOnce(
+                table,
+                GenericRow.of(
+                        1, 1, BinaryString.fromString("pt2"), BinaryString.fromString("test")));
+
+        Thread.sleep(2000);
+        writeOnce(
+                table,
+                GenericRow.of(
+                        1, 1, BinaryString.fromString("pt3"), BinaryString.fromString("test")));
+        writeOnce(
+                table,
+                GenericRow.of(
+                        1, 1, BinaryString.fromString("pt4"), BinaryString.fromString("test")));
+
+        // test specify partition and enable history partition auto clustering
+        IncrementalClusterManager incrementalClusterManager =
+                new IncrementalClusterManager(
+                        table,
+                        PartitionPredicate.fromMultiple(
+                                RowType.of(DataTypes.INT()),
+                                Lists.newArrayList(BinaryRow.singleColumn("pt3"))));
+        Map<BinaryRow, List<LevelSortedRun>> partitionLevels =
+                incrementalClusterManager.constructLevels();
+        assertThat(partitionLevels.size()).isEqualTo(2);
+        assertThat(partitionLevels.get(BinaryRow.singleColumn("pt1"))).isNotEmpty();
+        assertThat(partitionLevels.get(BinaryRow.singleColumn("pt3"))).isNotEmpty();
+
+        // test don't specify partition and enable history partition auto clustering
+        incrementalClusterManager = new IncrementalClusterManager(table);
+        partitionLevels = incrementalClusterManager.constructLevels();
+        assertThat(partitionLevels.size()).isEqualTo(4);
+
+        // test specify partition and disable history partition auto clustering
+        Map<String, String> newOptions = new HashMap<>();
+        newOptions.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_AUTO.key(), "false");
+        incrementalClusterManager =
+                new IncrementalClusterManager(
+                        table.copy(newOptions),
+                        PartitionPredicate.fromMultiple(
+                                RowType.of(DataTypes.INT()),
+                                Lists.newArrayList(BinaryRow.singleColumn("pt3"))));
+        partitionLevels = incrementalClusterManager.constructLevels();
+        assertThat(partitionLevels.size()).isEqualTo(1);
+        assertThat(partitionLevels.get(BinaryRow.singleColumn("pt3"))).isNotEmpty();
+
+        // test specify partition and disable history partition auto clustering
+        SchemaChange schemaChange =
+                SchemaChange.removeOption(CoreOptions.CLUSTERING_PARTITION_IDLE_TIME.key());
+        assertThatThrownBy(
+                        () ->
+                                new IncrementalClusterManager(
+                                        table.copy(
+                                                table.schemaManager()
+                                                        .commitChanges(
+                                                                Collections.singletonList(
+                                                                        schemaChange)))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "'clustering.partition.idle-time' is required when 'clustering.history-partition.auto.enabled' is true.");
+    }
+
     private FileStoreTable createTable(
             Map<String, String> customOptions, List<String> partitionKeys) throws Exception {
         Map<String, String> options = new HashMap<>();
@@ -181,6 +320,19 @@ public class IncrementalClusterManagerTest {
                 LocalFileIO.create(),
                 new Path(tempDir.toString()),
                 schemaManager.createTable(schema));
+    }
+
+    private void writeOnce(FileStoreTable table, GenericRow... rows) {
+        String commitUser = "test_user";
+        try (BatchTableWrite write = table.newWrite(commitUser);
+                BatchTableCommit commit = table.newCommit(commitUser)) {
+            for (GenericRow row : rows) {
+                write.write(row);
+            }
+            commit.commit(write.prepareCommit());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private static DataFileMeta createFile(long size, long schemaId, int level) {
