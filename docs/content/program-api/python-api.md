@@ -519,6 +519,97 @@ Key points about shard read:
 - **Parallel Processing**: Each shard can be processed independently for better performance
 - **Consistency**: Combining all shards should produce the complete table data
 
+## REST API
+
+### Create Catalog
+
+The sample code is as follows. The detailed meaning of option can be found in [DLF Token](../concepts/rest/dlf.md).
+
+```python
+from pypaimon import CatalogFactory
+
+# Note that keys and values are all string
+catalog_options = {
+    'metastore': 'rest',
+    'warehouse': 'xxx',
+    'uri': 'xxx',
+    'dlf.region': 'xxx',
+    'token.provider': 'xxx',
+    'dlf.access-key-id': 'xxx',
+    'dlf.access-key-secret': 'xxx'
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+
+### Write And Read
+
+Write and read operations with RESTCatalog is exactly the same as that of FileSystemCatalog.
+
+```python
+import pyarrow as pa
+from pypaimon.api.options import Options
+from pypaimon.catalog.catalog_context import CatalogContext
+from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+from pypaimon.schema.schema import Schema
+
+
+def write_test_table(table):
+    write_builder = table.new_batch_write_builder()
+
+    # first write
+    table_write = write_builder.new_write()
+    table_commit = write_builder.new_commit()
+    data1 = {
+        'user_id': [1, 2, 3, 4],
+        'item_id': [1001, 1002, 1003, 1004],
+        'behavior': ['a', 'b', 'c', 'd'],
+        'dt': ['12', '34', '56', '78'],
+    }
+    pa_table = pa.Table.from_pydict(data1, schema=pa_schema)
+    table_write.write_arrow(pa_table)
+    table_commit.commit(table_write.prepare_commit())
+    table_write.close()
+    table_commit.close()
+
+
+def read_test_table(read_builder):
+    table_read = read_builder.new_read()
+    splits = read_builder.new_scan().plan().splits()
+    return table_read.to_arrow(splits)
+
+
+options = {
+    'metastore': 'rest',
+    'warehouse': 'xxx',
+    'uri': 'xxx',
+    'dlf.region': 'xxx',
+    'token.provider': 'xxx',
+    'dlf.access-key-id': 'xxx',
+    'dlf.access-key-secret': 'xxx'
+}
+
+rest_catalog = RESTCatalog(CatalogContext.create_from_options(Options(options)))
+print("rest catalog create success")
+pa_schema = pa.schema([
+    ('user_id', pa.int32()),
+    ('item_id', pa.int64()),
+    ('behavior', pa.string()),
+    ('dt', pa.string()),
+])
+
+# test parquet append only read
+schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+rest_catalog.create_table('default.test_t', schema, True)
+table = rest_catalog.get_table('default.test_t')
+write_test_table(table)
+print("write success")
+
+read_builder = table.new_read_builder()
+actual = read_test_table(read_builder)
+print("read data:")
+print(actual)
+```
+
 ## Data Types
 
 | Python Native Type  | PyArrow Type                                     | Paimon Type                       |
@@ -558,3 +649,4 @@ Key points about shard read:
 | f is in [l1, l2]      | PredicateBuilder.is_in(f, [l1, l2])           |
 | f is not in [l1, l2]  | PredicateBuilder.is_not_in(f, [l1, l2])       |
 | lower <= f <= upper   | PredicateBuilder.between(f, lower, upper)     |
+
