@@ -417,6 +417,14 @@ public class DataEvolutionTableTest extends TableTestBase {
         readBuilder.withFilter(predicate);
         assertThat(((DataSplit) readBuilder.newScan().plan().splits().get(0)).dataFiles().size())
                 .isEqualTo(2);
+
+        predicate = predicateBuilder.notEqual(1, BinaryString.fromString("a"));
+        readBuilder.withFilter(predicate);
+        assertThat(readBuilder.newScan().plan().splits().isEmpty()).isTrue();
+
+        predicate = predicateBuilder.notEqual(2, BinaryString.fromString("c"));
+        readBuilder.withFilter(predicate);
+        assertThat(readBuilder.newScan().plan().splits().isEmpty()).isTrue();
     }
 
     protected Schema schemaDefault() {
