@@ -124,7 +124,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         return getFileSystemPair(path).getKey();
     }
 
-    private Pair<JindoHadoopSystem, String> getFileSystemPair(org.apache.hadoop.fs.Path path)
+    protected Pair<JindoHadoopSystem, String> getFileSystemPair(org.apache.hadoop.fs.Path path)
             throws IOException {
         if (fsMap == null) {
             synchronized (this) {

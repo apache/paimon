@@ -20,6 +20,8 @@ package org.apache.paimon.jindo;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
@@ -120,6 +122,18 @@ public class JindoFileIO extends HadoopCompliantFileIO {
 
     public Options hadoopOptions() {
         return hadoopOptions;
+    }
+
+    @Override
+    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        if (!overwrite && this.exists(path)) {
+            throw new IOException("File " + path + " already exists.");
+        }
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        Pair<JindoHadoopSystem, String> pair = getFileSystemPair(hadoopPath);
+        JindoHadoopSystem fs = pair.getKey();
+        return new JindoTwoPhaseOutputStream(new JindoMultiPartUpload(fs, hadoopPath), hadoopPath);
     }
 
     @Override

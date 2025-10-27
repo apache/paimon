@@ -16,23 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.s3;
+package org.apache.paimon.jindo;
 
 import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
 
-import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
-import com.amazonaws.services.s3.model.PartETag;
+import com.aliyun.jindodata.api.spec.protos.JdoObjectPart;
 
 import java.io.IOException;
 import java.util.List;
 
-/** S3 implementation of TwoPhaseOutputStream using multipart upload. */
-public class S3TwoPhaseOutputStream
-        extends MultiPartUploadTwoPhaseOutputStream<PartETag, CompleteMultipartUploadResult> {
+/** Jindo implementation of TwoPhaseOutputStream using multipart upload. */
+public class JindoTwoPhaseOutputStream
+        extends MultiPartUploadTwoPhaseOutputStream<JdoObjectPart, String> {
 
-    public S3TwoPhaseOutputStream(
-            MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore,
+    public JindoTwoPhaseOutputStream(
+            MultiPartUploadStore<JdoObjectPart, String> multiPartUploadStore,
             org.apache.hadoop.fs.Path hadoopPath)
             throws IOException {
         super(multiPartUploadStore, hadoopPath);
@@ -40,7 +39,7 @@ public class S3TwoPhaseOutputStream
 
     @Override
     public Committer committer(
-            String uploadId, List<PartETag> uploadedParts, String objectName, long position) {
-        return new S3MultiPartUploadCommitter(uploadId, uploadedParts, objectName, position);
+            String uploadId, List<JdoObjectPart> uploadedParts, String objectName, long position) {
+        return new JindoMultiPartUploadCommitter(uploadId, uploadedParts, objectName, position);
     }
 }

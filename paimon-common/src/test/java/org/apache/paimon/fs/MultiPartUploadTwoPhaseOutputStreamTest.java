@@ -30,6 +30,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -66,7 +67,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
                 .isEqualTo("hello world!".getBytes(StandardCharsets.UTF_8).length);
 
         TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
-        assertThat(store.getUploadedParts()).hasSize(2);
+        assertThat(store.getUploadedParts()).hasSize(3);
         assertThat(committer.targetFilePath().toString()).isEqualTo(store.getStartedObjectName());
 
         committer.commit(fileIO);
@@ -122,11 +123,44 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         first.commit(fileIO);
     }
 
+    @Test
+    void testBigWriteSplitByThreshold() throws IOException {
+        TestMultiPartUploadTwoPhaseOutputStream stream =
+                new TestMultiPartUploadTwoPhaseOutputStream(store, objectPath, 5);
+
+        byte[] data1 = "abc".getBytes(StandardCharsets.UTF_8);
+        stream.write(data1);
+        byte[] data2 = "abcdefghij".getBytes(StandardCharsets.UTF_8);
+        stream.write(data2);
+
+        assertThat(store.getUploadedParts()).hasSize(2);
+        assertThat(store.getUploadedParts())
+                .extracting(TestPart::getPartNumber)
+                .containsExactly(1, 2);
+        assertThat(store.getUploadedParts())
+                .extracting(TestPart::getContent)
+                .containsExactly("abcab", "cdefg");
+        assertThat(stream.getPos()).isEqualTo(data1.length + data2.length);
+        stream.flush();
+        assertThat(store.getUploadedParts())
+                .extracting(TestPart::getContent)
+                .containsExactly("abcab", "cdefg", "hij");
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+        assertThat(store.getUploadedParts()).hasSize(3);
+
+        committer.commit(fileIO);
+
+        assertThat(store.getCompletedUploadId()).isEqualTo(store.getStartedUploadId());
+        assertThat(store.getCompletedObjectName()).isEqualTo(store.getStartedObjectName());
+        assertThat(store.getCompletedParts()).containsExactlyElementsOf(store.getUploadedParts());
+        assertThat(store.getCompletedBytes()).isEqualTo(stream.getPos());
+        assertThat(store.getAbortedUploadId()).isNull();
+    }
+
     /** Fake store implementation for testing. */
     private static class FakeMultiPartUploadStore
             implements MultiPartUploadStore<TestPart, String> {
 
-        private int uploadCounter = 0;
         private final List<TestPart> uploadedParts = new ArrayList<>();
         private String startedUploadId;
         private String startedObjectName;
@@ -144,7 +178,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         @Override
         public String startMultiPartUpload(String objectName) {
             this.startedObjectName = objectName;
-            this.startedUploadId = "upload-" + (++uploadCounter);
+            this.startedUploadId = UUID.randomUUID().toString();
             this.uploadedParts.clear();
             this.completedUploadId = null;
             this.completedObjectName = null;
@@ -169,7 +203,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
 
         @Override
         public TestPart uploadPart(
-                String objectName, String uploadId, int partNumber, File file, long byteLength)
+                String objectName, String uploadId, int partNumber, File file, int byteLength)
                 throws IOException {
             byte[] bytes = Files.readAllBytes(file.toPath());
             String content = new String(bytes, StandardCharsets.UTF_8);
@@ -220,10 +254,10 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
             extends MultiPartUploadTwoPhaseOutputStream<TestPart, String> {
 
         private final FakeMultiPartUploadStore store;
-        private final long threshold;
+        private final int threshold;
 
         private TestMultiPartUploadTwoPhaseOutputStream(
-                FakeMultiPartUploadStore store, org.apache.hadoop.fs.Path path, long threshold)
+                FakeMultiPartUploadStore store, org.apache.hadoop.fs.Path path, int threshold)
                 throws IOException {
             super(store, path);
             this.store = store;
@@ -231,7 +265,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         }
 
         @Override
-        public long partSizeThreshold() {
+        public int partSizeThreshold() {
             return threshold;
         }
 
@@ -257,12 +291,12 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
                 String uploadId,
                 List<TestPart> parts,
                 String objectName,
-                long byteLength) {
+                long position) {
             this.store = store;
             this.uploadId = uploadId;
             this.parts = new ArrayList<>(parts);
             this.objectName = objectName;
-            this.byteLength = byteLength;
+            this.byteLength = position;
         }
 
         @Override
@@ -307,10 +341,6 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
 
         String getContent() {
             return content;
-        }
-
-        long getByteLength() {
-            return byteLength;
         }
     }
 }

@@ -39,11 +39,6 @@ public class OssTwoPhaseOutputStream
     }
 
     @Override
-    public long partSizeThreshold() {
-        return 10L << 20;
-    }
-
-    @Override
     public Committer committer(
             String uploadId, List<PartETag> uploadedParts, String objectName, long position) {
         return new OSSMultiPartUploadCommitter(uploadId, uploadedParts, objectName, position);
