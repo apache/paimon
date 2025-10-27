@@ -25,10 +25,10 @@ under the License.
 -->
 
 # Views
-
-Paimon views are logical table definitions managed in the catalog. A view stores only the SQL query that
-produces its result set, which allows one engine to define a view and other engines to consume it
-without duplicating data. View metadata can be coordinated across engines.
+A view is a logical table that encapsulates business logic and domain-specific semantics.
+While most compute engines support views natively, each engine stores view metadata in proprietary formats, creating interoperability challenges across different platforms.
+Paimon views abstracting engine-specific query dialects and establishing unified metadata standards.
+View metadata could enable centralized view management that facilitates cross-engine sharing and reduces maintenance complexity in heterogeneous computing environments.
 
 ## Catalog support
 
@@ -65,12 +65,7 @@ FROM sales
 GROUP BY region;
 ```
 
-### Inspect view definitions
-
-- `SHOW VIEWS` lists all registered views in the current catalog.
-- `SHOW CREATE VIEW view_name` returns the canonical SQL representation of a view.
-
-### Alter view dialects via procedures
+### Alter view dialect via procedure
 
 Paimon provides the `sys.alter_view_dialect` procedure so that engines can manage multiple SQL
 representations for the same view version.
@@ -109,3 +104,4 @@ CALL sys.alter_view_dialect('view_identifier', 'drop', 'spark');
 
 - [Spark SQL DDL – Views]({{< ref "spark/sql-ddl#view" >}})
 - [REST Catalog Overview]({{< ref "concepts/rest/overview" >}})
+- [REST Catalog View API]({{< ref "concepts/rest/rest-api/#tag/view" >}})
