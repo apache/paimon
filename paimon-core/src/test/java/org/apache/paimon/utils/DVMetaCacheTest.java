@@ -102,7 +102,7 @@ public class DVMetaCacheTest {
 
     @Test
     public void testCacheEviction() {
-        DVMetaCache cache = new DVMetaCache(2);
+        DVMetaCache cache = new DVMetaCache(5);
         Path path = new Path("manifest/index-manifest-00004");
         BinaryRow partition = partition("year=2023/month=09");
 
@@ -126,16 +126,25 @@ public class DVMetaCacheTest {
         assertThat(cache.read(path, partition, 1)).isNotNull();
         assertThat(cache.read(path, partition, 2)).isNotNull();
 
-        // Add third entry, should evict first one
+        // Add third entry, should evict itself
         Map<String, DeletionFile> dvFiles3 = new HashMap<>();
         dvFiles3.put(
                 "data-g7h8i9j0-k1l2-3456-ghij-789012345678-1.parquet",
                 new DeletionFile("index-g7h8i9j0-k1l2-3456-ghij-789012345678-1", 0L, 100L, 3L));
         cache.put(path, partition, 3, dvFiles3);
 
+        // Add forth entry, should evict first one
+        Map<String, DeletionFile> dvFiles4 = new HashMap<>();
+        dvFiles4.put(
+                "data-g7h8i9j0-k1l2-311456-ghij-789012345678-1.parquet",
+                new DeletionFile("index-g117h8i9j0-k1l2-3456-ghij-789012345678-1", 0L, 100L, 3L));
+        cache.put(path, partition, 4, dvFiles4);
+
         // First entry should be evicted
         assertThat(cache.read(path, partition, 1)).isNull();
-        assertThat(cache.read(path, partition, 3)).isNotNull();
+        assertThat(cache.read(path, partition, 2)).isNotNull();
+        assertThat(cache.read(path, partition, 3)).isNull();
+        assertThat(cache.read(path, partition, 4)).isNotNull();
     }
 
     // ============================ Test utils ===================================

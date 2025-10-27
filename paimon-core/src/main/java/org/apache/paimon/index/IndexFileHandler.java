@@ -19,7 +19,6 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
@@ -27,27 +26,19 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
-import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.table.source.DeletionFile;
-import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
@@ -61,8 +52,6 @@ public class IndexFileHandler {
     private final IndexFilePathFactories pathFactories;
     private final MemorySize dvTargetFileSize;
     private final boolean dvBitmap64;
-    @Nullable private CacheMetrics cacheMetrics;
-    @Nullable private final DVMetaCache dvMetaCache;
 
     public IndexFileHandler(
             FileIO fileIO,
@@ -70,7 +59,6 @@ public class IndexFileHandler {
             IndexManifestFile indexManifestFile,
             IndexFilePathFactories pathFactories,
             MemorySize dvTargetFileSize,
-            DVMetaCache dvMetaCache,
             boolean dvBitmap64) {
         this.fileIO = fileIO;
         this.snapshotManager = snapshotManager;
@@ -78,7 +66,6 @@ public class IndexFileHandler {
         this.indexManifestFile = indexManifestFile;
         this.dvTargetFileSize = dvTargetFileSize;
         this.dvBitmap64 = dvBitmap64;
-        this.dvMetaCache = dvMetaCache;
     }
 
     public HashIndexFile hashIndex(BinaryRow partition, int bucket) {
@@ -98,140 +85,6 @@ public class IndexFileHandler {
                     "Find multiple hash index files for one bucket: " + result);
         }
         return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
-    }
-
-    public void withCacheMetrics(@Nullable CacheMetrics cacheMetrics) {
-        this.cacheMetrics = cacheMetrics;
-    }
-
-    // Construct DataFile -> DeletionFile based on IndexFileMeta
-    @Nullable
-    @VisibleForTesting
-    public Map<String, DeletionFile> extractDeletionFileByMeta(
-            BinaryRow partition, Integer bucket, IndexFileMeta fileMeta) {
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = fileMeta.dvRanges();
-        String dvFilePath = dvIndex(partition, bucket).path(fileMeta).toString();
-        if (dvRanges != null && !dvRanges.isEmpty()) {
-            Map<String, DeletionFile> result = new HashMap<>();
-            for (DeletionVectorMeta dvMeta : dvRanges.values()) {
-                result.put(
-                        dvMeta.dataFileName(),
-                        new DeletionFile(
-                                dvFilePath,
-                                dvMeta.offset(),
-                                dvMeta.length(),
-                                dvMeta.cardinality()));
-            }
-            return result;
-        }
-        return null;
-    }
-
-    // Scan DV index file of given partition buckets
-    // returns <DataFile: DeletionFile> map grouped by partition and bucket
-    public Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> scanDVIndex(
-            Snapshot snapshot, Set<Pair<BinaryRow, Integer>> partitionBuckets) {
-        if (snapshot == null || snapshot.indexManifest() == null) {
-            return Collections.emptyMap();
-        }
-        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> result = new HashMap<>();
-        // to avoid cache being frequently evicted,
-        //  currently we only read from cache when bucket number is 1
-        if (this.dvMetaCache != null && partitionBuckets.size() == 1) {
-            Pair<BinaryRow, Integer> partitionBucket = partitionBuckets.iterator().next();
-            Map<String, DeletionFile> deletionFiles =
-                    this.scanDVIndexWithCache(
-                            snapshot, partitionBucket.getLeft(), partitionBucket.getRight());
-            if (deletionFiles != null && deletionFiles.size() > 0) {
-                result.put(partitionBucket, deletionFiles);
-            }
-            return result;
-        }
-        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> partitionFileMetas =
-                scan(
-                        snapshot,
-                        DELETION_VECTORS_INDEX,
-                        partitionBuckets.stream().map(Pair::getLeft).collect(Collectors.toSet()));
-        partitionFileMetas.forEach(
-                (entry, indexFileMetas) -> {
-                    if (partitionBuckets.contains(entry)) {
-                        if (indexFileMetas != null) {
-                            indexFileMetas.forEach(
-                                    indexFileMeta -> {
-                                        Map<String, DeletionFile> dvMetas =
-                                                extractDeletionFileByMeta(
-                                                        entry.getLeft(),
-                                                        entry.getRight(),
-                                                        indexFileMeta);
-                                        if (dvMetas != null) {
-                                            result.computeIfAbsent(entry, k -> new HashMap<>())
-                                                    .putAll(dvMetas);
-                                        }
-                                    });
-                        }
-                    }
-                });
-        return result;
-    }
-
-    // Scan DV Meta Cache first, if not exist, scan DV index file, returns the exact deletion file
-    // of the specified partition/bucket
-    @VisibleForTesting
-    Map<String, DeletionFile> scanDVIndexWithCache(
-            Snapshot snapshot, BinaryRow partition, Integer bucket) {
-        // read from cache
-        String indexManifestName = snapshot.indexManifest();
-        Path indexManifestPath = this.indexManifestFile.indexManifestFilePath(indexManifestName);
-        Map<String, DeletionFile> result =
-                this.dvMetaCache.read(indexManifestPath, partition, bucket);
-        if (result != null) {
-            if (cacheMetrics != null) {
-                cacheMetrics.increaseHitObject();
-            }
-            return result;
-        }
-        if (cacheMetrics != null) {
-            cacheMetrics.increaseMissedObject();
-        }
-        // If miss, read the whole partition's deletion files
-        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> partitionFileMetas =
-                scan(
-                        snapshot,
-                        DELETION_VECTORS_INDEX,
-                        new HashSet<>(Collections.singletonList(partition)));
-        // for each bucket, extract deletion files, and fill meta cache
-        for (Map.Entry<Pair<BinaryRow, Integer>, List<IndexFileMeta>> entry :
-                partitionFileMetas.entrySet()) {
-            Pair<BinaryRow, Integer> partitionBucket = entry.getKey();
-            List<IndexFileMeta> fileMetas = entry.getValue();
-            if (entry.getValue() != null) {
-                Map<String, DeletionFile> bucketDeletionFiles = new HashMap<>();
-                fileMetas.forEach(
-                        meta -> {
-                            Map<String, DeletionFile> bucketDVMetas =
-                                    extractDeletionFileByMeta(
-                                            partitionBucket.getLeft(),
-                                            partitionBucket.getRight(),
-                                            meta);
-                            if (bucketDVMetas != null) {
-                                bucketDeletionFiles.putAll(bucketDVMetas);
-                            }
-                        });
-                // bucketDeletionFiles can be empty
-                this.dvMetaCache.put(
-                        indexManifestPath,
-                        partitionBucket.getLeft(),
-                        partitionBucket.getRight(),
-                        bucketDeletionFiles);
-                if (partitionBucket.getRight() != null
-                        && partitionBucket.getLeft() != null
-                        && partitionBucket.getRight().equals(bucket)
-                        && partitionBucket.getLeft().equals(partition)) {
-                    result = bucketDeletionFiles;
-                }
-            }
-        }
-        return result;
     }
 
     public List<IndexManifestEntry> scan(String indexType) {
@@ -315,6 +168,10 @@ public class IndexFileHandler {
             }
         }
         return result;
+    }
+
+    public Path indexManifestFilePath(String indexManifest) {
+        return indexManifestFile.indexManifestFilePath(indexManifest);
     }
 
     public Path filePath(IndexManifestEntry entry) {

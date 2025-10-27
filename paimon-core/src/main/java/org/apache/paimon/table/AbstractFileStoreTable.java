@@ -143,7 +143,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void setDVMetaCache(DVMetaCache cache) {
         this.dvmetaCache = cache;
-        store().setDVMetaCache(cache);
     }
 
     @Override
@@ -269,7 +268,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 nonPartitionFilterConsumer(),
                 store().pathFactory(),
                 name(),
-                store().newIndexFileHandler());
+                store().newIndexFileHandler(),
+                dvmetaCache);
     }
 
     @Override
