@@ -29,7 +29,7 @@ import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
-/** Base Scan implementation for {@link FormatTable}. */
+/** Base Scan implementation for [[FormatTable]]. */
 abstract class PaimonFormatTableBaseScan(
     table: FormatTable,
     requiredSchema: StructType,

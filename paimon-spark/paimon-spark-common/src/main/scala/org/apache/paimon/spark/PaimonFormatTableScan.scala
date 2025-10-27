@@ -23,7 +23,7 @@ import org.apache.paimon.table.FormatTable
 
 import org.apache.spark.sql.types.StructType
 
-/** Scan implementation for {@link FormatTable}. */
+/** Scan implementation for [[FormatTable]] */
 case class PaimonFormatTableScan(
     table: FormatTable,
     requiredSchema: StructType,

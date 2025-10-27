@@ -287,4 +287,26 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
       }
     }
   }
+
+  test("Paimon format table: show partitions") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, p1 INT, p2 STRING) USING parquet
+            |PARTITIONED BY (p1, p2)
+            |TBLPROPERTIES ('format-table.implementation'='paimon')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 1, '1')")
+      sql("INSERT INTO t VALUES (2, 1, '1')")
+      sql("INSERT INTO t VALUES (3, 2, '1')")
+      sql("INSERT INTO t VALUES (3, 2, '2')")
+
+      checkAnswer(
+        sql("SHOW PARTITIONS t"),
+        Seq(Row("p1=1/p2=1"), Row("p1=2/p2=1"), Row("p1=2/p2=2")))
+      checkAnswer(
+        sql("SHOW PARTITIONS t PARTITION (p1=2)"),
+        Seq(Row("p1=2/p2=1"), Row("p1=2/p2=2")))
+      checkAnswer(sql("SHOW PARTITIONS t PARTITION (p1=2, p2='2')"), Seq(Row("p1=2/p2=2")))
+    }
+  }
 }
