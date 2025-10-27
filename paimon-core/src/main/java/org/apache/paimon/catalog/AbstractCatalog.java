@@ -475,7 +475,8 @@ public abstract class AbstractCatalog implements Catalog {
                 this::loadTableMetadata,
                 lockFactory().orElse(null),
                 lockContext().orElse(null),
-                context);
+                context,
+                false);
     }
 
     @Override
