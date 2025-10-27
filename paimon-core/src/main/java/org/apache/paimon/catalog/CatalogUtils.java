@@ -215,7 +215,8 @@ public class CatalogUtils {
             TableMetadata.Loader metadataLoader,
             @Nullable CatalogLockFactory lockFactory,
             @Nullable CatalogLockContext lockContext,
-            @Nullable CatalogContext catalogContext)
+            @Nullable CatalogContext catalogContext,
+            boolean isRestCatalog)
             throws Catalog.TableNotExistException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
             return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), catalog);
@@ -256,9 +257,9 @@ public class CatalogUtils {
                 new CatalogEnvironment(
                         tableIdentifier,
                         metadata.uuid(),
-                        catalog.catalogLoader(),
-                        lockFactory,
-                        lockContext,
+                        isRestCatalog && metadata.isExternal() ? null : catalog.catalogLoader(),
+                        isRestCatalog ? null : lockFactory,
+                        isRestCatalog ? null : lockContext,
                         catalogContext,
                         catalog.supportsVersionManagement());
         Path path = new Path(schema.options().get(PATH.key()));

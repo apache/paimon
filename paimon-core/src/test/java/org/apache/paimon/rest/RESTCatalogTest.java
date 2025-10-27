@@ -22,6 +22,7 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
@@ -29,6 +30,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.Function;
@@ -44,6 +46,7 @@ import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
@@ -2566,6 +2569,185 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     @Test
     public void testTableUUID() {}
 
+    @Test
+    public void testCreateExternalTable(@TempDir java.nio.file.Path path) throws Exception {
+        // Create external table with specified location
+        Path externalTablePath = new Path(path.toString(), "external_table_location");
+
+        Map<String, String> options = new HashMap<>();
+        options.put("type", TableType.TABLE.toString());
+        options.put("path", externalTablePath.toString());
+
+        Schema externalTableSchema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "name", DataTypes.STRING()),
+                                new DataField(2, "age", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "External table for testing");
+
+        // Create database and external table
+        restCatalog.createDatabase("test_external_table_db", true);
+        Identifier identifier = Identifier.create("test_external_table_db", "external_test_table");
+
+        try {
+            catalog.dropTable(identifier, true);
+        } catch (Exception e) {
+            // Ignore drop errors - table might not exist
+        }
+
+        // Pre-create external table directory and schema files (simulating existing external table)
+        createExternalTableDirectory(externalTablePath, externalTableSchema);
+
+        catalog.createTable(identifier, externalTableSchema, false);
+
+        // Verify table exists
+        Table table = catalog.getTable(identifier);
+        assertThat(table).isNotNull();
+
+        // Verify table is external (path should be the specified external path)
+        FileIO fileIO = table.fileIO();
+        assertTrue(fileIO.exists(externalTablePath), "External table path should exist");
+
+        // Verify table metadata
+        assertThat(table.comment()).isEqualTo(Optional.of("External table for testing"));
+        assertThat(table.rowType().getFieldCount()).isEqualTo(3);
+        assertThat(table.rowType().getFieldNames()).containsExactly("id", "name", "age");
+
+        // Test writing data to external table
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        BatchTableCommit commit = writeBuilder.newCommit();
+
+        // Write test data
+        InternalRowSerializer serializer = InternalSerializers.create(table.rowType());
+        InternalRow row1 = GenericRow.of(100, BinaryString.fromString("Alice"), 25);
+        InternalRow row2 = GenericRow.of(200, BinaryString.fromString("Bob"), 30);
+
+        write.write(row1);
+        write.write(row2);
+        List<CommitMessage> commitMessages = write.prepareCommit();
+        commit.commit(commitMessages);
+        write.close();
+        commit.close();
+
+        // Verify data can be read from external table
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableRead read = readBuilder.newRead();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+
+        List<InternalRow> results = new ArrayList<>();
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader = read.createReader(split)) {
+                reader.forEachRemaining(results::add);
+            }
+        }
+
+        // Verify we can read data from external table (at least one row)
+        assertThat(results).isNotEmpty();
+
+        // Verify the data structure is correct
+        for (InternalRow row : results) {
+            assertThat(row.getInt(0)).isGreaterThan(0); // id should be positive
+            assertThat(row.getString(1).toString()).isNotEmpty(); // name should not be empty
+            assertThat(row.getInt(2)).isGreaterThan(0); // age should be positive
+        }
+
+        // Test snapshot reading functionality - should read from client side, not server side
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
+
+        // Verify that snapshot manager can read latest snapshot ID from file system
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        assertThat(latestSnapshotId).isNotNull();
+        assertThat(latestSnapshotId).isPositive();
+
+        // Verify that snapshot manager can read the latest snapshot from file system
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        assertThat(latestSnapshot).isNotNull();
+        assertThat(latestSnapshot.id()).isEqualTo(latestSnapshotId);
+
+        // Verify that snapshot manager can read specific snapshot from file system
+        Snapshot specificSnapshot = snapshotManager.snapshot(latestSnapshotId);
+        assertThat(specificSnapshot).isNotNull();
+        assertThat(specificSnapshot.id()).isEqualTo(latestSnapshotId);
+
+        // Verify snapshot contains our committed data
+        assertThat(latestSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+
+        // Test that external table can be listed in catalog
+        List<String> tables = catalog.listTables("test_external_table_db");
+        assertThat(tables).contains("external_test_table");
+
+        // Test that external table can be accessed again after operations
+        Table tableAgain = catalog.getTable(identifier);
+        assertThat(tableAgain).isNotNull();
+        assertThat(tableAgain.comment()).isEqualTo(Optional.of("External table for testing"));
+
+        testReadSystemTables();
+
+        // Verify external table path still exists after operations
+        assertTrue(
+                fileIO.exists(externalTablePath),
+                "External table path should still exist after operations");
+
+        // Test dropping external table - data should remain
+        catalog.dropTable(identifier, false);
+
+        // Verify external table path still exists after drop (external table behavior)
+        assertTrue(
+                fileIO.exists(externalTablePath),
+                "External table path should still exist after drop");
+
+        // Clean up
+        try {
+            fileIO.deleteQuietly(externalTablePath);
+        } catch (Exception e) {
+            // Ignore cleanup errors
+        }
+    }
+
+    private void testReadSystemTables() throws IOException, Catalog.TableNotExistException {
+        Identifier allTablesIdentifier = Identifier.create("sys", "tables");
+        Table allTablesTable = catalog.getTable(allTablesIdentifier);
+
+        if (allTablesTable != null) {
+            ReadBuilder allTablesReadBuilder = allTablesTable.newReadBuilder();
+            TableRead allTablesRead = allTablesReadBuilder.newRead();
+            List<Split> allTablesSplits = allTablesReadBuilder.newScan().plan().splits();
+
+            List<InternalRow> allTablesResults = new ArrayList<>();
+            for (Split split : allTablesSplits) {
+                try (RecordReader<InternalRow> reader = allTablesRead.createReader(split)) {
+                    reader.forEachRemaining(allTablesResults::add);
+                }
+            }
+
+            // Verify that our external table appears in ALL_TABLES
+            assertThat(allTablesResults).isNotEmpty();
+
+            // Find our external table in the results
+            boolean foundExternalTable = false;
+            for (InternalRow row : allTablesResults) {
+                String tableName = row.getString(1).toString(); // table_name column
+                String databaseName = row.getString(0).toString(); // database_name column
+                if ("external_test_table".equals(tableName)
+                        && "test_external_table_db".equals(databaseName)) {
+                    foundExternalTable = true;
+                    // Verify table properties
+                    String tableType = row.getString(2).toString(); // table_type column
+                    assertThat(tableType)
+                            .isEqualTo("table"); // External tables are still MANAGED type
+                    break;
+                }
+            }
+            assertThat(foundExternalTable).isTrue();
+        }
+    }
+
     protected void createTable(
             Identifier identifier, Map<String, String> options, List<String> partitionKeys)
             throws Exception {
@@ -2641,5 +2823,20 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
         String tokenStr = RESTApi.toJson(token);
         FileUtils.writeStringToFile(tokenFile, tokenStr);
+    }
+
+    private void createExternalTableDirectory(Path externalTablePath, Schema schema)
+            throws Exception {
+        // Create external table directory structure
+        FileIO fileIO = FileIO.get(externalTablePath, CatalogContext.create(new Options()));
+
+        // Create the external table directory
+        if (!fileIO.exists(externalTablePath)) {
+            fileIO.mkdirs(externalTablePath);
+        }
+
+        // Create schema file in the external table directory
+        SchemaManager schemaManager = new SchemaManager(fileIO, externalTablePath);
+        schemaManager.createTable(schema, true); // true indicates external table
     }
 }
