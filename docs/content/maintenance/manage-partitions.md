@@ -167,4 +167,4 @@ enable this by setting `'partition.mark-done-action.mode' = 'watermark'`.
 ### Batch Mark Done
 
 For batch mode, you can trigger partition mark done when end input by setting `'partition.end-input-to-done'='true'`,
-and all partitions written in this batch will be mark done.
+and all partitions written in this batch will be marked done.
