@@ -370,9 +370,9 @@ This section introduce all available spark procedures about paimon.
       </td>
       <td>
          -- mark single partition done<br/>
-         CALL sys.mark_partition_done(table => 'default.T', parititions => 'day=2024-07-01')<br/><br/>
+         CALL sys.mark_partition_done(table => 'default.T', partitions => 'day=2024-07-01')<br/><br/>
          -- mark multiple partitions done<br/>
-         CALL sys.mark_partition_done(table => 'default.T', parititions => 'day=2024-07-01;day=2024-07-02')
+         CALL sys.mark_partition_done(table => 'default.T', partitions => 'day=2024-07-01;day=2024-07-02')
       </td>
    </tr>
    <tr>
