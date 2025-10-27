@@ -57,7 +57,12 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         this.position = 0;
     }
 
-    public abstract int partSizeThreshold();
+    // OSS limit:  100KB ~ 5GB
+    // S3 limit:  5MiB ~ 5GiB
+    // Considering memory usage, and referencing Flink's setting of 10MiB.
+    public int partSizeThreshold() {
+        return 10 << 20;
+    }
 
     public abstract Committer committer(
             String uploadId, List<T> uploadedParts, String objectName, long position);
@@ -102,6 +107,10 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             offset += count;
             remaining -= count;
             position += count;
+            // consume buffer if it is full
+            if (buffer.size() >= partSizeThreshold()) {
+                uploadPart();
+            }
         }
     }
 
@@ -144,15 +153,18 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         File tempFile = null;
         int partNumber = uploadedParts.size() + 1;
         try {
-            byte[] data = buffer.toByteArray();
             tempFile = Files.createTempFile("multi-part-" + UUID.randomUUID(), ".tmp").toFile();
             try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-                fos.write(data);
+                buffer.writeTo(fos);
                 fos.flush();
             }
             T partETag =
                     multiPartUploadStore.uploadPart(
-                            objectName, uploadId, uploadedParts.size() + 1, tempFile, data.length);
+                            objectName,
+                            uploadId,
+                            partNumber,
+                            tempFile,
+                            checkedDownCast(tempFile.length()));
             uploadedParts.add(partETag);
             buffer.reset();
         } catch (Exception e) {
@@ -165,5 +177,14 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
                 }
             }
         }
+    }
+
+    private static int checkedDownCast(long value) {
+        int downCast = (int) value;
+        if (downCast != value) {
+            throw new IllegalArgumentException(
+                    "Cannot downcast long value " + value + " to integer.");
+        }
+        return downCast;
     }
 }

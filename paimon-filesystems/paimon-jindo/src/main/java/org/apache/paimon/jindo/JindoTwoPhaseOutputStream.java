@@ -38,11 +38,6 @@ public class JindoTwoPhaseOutputStream
     }
 
     @Override
-    public int partSizeThreshold() {
-        return 8 << 20;
-    }
-
-    @Override
     public Committer committer(
             String uploadId, List<JdoObjectPart> uploadedParts, String objectName, long position) {
         return new JindoMultiPartUploadCommitter(uploadId, uploadedParts, objectName, position);

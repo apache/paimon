@@ -55,8 +55,6 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
                 new TestMultiPartUploadTwoPhaseOutputStream(store, objectPath, 5);
 
         stream.write("hello".getBytes(StandardCharsets.UTF_8));
-        assertThat(store.getUploadedParts()).hasSize(0);
-        stream.flush();
         assertThat(store.getUploadedParts()).hasSize(1);
         assertThat(store.getUploadedParts()).extracting(TestPart::getPartNumber).containsExactly(1);
         assertThat(store.getUploadedParts())

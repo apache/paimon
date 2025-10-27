@@ -39,11 +39,6 @@ public class S3TwoPhaseOutputStream
     }
 
     @Override
-    public int partSizeThreshold() {
-        return 5 << 20;
-    }
-
-    @Override
     public Committer committer(
             String uploadId, List<PartETag> uploadedParts, String objectName, long position) {
         return new S3MultiPartUploadCommitter(uploadId, uploadedParts, objectName, position);
