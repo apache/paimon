@@ -50,7 +50,9 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
@@ -109,6 +111,9 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
                     "Initializing Postpone table {} batch write fixed buckets to {} at runtime.",
                     table.name(),
                     sinkParallelism);
+            Map<String, String> newOptions = new HashMap<>(table.options());
+            newOptions.put(BUCKET.key(), String.valueOf(sinkParallelism));
+            table = table.copy(table.schema().copy(newOptions));
             // to recreate postpone writer
             this.write.replace(table);
         }
