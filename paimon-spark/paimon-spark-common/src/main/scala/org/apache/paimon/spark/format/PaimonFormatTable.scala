@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.format
 
+import org.apache.paimon.format.csv.CsvOptions
 import org.apache.paimon.fs.TwoPhaseOutputStream
 import org.apache.paimon.spark.{BaseTable, FormatTableScanBuilder, SparkInternalRowWrapper}
 import org.apache.paimon.spark.write.BaseV2WriteBuilder
@@ -28,7 +29,7 @@ import org.apache.paimon.types.RowType
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability}
+import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability, TableCatalog}
 import org.apache.spark.sql.connector.catalog.TableCapability.{BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write._
@@ -48,6 +49,17 @@ case class PaimonFormatTable(table: FormatTable)
 
   override def capabilities(): util.Set[TableCapability] = {
     util.EnumSet.of(BATCH_READ, BATCH_WRITE, OVERWRITE_DYNAMIC, OVERWRITE_BY_FILTER)
+  }
+
+  override def properties: util.Map[String, String] = {
+    val properties = new util.HashMap[String, String](table.options())
+    if (table.comment.isPresent) {
+      properties.put(TableCatalog.PROP_COMMENT, table.comment.get)
+    }
+    if (FormatTable.Format.CSV == table.format) {
+      properties.put("sep", properties.get(CsvOptions.FIELD_DELIMITER.key()))
+    }
+    properties
   }
 
   override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
