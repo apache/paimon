@@ -49,7 +49,7 @@ public class FlinkFormatTableSink implements DynamicTableSink, SupportsPartition
 
     @Override
     public ChangelogMode getChangelogMode(ChangelogMode requestedMode) {
-        return ChangelogMode.insertOnly();
+        throw new UnsupportedOperationException("Format Table doesn't support changelog mode.");
     }
 
     @Override
@@ -67,7 +67,7 @@ public class FlinkFormatTableSink implements DynamicTableSink, SupportsPartition
 
     @Override
     public String asSummaryString() {
-        return "Paimon-FormatTable";
+        return "PaimonFormatTableSink";
     }
 
     @Override

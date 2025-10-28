@@ -99,12 +99,18 @@ public class FlinkFormatTableDataStreamSink {
             @Override
             public void close() throws Exception {
                 if (tableWrite != null) {
+                    List<CommitMessage> committers = null;
                     try {
                         // Prepare commit and commit the data
-                        List<CommitMessage> committers = tableWrite.prepareCommit();
+                        committers = tableWrite.prepareCommit();
                         if (!committers.isEmpty()) {
                             tableWrite.commit(committers);
                         }
+                    } catch (Exception e) {
+                        if (committers != null && !committers.isEmpty()) {
+                            tableWrite.discard(committers);
+                        }
+                        throw new RuntimeException(e);
                     } finally {
                         try {
                             tableWrite.close();

@@ -113,6 +113,18 @@ public class FormatTableWrite implements BatchTableWrite {
         }
     }
 
+    public void discard(List<CommitMessage> commitMessages) throws Exception {
+        for (CommitMessage commitMessage : commitMessages) {
+            if (commitMessage instanceof TwoPhaseCommitMessage) {
+                TwoPhaseCommitMessage twoPhaseCommitMessage = (TwoPhaseCommitMessage) commitMessage;
+                twoPhaseCommitMessage.getCommitter().discard(this.fileIO);
+            } else {
+                throw new RuntimeException(
+                        "Unsupported commit message type: " + commitMessage.getClass().getName());
+            }
+        }
+    }
+
     @Override
     public void close() throws Exception {
         write.close();
