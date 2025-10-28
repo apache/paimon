@@ -25,7 +25,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.cdc.debezium.utils.JdbcUrlUtils;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -50,9 +50,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** IT test for {@link TypeMapping} in MySQL CDC. */
 public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
-    @BeforeAll
-    public static void startContainers() {
-        MYSQL_CONTAINER.withSetupSQL("mysql/type_mapping_test_setup.sql");
+    @BeforeEach
+    public void startContainers() {
+        mysqlContainer.withSetupSQL("mysql/type_mapping_test_setup.sql");
         start();
     }
 

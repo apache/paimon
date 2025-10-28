@@ -24,7 +24,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -41,9 +41,9 @@ import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
 /** Test if the table list in {@link MySqlSyncDatabaseAction} is correct. */
 public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
 
-    @BeforeAll
-    public static void startContainers() {
-        MYSQL_CONTAINER.withSetupSQL("mysql/tablelist_test_setup.sql");
+    @BeforeEach
+    public void startContainers() {
+        mysqlContainer.withSetupSQL("mysql/tablelist_test_setup.sql");
         start();
     }
 
