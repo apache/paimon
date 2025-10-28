@@ -298,7 +298,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
         JobClient jobClient = runActionWithDefaultEnv(action1);
 
         waitingTables("t3");
-        jobClient.cancel();
+        jobClient.cancel().get();
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");

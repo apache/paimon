@@ -27,7 +27,7 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.flink.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 import org.apache.flink.core.execution.JobClient;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -49,9 +49,9 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     private static final String DATABASE_NAME = "paimon_sync_table";
     private static final String SCHEMA_NAME = "public";
 
-    @BeforeAll
-    public static void startContainers() {
-        POSTGRES_CONTAINER.withSetupSQL("postgres/sync_table_setup.sql");
+    @BeforeEach
+    public void startContainers() {
+        postgresContainer.withSetupSQL("postgres/sync_table_setup.sql");
         start();
     }
 
@@ -703,7 +703,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                     "INSERT INTO test_options_change VALUES (2, '2023-03-23', null)");
         }
         waitingTables(tableName);
-        jobClient.cancel();
+        jobClient.cancel().get();
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");

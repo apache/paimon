@@ -186,7 +186,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
                 syncTableActionBuilder(mongodbConfig).withTableConfig(tableConfig).build();
         JobClient jobClient = runActionWithDefaultEnv(action1);
         waitingTables(tableName);
-        jobClient.cancel();
+        jobClient.cancel().get();
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");
