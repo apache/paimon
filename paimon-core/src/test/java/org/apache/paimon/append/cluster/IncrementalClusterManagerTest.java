@@ -276,23 +276,6 @@ public class IncrementalClusterManagerTest {
         partitionLevels = incrementalClusterManager.constructLevels();
         assertThat(partitionLevels.size()).isEqualTo(1);
         assertThat(partitionLevels.get(BinaryRow.singleColumn("pt3"))).isNotEmpty();
-
-        // test specify partition and disable history partition auto clustering
-        //        SchemaChange schemaChange =
-        //
-        // SchemaChange.removeOption(CoreOptions.CLUSTERING_PARTITION_IDLE_TIME.key());
-        //        assertThatThrownBy(
-        //                        () ->
-        //                                new IncrementalClusterManager(
-        //                                        table.copy(
-        //                                                table.schemaManager()
-        //                                                        .commitChanges(
-        //                                                                Collections.singletonList(
-        //                                                                        schemaChange)))))
-        //                .isInstanceOf(IllegalArgumentException.class)
-        //                .hasMessageContaining(
-        //                        "'clustering.partition.idle-time' is required when
-        // 'clustering.history-partition.auto.enabled' is true.");
     }
 
     private FileStoreTable createTable(
