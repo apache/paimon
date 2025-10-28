@@ -149,6 +149,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private Long strictModeLastSafeSnapshot;
     private final InternalRowPartitionComputer partitionComputer;
     private final boolean rowTrackingEnabled;
+    private final boolean discardDuplicateFiles;
     private final ConflictDetection conflictDetection;
 
     private boolean ignoreEmptyCommit;
@@ -185,6 +186,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long commitMaxRetryWait,
             @Nullable Long strictModeLastSafeSnapshot,
             boolean rowTrackingEnabled,
+            boolean discardDuplicateFiles,
             ConflictDetection conflictDetection) {
         this.snapshotCommit = snapshotCommit;
         this.fileIO = fileIO;
@@ -228,6 +230,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
         this.rowTrackingEnabled = rowTrackingEnabled;
+        this.discardDuplicateFiles = discardDuplicateFiles;
         this.conflictDetection = conflictDetection;
     }
 
@@ -326,6 +329,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     conflictCheck = mustConflictCheck();
                 }
 
+                boolean discardDuplicate = discardDuplicateFiles && commitKind == CommitKind.APPEND;
+                if (discardDuplicate) {
+                    checkAppendFiles = true;
+                }
+
                 if (latestSnapshot != null && checkAppendFiles) {
                     // it is possible that some partitions only have compact changes,
                     // so we need to contain all changes
@@ -336,6 +344,20 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                             appendTableFiles,
                                             compactTableFiles,
                                             appendIndexFiles)));
+                    if (discardDuplicate) {
+                        Set<FileEntry.Identifier> baseIdentifiers =
+                                baseEntries.stream()
+                                        .map(FileEntry::identifier)
+                                        .collect(Collectors.toSet());
+                        appendTableFiles =
+                                appendTableFiles.stream()
+                                        .filter(
+                                                entry ->
+                                                        !baseIdentifiers.contains(
+                                                                entry.identifier()))
+                                        .collect(Collectors.toList());
+                        appendSimpleEntries = SimpleFileEntry.from(appendTableFiles);
+                    }
                     conflictDetection.checkNoConflictsOrFail(
                             latestSnapshot,
                             baseEntries,
@@ -1003,7 +1025,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         List<SimpleFileEntry> baseDataFiles = new ArrayList<>();
-        if (latestSnapshot != null && conflictCheck.shouldCheck(latestSnapshot.id())) {
+        boolean discardDuplicate = discardDuplicateFiles && commitKind == CommitKind.APPEND;
+        if (latestSnapshot != null
+                && (discardDuplicate || conflictCheck.shouldCheck(latestSnapshot.id()))) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
             List<BinaryRow> changedPartitions =
@@ -1020,6 +1044,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             } else {
                 baseDataFiles =
                         readAllEntriesFromChangedPartitions(latestSnapshot, changedPartitions);
+            }
+            if (discardDuplicate) {
+                Set<FileEntry.Identifier> baseIdentifiers =
+                        baseDataFiles.stream()
+                                .map(FileEntry::identifier)
+                                .collect(Collectors.toSet());
+                deltaFiles =
+                        deltaFiles.stream()
+                                .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
+                                .collect(Collectors.toList());
             }
             conflictDetection.checkNoConflictsOrFail(
                     latestSnapshot,
