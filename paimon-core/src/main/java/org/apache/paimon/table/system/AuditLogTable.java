@@ -360,6 +360,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withManifestLevelFilter(Filter<Integer> manifestLevelFilter) {
+            wrapped.withManifestLevelFilter(manifestLevelFilter);
+            return this;
+        }
+
+        @Override
         public SnapshotReader enableValueFilter() {
             wrapped.enableValueFilter();
             return this;

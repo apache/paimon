@@ -254,6 +254,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return this;
     }
 
+    public SnapshotReader withManifestLevelFilter(Filter<Integer> manifestLevelFilter) {
+        scan.withManifestLevelFilter(manifestLevelFilter);
+        return this;
+    }
+
     @Override
     public SnapshotReader enableValueFilter() {
         scan.enableValueFilter();

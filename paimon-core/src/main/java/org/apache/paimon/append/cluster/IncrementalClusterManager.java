@@ -32,6 +32,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import org.slf4j.Logger;
@@ -67,11 +68,12 @@ public class IncrementalClusterManager {
     private final IncrementalClusterStrategy incrementalClusterStrategy;
     private final CoreOptions.OrderType clusterCurve;
     private final List<String> clusterKeys;
+    @Nullable private final PartitionPredicate specifiedPartitions;
 
     @Nullable private final Duration historyPartitionIdleTime;
     private final int historyPartitionLimit;
+    @Nullable private Filter<Integer> partitionLevelFilter = null;
 
-    @Nullable private final PartitionPredicate specifiedPartitions;
     private int maxLevel;
 
     public IncrementalClusterManager(FileStoreTable table) {
@@ -89,6 +91,7 @@ public class IncrementalClusterManager {
                 "Only support incremental clustering when '%s' is true.",
                 CLUSTERING_INCREMENTAL.key());
 
+        this.maxLevel = options.numLevels();
         this.partitionComputer =
                 new InternalRowPartitionComputer(
                         table.coreOptions().partitionDefaultName(),
@@ -103,6 +106,8 @@ public class IncrementalClusterManager {
         this.historyPartitionLimit = options.clusteringHistoryPartitionLimit();
 
         if (historyPartitionIdleTime != null) {
+            // (maxLevel + 1) / 2 is used to calculate the ceiling of maxLevel divided by 2
+            partitionLevelFilter = partitionMinLevel -> partitionMinLevel < (maxLevel + 1) / 2;
             this.snapshotReader = table.newSnapshotReader().dropStats();
         } else {
             this.snapshotReader =
@@ -117,7 +122,6 @@ public class IncrementalClusterManager {
                         options.numSortedRunCompactionTrigger());
         this.clusterCurve = options.clusteringStrategy(options.clusteringColumns().size());
         this.clusterKeys = options.clusteringColumns();
-        this.maxLevel = options.numLevels();
     }
 
     public Map<BinaryRow, CompactUnit> prepareForCluster(boolean fullCompaction) {
@@ -225,7 +229,8 @@ public class IncrementalClusterManager {
         if (specifiedPartitions != null
                 && historyPartitionIdleTime != null
                 && historyPartitionLimit > 0) {
-            List<PartitionEntry> partitionEntries = snapshotReader.partitionEntries();
+            List<PartitionEntry> partitionEntries =
+                    snapshotReader.withManifestLevelFilter(partitionLevelFilter).partitionEntries();
             // sort by last file creation time, and we will pick the oldest N partitions
             partitionEntries.sort(Comparator.comparingLong(PartitionEntry::lastFileCreationTime));
             Set<BinaryRow> historyPartitions =
@@ -327,7 +332,8 @@ public class IncrementalClusterManager {
                     for (DataFileMeta file : files) {
                         partitionMinLevel = Math.min(partitionMinLevel, file.level());
                     }
-                    if (partitionMinLevel < Math.ceil((double) maxLevel / 2)) {
+                    if (partitionLevelFilter != null
+                            && partitionLevelFilter.test(partitionMinLevel)) {
                         partitions.add(partition);
                         if (partitions.size() >= historyPartitionLimit) {
                             break;
