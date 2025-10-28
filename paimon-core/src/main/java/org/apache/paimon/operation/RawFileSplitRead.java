@@ -84,6 +84,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
     @Nullable private Integer limit;
+    @Nullable private List<Long> indices;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -138,6 +139,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Override
     public SplitRead<InternalRow> withLimit(@Nullable Integer limit) {
         this.limit = limit;
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withRowIds(@Nullable List<Long> indices) {
+        this.indices = indices;
         return this;
     }
 
@@ -251,6 +258,15 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         if (fileIndexResult instanceof BitmapIndexResult) {
             selection = ((BitmapIndexResult) fileIndexResult).get();
         }
+        if (indices != null) {
+            RoaringBitmap32 selectionRowIds = readIndices(file);
+
+            if (selection == null) {
+                selection = selectionRowIds;
+            } else {
+                selection.and(selectionRowIds);
+            }
+        }
 
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(
@@ -278,5 +294,20 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             return new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
         }
         return fileRecordReader;
+    }
+
+    private RoaringBitmap32 readIndices(DataFileMeta file) {
+        RoaringBitmap32 selection = null;
+        if (indices != null && file.firstRowId() != null) {
+            selection = new RoaringBitmap32();
+            long start = file.firstRowId();
+            long end = start + file.rowCount();
+            for (long rowId : indices) {
+                if (rowId >= start && rowId < end) {
+                    selection.add((int) (rowId - start));
+                }
+            }
+        }
+        return selection;
     }
 }

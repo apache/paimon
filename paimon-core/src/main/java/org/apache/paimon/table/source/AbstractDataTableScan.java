@@ -171,6 +171,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
+    @Override
+    public InnerTableScan withRowIds(List<Long> indices) {
+        snapshotReader.withRowIds(indices);
+        return this;
+    }
+
     public CoreOptions options() {
         return options;
     }

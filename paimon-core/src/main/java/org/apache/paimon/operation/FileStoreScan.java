@@ -87,6 +87,8 @@ public interface FileStoreScan {
 
     FileStoreScan keepStats();
 
+    FileStoreScan withRowIds(List<Long> indices);
+
     @Nullable
     Integer parallelism();
 

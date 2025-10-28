@@ -33,6 +33,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
+import java.util.List;
 
 import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
 
@@ -52,6 +53,11 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
     public void applyReadType(RowType readType) {
         fullPhaseMergeRead.withReadType(readType);
         incrementalDiffRead.withReadType(readType);
+    }
+
+    @Override
+    public void applyRowIds(List<Long> indices) {
+        throw new UnsupportedOperationException("Does not support row ids.");
     }
 
     @Override

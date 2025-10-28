@@ -47,6 +47,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
@@ -78,6 +79,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final Function<Long, TableSchema> schemaFetcher;
+    @Nullable private List<Long> indices;
 
     protected RowType readRowType;
 
@@ -119,6 +121,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     public SplitRead<InternalRow> withFilter(@Nullable Predicate predicate) {
         // TODO: Support File index push down (all conditions) and Predicate push down (only if no
         // column merge)
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withRowIds(@Nullable List<Long> indices) {
+        this.indices = indices;
         return this;
     }
 
@@ -311,9 +319,10 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
         List<ReaderSupplier<InternalRow>> readerSuppliers = new ArrayList<>();
         for (DataFileMeta file : bunch.files()) {
+            RoaringBitmap32 selection = readIndices(file);
             FormatReaderContext formatReaderContext =
                     new FormatReaderContext(
-                            fileIO, dataFilePathFactory.toPath(file), file.fileSize(), null);
+                            fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);
             readerSuppliers.add(
                     () ->
                             new DataFileRecordReader(
@@ -338,9 +347,10 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             FormatReaderMapping formatReaderMapping)
             throws IOException {
+        RoaringBitmap32 selection = readIndices(file);
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(
-                        fileIO, dataFilePathFactory.toPath(file), file.fileSize(), null);
+                        fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);
         return new DataFileRecordReader(
                 schema.logicalRowType(),
                 formatReaderMapping.getReaderFactory(),
@@ -352,6 +362,21 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 file.firstRowId(),
                 file.maxSequenceNumber(),
                 formatReaderMapping.getSystemFields());
+    }
+
+    private RoaringBitmap32 readIndices(DataFileMeta file) {
+        RoaringBitmap32 selection = null;
+        if (indices != null && file.firstRowId() != null) {
+            selection = new RoaringBitmap32();
+            long start = file.firstRowId();
+            long end = start + file.rowCount();
+            for (long rowId : indices) {
+                if (rowId >= start && rowId < end) {
+                    selection.add((int) (rowId - start));
+                }
+            }
+        }
+        return selection;
     }
 
     @VisibleForTesting

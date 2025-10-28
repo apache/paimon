@@ -35,6 +35,8 @@ import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -44,6 +46,7 @@ import java.util.stream.Collectors;
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     private boolean dropStats = false;
+    @Nullable private List<Long> indices;
 
     public DataEvolutionFileStoreScan(
             ManifestsReader manifestsReader,
@@ -78,6 +81,12 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     public DataEvolutionFileStoreScan withFilter(Predicate predicate) {
         this.inputFilter = predicate;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withRowIds(List<Long> indices) {
+        this.indices = indices;
         return this;
     }
 
@@ -171,6 +180,28 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
-        return true;
+        // If indices is null, all entries should be kept
+        if (this.indices == null) {
+            return true;
+        }
+
+        // If entry.firstRowId does not exist, keep the entry
+        Long firstRowId = entry.file().firstRowId();
+        if (firstRowId == null) {
+            return true;
+        }
+
+        // Check if any value in indices is in the range [firstRowId, firstRowId + rowCount)
+        long rowCount = entry.file().rowCount();
+        long endRowId = firstRowId + rowCount;
+
+        for (Long index : this.indices) {
+            if (index >= firstRowId && index < endRowId) {
+                return true;
+            }
+        }
+
+        // No matching indices found, skip this entry
+        return false;
     }
 }

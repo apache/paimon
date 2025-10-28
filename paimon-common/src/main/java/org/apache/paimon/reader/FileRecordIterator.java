@@ -20,10 +20,12 @@ package org.apache.paimon.reader;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.function.Function;
 
 /**
@@ -97,6 +99,55 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
                     }
                     if (filter.test(next)) {
                         return next;
+                    }
+                }
+            }
+
+            @Override
+            public void releaseBatch() {
+                thisIterator.releaseBatch();
+            }
+        };
+    }
+
+    default FileRecordIterator<T> selection(RoaringBitmap32 selection) {
+        FileRecordIterator<T> thisIterator = this;
+        final Iterator<Integer> selects = selection.iterator();
+        return new FileRecordIterator<T>() {
+            private long nextExpected = selects.hasNext() ? selects.next() : -1;
+
+            @Override
+            public long returnedPosition() {
+                return thisIterator.returnedPosition();
+            }
+
+            @Override
+            public Path filePath() {
+                return thisIterator.filePath();
+            }
+
+            @Nullable
+            @Override
+            public T next() throws IOException {
+                if (nextExpected == -1) {
+                    return null;
+                }
+                while (true) {
+                    T next = thisIterator.next();
+                    if (next == null) {
+                        return null;
+                    }
+                    if (nextExpected == returnedPosition()) {
+                        nextExpected = selects.hasNext() ? selects.next() : -1;
+                        return next;
+                    }
+                    if (nextExpected < returnedPosition()) {
+                        throw new IllegalStateException(
+                                "The next expected position "
+                                        + nextExpected
+                                        + " is smaller than current position "
+                                        + returnedPosition()
+                                        + ", this should not happen.");
                     }
                 }
             }

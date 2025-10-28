@@ -27,6 +27,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Optional;
 
 /** A {@link InnerTableRead} for data table. */
@@ -42,6 +43,8 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     }
 
     public abstract void applyReadType(RowType readType);
+
+    public abstract void applyRowIds(List<Long> indices);
 
     public abstract RecordReader<InternalRow> reader(Split split) throws IOException;
 
@@ -76,6 +79,12 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     public final InnerTableRead withReadType(RowType readType) {
         this.readType = readType;
         applyReadType(readType);
+        return this;
+    }
+
+    @Override
+    public InnerTableRead withRowIds(List<Long> indices) {
+        applyRowIds(indices);
         return this;
     }
 

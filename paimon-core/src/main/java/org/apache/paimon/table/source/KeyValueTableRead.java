@@ -105,6 +105,11 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     }
 
     @Override
+    public void applyRowIds(List<Long> indices) {
+        throw new UnsupportedOperationException("Does not support row ids.");
+    }
+
+    @Override
     public InnerTableRead forceKeepDelete() {
         initialized().forEach(SplitRead::forceKeepDelete);
         this.forceKeepDelete = true;

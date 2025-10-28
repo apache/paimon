@@ -221,6 +221,11 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withRowIds(List<Long> indices) {
+        throw new UnsupportedOperationException("Format Table does not support withRowIds.");
+    }
+
+    @Override
     public StreamTableScan newStreamScan() {
         throw new UnsupportedOperationException("Format Table does not support stream scan.");
     }
