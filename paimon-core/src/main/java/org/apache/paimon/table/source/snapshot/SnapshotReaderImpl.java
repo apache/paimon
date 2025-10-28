@@ -47,6 +47,7 @@ import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
@@ -251,6 +252,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withLevelFilter(Filter<Integer> levelFilter) {
         scan.withLevelFilter(levelFilter);
+        return this;
+    }
+
+    public SnapshotReader withManifestLevelFilter(BiFilter<Integer, Integer> manifestLevelFilter) {
+        scan.withManifestLevelFilter(manifestLevelFilter);
         return this;
     }
 

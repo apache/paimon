@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -41,8 +43,11 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -362,6 +367,158 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testClusterHistoryPartition() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_IDLE_TIME.key(), "3s");
+        FileStoreTable table = createTable("pt", 1, options);
+
+        BinaryString randomStr = BinaryString.fromString(randomString(150));
+        List<CommitMessage> messages = new ArrayList<>();
+
+        // first write
+        List<String> expected1 = new ArrayList<>();
+        for (int pt = 0; pt < 4; pt++) {
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    messages.addAll(write(GenericRow.of(i, j, randomStr, pt)));
+                    expected1.add(String.format("+I[%s, %s, %s]", i, j, pt));
+                }
+            }
+        }
+        commit(messages);
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0, 1, 3});
+        List<String> result1 =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        readBuilder.readType());
+        assertThat(result1).containsExactlyElementsOf(expected1);
+
+        // first cluster, files in four partitions will be in top level
+        runAction(Collections.emptyList());
+        checkSnapshot(table);
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThat(splits.size()).isEqualTo(4);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(1);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
+        List<String> result2 = getResult(readBuilder.newRead(), splits, readBuilder.readType());
+        List<String> expected2 = new ArrayList<>();
+        for (int pt = 0; pt < 4; pt++) {
+            expected2.add(String.format("+I[0, 0, %s]", pt));
+            expected2.add(String.format("+I[0, 1, %s]", pt));
+            expected2.add(String.format("+I[1, 0, %s]", pt));
+            expected2.add(String.format("+I[1, 1, %s]", pt));
+            expected2.add(String.format("+I[0, 2, %s]", pt));
+            expected2.add(String.format("+I[1, 2, %s]", pt));
+            expected2.add(String.format("+I[2, 0, %s]", pt));
+            expected2.add(String.format("+I[2, 1, %s]", pt));
+            expected2.add(String.format("+I[2, 2, %s]", pt));
+        }
+        assertThat(result2).containsExactlyElementsOf(expected2);
+
+        // second write
+        messages.clear();
+        for (int pt = 0; pt < 4; pt++) {
+            messages.addAll(
+                    write(
+                            GenericRow.of(0, 3, null, pt),
+                            GenericRow.of(1, 3, null, pt),
+                            GenericRow.of(2, 3, null, pt)));
+            messages.addAll(
+                    write(
+                            GenericRow.of(3, 0, null, pt),
+                            GenericRow.of(3, 1, null, pt),
+                            GenericRow.of(3, 2, null, pt),
+                            GenericRow.of(3, 3, null, pt)));
+            // pt-0, pt-1 will be history partition
+            if (pt == 1) {
+                Thread.sleep(3000);
+            }
+        }
+        commit(messages);
+
+        List<String> result3 =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        readBuilder.readType());
+        List<String> expected3 = new ArrayList<>();
+        for (int pt = 0; pt < 4; pt++) {
+            expected3.addAll(expected2.subList(9 * pt, 9 * pt + 9));
+            expected3.add(String.format("+I[0, 3, %s]", pt));
+            expected3.add(String.format("+I[1, 3, %s]", pt));
+            expected3.add(String.format("+I[2, 3, %s]", pt));
+            expected3.add(String.format("+I[3, 0, %s]", pt));
+            expected3.add(String.format("+I[3, 1, %s]", pt));
+            expected3.add(String.format("+I[3, 2, %s]", pt));
+            expected3.add(String.format("+I[3, 3, %s]", pt));
+        }
+        assertThat(result3).containsExactlyElementsOf(expected3);
+
+        // second cluster
+        runAction(Lists.newArrayList("--partition", "pt=3"));
+        checkSnapshot(table);
+        splits = readBuilder.newScan().plan().splits();
+        List<String> result4 = getResult(readBuilder.newRead(), splits, readBuilder.readType());
+        List<String> expected4 = new ArrayList<>();
+        assertThat(splits.size()).isEqualTo(4);
+        // for pt-0 and pt-1: history partition, full clustering, all files will be
+        // picked for clustering, outputLevel is 5.
+        for (int pt = 0; pt <= 1; pt++) {
+            expected4.add(String.format("+I[0, 0, %s]", pt));
+            expected4.add(String.format("+I[0, 1, %s]", pt));
+            expected4.add(String.format("+I[1, 0, %s]", pt));
+            expected4.add(String.format("+I[1, 1, %s]", pt));
+            expected4.add(String.format("+I[0, 2, %s]", pt));
+            expected4.add(String.format("+I[0, 3, %s]", pt));
+            expected4.add(String.format("+I[1, 2, %s]", pt));
+            expected4.add(String.format("+I[1, 3, %s]", pt));
+            expected4.add(String.format("+I[2, 0, %s]", pt));
+            expected4.add(String.format("+I[2, 1, %s]", pt));
+            expected4.add(String.format("+I[3, 0, %s]", pt));
+            expected4.add(String.format("+I[3, 1, %s]", pt));
+            expected4.add(String.format("+I[2, 2, %s]", pt));
+            expected4.add(String.format("+I[2, 3, %s]", pt));
+            expected4.add(String.format("+I[3, 2, %s]", pt));
+            expected4.add(String.format("+I[3, 3, %s]", pt));
+            // the table has enabled 'scan.plan-sort-partition', so the splits has been sorted by
+            // partition
+            assertThat(((DataSplit) splits.get(pt)).dataFiles().size()).isEqualTo(1);
+            assertThat(((DataSplit) splits.get(pt)).dataFiles().get(0).level()).isEqualTo(5);
+        }
+        // for pt-2, non history partition, nor specified partition, nothing happened
+        expected4.addAll(expected3.subList(32, 48));
+        assertThat(((DataSplit) splits.get(2)).dataFiles().size()).isEqualTo(3);
+        // for pt-3: minor clustering, only file in level-0 will be picked for clustering,
+        // outputLevel is 4
+        expected4.add("+I[0, 0, 3]");
+        expected4.add("+I[0, 1, 3]");
+        expected4.add("+I[1, 0, 3]");
+        expected4.add("+I[1, 1, 3]");
+        expected4.add("+I[0, 2, 3]");
+        expected4.add("+I[1, 2, 3]");
+        expected4.add("+I[2, 0, 3]");
+        expected4.add("+I[2, 1, 3]");
+        expected4.add("+I[2, 2, 3]");
+        expected4.add("+I[0, 3, 3]");
+        expected4.add("+I[1, 3, 3]");
+        expected4.add("+I[3, 0, 3]");
+        expected4.add("+I[3, 1, 3]");
+        expected4.add("+I[2, 3, 3]");
+        expected4.add("+I[3, 2, 3]");
+        expected4.add("+I[3, 3, 3]");
+        assertThat(((DataSplit) splits.get(3)).dataFiles().size()).isEqualTo(2);
+        assertThat(
+                        ((DataSplit) splits.get(3))
+                                .dataFiles().stream()
+                                        .map(DataFileMeta::level)
+                                        .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(4, 5);
+
+        assertThat(result4).containsExactlyElementsOf(expected4);
+    }
+
+    @Test
     public void testClusterOnEmptyData() throws Exception {
         createTable("pt", 1);
         assertThatCode(() -> runAction(Collections.emptyList())).doesNotThrowAnyException();
@@ -410,8 +567,14 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
 
     protected FileStoreTable createTable(String partitionKeys, int sinkParallelism)
             throws Exception {
+        return createTable(partitionKeys, sinkParallelism, Collections.emptyMap());
+    }
+
+    protected FileStoreTable createTable(
+            String partitionKeys, int sinkParallelism, Map<String, String> options)
+            throws Exception {
         catalog.createDatabase(database, true);
-        catalog.createTable(identifier(), schema(partitionKeys, sinkParallelism), true);
+        catalog.createTable(identifier(), schema(partitionKeys, sinkParallelism, options), true);
         return (FileStoreTable) catalog.getTable(identifier());
     }
 
@@ -440,6 +603,11 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
     }
 
     private static Schema schema(String partitionKeys, int sinkParallelism) {
+        return schema(partitionKeys, sinkParallelism, Collections.emptyMap());
+    }
+
+    private static Schema schema(
+            String partitionKeys, int sinkParallelism, Map<String, String> options) {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("a", DataTypes.INT());
         schemaBuilder.column("b", DataTypes.INT());
@@ -454,6 +622,9 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         schemaBuilder.option("clustering.incremental", "true");
         schemaBuilder.option("scan.parallelism", "1");
         schemaBuilder.option("sink.parallelism", String.valueOf(sinkParallelism));
+        for (String key : options.keySet()) {
+            schemaBuilder.option(key, options.get(key));
+        }
         if (!StringUtils.isNullOrWhitespaceOnly(partitionKeys)) {
             schemaBuilder.partitionKeys(partitionKeys);
         }

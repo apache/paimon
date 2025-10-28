@@ -19,18 +19,27 @@
 package org.apache.paimon.append.cluster;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.compact.CompactUnit;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.mergetree.LevelSortedRun;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -143,7 +152,7 @@ public class IncrementalClusterManagerTest {
         // Test upgrading to level 3
         int outputLevel = 3;
         List<DataFileMeta> upgradedFiles =
-                incrementalClusterManager.upgrade(filesAfterCluster, outputLevel);
+                IncrementalClusterManager.upgrade(filesAfterCluster, outputLevel);
 
         // Verify the results
         assertThat(upgradedFiles).hasSize(3);
@@ -154,7 +163,67 @@ public class IncrementalClusterManagerTest {
         }
     }
 
-    private FileStoreTable createTable(
+    @Test
+    public void testHistoryPartitionAutoClustering() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_IDLE_TIME.key(), "2s");
+        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_LIMIT.key(), "1");
+
+        FileStoreTable table = createTable(options, Collections.singletonList("f2"));
+        writeOnce(
+                table,
+                GenericRow.of(
+                        1, 1, BinaryString.fromString("pt1"), BinaryString.fromString("test")));
+        writeOnce(
+                table,
+                GenericRow.of(
+                        1, 1, BinaryString.fromString("pt2"), BinaryString.fromString("test")));
+
+        Thread.sleep(2000);
+        writeOnce(
+                table,
+                GenericRow.of(
+                        1, 1, BinaryString.fromString("pt3"), BinaryString.fromString("test")));
+        writeOnce(
+                table,
+                GenericRow.of(
+                        1, 1, BinaryString.fromString("pt4"), BinaryString.fromString("test")));
+
+        // test specify partition and enable history partition auto clustering
+        IncrementalClusterManager incrementalClusterManager =
+                new IncrementalClusterManager(
+                        table,
+                        PartitionPredicate.fromMultiple(
+                                RowType.of(DataTypes.INT()),
+                                Lists.newArrayList(BinaryRow.singleColumn("pt3"))));
+        Map<BinaryRow, CompactUnit> partitionLevels =
+                incrementalClusterManager.prepareForCluster(true);
+        assertThat(partitionLevels.size()).isEqualTo(2);
+        assertThat(partitionLevels.get(BinaryRow.singleColumn("pt1"))).isNotNull();
+        assertThat(partitionLevels.get(BinaryRow.singleColumn("pt3"))).isNotNull();
+
+        // test don't specify partition and enable history partition auto clustering
+        incrementalClusterManager = new IncrementalClusterManager(table);
+        partitionLevels = incrementalClusterManager.prepareForCluster(true);
+        assertThat(partitionLevels.size()).isEqualTo(4);
+
+        // test specify partition and disable history partition auto clustering
+        SchemaChange schemaChange =
+                SchemaChange.removeOption(CoreOptions.CLUSTERING_HISTORY_PARTITION_IDLE_TIME.key());
+        incrementalClusterManager =
+                new IncrementalClusterManager(
+                        table.copy(
+                                table.schemaManager()
+                                        .commitChanges(Collections.singletonList(schemaChange))),
+                        PartitionPredicate.fromMultiple(
+                                RowType.of(DataTypes.INT()),
+                                Lists.newArrayList(BinaryRow.singleColumn("pt3"))));
+        partitionLevels = incrementalClusterManager.prepareForCluster(true);
+        assertThat(partitionLevels.size()).isEqualTo(1);
+        assertThat(partitionLevels.get(BinaryRow.singleColumn("pt3"))).isNotNull();
+    }
+
+    protected FileStoreTable createTable(
             Map<String, String> customOptions, List<String> partitionKeys) throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "-1");
@@ -183,7 +252,20 @@ public class IncrementalClusterManagerTest {
                 schemaManager.createTable(schema));
     }
 
-    private static DataFileMeta createFile(long size, long schemaId, int level) {
+    protected static void writeOnce(FileStoreTable table, GenericRow... rows) {
+        String commitUser = "test_user";
+        try (BatchTableWrite write = table.newWrite(commitUser);
+                BatchTableCommit commit = table.newCommit(commitUser)) {
+            for (GenericRow row : rows) {
+                write.write(row);
+            }
+            commit.commit(write.prepareCommit());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    protected static DataFileMeta createFile(long size, long schemaId, int level) {
         return DataFileMeta.create(
                 "",
                 size,

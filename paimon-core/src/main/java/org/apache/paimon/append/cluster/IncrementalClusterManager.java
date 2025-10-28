@@ -30,6 +30,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,12 +52,15 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class IncrementalClusterManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(IncrementalClusterManager.class);
+    private final InternalRowPartitionComputer partitionComputer;
 
     private final SnapshotReader snapshotReader;
 
     private final IncrementalClusterStrategy incrementalClusterStrategy;
     private final CoreOptions.OrderType clusterCurve;
     private final List<String> clusterKeys;
+
+    private final HistoryPartitionCluster historyPartitionCluster;
 
     private int maxLevel;
 
@@ -69,14 +73,20 @@ public class IncrementalClusterManager {
         checkArgument(
                 table.bucketMode() == BucketMode.BUCKET_UNAWARE,
                 "only append unaware-bucket table support incremental clustering.");
-        // drop stats to reduce memory usage
-        this.snapshotReader =
-                table.newSnapshotReader().withPartitionFilter(specifiedPartitions).dropStats();
         CoreOptions options = table.coreOptions();
         checkArgument(
                 options.clusteringIncrementalEnabled(),
                 "Only support incremental clustering when '%s' is true.",
                 CLUSTERING_INCREMENTAL.key());
+        this.maxLevel = options.numLevels();
+        this.partitionComputer =
+                new InternalRowPartitionComputer(
+                        table.coreOptions().partitionDefaultName(),
+                        table.store().partitionType(),
+                        table.partitionKeys().toArray(new String[0]),
+                        table.coreOptions().legacyPartitionName());
+        this.snapshotReader =
+                table.newSnapshotReader().dropStats().withPartitionFilter(specifiedPartitions);
         this.incrementalClusterStrategy =
                 new IncrementalClusterStrategy(
                         table.schemaManager(),
@@ -86,31 +96,22 @@ public class IncrementalClusterManager {
                         options.numSortedRunCompactionTrigger());
         this.clusterCurve = options.clusteringStrategy(options.clusteringColumns().size());
         this.clusterKeys = options.clusteringColumns();
-        this.maxLevel = options.numLevels();
+
+        this.historyPartitionCluster =
+                new HistoryPartitionCluster(
+                        table,
+                        incrementalClusterStrategy,
+                        partitionComputer,
+                        maxLevel,
+                        options.clusteringHistoryPartitionLimit(),
+                        specifiedPartitions,
+                        options.clusteringHistoryPartitionIdleTime());
     }
 
     public Map<BinaryRow, CompactUnit> prepareForCluster(boolean fullCompaction) {
         // 1. construct LSM structure for each partition
         Map<BinaryRow, List<LevelSortedRun>> partitionLevels = constructLevels();
-        if (LOG.isDebugEnabled()) {
-            partitionLevels.forEach(
-                    (partition, levelSortedRuns) -> {
-                        String runsInfo =
-                                levelSortedRuns.stream()
-                                        .map(
-                                                lsr ->
-                                                        String.format(
-                                                                "level-%s:%s",
-                                                                lsr.level(),
-                                                                lsr.run().files().size()))
-                                        .collect(Collectors.joining(","));
-                        LOG.debug(
-                                "Partition {} has {} runs: [{}]",
-                                partition,
-                                levelSortedRuns.size(),
-                                runsInfo);
-                    });
-        }
+        logForPartitionLevel(partitionLevels, partitionComputer);
 
         // 2. pick files to be clustered for each partition
         Map<BinaryRow, Optional<CompactUnit>> units =
@@ -123,6 +124,10 @@ public class IncrementalClusterManager {
                                                         maxLevel,
                                                         entry.getValue(),
                                                         fullCompaction)));
+
+        Map<BinaryRow, Optional<CompactUnit>> historyUnits =
+                historyPartitionCluster.pickForHistoryPartitions();
+        units.putAll(historyUnits);
 
         // 3. filter out empty units
         Map<BinaryRow, CompactUnit> filteredUnits =
@@ -146,7 +151,7 @@ public class IncrementalClusterManager {
                                         .collect(Collectors.joining(", "));
                         LOG.debug(
                                 "Partition {}, outputLevel:{}, clustered with {} files: [{}]",
-                                partition,
+                                partitionComputer.generatePartValues(partition),
                                 compactUnit.outputLevel(),
                                 compactUnit.files().size(),
                                 filesInfo);
@@ -169,13 +174,7 @@ public class IncrementalClusterManager {
                                 + 1);
         checkArgument(maxLevel > 1, "Number of levels must be at least 2.");
 
-        Map<BinaryRow, List<DataFileMeta>> partitionFiles = new HashMap<>();
-        for (DataSplit dataSplit : dataSplits) {
-            partitionFiles
-                    .computeIfAbsent(dataSplit.partition(), k -> new ArrayList<>())
-                    .addAll(dataSplit.dataFiles());
-        }
-
+        Map<BinaryRow, List<DataFileMeta>> partitionFiles = getPartitionFiles(dataSplits);
         return partitionFiles.entrySet().stream()
                 .collect(
                         Collectors.toMap(
@@ -183,7 +182,7 @@ public class IncrementalClusterManager {
                                 entry -> constructPartitionLevels(entry.getValue())));
     }
 
-    public List<LevelSortedRun> constructPartitionLevels(List<DataFileMeta> partitionFiles) {
+    public static List<LevelSortedRun> constructPartitionLevels(List<DataFileMeta> partitionFiles) {
         List<LevelSortedRun> partitionLevels = new ArrayList<>();
         Map<Integer, List<DataFileMeta>> levelMap =
                 partitionFiles.stream().collect(Collectors.groupingBy(DataFileMeta::level));
@@ -207,6 +206,16 @@ public class IncrementalClusterManager {
         // sort by level
         partitionLevels.sort(Comparator.comparing(LevelSortedRun::level));
         return partitionLevels;
+    }
+
+    private Map<BinaryRow, List<DataFileMeta>> getPartitionFiles(List<DataSplit> dataSplits) {
+        Map<BinaryRow, List<DataFileMeta>> partitionFiles = new HashMap<>();
+        for (DataSplit dataSplit : dataSplits) {
+            partitionFiles
+                    .computeIfAbsent(dataSplit.partition(), k -> new ArrayList<>())
+                    .addAll(dataSplit.dataFiles());
+        }
+        return partitionFiles;
     }
 
     public List<DataSplit> toSplits(BinaryRow partition, List<DataFileMeta> files) {
@@ -242,11 +251,39 @@ public class IncrementalClusterManager {
                 .collect(Collectors.toList());
     }
 
+    public static void logForPartitionLevel(
+            Map<BinaryRow, List<LevelSortedRun>> partitionLevels,
+            InternalRowPartitionComputer partitionComputer) {
+        if (LOG.isDebugEnabled()) {
+            partitionLevels.forEach(
+                    (partition, levelSortedRuns) -> {
+                        String runsInfo =
+                                levelSortedRuns.stream()
+                                        .map(
+                                                lsr ->
+                                                        String.format(
+                                                                "level-%s:%s",
+                                                                lsr.level(),
+                                                                lsr.run().files().size()))
+                                        .collect(Collectors.joining(","));
+                        LOG.debug(
+                                "Partition {} has {} runs: [{}]",
+                                partitionComputer.generatePartValues(partition),
+                                levelSortedRuns.size(),
+                                runsInfo);
+                    });
+        }
+    }
+
     public CoreOptions.OrderType clusterCurve() {
         return clusterCurve;
     }
 
     public List<String> clusterKeys() {
         return clusterKeys;
+    }
+
+    public HistoryPartitionCluster historyPartitionCluster() {
+        return historyPartitionCluster;
     }
 }
