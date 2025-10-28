@@ -198,7 +198,7 @@ public abstract class AbstractFlinkTableFactory
                 (key, newValue) -> {
                     String oldValue = origin.getOptions().get(key);
                     if (!Objects.equals(oldValue, newValue)) {
-                        SchemaManager.checkAlterTableOption(key, oldValue, newValue, true);
+                        SchemaManager.checkAlterTableOption(key, oldValue, newValue);
                     }
                 });
         Map<String, String> newOptions = new HashMap<>();
