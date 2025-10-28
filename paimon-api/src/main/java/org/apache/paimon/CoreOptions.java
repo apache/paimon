@@ -1998,7 +1998,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<FormatTableImplementation> FORMAT_TABLE_IMPLEMENTATION =
             key("format-table.implementation")
                     .enumType(FormatTableImplementation.class)
-                    .defaultValue(FormatTableImplementation.ENGINE)
+                    .defaultValue(FormatTableImplementation.PAIMON)
                     .withDescription("Format table uses paimon or engine.");
 
     public static final ConfigOption<Boolean> FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH =
