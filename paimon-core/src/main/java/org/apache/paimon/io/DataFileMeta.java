@@ -31,6 +31,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
@@ -331,5 +332,20 @@ public interface DataFileMeta {
                 .map(DataFileMeta::maxSequenceNumber)
                 .max(Long::compare)
                 .orElse(-1L);
+    }
+
+    static RoaringBitmap32 readIndices(List<Long> indices, DataFileMeta file) {
+        RoaringBitmap32 selection = null;
+        if (indices != null && file.firstRowId() != null) {
+            selection = new RoaringBitmap32();
+            long start = file.firstRowId();
+            long end = start + file.rowCount();
+            for (long rowId : indices) {
+                if (rowId >= start && rowId < end) {
+                    selection.add((int) (rowId - start));
+                }
+            }
+        }
+        return selection;
     }
 }
