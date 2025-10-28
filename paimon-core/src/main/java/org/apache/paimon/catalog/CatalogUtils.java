@@ -196,6 +196,28 @@ public class CatalogUtils {
         return partitions;
     }
 
+    public static Table loadTable(
+            Catalog catalog,
+            Identifier identifier,
+            Function<Path, FileIO> internalFileIO,
+            Function<Path, FileIO> externalFileIO,
+            TableMetadata.Loader metadataLoader,
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext,
+            @Nullable CatalogContext catalogContext)
+            throws Catalog.TableNotExistException {
+        return loadTable(
+                catalog,
+                identifier,
+                internalFileIO,
+                externalFileIO,
+                metadataLoader,
+                lockFactory,
+                lockContext,
+                catalogContext,
+                false);
+    }
+
     /**
      * Load table from {@link Catalog}, this table can be:
      *
