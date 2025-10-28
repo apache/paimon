@@ -16,17 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.rest;
 
-import org.apache.paimon.predicate.Predicate
-import org.apache.paimon.table.FormatTable
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.FileSystemCatalog;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 
-import org.apache.spark.sql.types.StructType
+/**
+ * A FileSystemCatalog that supports custom table paths for REST catalog server. This allows REST
+ * catalog to create external tables with specified paths.
+ */
+public class RESTFileSystemCatalog extends FileSystemCatalog {
 
-/** Scan implementation for [[FormatTable]] */
-case class PaimonFormatTableScan(
-    table: FormatTable,
-    requiredSchema: StructType,
-    filters: Seq[Predicate],
-    override val pushDownLimit: Option[Int])
-  extends PaimonFormatTableBaseScan(table, requiredSchema, filters, pushDownLimit) {}
+    public RESTFileSystemCatalog(FileIO fileIO, Path warehouse, CatalogContext context) {
+        super(fileIO, warehouse, context);
+    }
+
+    @Override
+    protected boolean allowCustomTablePath() {
+        return true;
+    }
+}

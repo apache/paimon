@@ -18,15 +18,35 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.predicate.Predicate
-import org.apache.paimon.table.FormatTable
+import org.apache.paimon.table.Table
+import org.apache.paimon.utils.StringUtils
 
+import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.types.StructType
 
-/** Scan implementation for [[FormatTable]] */
-case class PaimonFormatTableScan(
-    table: FormatTable,
-    requiredSchema: StructType,
-    filters: Seq[Predicate],
-    override val pushDownLimit: Option[Int])
-  extends PaimonFormatTableBaseScan(table, requiredSchema, filters, pushDownLimit) {}
+import java.util.{Map => JMap}
+
+import scala.collection.JavaConverters._
+
+abstract class BaseTable
+  extends org.apache.spark.sql.connector.catalog.Table
+  with PaimonPartitionManagement {
+
+  val table: Table
+
+  override def name: String = table.fullName
+
+  override lazy val schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType)
+
+  override def partitioning: Array[Transform] = {
+    table.partitionKeys().asScala.map(p => Expressions.identity(StringUtils.quote(p))).toArray
+  }
+
+  override def properties: JMap[String, String] = {
+    table.options()
+  }
+
+  override def toString: String = {
+    s"${table.getClass.getSimpleName}[${table.fullName()}]"
+  }
+}
