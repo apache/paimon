@@ -36,7 +36,6 @@ import org.apache.paimon.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
 import org.apache.paimon.schema.SchemaChange.UpdateComment;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -298,10 +297,7 @@ public class SchemaManager implements Serializable {
                 SetOption setOption = (SetOption) change;
                 if (hasSnapshots.get()) {
                     checkAlterTableOption(
-                            setOption.key(),
-                            oldOptions.get(setOption.key()),
-                            setOption.value(),
-                            false);
+                            setOption.key(), oldOptions.get(setOption.key()), setOption.value());
                 }
                 newOptions.put(setOption.key(), setOption.value());
             } else if (change instanceof RemoveOption) {
@@ -1076,7 +1072,7 @@ public class SchemaManager implements Serializable {
     }
 
     public static void checkAlterTableOption(
-            String key, @Nullable String oldValue, String newValue, boolean fromDynamicOptions) {
+            String key, @Nullable String oldValue, String newValue) {
         if (CoreOptions.IMMUTABLE_OPTIONS.contains(key)) {
             throw new UnsupportedOperationException(
                     String.format("Change '%s' is not supported yet.", key));
@@ -1089,19 +1085,11 @@ public class SchemaManager implements Serializable {
                             : Integer.parseInt(oldValue);
             int newBucket = Integer.parseInt(newValue);
 
-            if (fromDynamicOptions) {
-                throw new UnsupportedOperationException(
-                        "Cannot change bucket number through dynamic options. You might need to rescale bucket.");
-            }
             if (oldBucket == -1) {
                 throw new UnsupportedOperationException("Cannot change bucket when it is -1.");
             }
             if (newBucket == -1) {
                 throw new UnsupportedOperationException("Cannot change bucket to -1.");
-            }
-            if (oldBucket == BucketMode.POSTPONE_BUCKET) {
-                throw new UnsupportedOperationException(
-                        "Cannot change bucket for postpone bucket tables.");
             }
         }
     }
