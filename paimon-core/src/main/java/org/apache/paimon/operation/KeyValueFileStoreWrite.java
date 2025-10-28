@@ -59,9 +59,7 @@ import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter.FirstRowMergeFunctionWrapperFactory;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter.LookupMergeFunctionWrapperFactory;
-import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
-import org.apache.paimon.mergetree.compact.MergeFunctionPreValidator;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.OffPeakHours;
@@ -214,11 +212,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 createCompactManager(
                         partition, bucket, compactStrategy, compactExecutor, levels, dvMaintainer);
 
-        MergeFunction<KeyValue> mergeFunction = mfFactory.create();
-        MergeFunctionPreValidator validator =
-                options.postponeBatchWrite()
-                        ? new MergeFunctionPreValidator.PostponeValidator(mergeFunction)
-                        : new MergeFunctionPreValidator.NoopValidator();
         return new MergeTreeWriter(
                 options.writeBufferSpillable(),
                 options.writeBufferSpillDiskSize(),
@@ -228,8 +221,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 compactManager,
                 restoredMaxSeqNumber,
                 keyComparator,
-                mergeFunction,
-                validator,
+                mfFactory.create(),
                 writerFactory,
                 options.commitForceCompact(),
                 options.changelogProducer(),

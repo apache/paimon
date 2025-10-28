@@ -44,7 +44,6 @@ import org.apache.paimon.mergetree.compact.CompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactStrategy;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
-import org.apache.paimon.mergetree.compact.MergeFunctionPreValidator;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.options.MemorySize;
@@ -426,7 +425,6 @@ public abstract class MergeTreeTestBase {
                         maxSequenceNumber,
                         comparator,
                         DeduplicateMergeFunction.factory().create(),
-                        new MergeFunctionPreValidator.NoopValidator(),
                         writerFactory,
                         options.commitForceCompact(),
                         ChangelogProducer.NONE,

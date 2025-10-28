@@ -40,7 +40,7 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
 
     private static final long serialVersionUID = 1L;
 
-    @Nullable private final Map<String, String> overwritePartition;
+    @Nullable protected final Map<String, String> overwritePartition;
 
     public FlinkWriteSink(FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
         super(table, overwritePartition != null);

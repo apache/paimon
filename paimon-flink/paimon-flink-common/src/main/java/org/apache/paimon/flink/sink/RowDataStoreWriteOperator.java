@@ -57,7 +57,7 @@ import java.util.Objects;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.LOG_IGNORE_DELETE;
-import static org.apache.paimon.CoreOptions.POSTPONE_CHANGE_BUCKET_RUNTIME;
+import static org.apache.paimon.flink.FlinkConnectorOptions.POSTPONE_CHANGE_BUCKET_RUNTIME;
 
 /** A {@link PrepareCommitOperator} to write {@link InternalRow}. Record schema is fixed. */
 public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {

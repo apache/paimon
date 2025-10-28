@@ -36,7 +36,6 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.mergetree.compact.MergeFunction;
-import org.apache.paimon.mergetree.compact.MergeFunctionPreValidator;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -69,7 +68,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final CompactManager compactManager;
     private final Comparator<InternalRow> keyComparator;
     private final MergeFunction<KeyValue> mergeFunction;
-    private final MergeFunctionPreValidator validator;
     private final KeyValueFileWriterFactory writerFactory;
     private final boolean commitForceCompact;
     private final ChangelogProducer changelogProducer;
@@ -97,7 +95,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             long maxSequenceNumber,
             Comparator<InternalRow> keyComparator,
             MergeFunction<KeyValue> mergeFunction,
-            MergeFunctionPreValidator validator,
             KeyValueFileWriterFactory writerFactory,
             boolean commitForceCompact,
             ChangelogProducer changelogProducer,
@@ -114,7 +111,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.newSequenceNumber = maxSequenceNumber + 1;
         this.keyComparator = keyComparator;
         this.mergeFunction = mergeFunction;
-        this.validator = validator;
         this.writerFactory = writerFactory;
         this.commitForceCompact = commitForceCompact;
         this.changelogProducer = changelogProducer;
@@ -166,7 +162,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void write(KeyValue kv) throws Exception {
-        validator.validate(kv);
         long sequenceNumber = newSequenceNumber();
         boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {

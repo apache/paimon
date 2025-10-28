@@ -18,10 +18,7 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.util.AbstractTestBase;
-import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -41,6 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for postpone bucket tables. */
@@ -78,14 +76,21 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  'rowkind.field' = 'row_kind_col'\n"
                         + ")");
 
+        boolean writeFixedBucket = ThreadLocalRandom.current().nextBoolean();
         tEnv.executeSql(
                 String.format(
                         "ALTER TABLE T SET ('postpone.batch-write-fixed-bucket' = '%s')",
-                        ThreadLocalRandom.current().nextBoolean()));
-
-        assertThatThrownBy(() -> tEnv.executeSql("INSERT INTO T VALUES (1, 1, 1, '-D')").await())
-                .rootCause()
-                .hasMessageContaining("By default, Partial update can not accept delete records");
+                        writeFixedBucket));
+        if (writeFixedBucket) {
+            assertThatCode(() -> tEnv.executeSql("INSERT INTO T VALUES (1, 1, 1, '-U')").await())
+                    .doesNotThrowAnyException();
+        } else {
+            assertThatThrownBy(
+                            () -> tEnv.executeSql("INSERT INTO T VALUES (1, 1, 1, '-D')").await())
+                    .rootCause()
+                    .hasMessageContaining(
+                            "By default, Partial update can not accept delete records");
+        }
     }
 
     @Test
@@ -871,7 +876,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + ") WITH (\n"
                         + "  'bucket' = '-2'\n"
                         + ")");
-        FileStoreTable table = paimonTable(tEnv, "T");
 
         // flink runtime sink parallelism is 1 here
         tEnv.executeSql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')").await();
@@ -885,9 +889,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                                 .collect(Collectors.toSet()))
                 .containsExactly(0);
         assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
-        Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
-        assertThat(latestSnapshot.properties().get("postpone.batch-write-fixed-bucket"))
-                .isEqualTo("true");
 
         // add Flink and Paimon sink.parallelism to verify that the postpone writer will use current
         // bucket number
@@ -912,9 +913,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                                 .collect(Collectors.toSet()))
                 .containsExactly(0);
         assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
-        latestSnapshot = table.snapshotManager().latestSnapshot();
-        assertThat(latestSnapshot.properties().get("postpone.batch-write-fixed-bucket"))
-                .isEqualTo("true");
     }
 
     @Test
@@ -942,7 +940,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + ") WITH (\n"
                         + "  'bucket' = '-2'\n"
                         + ")");
-        FileStoreTable table = paimonTable(tEnv, "T");
 
         // use sink.parallelism
         tEnv.executeSql(
@@ -965,9 +962,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                                 .collect(Collectors.toSet()))
                 .containsExactlyInAnyOrder(0, 1, 2, 3);
         assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
-        Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
-        assertThat(latestSnapshot.properties().get("postpone.batch-write-fixed-bucket"))
-                .isEqualTo("true");
 
         // add Flink and Paimon sink.parallelism to verify that the postpone writer will use current
         // bucket number
@@ -1001,9 +995,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                                 .collect(Collectors.toSet()))
                 .containsExactlyInAnyOrder(0, 1, 2, 3);
         assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
-        latestSnapshot = table.snapshotManager().latestSnapshot();
-        assertThat(latestSnapshot.properties().get("postpone.batch-write-fixed-bucket"))
-                .isEqualTo("true");
     }
 
     @Test
@@ -1031,7 +1022,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + ") WITH (\n"
                         + "  'bucket' = '-2'\n"
                         + ")");
-        FileStoreTable table = paimonTable(tEnv, "T");
 
         // use sink.parallelism
         tEnv.executeSql(
@@ -1054,9 +1044,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                                 .collect(Collectors.toSet()))
                 .containsExactlyInAnyOrder(0, 1, 2, 3);
         assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
-        Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
-        assertThat(latestSnapshot.properties().get("postpone.batch-write-fixed-bucket"))
-                .isEqualTo("true");
 
         // write to postpone bucket, new record cannot be read before compact
         tEnv.executeSql(
@@ -1080,8 +1067,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                                 .collect(Collectors.toSet()))
                 .containsExactlyInAnyOrder(-2, 0, 1, 2, 3);
         assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
-        latestSnapshot = table.snapshotManager().latestSnapshot();
-        assertThat(latestSnapshot.properties()).isNull();
 
         // compact and check result again
         boolean forceUpLevel0 = ThreadLocalRandom.current().nextBoolean();
@@ -1117,8 +1102,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
             assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level = 0")))
                     .isEmpty();
         }
-        latestSnapshot = table.snapshotManager().latestSnapshot();
-        assertThat(latestSnapshot.properties()).isNull();
     }
 
     @Test
@@ -1160,7 +1143,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                                         .await())
                 .hasMessageContaining(
                         "There are uncompacted files of postpone-bucket table. Please compact them before "
-                                + "performing batch write fixed bucket.");
+                                + "writing into fixed bucket directly.");
         // Can write to a new partition with options
         tEnv.executeSql(
                         "INSERT INTO T /*+ OPTIONS('postpone.batch-write-partitions' = 'pt=2') */ "
@@ -1168,9 +1151,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                 .await();
         assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
                 .containsExactlyInAnyOrder("+I[2, 1, a]");
-        Snapshot latestSnapshot = paimonTable(tEnv, "T").snapshotManager().latestSnapshot();
-        assertThat(latestSnapshot.properties().get("postpone.batch-write-fixed-bucket"))
-                .isEqualTo("true");
 
         // can read two partitions
         tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
@@ -1212,7 +1192,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         assertThatThrownBy(() -> tEnv.executeSql("INSERT INTO T VALUES (1, 'A')").await())
                 .hasMessageContaining(
                         "There are uncompacted files of postpone-bucket table. Please compact them before "
-                                + "performing batch write fixed bucket.");
+                                + "writing into fixed bucket directly.");
 
         tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
         assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
@@ -1268,13 +1248,5 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-    private FileStoreTable paimonTable(TableEnvironment tEnv, String tableName)
-            throws org.apache.paimon.catalog.Catalog.TableNotExistException {
-        FlinkCatalog flinkCatalog = (FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
-        org.apache.paimon.catalog.Catalog paimonCatalog = flinkCatalog.catalog();
-        return (FileStoreTable)
-                paimonCatalog.getTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
     }
 }

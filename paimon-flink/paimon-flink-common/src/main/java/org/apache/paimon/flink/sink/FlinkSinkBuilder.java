@@ -57,9 +57,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.CoreOptions.clusteringStrategy;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
+import static org.apache.paimon.flink.FlinkConnectorOptions.POSTPONE_CHANGE_BUCKET_RUNTIME;
 import static org.apache.paimon.flink.sink.FlinkSink.isStreaming;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
@@ -296,16 +299,14 @@ public class FlinkSinkBuilder {
                 channelComputer = new PostponeBucketChannelComputer(table.schema());
             }
             DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
-            PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
+            PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition, false);
             return sink.sinkFrom(partitioned);
         } else {
             validatePostponeBatchWriteFixedBucket();
 
             Integer fixedBuckets = getPostponeFixedBucketNumber();
-            Map<String, String> postponeOptions = new HashMap<>(table.options());
-            postponeOptions.put(CoreOptions.POSTPONE_BATCH_WRITE.key(), "true");
-            postponeOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
-
+            Map<String, String> batchWriteOptions = new HashMap<>();
+            batchWriteOptions.put(WRITE_ONLY.key(), "true");
             ChannelComputer<InternalRow> channelComputer;
             FileStoreTable tableForWrite;
             if (fixedBuckets != null) {
@@ -314,21 +315,22 @@ public class FlinkSinkBuilder {
                         table.name(),
                         fixedBuckets);
                 setFixedBucketParallelism(fixedBuckets);
-                postponeOptions.put(CoreOptions.BUCKET.key(), String.valueOf(fixedBuckets));
-                tableForWrite = table.copy(table.schema().copy(postponeOptions));
+                batchWriteOptions.put(BUCKET.key(), String.valueOf(fixedBuckets));
+                tableForWrite = table.copy(batchWriteOptions);
                 channelComputer = new RowDataChannelComputer(tableForWrite.schema(), false);
             } else {
                 LOG.info(
                         "Initializing Postpone table {} batch write fixed buckets to default num 1. It will be changed at runtime.",
                         table.name());
-                postponeOptions.put(CoreOptions.BUCKET.key(), "1");
-                postponeOptions.put(CoreOptions.POSTPONE_CHANGE_BUCKET_RUNTIME.key(), "true");
-                tableForWrite = table.copy(table.schema().copy(postponeOptions));
+                batchWriteOptions.put(BUCKET.key(), "1");
+                batchWriteOptions.put(POSTPONE_CHANGE_BUCKET_RUNTIME.key(), "true");
+                tableForWrite = table.copy(batchWriteOptions);
                 channelComputer = new RowDataRuntimeChannelComputer(tableForWrite.schema());
             }
 
             DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
-            FixedBucketSink sink = new FixedBucketSink(tableForWrite, overwritePartition, null);
+            PostponeBucketSink sink =
+                    new PostponeBucketSink(tableForWrite, overwritePartition, true);
             return sink.sinkFrom(partitioned);
         }
     }
@@ -360,8 +362,8 @@ public class FlinkSinkBuilder {
         List<SimpleFileEntry> simpleFileEntries = scan.readSimpleEntries();
         checkArgument(
                 simpleFileEntries.isEmpty(),
-                "There are uncompacted files of postpone-bucket table. Please compact them before "
-                        + "performing batch write fixed bucket.");
+                "There are uncompacted files of postpone-bucket table. "
+                        + "Please compact them before writing into fixed bucket directly.");
     }
 
     @Nullable

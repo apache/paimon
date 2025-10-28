@@ -102,6 +102,7 @@ import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatch
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FileStoreCommitImpl}. */
@@ -1137,18 +1138,11 @@ public class FileStoreCommitTest {
 
         preparePostponeFiles(root, partitionType, keyType, rowType, tableSchema, partition);
 
-        Map<String, String> postponeBatchOptions = new HashMap<>();
-        postponeBatchOptions.put(CoreOptions.POSTPONE_BATCH_WRITE.key(), "true");
-        postponeBatchOptions.put(CoreOptions.BUCKET.key(), "1");
+        // postpone batch write use a fixed bucket table commit
         TestFileStore store =
-                postponeStoreBuilder(
-                                root,
-                                partitionType,
-                                keyType,
-                                rowType,
-                                tableSchema.copy(postponeBatchOptions))
+                primaryKeyStoreBuilder(root, 1, partitionType, keyType, rowType, tableSchema)
                         .build();
-        CommitMessageImpl commitMessage2 =
+        CommitMessageImpl commitMessage =
                 writeDataFiles(
                         store.pathFactory(),
                         store.fileIO(),
@@ -1158,11 +1152,11 @@ public class FileStoreCommitTest {
                         Collections.singletonList("file1"));
 
         ManifestCommittable committable = new ManifestCommittable(2);
-        committable.addFileCommittable(commitMessage2);
-        assertThatThrownBy(() -> store.newCommit().commit(committable, false))
+        committable.addFileCommittable(commitMessage);
+        assertThatThrownBy(() -> store.newCommit().commit(committable, true))
                 .hasMessageContaining(
-                        "There are uncompacted files of postpone-bucket table. Please compact them before "
-                                + "performing batch write fixed bucket.");
+                        "There are uncompacted files of postpone-bucket table. "
+                                + "Please compact them before writing into fixed bucket directly.");
     }
 
     // bucket-postpone doesn't have files committed before
@@ -1204,16 +1198,9 @@ public class FileStoreCommitTest {
                     root, partitionType, keyType, rowType, tableSchema, BinaryRow.singleColumn(1));
         }
 
-        Map<String, String> postponeBatchOptions = new HashMap<>();
-        postponeBatchOptions.put(CoreOptions.POSTPONE_BATCH_WRITE.key(), "true");
-        postponeBatchOptions.put(CoreOptions.BUCKET.key(), "1");
+        // postpone batch write use a fixed bucket table commit
         TestFileStore store =
-                postponeStoreBuilder(
-                                root,
-                                partitionType,
-                                keyType,
-                                rowType,
-                                tableSchema.copy(postponeBatchOptions))
+                primaryKeyStoreBuilder(root, 1, partitionType, keyType, rowType, tableSchema)
                         .build();
         CommitMessageImpl commitMessage =
                 writeDataFiles(
@@ -1227,8 +1214,8 @@ public class FileStoreCommitTest {
 
         ManifestCommittable committable = new ManifestCommittable(2);
         committable.addFileCommittable(commitMessage);
-        // no exception
-        store.newCommit().commit(committable, false);
+        assertThatCode(() -> store.newCommit().commit(committable, true))
+                .doesNotThrowAnyException();
     }
 
     @ParameterizedTest
@@ -1266,16 +1253,9 @@ public class FileStoreCommitTest {
 
         preparePostponeFiles(root, partitionType, keyType, rowType, tableSchema, partition);
 
-        Map<String, String> postponeBatchOptions = new HashMap<>();
-        postponeBatchOptions.put(CoreOptions.POSTPONE_BATCH_WRITE.key(), "true");
-        postponeBatchOptions.put(CoreOptions.BUCKET.key(), "1");
+        // postpone batch overwrite use a postpone bucket table commit
         TestFileStore store =
-                postponeStoreBuilder(
-                                root,
-                                partitionType,
-                                keyType,
-                                rowType,
-                                tableSchema.copy(postponeBatchOptions))
+                primaryKeyStoreBuilder(root, -2, partitionType, keyType, rowType, tableSchema)
                         .build();
         CommitMessageImpl commitMessage =
                 writeDataFiles(
@@ -1290,8 +1270,12 @@ public class FileStoreCommitTest {
         committable.addFileCommittable(commitMessage);
         Map<String, String> partitionMap =
                 partitioned ? Collections.singletonMap("pt", "1") : Collections.emptyMap();
-        // no exception
-        store.newCommit().overwritePartition(partitionMap, committable, Collections.emptyMap());
+        assertThatCode(
+                        () ->
+                                store.newCommit()
+                                        .overwritePartition(
+                                                partitionMap, committable, Collections.emptyMap()))
+                .doesNotThrowAnyException();
     }
 
     private TestFileStore createStore(boolean failing, Map<String, String> options)
@@ -1385,8 +1369,9 @@ public class FileStoreCommitTest {
         LOG.debug("========== End of " + name + " ==========");
     }
 
-    private TestFileStore.Builder postponeStoreBuilder(
+    private TestFileStore.Builder primaryKeyStoreBuilder(
             String root,
+            int numBucket,
             RowType partitionType,
             RowType keyType,
             RowType rowType,
@@ -1394,7 +1379,7 @@ public class FileStoreCommitTest {
         return new TestFileStore.Builder(
                 "avro",
                 root,
-                -2,
+                numBucket,
                 partitionType,
                 keyType,
                 rowType,
@@ -1412,7 +1397,8 @@ public class FileStoreCommitTest {
             BinaryRow partition)
             throws IOException {
         TestFileStore store =
-                postponeStoreBuilder(root, partitionType, keyType, rowType, tableSchema).build();
+                primaryKeyStoreBuilder(root, -2, partitionType, keyType, rowType, tableSchema)
+                        .build();
         CommitMessageImpl commitMessage =
                 writeDataFiles(
                         store.pathFactory(),
