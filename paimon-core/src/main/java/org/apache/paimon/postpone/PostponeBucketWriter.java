@@ -33,7 +33,7 @@ import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
-import org.apache.paimon.mergetree.compact.MergeFunction;
+import org.apache.paimon.mergetree.compact.MergeFunctionPreValidator;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.types.RowType;
@@ -56,17 +56,16 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
 
     private final FileIO fileIO;
     private final DataFilePathFactory pathFactory;
-    private final MergeFunction<KeyValue> mergeFunction;
     private final KeyValueFileWriterFactory writerFactory;
     private final List<DataFileMeta> files;
     private final IOFunction<List<DataFileMeta>, RecordReaderIterator<KeyValue>> fileRead;
     private final @Nullable IOManager ioManager;
     private final CompressOptions spillCompression;
     private final MemorySize maxDiskSize;
+    private final MergeFunctionPreValidator validator;
 
     private SinkWriter<KeyValue> sinkWriter;
     private MemorySegmentPool memorySegmentPool;
-    private boolean retractValidated = false;
 
     public PostponeBucketWriter(
             FileIO fileIO,
@@ -74,14 +73,14 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
             CompressOptions spillCompression,
             MemorySize maxDiskSize,
             @Nullable IOManager ioManager,
-            MergeFunction<KeyValue> mergeFunction,
+            MergeFunctionPreValidator validator,
             KeyValueFileWriterFactory writerFactory,
             IOFunction<List<DataFileMeta>, RecordReaderIterator<KeyValue>> fileRead,
             boolean useWriteBuffer,
             boolean spillable,
             @Nullable CommitIncrement restoreIncrement) {
         this.ioManager = ioManager;
-        this.mergeFunction = mergeFunction;
+        this.validator = validator;
         this.writerFactory = writerFactory;
         this.fileRead = fileRead;
         this.fileIO = fileIO;
@@ -104,7 +103,7 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
 
     @Override
     public void write(KeyValue record) throws Exception {
-        validateRetract(record);
+        validator.validate(record);
         boolean success = sinkWriter.write(record);
         if (!success) {
             flush();
@@ -115,18 +114,6 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
                 // code in SpillableBuffer.)
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }
-        }
-    }
-
-    private void validateRetract(KeyValue kv) {
-        if (kv.valueKind().isRetract()) {
-            if (retractValidated) {
-                return;
-            }
-            mergeFunction.reset();
-            mergeFunction.add(kv);
-            mergeFunction.getResult();
-            retractValidated = true;
         }
     }
 

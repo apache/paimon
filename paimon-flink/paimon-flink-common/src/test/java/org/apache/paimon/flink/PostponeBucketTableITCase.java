@@ -18,7 +18,12 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.util.AbstractTestBase;
+import org.apache.paimon.table.FileStoreTable;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.table.api.TableEnvironment;
@@ -33,6 +38,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -71,6 +77,12 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  'merge-engine' = 'partial-update',\n"
                         + "  'rowkind.field' = 'row_kind_col'\n"
                         + ")");
+
+        tEnv.executeSql(
+                String.format(
+                        "ALTER TABLE T SET ('postpone.batch-write-fixed-bucket' = '%s')",
+                        ThreadLocalRandom.current().nextBoolean()));
+
         assertThatThrownBy(() -> tEnv.executeSql("INSERT INTO T VALUES (1, 1, 1, '-D')").await())
                 .rootCause()
                 .hasMessageContaining("By default, Partial update can not accept delete records");
@@ -100,7 +112,8 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  v INT,\n"
                         + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
                         + ") PARTITIONED BY (pt) WITH (\n"
-                        + "  'bucket' = '-2'\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'postpone.batch-write-fixed-bucket' = 'false'\n"
                         + ")");
 
         int numPartitions = 3;
@@ -159,7 +172,61 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testOverwrite() throws Exception {
+    public void testOverwriteWithoutBatchWriteFixedBucket() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  pt INT,\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'postpone.batch-write-fixed-bucket' = 'false'\n"
+                        + ")");
+
+        tEnv.executeSql(
+                        "INSERT INTO T VALUES (1, 10, 110), (1, 20, 120), (2, 10, 210), (2, 20, 220)")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T"))).isEmpty();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT k, v, pt FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[10, 110, 1]", "+I[20, 120, 1]", "+I[10, 210, 2]", "+I[20, 220, 2]");
+
+        // no compact, so the result is the same
+        tEnv.executeSql("INSERT INTO T VALUES (2, 40, 240)").await();
+        assertThat(collect(tEnv.executeSql("SELECT k, v, pt FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[10, 110, 1]", "+I[20, 120, 1]", "+I[10, 210, 2]", "+I[20, 220, 2]");
+
+        tEnv.executeSql("INSERT OVERWRITE T VALUES (2, 20, 221), (2, 30, 230)").await();
+        assertThat(collect(tEnv.executeSql("SELECT k, v, pt FROM T")))
+                .containsExactlyInAnyOrder("+I[10, 110, 1]", "+I[20, 120, 1]");
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        // overwrite should also clean up files in bucket = -2 directory,
+        // which the record with key = 40
+        assertThat(collect(tEnv.executeSql("SELECT k, v, pt FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[10, 110, 1]", "+I[20, 120, 1]", "+I[20, 221, 2]", "+I[30, 230, 2]");
+    }
+
+    @Test
+    public void testOverwriteWithBatchWriteFixedBucket() throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv =
                 tableEnvironmentBuilder()
@@ -185,27 +252,20 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  'bucket' = '-2'\n"
                         + ")");
 
+        // write postpone bucket with partition 1 and 2
         tEnv.executeSql(
-                        "INSERT INTO T VALUES (1, 10, 110), (1, 20, 120), (2, 10, 210), (2, 20, 220)")
+                        "INSERT INTO T /*+ OPTIONS ('postpone.batch-write-fixed-bucket' = 'false') */ "
+                                + "VALUES (1, 10, 110), (1, 20, 120), (2, 10, 210), (2, 20, 220)")
                 .await();
-        assertThat(collect(tEnv.executeSql("SELECT * FROM T"))).isEmpty();
-        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
-        assertThat(collect(tEnv.executeSql("SELECT k, v, pt FROM T")))
-                .containsExactlyInAnyOrder(
-                        "+I[10, 110, 1]", "+I[20, 120, 1]", "+I[10, 210, 2]", "+I[20, 220, 2]");
+        assertThat(collect(tEnv.executeSql("SELECT k, v, pt FROM T"))).isEmpty();
 
-        // no compact, so the result is the same
-        tEnv.executeSql("INSERT INTO T VALUES (2, 40, 240)").await();
-        assertThat(collect(tEnv.executeSql("SELECT k, v, pt FROM T")))
-                .containsExactlyInAnyOrder(
-                        "+I[10, 110, 1]", "+I[20, 120, 1]", "+I[10, 210, 2]", "+I[20, 220, 2]");
-
+        // batch overite partition 2 and the new data can be read
         tEnv.executeSql("INSERT OVERWRITE T VALUES (2, 20, 221), (2, 30, 230)").await();
         assertThat(collect(tEnv.executeSql("SELECT k, v, pt FROM T")))
-                .containsExactlyInAnyOrder("+I[10, 110, 1]", "+I[20, 120, 1]");
+                .containsExactlyInAnyOrder("+I[20, 221, 2]", "+I[30, 230, 2]");
+
+        // compact then partition 1 can be read
         tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
-        // overwrite should also clean up files in bucket = -2 directory,
-        // which the record with key = 40
         assertThat(collect(tEnv.executeSql("SELECT k, v, pt FROM T")))
                 .containsExactlyInAnyOrder(
                         "+I[10, 110, 1]", "+I[20, 120, 1]", "+I[20, 221, 2]", "+I[30, 230, 2]");
@@ -238,7 +298,8 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
                         + ") PARTITIONED BY (pt) WITH (\n"
                         + "  'bucket' = '-2',\n"
-                        + "  'changelog-producer' = 'lookup'\n"
+                        + "  'changelog-producer' = 'lookup',\n"
+                        + "  'postpone.batch-write-fixed-bucket' = 'false'\n"
                         + ")");
 
         TableEnvironment sEnv =
@@ -305,7 +366,8 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
                         + ") PARTITIONED BY (pt) WITH (\n"
                         + "  'bucket' = '-2',\n"
-                        + "  'postpone.default-bucket-num' = '2'\n"
+                        + "  'postpone.default-bucket-num' = '2',\n"
+                        + "  'postpone.batch-write-fixed-bucket' = 'false'\n"
                         + ")");
 
         int numKeys = 100;
@@ -461,6 +523,11 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  'snapshot.num-retained.max' = '3'\n"
                         + ")");
 
+        tEnv.executeSql(
+                String.format(
+                        "ALTER TABLE T SET ('postpone.batch-write-fixed-bucket' = '%s')",
+                        ThreadLocalRandom.current().nextBoolean()));
+
         for (int i = 0; i < 5; i++) {
             tEnv.executeSql(String.format("INSERT INTO T VALUES (%d, 0, 0)", i)).await();
         }
@@ -494,7 +561,8 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  v INT,\n"
                         + "  PRIMARY KEY (k) NOT ENFORCED\n"
                         + ") WITH (\n"
-                        + "  'bucket' = '-2'\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'postpone.batch-write-fixed-bucket' = 'false'\n"
                         + ")");
         bEnv.executeSql("CREATE TABLE SRC (i INT, `proctime` AS PROCTIME())");
 
@@ -557,7 +625,8 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  v INT,\n"
                         + "  PRIMARY KEY (k, pt) NOT ENFORCED\n"
                         + ") PARTITIONED BY (pt) WITH (\n"
-                        + "  'bucket' = '-2'\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'postpone.batch-write-fixed-bucket' = 'false'\n"
                         + ")");
         bEnv.executeSql("CREATE TABLE SRC (i INT, pt INT, `proctime` AS PROCTIME())");
 
@@ -618,6 +687,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  PRIMARY KEY (k) NOT ENFORCED\n"
                         + ") WITH (\n"
                         + "  'bucket' = '-2',\n"
+                        + "  'postpone.batch-write-fixed-bucket' = 'false',\n"
                         + "  'deletion-vectors.enabled' = 'true'\n"
                         + ")");
 
@@ -662,7 +732,8 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  v INT,\n"
                         + "  PRIMARY KEY (k) NOT ENFORCED\n"
                         + ") WITH (\n"
-                        + "  'bucket' = '-2'\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'postpone.batch-write-fixed-bucket' = 'false'\n"
                         + ")");
 
         tEnv.executeSql(
@@ -696,7 +767,8 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  v TIMESTAMP(9),\n"
                         + "  PRIMARY KEY (k) NOT ENFORCED\n"
                         + ") WITH (\n"
-                        + "  'bucket' = '-2'\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'postpone.batch-write-fixed-bucket' = 'false'\n"
                         + ")");
 
         tEnv.executeSql(
@@ -733,6 +805,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  PRIMARY KEY (k) NOT ENFORCED\n"
                         + ") WITH (\n"
                         + "  'bucket' = '-2',\n"
+                        + "  'postpone.batch-write-fixed-bucket' = 'false',\n"
                         + "  'changelog-producer' = 'none',\n"
                         + "  'scan.remove-normalize' = 'true',\n"
                         + "  'continuous.discovery-interval' = '1ms'\n"
@@ -773,6 +846,382 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         "+I[5, 53]");
     }
 
+    @Test
+    public void testWriteFixedBucketWithFlinkParallelism() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+        FileStoreTable table = paimonTable(tEnv, "T");
+
+        // flink runtime sink parallelism is 1 here
+        tEnv.executeSql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')").await();
+
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, a]", "+I[2, b]", "+I[3, c]", "+I[4, d]");
+
+        assertThat(
+                        collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
+                                .map(row -> (Integer) row.getField(1))
+                                .collect(Collectors.toSet()))
+                .containsExactly(0);
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
+        Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
+        assertThat(latestSnapshot.properties().get("postpone.batch-write-fixed-bucket"))
+                .isEqualTo("true");
+
+        // add Flink and Paimon sink.parallelism to verify that the postpone writer will use current
+        // bucket number
+        tEnv.getConfig().set("sink.parallelism", "2");
+        tEnv.executeSql(
+                        "INSERT INTO T /*+ OPTIONS ('sink.parallelism' = '2') */ "
+                                + "VALUES (1, 'A'), (2, 'B'), (3, 'C'), (4, 'D'), (5, 'E'), (6, 'F'), (7, 'G'), (8, 'H')")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[1, A]",
+                        "+I[2, B]",
+                        "+I[3, C]",
+                        "+I[4, D]",
+                        "+I[5, E]",
+                        "+I[6, F]",
+                        "+I[7, G]",
+                        "+I[8, H]");
+        assertThat(
+                        collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
+                                .map(row -> (Integer) row.getField(1))
+                                .collect(Collectors.toSet()))
+                .containsExactly(0);
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
+        latestSnapshot = table.snapshotManager().latestSnapshot();
+        assertThat(latestSnapshot.properties().get("postpone.batch-write-fixed-bucket"))
+                .isEqualTo("true");
+    }
+
+    @Test
+    public void testWriteFixedBucketWithSinkParallelism() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+        FileStoreTable table = paimonTable(tEnv, "T");
+
+        // use sink.parallelism
+        tEnv.executeSql(
+                        "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '4') */ "
+                                + "VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e'), (6, 'f'), (7, 'g'), (8, 'h');")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[1, a]",
+                        "+I[2, b]",
+                        "+I[3, c]",
+                        "+I[4, d]",
+                        "+I[5, e]",
+                        "+I[6, f]",
+                        "+I[7, g]",
+                        "+I[8, h]");
+        assertThat(
+                        collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
+                                .map(row -> (Integer) row.getField(1))
+                                .collect(Collectors.toSet()))
+                .containsExactlyInAnyOrder(0, 1, 2, 3);
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
+        Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
+        assertThat(latestSnapshot.properties().get("postpone.batch-write-fixed-bucket"))
+                .isEqualTo("true");
+
+        // add Flink and Paimon sink.parallelism to verify that the postpone writer will use current
+        // bucket number
+        tEnv.getConfig().set("sink.parallelism", "5");
+        tEnv.executeSql(
+                        "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '5') */ "
+                                + "VALUES (1, 'A'), (2, 'B'), (3, 'C'), (4, 'D'), (5, 'E'), (6, 'F'), (7, 'G'), (8, 'H'), "
+                                + "(9, '9'), (10, '10'), (11, '11'), (12, '12'), (13, '13'), (14, '14'), (15, '15'), (16, '16');")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[1, A]",
+                        "+I[2, B]",
+                        "+I[3, C]",
+                        "+I[4, D]",
+                        "+I[5, E]",
+                        "+I[6, F]",
+                        "+I[7, G]",
+                        "+I[8, H]",
+                        "+I[9, 9]",
+                        "+I[10, 10]",
+                        "+I[11, 11]",
+                        "+I[12, 12]",
+                        "+I[13, 13]",
+                        "+I[14, 14]",
+                        "+I[15, 15]",
+                        "+I[16, 16]");
+        assertThat(
+                        collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
+                                .map(row -> (Integer) row.getField(1))
+                                .collect(Collectors.toSet()))
+                .containsExactlyInAnyOrder(0, 1, 2, 3);
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
+        latestSnapshot = table.snapshotManager().latestSnapshot();
+        assertThat(latestSnapshot.properties().get("postpone.batch-write-fixed-bucket"))
+                .isEqualTo("true");
+    }
+
+    @Test
+    public void testWriteFixedBucketThenWritePostponeBucket() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+        FileStoreTable table = paimonTable(tEnv, "T");
+
+        // use sink.parallelism
+        tEnv.executeSql(
+                        "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '4') */ "
+                                + "VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e'), (6, 'f'), (7, 'g'), (8, 'h');")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[1, a]",
+                        "+I[2, b]",
+                        "+I[3, c]",
+                        "+I[4, d]",
+                        "+I[5, e]",
+                        "+I[6, f]",
+                        "+I[7, g]",
+                        "+I[8, h]");
+        assertThat(
+                        collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
+                                .map(row -> (Integer) row.getField(1))
+                                .collect(Collectors.toSet()))
+                .containsExactlyInAnyOrder(0, 1, 2, 3);
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
+        Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
+        assertThat(latestSnapshot.properties().get("postpone.batch-write-fixed-bucket"))
+                .isEqualTo("true");
+
+        // write to postpone bucket, new record cannot be read before compact
+        tEnv.executeSql(
+                        "INSERT INTO T /*+ OPTIONS('postpone.batch-write-fixed-bucket' = 'false') */ "
+                                + "VALUES (1, 'A'), (2, 'B'), (3, 'C'), (4, 'D'), (5, 'E'), (6, 'F'), (7, 'G'), (8, 'H'), "
+                                + "(9, '9'), (10, '10'), (11, '11'), (12, '12'), (13, '13'), (14, '14'), (15, '15'), (16, '16');")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[1, a]",
+                        "+I[2, b]",
+                        "+I[3, c]",
+                        "+I[4, d]",
+                        "+I[5, e]",
+                        "+I[6, f]",
+                        "+I[7, g]",
+                        "+I[8, h]");
+        assertThat(
+                        collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
+                                .map(row -> (Integer) row.getField(1))
+                                .collect(Collectors.toSet()))
+                .containsExactlyInAnyOrder(-2, 0, 1, 2, 3);
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
+        latestSnapshot = table.snapshotManager().latestSnapshot();
+        assertThat(latestSnapshot.properties()).isNull();
+
+        // compact and check result again
+        boolean forceUpLevel0 = ThreadLocalRandom.current().nextBoolean();
+        if (forceUpLevel0) {
+            tEnv.executeSql("ALTER TABLE T set ('compaction.force-up-level-0' = 'true')").await();
+        }
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[1, A]",
+                        "+I[2, B]",
+                        "+I[3, C]",
+                        "+I[4, D]",
+                        "+I[5, E]",
+                        "+I[6, F]",
+                        "+I[7, G]",
+                        "+I[8, H]",
+                        "+I[9, 9]",
+                        "+I[10, 10]",
+                        "+I[11, 11]",
+                        "+I[12, 12]",
+                        "+I[13, 13]",
+                        "+I[14, 14]",
+                        "+I[15, 15]",
+                        "+I[16, 16]");
+        assertThat(
+                        collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
+                                .map(row -> (Integer) row.getField(1))
+                                .collect(Collectors.toSet()))
+                .containsExactlyInAnyOrder(0, 1, 2, 3);
+        if (forceUpLevel0) {
+            assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level = 0")))
+                    .isEmpty();
+        }
+        latestSnapshot = table.snapshotManager().latestSnapshot();
+        assertThat(latestSnapshot.properties()).isNull();
+    }
+
+    @Test
+    public void testBatchWritePartition() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  pt INT,\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+
+        tEnv.executeSql(
+                        "INSERT INTO T /*+ OPTIONS('postpone.batch-write-fixed-bucket' = 'false') */ "
+                                + "PARTITION (pt = 1) VALUES (1, 'a')")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T"))).isEmpty();
+
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql("INSERT INTO T PARTITION (pt = 2) VALUES (1, 'a')")
+                                        .await())
+                .hasMessageContaining(
+                        "There are uncompacted files of postpone-bucket table. Please compact them before "
+                                + "performing batch write fixed bucket.");
+        // Can write to a new partition with options
+        tEnv.executeSql(
+                        "INSERT INTO T /*+ OPTIONS('postpone.batch-write-partitions' = 'pt=2') */ "
+                                + "PARTITION (pt = 2) VALUES (1, 'a')")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[2, 1, a]");
+        Snapshot latestSnapshot = paimonTable(tEnv, "T").snapshotManager().latestSnapshot();
+        assertThat(latestSnapshot.properties().get("postpone.batch-write-fixed-bucket"))
+                .isEqualTo("true");
+
+        // can read two partitions
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, 1, a]", "+I[2, 1, a]");
+    }
+
+    @Test
+    public void testCompactPostponeThenWriteFixedBucket() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2'\n"
+                        + ")");
+
+        tEnv.executeSql(
+                        "INSERT INTO T /*+ OPTIONS('postpone.batch-write-fixed-bucket' = 'false') */ VALUES (1, 'a')")
+                .await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T"))).isEmpty();
+
+        assertThatThrownBy(() -> tEnv.executeSql("INSERT INTO T VALUES (1, 'A')").await())
+                .hasMessageContaining(
+                        "There are uncompacted files of postpone-bucket table. Please compact them before "
+                                + "performing batch write fixed bucket.");
+
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, a]");
+        tEnv.executeSql("INSERT INTO T VALUES (1, 'A')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, A]");
+    }
+
     private List<String> collect(TableResult result) throws Exception {
         List<String> ret = new ArrayList<>();
         try (CloseableIterator<Row> it = result.collect()) {
@@ -811,5 +1260,21 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         shouldStop.set(true);
         timerThread.join();
         return ret;
+    }
+
+    private List<Row> collectRow(TableResult result) {
+        try (CloseableIterator<Row> iter = result.collect()) {
+            return ImmutableList.copyOf(iter);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private FileStoreTable paimonTable(TableEnvironment tEnv, String tableName)
+            throws org.apache.paimon.catalog.Catalog.TableNotExistException {
+        FlinkCatalog flinkCatalog = (FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
+        org.apache.paimon.catalog.Catalog paimonCatalog = flinkCatalog.catalog();
+        return (FileStoreTable)
+                paimonCatalog.getTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
     }
 }

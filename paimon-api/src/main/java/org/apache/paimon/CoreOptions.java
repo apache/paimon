@@ -2026,6 +2026,28 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether discard duplicate files in commit.");
 
+    public static final ConfigOption<Boolean> POSTPONE_BATCH_WRITE_FIXED_BUCKET =
+            key("postpone.batch-write-fixed-bucket")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to write the data into fixed bucket for batch writing a postpone bucket table.");
+
+    public static final ConfigOption<String> POSTPONE_BATCH_WRITE_PARTITIONS =
+            key("postpone.batch-write-partitions")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The partitions for batch writing a postpone bucket table. Format is 'pt1=v1,pt2=v2;...'.");
+
+    @ExcludeFromDocumentation("Only used internally to support postpone bucket table batch write.")
+    public static final ConfigOption<Boolean> POSTPONE_BATCH_WRITE =
+            key("postpone.batch-write").booleanType().defaultValue(false);
+
+    @ExcludeFromDocumentation("Only used internally to support postpone bucket table batch write.")
+    public static final ConfigOption<Boolean> POSTPONE_CHANGE_BUCKET_RUNTIME =
+            key("postpone.change-bucket-runtime").booleanType().defaultValue(false);
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3117,6 +3139,19 @@ public class CoreOptions implements Serializable {
 
     public boolean blobAsDescriptor() {
         return options.get(BLOB_AS_DESCRIPTOR);
+    }
+
+    public boolean postponeBatchWriteFixedBucket() {
+        return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET);
+    }
+
+    @Nullable
+    public String postponeBatchWritePartitions() {
+        return options.get(POSTPONE_BATCH_WRITE_PARTITIONS);
+    }
+
+    public boolean postponeBatchWrite() {
+        return options.get(POSTPONE_BATCH_WRITE);
     }
 
     /** Specifies the merge engine for table with primary key. */

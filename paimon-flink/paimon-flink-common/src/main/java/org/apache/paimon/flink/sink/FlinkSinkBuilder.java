@@ -28,10 +28,13 @@ import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
+import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -273,15 +276,7 @@ public class FlinkSinkBuilder {
 
     protected DataStreamSink<?> buildForFixedBucket(DataStream<InternalRow> input) {
         int bucketNums = table.bucketSpec().getNumBuckets();
-        if (parallelism == null
-                && bucketNums < input.getParallelism()
-                && table.partitionKeys().isEmpty()) {
-            // For non-partitioned table, if the bucketNums is less than job parallelism.
-            LOG.warn(
-                    "For non-partitioned table, if bucketNums is less than the parallelism of inputOperator,"
-                            + " then the parallelism of writerOperator will be set to bucketNums.");
-            parallelism = bucketNums;
-        }
+        setFixedBucketParallelism(bucketNums);
         DataStream<InternalRow> partitioned =
                 partition(
                         input,
@@ -292,16 +287,97 @@ public class FlinkSinkBuilder {
     }
 
     private DataStreamSink<?> buildPostponeBucketSink(DataStream<InternalRow> input) {
-        ChannelComputer<InternalRow> channelComputer;
-        if (!table.partitionKeys().isEmpty()
-                && table.coreOptions().partitionSinkStrategy() == PartitionSinkStrategy.HASH) {
-            channelComputer = new RowDataHashPartitionChannelComputer(table.schema());
+        if (isStreaming(input) || !table.coreOptions().postponeBatchWriteFixedBucket()) {
+            ChannelComputer<InternalRow> channelComputer;
+            if (!table.partitionKeys().isEmpty()
+                    && table.coreOptions().partitionSinkStrategy() == PartitionSinkStrategy.HASH) {
+                channelComputer = new RowDataHashPartitionChannelComputer(table.schema());
+            } else {
+                channelComputer = new PostponeBucketChannelComputer(table.schema());
+            }
+            DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
+            PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
+            return sink.sinkFrom(partitioned);
         } else {
-            channelComputer = new PostponeBucketChannelComputer(table.schema());
+            validatePostponeBatchWriteFixedBucket();
+
+            Integer fixedBuckets = getPostponeFixedBucketNumber();
+            Map<String, String> postponeOptions = new HashMap<>(table.options());
+            postponeOptions.put(CoreOptions.POSTPONE_BATCH_WRITE.key(), "true");
+            postponeOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+            ChannelComputer<InternalRow> channelComputer;
+            FileStoreTable tableForWrite;
+            if (fixedBuckets != null) {
+                LOG.info(
+                        "Initializing Postpone table {} batch write fixed buckets to {}.",
+                        table.name(),
+                        fixedBuckets);
+                setFixedBucketParallelism(fixedBuckets);
+                postponeOptions.put(CoreOptions.BUCKET.key(), String.valueOf(fixedBuckets));
+                tableForWrite = table.copy(table.schema().copy(postponeOptions));
+                channelComputer = new RowDataChannelComputer(tableForWrite.schema(), false);
+            } else {
+                LOG.info(
+                        "Initializing Postpone table {} batch write fixed buckets to default num 1. It will be changed at runtime.",
+                        table.name());
+                postponeOptions.put(CoreOptions.BUCKET.key(), "1");
+                postponeOptions.put(CoreOptions.POSTPONE_CHANGE_BUCKET_RUNTIME.key(), "true");
+                tableForWrite = table.copy(table.schema().copy(postponeOptions));
+                channelComputer = new RowDataRuntimeChannelComputer(tableForWrite.schema());
+            }
+
+            DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
+            FixedBucketSink sink = new FixedBucketSink(tableForWrite, overwritePartition, null);
+            return sink.sinkFrom(partitioned);
         }
-        DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
-        PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
-        return sink.sinkFrom(partitioned);
+    }
+
+    private void setFixedBucketParallelism(int bucketNums) {
+        if (parallelism == null
+                && bucketNums < input.getParallelism()
+                && table.partitionKeys().isEmpty()) {
+            // For non-partitioned table, if the bucketNums is less than job parallelism.
+            LOG.warn(
+                    "For non-partitioned table, if bucketNums is less than the parallelism of inputOperator,"
+                            + " then the parallelism of writerOperator will be set to bucketNums.");
+            parallelism = bucketNums;
+        }
+    }
+
+    private void validatePostponeBatchWriteFixedBucket() {
+        if (overwritePartition != null) {
+            // always can overwrite
+            return;
+        }
+
+        FileStoreScan scan = table.store().newScan().withBucket(BucketMode.POSTPONE_BUCKET);
+        String partitions = table.coreOptions().postponeBatchWritePartitions();
+        if (partitions != null) {
+            scan.withPartitionsFilter(ParameterUtils.getPartitions(partitions.split(";")));
+        }
+
+        List<SimpleFileEntry> simpleFileEntries = scan.readSimpleEntries();
+        checkArgument(
+                simpleFileEntries.isEmpty(),
+                "There are uncompacted files of postpone-bucket table. Please compact them before "
+                        + "performing batch write fixed bucket.");
+    }
+
+    @Nullable
+    private Integer getPostponeFixedBucketNumber() {
+        // If data exists, use the current bucket number; otherwise, use sink.parallelism if set. If
+        // neither is set, use Flink's parallelism (get at runtime), but here we should use a
+        // default number.
+        List<SimpleFileEntry> simpleFileEntries =
+                table.store().newScan().onlyReadRealBuckets().readSimpleEntries();
+        if (!simpleFileEntries.isEmpty()) {
+            return simpleFileEntries.get(0).totalBuckets();
+        } else if (parallelism != null) {
+            return parallelism;
+        } else {
+            return null;
+        }
     }
 
     private DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {

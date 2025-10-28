@@ -27,10 +27,14 @@ import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -45,8 +49,10 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.ColStats;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
@@ -54,6 +60,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -67,6 +74,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -87,6 +97,7 @@ import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.operation.commit.ConflictDetection.mustConflictCheck;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
+import static org.apache.paimon.table.PrimaryKeyTableUtils.addKeyNamePrefix;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -1090,6 +1101,199 @@ public class FileStoreCommitTest {
         assertThat(id).isEqualTo(2);
     }
 
+    // bucket-postpone has files committed before
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testIllegalPostponeBatchWriteFixedBucket(boolean partitioned) throws Exception {
+        String root = tempDir.toString();
+        Path path = new Path(tempDir.toUri());
+        RowType rowType =
+                RowType.builder()
+                        .field("pt", DataTypes.INT())
+                        .field("k", DataTypes.INT())
+                        .field("v", DataTypes.INT())
+                        .build();
+        RowType partitionType =
+                partitioned ? RowType.builder().field("pt", DataTypes.INT()).build() : RowType.of();
+        RowType rawKeyType =
+                partitioned
+                        ? RowType.builder()
+                                .field("pt", DataTypes.INT())
+                                .field("k", DataTypes.INT())
+                                .build()
+                        : RowType.builder().field("k", DataTypes.INT()).build();
+        RowType keyType = addKeyNamePrefix(rawKeyType);
+        BinaryRow partition = partitioned ? BinaryRow.singleColumn(1) : BinaryRow.EMPTY_ROW;
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(new LocalFileIO(), path),
+                        new Schema(
+                                rowType.getFields(),
+                                partitionType.getFieldNames(),
+                                rawKeyType.getFieldNames(),
+                                Collections.emptyMap(),
+                                null));
+
+        preparePostponeFiles(root, partitionType, keyType, rowType, tableSchema, partition);
+
+        Map<String, String> postponeBatchOptions = new HashMap<>();
+        postponeBatchOptions.put(CoreOptions.POSTPONE_BATCH_WRITE.key(), "true");
+        postponeBatchOptions.put(CoreOptions.BUCKET.key(), "1");
+        TestFileStore store =
+                postponeStoreBuilder(
+                                root,
+                                partitionType,
+                                keyType,
+                                rowType,
+                                tableSchema.copy(postponeBatchOptions))
+                        .build();
+        CommitMessageImpl commitMessage2 =
+                writeDataFiles(
+                        store.pathFactory(),
+                        store.fileIO(),
+                        partition,
+                        0,
+                        1,
+                        Collections.singletonList("file1"));
+
+        ManifestCommittable committable = new ManifestCommittable(2);
+        committable.addFileCommittable(commitMessage2);
+        assertThatThrownBy(() -> store.newCommit().commit(committable, false))
+                .hasMessageContaining(
+                        "There are uncompacted files of postpone-bucket table. Please compact them before "
+                                + "performing batch write fixed bucket.");
+    }
+
+    // bucket-postpone doesn't have files committed before
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testLegalPostponeBatchWriteFixedBucket(boolean partitioned) throws Exception {
+        String root = tempDir.toString();
+        Path path = new Path(tempDir.toUri());
+        RowType rowType =
+                RowType.builder()
+                        .field("pt", DataTypes.INT())
+                        .field("k", DataTypes.INT())
+                        .field("v", DataTypes.INT())
+                        .build();
+        RowType partitionType =
+                partitioned ? RowType.builder().field("pt", DataTypes.INT()).build() : RowType.of();
+        RowType rawKeyType =
+                partitioned
+                        ? RowType.builder()
+                                .field("pt", DataTypes.INT())
+                                .field("k", DataTypes.INT())
+                                .build()
+                        : RowType.builder().field("k", DataTypes.INT()).build();
+        RowType keyType = addKeyNamePrefix(rawKeyType);
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(new LocalFileIO(), path),
+                        new Schema(
+                                rowType.getFields(),
+                                partitionType.getFieldNames(),
+                                rawKeyType.getFieldNames(),
+                                Collections.emptyMap(),
+                                null));
+
+        if (partitioned) {
+            // write file to partition 1
+            preparePostponeFiles(
+                    root, partitionType, keyType, rowType, tableSchema, BinaryRow.singleColumn(1));
+        }
+
+        Map<String, String> postponeBatchOptions = new HashMap<>();
+        postponeBatchOptions.put(CoreOptions.POSTPONE_BATCH_WRITE.key(), "true");
+        postponeBatchOptions.put(CoreOptions.BUCKET.key(), "1");
+        TestFileStore store =
+                postponeStoreBuilder(
+                                root,
+                                partitionType,
+                                keyType,
+                                rowType,
+                                tableSchema.copy(postponeBatchOptions))
+                        .build();
+        CommitMessageImpl commitMessage =
+                writeDataFiles(
+                        store.pathFactory(),
+                        store.fileIO(),
+                        // if partitioned, test write file to partition 2
+                        partitioned ? BinaryRow.singleColumn(2) : BinaryRow.EMPTY_ROW,
+                        0,
+                        1,
+                        Collections.singletonList("file1"));
+
+        ManifestCommittable committable = new ManifestCommittable(2);
+        committable.addFileCommittable(commitMessage);
+        // no exception
+        store.newCommit().commit(committable, false);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testPostponeBatchOverwriteFixedBucket(boolean partitioned) throws Exception {
+        String root = tempDir.toString();
+        Path path = new Path(tempDir.toUri());
+        RowType rowType =
+                RowType.builder()
+                        .field("pt", DataTypes.INT())
+                        .field("k", DataTypes.INT())
+                        .field("v", DataTypes.INT())
+                        .build();
+        RowType partitionType =
+                partitioned ? RowType.builder().field("pt", DataTypes.INT()).build() : RowType.of();
+        RowType rawKeyType =
+                partitioned
+                        ? RowType.builder()
+                                .field("pt", DataTypes.INT())
+                                .field("k", DataTypes.INT())
+                                .build()
+                        : RowType.builder().field("k", DataTypes.INT()).build();
+        RowType keyType = addKeyNamePrefix(rawKeyType);
+        BinaryRow partition = partitioned ? BinaryRow.singleColumn(1) : BinaryRow.EMPTY_ROW;
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(new LocalFileIO(), path),
+                        new Schema(
+                                rowType.getFields(),
+                                partitionType.getFieldNames(),
+                                rawKeyType.getFieldNames(),
+                                Collections.emptyMap(),
+                                null));
+
+        preparePostponeFiles(root, partitionType, keyType, rowType, tableSchema, partition);
+
+        Map<String, String> postponeBatchOptions = new HashMap<>();
+        postponeBatchOptions.put(CoreOptions.POSTPONE_BATCH_WRITE.key(), "true");
+        postponeBatchOptions.put(CoreOptions.BUCKET.key(), "1");
+        TestFileStore store =
+                postponeStoreBuilder(
+                                root,
+                                partitionType,
+                                keyType,
+                                rowType,
+                                tableSchema.copy(postponeBatchOptions))
+                        .build();
+        CommitMessageImpl commitMessage =
+                writeDataFiles(
+                        store.pathFactory(),
+                        store.fileIO(),
+                        partition,
+                        0,
+                        1,
+                        Collections.singletonList("file1"));
+
+        ManifestCommittable committable = new ManifestCommittable(2);
+        committable.addFileCommittable(commitMessage);
+        Map<String, String> partitionMap =
+                partitioned ? Collections.singletonMap("pt", "1") : Collections.emptyMap();
+        // no exception
+        store.newCommit().overwritePartition(partitionMap, committable, Collections.emptyMap());
+    }
+
     private TestFileStore createStore(boolean failing, Map<String, String> options)
             throws Exception {
         return createStore(failing, 1, CoreOptions.ChangelogProducer.NONE, options);
@@ -1179,5 +1383,84 @@ public class FileStoreCommitTest {
                             TestKeyValueGenerator.DEFAULT_ROW_TYPE));
         }
         LOG.debug("========== End of " + name + " ==========");
+    }
+
+    private TestFileStore.Builder postponeStoreBuilder(
+            String root,
+            RowType partitionType,
+            RowType keyType,
+            RowType rowType,
+            TableSchema tableSchema) {
+        return new TestFileStore.Builder(
+                "avro",
+                root,
+                -2,
+                partitionType,
+                keyType,
+                rowType,
+                PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR,
+                DeduplicateMergeFunction.factory(),
+                tableSchema);
+    }
+
+    private void preparePostponeFiles(
+            String root,
+            RowType partitionType,
+            RowType keyType,
+            RowType rowType,
+            TableSchema tableSchema,
+            BinaryRow partition)
+            throws IOException {
+        TestFileStore store =
+                postponeStoreBuilder(root, partitionType, keyType, rowType, tableSchema).build();
+        CommitMessageImpl commitMessage =
+                writeDataFiles(
+                        store.pathFactory(),
+                        store.fileIO(),
+                        partition,
+                        -2,
+                        null,
+                        Collections.singletonList("file0"));
+        ManifestCommittable committable = new ManifestCommittable(1);
+        committable.addFileCommittable(commitMessage);
+        store.newCommit().commit(committable, false);
+    }
+
+    private CommitMessageImpl writeDataFiles(
+            FileStorePathFactory pathFactory,
+            FileIO fileIO,
+            BinaryRow partition,
+            int bucket,
+            @Nullable Integer totalBuckets,
+            List<String> dataFileNames)
+            throws IOException {
+        List<DataFileMeta> fileMetas = new ArrayList<>();
+        Path bucketPath = pathFactory.bucketPath(partition, bucket);
+        for (String dataFileName : dataFileNames) {
+            Path path = new Path(bucketPath, dataFileName);
+            fileIO.newOutputStream(path, false).close();
+            fileMetas.add(
+                    DataFileMeta.forAppend(
+                            path.getName(),
+                            10L,
+                            10L,
+                            SimpleStats.EMPTY_STATS,
+                            0L,
+                            0L,
+                            0,
+                            Collections.emptyList(),
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null));
+        }
+        return new CommitMessageImpl(
+                partition,
+                bucket,
+                totalBuckets,
+                new DataIncrement(fileMetas, Collections.emptyList(), Collections.emptyList()),
+                CompactIncrement.emptyIncrement());
     }
 }

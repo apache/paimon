@@ -119,6 +119,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
 
+    private static final String POSTPONE_BATCH_WRITE_FIXED_BUCKET_PROPERTY_KEY =
+            "postpone.batch-write-fixed-bucket";
+
     private final SnapshotCommit snapshotCommit;
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
@@ -151,6 +154,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final boolean rowTrackingEnabled;
     private final boolean discardDuplicateFiles;
     private final ConflictDetection conflictDetection;
+    private final boolean postponeWriteFixedBucket;
 
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
@@ -187,7 +191,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long strictModeLastSafeSnapshot,
             boolean rowTrackingEnabled,
             boolean discardDuplicateFiles,
-            ConflictDetection conflictDetection) {
+            ConflictDetection conflictDetection,
+            boolean postponeWriteFixedBucket) {
         this.snapshotCommit = snapshotCommit;
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
@@ -232,6 +237,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.rowTrackingEnabled = rowTrackingEnabled;
         this.discardDuplicateFiles = discardDuplicateFiles;
         this.conflictDetection = conflictDetection;
+        this.postponeWriteFixedBucket = postponeWriteFixedBucket;
     }
 
     @Override
@@ -334,39 +340,51 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     checkAppendFiles = true;
                 }
 
-                if (latestSnapshot != null && checkAppendFiles) {
-                    // it is possible that some partitions only have compact changes,
-                    // so we need to contain all changes
-                    baseEntries.addAll(
-                            readAllEntriesFromChangedPartitions(
+                if (latestSnapshot != null) {
+                    if (postponeWriteFixedBucket || checkAppendFiles) {
+                        List<SimpleFileEntry> latestEntries =
+                                readAllEntriesFromChangedPartitions(
+                                        latestSnapshot,
+                                        changedPartitions(
+                                                appendTableFiles,
+                                                compactTableFiles,
+                                                appendIndexFiles));
+                        if (postponeWriteFixedBucket) {
+                            validatePostponeBatchWriteFixedBucket(latestEntries);
+                        }
+                        if (checkAppendFiles) {
+                            // it is possible that some partitions only have compact changes,
+                            // so we need to contain all changes
+                            baseEntries.addAll(latestEntries);
+                            if (discardDuplicate) {
+                                Set<FileEntry.Identifier> baseIdentifiers =
+                                        baseEntries.stream()
+                                                .map(FileEntry::identifier)
+                                                .collect(Collectors.toSet());
+                                appendTableFiles =
+                                        appendTableFiles.stream()
+                                                .filter(
+                                                        entry ->
+                                                                !baseIdentifiers.contains(
+                                                                        entry.identifier()))
+                                                .collect(Collectors.toList());
+                                appendSimpleEntries = SimpleFileEntry.from(appendTableFiles);
+                            }
+                            conflictDetection.checkNoConflictsOrFail(
                                     latestSnapshot,
-                                    changedPartitions(
-                                            appendTableFiles,
-                                            compactTableFiles,
-                                            appendIndexFiles)));
-                    if (discardDuplicate) {
-                        Set<FileEntry.Identifier> baseIdentifiers =
-                                baseEntries.stream()
-                                        .map(FileEntry::identifier)
-                                        .collect(Collectors.toSet());
-                        appendTableFiles =
-                                appendTableFiles.stream()
-                                        .filter(
-                                                entry ->
-                                                        !baseIdentifiers.contains(
-                                                                entry.identifier()))
-                                        .collect(Collectors.toList());
-                        appendSimpleEntries = SimpleFileEntry.from(appendTableFiles);
+                                    baseEntries,
+                                    appendSimpleEntries,
+                                    appendIndexFiles,
+                                    commitKind);
+                            safeLatestSnapshotId = latestSnapshot.id();
+                        }
                     }
-                    conflictDetection.checkNoConflictsOrFail(
-                            latestSnapshot,
-                            baseEntries,
-                            appendSimpleEntries,
-                            appendIndexFiles,
-                            commitKind);
-                    safeLatestSnapshotId = latestSnapshot.id();
                 }
 
+                Map<String, String> snapshotProperty = new HashMap<>(committable.properties());
+                if (postponeWriteFixedBucket) {
+                    snapshotProperty.put(POSTPONE_BATCH_WRITE_FIXED_BUCKET_PROPERTY_KEY, "true");
+                }
                 attempts +=
                         tryCommit(
                                 appendTableFiles,
@@ -375,7 +393,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
-                                committable.properties(),
+                                snapshotProperty,
                                 commitKind,
                                 conflictCheck,
                                 null);
@@ -562,6 +580,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             // overwrite new files
             if (!skipOverwrite) {
+                Map<String, String> snapshotProperties = new HashMap<>(committable.properties());
+                if (postponeWriteFixedBucket) {
+                    snapshotProperties.put(POSTPONE_BATCH_WRITE_FIXED_BUCKET_PROPERTY_KEY, "true");
+                }
                 attempts +=
                         tryOverwritePartition(
                                 partitionFilter,
@@ -570,7 +592,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
-                                committable.properties());
+                                snapshotProperties);
                 generatedSnapshot += 1;
             }
 
@@ -903,8 +925,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             scan.withSnapshot(latestSnapshot)
                     .withPartitionFilter(partitionFilter)
                     .withKind(ScanMode.ALL);
-            if (numBucket != BucketMode.POSTPONE_BUCKET) {
-                // bucket = -2 can only be overwritten in postpone bucket tables
+            // none postpone table shouldn't scan -2 bucket
+            // postpone batch overwrite should also scan -2 bucket
+            if (!postponeWriteFixedBucket && numBucket != BucketMode.POSTPONE_BUCKET) {
                 scan.withBucketFilter(bucket -> bucket >= 0);
             }
             List<ManifestEntry> currentEntries = scan.plan().files();
@@ -1488,6 +1511,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             throw new RuntimeException(ie);
+        }
+    }
+
+    private void validatePostponeBatchWriteFixedBucket(List<SimpleFileEntry> latestEntries) {
+        for (SimpleFileEntry entry : latestEntries) {
+            if (entry.bucket() == BucketMode.POSTPONE_BUCKET) {
+                throw new UnsupportedOperationException(
+                        "There are uncompacted files of postpone-bucket table. Please compact them before "
+                                + "performing batch write fixed bucket.");
+            }
         }
     }
 

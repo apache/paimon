@@ -32,6 +32,7 @@ import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.mergetree.compact.MergeFunctionPreValidator;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.MemoryFileStoreWrite;
@@ -198,13 +199,15 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
                 "Postpone bucket writers should not restore previous files. This is unexpected.");
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
+        MergeFunctionPreValidator validator =
+                new MergeFunctionPreValidator.PostponeValidator(mfFactory.create());
         return new PostponeBucketWriter(
                 fileIO,
                 pathFactory.createDataFilePathFactory(partition, bucket),
                 options.spillCompressOptions(),
                 options.writeBufferSpillDiskSize(),
                 ioManager,
-                mfFactory.create(),
+                validator,
                 writerFactory,
                 files -> newFileRead(partition, bucket, files),
                 forceBufferSpill,
