@@ -65,9 +65,7 @@ public class SparkCatalogWithHiveTest {
 
             // test orc table
 
-            spark.sql(
-                    "CREATE TABLE IF NOT EXISTS table_orc (a INT, bb INT, c STRING) USING orc "
-                            + "TBLPROPERTIES ('format-table.implementation'='engine')");
+            spark.sql("CREATE TABLE IF NOT EXISTS table_orc (a INT, bb INT, c STRING) USING orc");
 
             assertThat(
                             spark.sql("SHOW TABLES").collectAsList().stream()
@@ -80,7 +78,7 @@ public class SparkCatalogWithHiveTest {
                                     .stream()
                                     .map(s -> s.get(0))
                                     .map(Object::toString)
-                                    .filter(s -> s.contains("OrcScan"))
+                                    .filter(s -> s.contains("PaimonFormatTableScan"))
                                     .count())
                     .isGreaterThan(0);
 
