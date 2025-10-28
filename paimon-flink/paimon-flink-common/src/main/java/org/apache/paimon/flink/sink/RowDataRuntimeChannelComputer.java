@@ -18,45 +18,21 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
-import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
-/** {@link ChannelComputer} for {@link InternalRow} which gets bucket number at runtime. */
-public class RowDataRuntimeChannelComputer implements ChannelComputer<InternalRow> {
+/** {@link RowDataChannelComputer} which gets bucket number at runtime. */
+public class RowDataRuntimeChannelComputer extends RowDataChannelComputer {
 
     private static final long serialVersionUID = 1L;
 
-    private final TableSchema schema;
-
-    private transient int numChannels;
-    private transient KeyAndBucketExtractor<InternalRow> extractor;
-
     public RowDataRuntimeChannelComputer(TableSchema schema) {
-        this.schema = schema;
+        super(schema, false);
     }
 
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
         this.extractor = new FixedBucketRowKeyExtractor(schema, numChannels);
-    }
-
-    @Override
-    public int channel(InternalRow record) {
-        extractor.setRecord(record);
-        return channel(extractor.partition(), extractor.bucket());
-    }
-
-    public int channel(BinaryRow partition, int bucket) {
-        return ChannelComputer.select(partition, bucket, numChannels);
-    }
-
-    @Override
-    public String toString() {
-        return "shuffle by bucket";
     }
 }

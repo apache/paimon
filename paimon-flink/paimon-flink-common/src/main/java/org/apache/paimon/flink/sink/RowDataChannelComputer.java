@@ -30,11 +30,11 @@ public class RowDataChannelComputer implements ChannelComputer<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
-    private final TableSchema schema;
+    protected final TableSchema schema;
     private final boolean hasLogSink;
 
-    private transient int numChannels;
-    private transient KeyAndBucketExtractor<InternalRow> extractor;
+    protected transient int numChannels;
+    protected transient KeyAndBucketExtractor<InternalRow> extractor;
 
     public RowDataChannelComputer(TableSchema schema, boolean hasLogSink) {
         this.schema = schema;
