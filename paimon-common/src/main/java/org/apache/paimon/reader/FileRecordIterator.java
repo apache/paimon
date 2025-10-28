@@ -129,25 +129,19 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
             @Nullable
             @Override
             public T next() throws IOException {
-                if (nextExpected == -1) {
-                    return null;
-                }
                 while (true) {
+                    if (nextExpected == -1) {
+                        return null;
+                    }
                     T next = thisIterator.next();
                     if (next == null) {
                         return null;
                     }
-                    if (nextExpected == returnedPosition()) {
+                    while (nextExpected != -1 && nextExpected < returnedPosition()) {
                         nextExpected = selects.hasNext() ? selects.next() : -1;
-                        return next;
                     }
-                    if (nextExpected < returnedPosition()) {
-                        throw new IllegalStateException(
-                                "The next expected position "
-                                        + nextExpected
-                                        + " is smaller than current position "
-                                        + returnedPosition()
-                                        + ", this should not happen.");
+                    if (nextExpected == returnedPosition()) {
+                        return next;
                     }
                 }
             }
