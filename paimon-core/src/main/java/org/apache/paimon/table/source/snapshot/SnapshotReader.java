@@ -88,7 +88,7 @@ public interface SnapshotReader {
 
     SnapshotReader withLevelFilter(Filter<Integer> levelFilter);
 
-    SnapshotReader withManifestLevelFilter(BiFilter<Integer, Integer> manifestLevelFilter);
+    SnapshotReader withLevelMinMaxFilter(BiFilter<Integer, Integer> minMaxFilter);
 
     SnapshotReader enableValueFilter();
 

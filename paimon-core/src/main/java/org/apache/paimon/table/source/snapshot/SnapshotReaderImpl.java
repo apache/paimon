@@ -262,8 +262,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return this;
     }
 
-    public SnapshotReader withManifestLevelFilter(BiFilter<Integer, Integer> manifestLevelFilter) {
-        scan.withManifestLevelFilter(manifestLevelFilter);
+    @Override
+    public SnapshotReader withLevelMinMaxFilter(BiFilter<Integer, Integer> minMaxFilter) {
+        scan.withLevelMinMaxFilter(minMaxFilter);
         return this;
     }
 

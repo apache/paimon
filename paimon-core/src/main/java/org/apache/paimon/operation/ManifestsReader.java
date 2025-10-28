@@ -53,7 +53,7 @@ public class ManifestsReader {
     @Nullable private Integer specifiedBucket = null;
     @Nullable private Integer specifiedLevel = null;
     @Nullable private PartitionPredicate partitionFilter = null;
-    @Nullable private BiFilter<Integer, Integer> manifestLevelFilter = null;
+    @Nullable private BiFilter<Integer, Integer> levelMinMaxFilter = null;
 
     public ManifestsReader(
             RowType partitionType,
@@ -81,8 +81,8 @@ public class ManifestsReader {
         return this;
     }
 
-    public ManifestsReader withManifestLevelFilter(BiFilter<Integer, Integer> manifestLevelFilter) {
-        this.manifestLevelFilter = manifestLevelFilter;
+    public ManifestsReader withLevelMinMaxFilter(BiFilter<Integer, Integer> minMaxFilter) {
+        this.levelMinMaxFilter = minMaxFilter;
         return this;
     }
 
@@ -167,7 +167,7 @@ public class ManifestsReader {
                     && (specifiedLevel < minLevel || specifiedLevel > maxLevel)) {
                 return false;
             }
-            if (manifestLevelFilter != null && !manifestLevelFilter.test(minLevel, maxLevel)) {
+            if (levelMinMaxFilter != null && !levelMinMaxFilter.test(minLevel, maxLevel)) {
                 return false;
             }
         }
