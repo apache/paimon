@@ -36,6 +36,7 @@ import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.TagManager;
 
@@ -62,6 +63,8 @@ public interface FileStoreTable extends DataTable {
     void setSnapshotCache(Cache<Path, Snapshot> cache);
 
     void setStatsCache(Cache<String, Statistics> cache);
+
+    void setDVMetaCache(DVMetaCache cache);
 
     @Override
     default RowType rowType() {

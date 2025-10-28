@@ -16,34 +16,36 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import logging
-from datetime import datetime, date
+import time
+from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import Mock
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import pyarrow as pa
 
+from pypaimon import CatalogFactory, Schema
 from pypaimon.api.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
-from pypaimon import CatalogFactory
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.schema.data_types import DataField, AtomicType
-from pypaimon import Schema
-from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer, GenericRowDeserializer
+from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.table.row.generic_row import (GenericRow, GenericRowDeserializer,
+                                            GenericRowSerializer)
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
-
 from pypaimon.write.file_store_commit import FileStoreCommit
 
 
-class RESTReadWritePy36Test(RESTBaseTest):
+class RESTAOReadWritePy36Test(RESTBaseTest):
 
     def test_overwrite(self):
         simple_pa_schema = pa.schema([
@@ -175,12 +177,16 @@ class RESTReadWritePy36Test(RESTBaseTest):
         self.assertEqual(actual_data, expect_data)
 
         # to test GenericRow ability
-        latest_snapshot = table_scan.snapshot_manager.get_latest_snapshot()
-        manifest_files = table_scan.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.manifest_file_manager.read(manifest_files[0].file_name,
-                                                                 lambda row: table_scan._bucket_filter(row))
-        min_value_stats = manifest_entries[0].file.value_stats.min_values.values
-        max_value_stats = manifest_entries[0].file.value_stats.max_values.values
+        latest_snapshot = SnapshotManager(table).get_latest_snapshot()
+        manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
+            manifest_files[0].file_name,
+            lambda row: table_scan.starting_scanner._filter_manifest_entry(row),
+            drop_stats=False)
+        min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
+                                                            table.fields).values
+        max_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.max_values.data,
+                                                            table.fields).values
         expected_min_values = [col[0].as_py() for col in expect_data]
         expected_max_values = [col[1].as_py() for col in expect_data]
         self.assertEqual(min_value_stats, expected_min_values)
@@ -737,6 +743,33 @@ class RESTReadWritePy36Test(RESTBaseTest):
             test_name="specific_case"
         )
 
+    def test_incremental_timestamp(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_incremental_parquet', schema, False)
+        table = self.rest_catalog.get_table('default.test_incremental_parquet')
+        timestamp = int(time.time() * 1000)
+        self._write_test_table(table)
+
+        snapshot_manager = SnapshotManager(table)
+        t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
+        t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
+        # test 1
+        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: str(timestamp - 1) + ',' + str(timestamp)})
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder)
+        self.assertEqual(len(actual), 0)
+        # test 2
+        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: str(timestamp) + ',' + str(t2)})
+        read_builder = table.new_read_builder()
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
+        self.assertEqual(self.expected, actual)
+        # test 3
+        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: str(t1) + ',' + str(t2)})
+        read_builder = table.new_read_builder()
+        actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
+        expected = self.expected.slice(4, 4)
+        self.assertEqual(expected, actual)
+
     def _test_value_stats_cols_case(self, manifest_manager, table, value_stats_cols, expected_fields_count, test_name):
         """Helper method to test a specific _VALUE_STATS_COLS case."""
 
@@ -820,7 +853,7 @@ class RESTReadWritePy36Test(RESTBaseTest):
         manifest_manager.write(manifest_file_name, [entry])
 
         # Read the manifest entry back
-        entries = manifest_manager.read(manifest_file_name)
+        entries = manifest_manager.read(manifest_file_name, drop_stats=False)
 
         # Verify we have exactly one entry
         self.assertEqual(len(entries), 1)
@@ -834,23 +867,27 @@ class RESTReadWritePy36Test(RESTBaseTest):
         # Verify value_stats structure based on the logic
         if value_stats_cols is None:
             # Should use all table fields - verify we have data for all fields
-            self.assertEqual(len(read_entry.file.value_stats.min_values.values), expected_fields_count)
-            self.assertEqual(len(read_entry.file.value_stats.max_values.values), expected_fields_count)
+            self.assertEqual(read_entry.file.value_stats.min_values.arity, expected_fields_count)
+            self.assertEqual(read_entry.file.value_stats.min_values.arity, expected_fields_count)
             self.assertEqual(len(read_entry.file.value_stats.null_counts), expected_fields_count)
         elif not value_stats_cols:  # Empty list
             # Should use empty fields - verify we have no field data
-            self.assertEqual(len(read_entry.file.value_stats.min_values.values), 0)
-            self.assertEqual(len(read_entry.file.value_stats.max_values.values), 0)
+            self.assertEqual(read_entry.file.value_stats.min_values.arity, 0)
+            self.assertEqual(read_entry.file.value_stats.max_values.arity, 0)
             self.assertEqual(len(read_entry.file.value_stats.null_counts), 0)
         else:
             # Should use specified fields - verify we have data for specified fields only
-            self.assertEqual(len(read_entry.file.value_stats.min_values.values), expected_fields_count)
-            self.assertEqual(len(read_entry.file.value_stats.max_values.values), expected_fields_count)
+            self.assertEqual(read_entry.file.value_stats.min_values.arity, expected_fields_count)
+            self.assertEqual(read_entry.file.value_stats.max_values.arity, expected_fields_count)
             self.assertEqual(len(read_entry.file.value_stats.null_counts), expected_fields_count)
 
         # Verify the actual values match what we expect
         if expected_fields_count > 0:
-            self.assertEqual(read_entry.file.value_stats.min_values.values, min_values)
-            self.assertEqual(read_entry.file.value_stats.max_values.values, max_values)
+            self.assertEqual(
+                GenericRowDeserializer.from_bytes(read_entry.file.value_stats.min_values.data, test_fields).values,
+                min_values)
+            self.assertEqual(
+                GenericRowDeserializer.from_bytes(read_entry.file.value_stats.max_values.data, test_fields).values,
+                max_values)
 
         self.assertEqual(read_entry.file.value_stats.null_counts, null_counts)

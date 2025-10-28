@@ -17,16 +17,28 @@
 ################################################################################
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
+from typing import ClassVar
 
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.internal_row import InternalRow
 
 
 @dataclass
 class SimpleStats:
-    min_values: GenericRow
-    max_values: GenericRow
-    null_counts: Optional[List[int]]
+    min_values: InternalRow
+    max_values: InternalRow
+    null_counts: List[int]
+
+    _empty_stats: ClassVar[object] = None
+
+    @classmethod
+    def empty_stats(cls):
+        if cls._empty_stats is None:
+            min_values = GenericRow([], [])
+            max_values = GenericRow([], [])
+            cls._empty_stats = cls(min_values, max_values, None)
+        return cls._empty_stats
 
 
 SIMPLE_STATS_SCHEMA = {

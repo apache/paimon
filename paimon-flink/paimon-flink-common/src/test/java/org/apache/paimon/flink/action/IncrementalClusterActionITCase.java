@@ -320,9 +320,92 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testClusterSpecifyPartition() throws Exception {
+        FileStoreTable table = createTable("pt", 1);
+
+        BinaryString randomStr = BinaryString.fromString(randomString(150));
+        List<CommitMessage> messages = new ArrayList<>();
+
+        // first write
+        List<String> expected1 = new ArrayList<>();
+        for (int pt = 0; pt < 2; pt++) {
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    messages.addAll(write(GenericRow.of(i, j, (pt == 0) ? randomStr : null, pt)));
+                    expected1.add(String.format("+I[%s, %s, %s]", i, j, pt));
+                }
+            }
+        }
+        commit(messages);
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0, 1, 3});
+        List<String> result1 =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        readBuilder.readType());
+        assertThat(result1).containsExactlyElementsOf(expected1);
+
+        runAction(Lists.newArrayList("--partition", "pt=0", "--compact_strategy", "full"));
+        checkSnapshot(table);
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThat(splits.size()).isEqualTo(2);
+        for (Split split : splits) {
+            DataSplit dataSplit = (DataSplit) split;
+            if (dataSplit.partition().getInt(0) == 0) {
+                assertThat(dataSplit.dataFiles().size()).isEqualTo(1);
+                assertThat(dataSplit.dataFiles().get(0).level()).isEqualTo(5);
+            } else {
+                assertThat(dataSplit.dataFiles().size()).isGreaterThan(1);
+                assertThat(dataSplit.dataFiles().get(0).level()).isEqualTo(0);
+            }
+        }
+    }
+
+    @Test
     public void testClusterOnEmptyData() throws Exception {
         createTable("pt", 1);
         assertThatCode(() -> runAction(Collections.emptyList())).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testMultiParallelism() throws Exception {
+        FileStoreTable table = createTable(null, 2);
+
+        BinaryString randomStr = BinaryString.fromString(randomString(150));
+        List<CommitMessage> messages = new ArrayList<>();
+
+        // first write
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                messages.addAll(write(GenericRow.of(i, j, randomStr, 0)));
+            }
+        }
+        commit(messages);
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0, 1});
+        List<String> result1 =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        readBuilder.readType());
+        List<String> expected1 =
+                Lists.newArrayList(
+                        "+I[0, 0]",
+                        "+I[0, 1]",
+                        "+I[0, 2]",
+                        "+I[1, 0]",
+                        "+I[1, 1]",
+                        "+I[1, 2]",
+                        "+I[2, 0]",
+                        "+I[2, 1]",
+                        "+I[2, 2]");
+        assertThat(result1).containsExactlyElementsOf(expected1);
+
+        runAction(Lists.newArrayList("--table_conf", "scan.parallelism=2"));
+        checkSnapshot(table);
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThat(splits.size()).isEqualTo(1);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isGreaterThanOrEqualTo(1);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
     }
 
     protected FileStoreTable createTable(String partitionKeys, int sinkParallelism)
@@ -405,8 +488,6 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         baseArgs.addAll(extra);
 
         CompactAction action = createAction(CompactAction.class, baseArgs.toArray(new String[0]));
-        //        action.withStreamExecutionEnvironment(env).build();
-        //        env.execute();
         action.withStreamExecutionEnvironment(env);
         action.run();
     }

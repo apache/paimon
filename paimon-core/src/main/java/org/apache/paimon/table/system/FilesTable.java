@@ -274,6 +274,9 @@ public class FilesTable implements ReadonlyTable {
                             return levelPredicate.test(
                                     GenericRow.of(null, null, null, null, null, level));
                         });
+            } else {
+                // avoid that batchScanSkipLevel0 is true
+                scan.withLevelFilter(level -> true);
             }
             return scan.plan();
         }

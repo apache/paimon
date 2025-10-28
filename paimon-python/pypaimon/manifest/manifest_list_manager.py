@@ -25,8 +25,8 @@ from pypaimon.manifest.schema.manifest_file_meta import (
     MANIFEST_FILE_META_SCHEMA, ManifestFileMeta)
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.table.row.generic_row import (GenericRowDeserializer,
-                                            GenericRowSerializer)
+from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRowSerializer
 
 
 class ManifestListManager:
@@ -47,6 +47,9 @@ class ManifestListManager:
         manifest_files.extend(delta_manifests)
         return manifest_files
 
+    def read_delta(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        return self.read(snapshot.delta_manifest_list)
+
     def read(self, manifest_list_name: str) -> List[ManifestFileMeta]:
         manifest_files = []
 
@@ -58,13 +61,13 @@ class ManifestListManager:
         for record in reader:
             stats_dict = dict(record['_PARTITION_STATS'])
             partition_stats = SimpleStats(
-                min_values=GenericRowDeserializer.from_bytes(
+                min_values=BinaryRow(
                     stats_dict['_MIN_VALUES'],
-                    self.table.table_schema.get_partition_key_fields()
+                    self.table.partition_keys_fields
                 ),
-                max_values=GenericRowDeserializer.from_bytes(
+                max_values=BinaryRow(
                     stats_dict['_MAX_VALUES'],
-                    self.table.table_schema.get_partition_key_fields()
+                    self.table.partition_keys_fields
                 ),
                 null_counts=stats_dict['_NULL_COUNTS'],
             )

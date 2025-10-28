@@ -548,6 +548,7 @@ class PyarrowFieldParser:
 
     @staticmethod
     def to_paimon_schema(pa_schema: pyarrow.Schema) -> List[DataField]:
+        # Convert PyArrow schema to Paimon fields
         fields = []
         for i, pa_field in enumerate(pa_schema):
             pa_field: pyarrow.Field

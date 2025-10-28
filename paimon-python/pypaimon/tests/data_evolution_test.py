@@ -84,6 +84,58 @@ class DataEvolutionTest(unittest.TestCase):
         ]))
         self.assertEqual(actual_data, expect_data)
 
+    def test_with_shard(self):
+        simple_pa_schema = pa.schema([
+            ('f0', pa.int8()),
+            ('f1', pa.int16()),
+        ])
+        schema = Schema.from_pyarrow_schema(simple_pa_schema,
+                                            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'})
+        self.catalog.create_table('default.test_with_shard', schema, False)
+        table = self.catalog.get_table('default.test_with_shard')
+
+        # write 1
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        expect_data = pa.Table.from_pydict({
+            'f0': [-1, 2],
+            'f1': [-1001, 1002]
+        }, schema=simple_pa_schema)
+        table_write.write_arrow(expect_data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # write 2
+        table_write = write_builder.new_write().with_write_type(['f0'])
+        table_commit = write_builder.new_commit()
+        data2 = pa.Table.from_pydict({
+            'f0': [3, 4],
+        }, schema=pa.schema([
+            ('f0', pa.int8()),
+        ]))
+        table_write.write_arrow(data2)
+        cmts = table_write.prepare_commit()
+        cmts[0].new_files[0].first_row_id = 0
+        table_commit.commit(cmts)
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan().with_shard(0, 2)
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        actual_data = table_read.to_arrow(splits)
+        expect_data = pa.Table.from_pydict({
+            'f0': [3],
+            'f1': [-1001]
+        }, schema=pa.schema([
+            ('f0', pa.int8()),
+            ('f1', pa.int16()),
+        ]))
+        self.assertEqual(actual_data, expect_data)
+
     def test_multiple_appends(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int32()),

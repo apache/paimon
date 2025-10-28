@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
 import logging
 import os
 import subprocess
@@ -26,10 +25,10 @@ from urllib.parse import splitport, urlparse
 import pyarrow
 from packaging.version import parse
 from pyarrow._fs import FileSystem
-
 from pypaimon.common.config import OssOptions, S3Options
+from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
-from pypaimon.table.row.blob import BlobData
+from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.write.blob_format_writer import BlobFormatWriter
@@ -40,6 +39,7 @@ class FileIO:
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
         scheme, netloc, _ = self.parse_location(path)
+        self.uri_reader_factory = UriReaderFactory(catalog_options)
         if scheme in {"oss"}:
             self.filesystem = self._initialize_oss_fs(path)
         elif scheme in {"s3", "s3a", "s3n"}:
@@ -370,7 +370,7 @@ class FileIO:
         with self.new_output_stream(path) as output_stream:
             fastavro.writer(output_stream, avro_schema, records, **kwargs)
 
-    def write_blob(self, path: Path, data: pyarrow.Table, **kwargs):
+    def write_blob(self, path: Path, data: pyarrow.Table, blob_as_descriptor: bool, **kwargs):
         try:
             # Validate input constraints
             if data.num_columns != 1:
@@ -399,7 +399,11 @@ class FileIO:
                     col_data = records_dict[field_name][i]
                     # Convert to appropriate type based on field type
                     if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
-                        if isinstance(col_data, bytes):
+                        if blob_as_descriptor:
+                            blob_descriptor = BlobDescriptor.deserialize(col_data)
+                            uri_reader = self.uri_reader_factory.create(blob_descriptor.uri)
+                            blob_data = Blob.from_descriptor(uri_reader, blob_descriptor)
+                        elif isinstance(col_data, bytes):
                             blob_data = BlobData(col_data)
                         else:
                             # Convert to bytes if needed

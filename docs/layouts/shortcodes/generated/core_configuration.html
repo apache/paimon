@@ -63,6 +63,12 @@ under the License.
             <td>Specify the blob field.</td>
         </tr>
         <tr>
+            <td><h5>blob.target-file-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Target size of a blob file. Default is value of TARGET_FILE_SIZE.</td>
+        </tr>
+        <tr>
             <td><h5>bucket</h5></td>
             <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>
@@ -181,6 +187,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>A list of commit callback classes to be called after a successful commit. Class names are connected with comma (example: com.test.CallbackA,com.sample.CallbackB).</td>
+        </tr>
+        <tr>
+            <td><h5>commit.discard-duplicate-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether discard duplicate files in commit.</td>
         </tr>
         <tr>
             <td><h5>commit.force-compact</h5></td>
@@ -526,7 +538,7 @@ under the License.
         </tr>
         <tr>
             <td><h5>format-table.implementation</h5></td>
-            <td style="word-wrap: break-word;">engine</td>
+            <td style="word-wrap: break-word;">paimon</td>
             <td><p>Enum</p></td>
             <td>Format table uses paimon or engine.<br /><br />Possible values:<ul><li>"paimon": Paimon format table implementation.</li><li>"engine": Engine format table implementation.</li></ul></td>
         </tr>

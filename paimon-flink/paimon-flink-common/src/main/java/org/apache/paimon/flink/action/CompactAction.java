@@ -213,15 +213,12 @@ public class CompactAction extends TableActionBase {
     }
 
     private boolean buildForIncrementalClustering(
-            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming) {
+            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
+            throws Exception {
         checkArgument(!isStreaming, "Incremental clustering currently only supports batch mode");
-        checkArgument(
-                partitions == null,
-                "Incremental clustering currently does not support specifying partitions");
-        checkArgument(
-                whereSql == null, "Incremental clustering currently does not support predicates");
 
-        IncrementalClusterManager incrementalClusterManager = new IncrementalClusterManager(table);
+        IncrementalClusterManager incrementalClusterManager =
+                new IncrementalClusterManager(table, getPartitionPredicate());
 
         // non-full strategy as default for incremental clustering
         if (fullCompaction == null) {
@@ -248,9 +245,10 @@ public class CompactAction extends TableActionBase {
         Map<BinaryRow, CompactUnit> compactUnits =
                 incrementalClusterManager.prepareForCluster(fullCompaction);
         if (compactUnits.isEmpty()) {
-            LOGGER.info(
+            LOGGER.warn(
                     "No partition needs to be incrementally clustered. "
-                            + "Please set '--compact_strategy full' if you need to forcibly trigger the cluster.");
+                            + "Please set '--compact_strategy full' if you need forcibly trigger the cluster."
+                            + "Please set '--force_start_flink_job true' if you need forcibly start a flink job.");
             if (this.forceStartFlinkJob) {
                 env.fromSequence(0, 0)
                         .name("Nothing to Cluster Source")
@@ -309,15 +307,17 @@ public class CompactAction extends TableActionBase {
             // set parallelism to null, and it'll forward parallelism when doWrite()
             RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
             boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
-            DataStream<Committable> clusterCommittable =
+            DataStream<Committable> written =
                     sink.doWrite(
-                                    FlinkSinkBuilder.mapToInternalRow(
-                                            sorted,
-                                            table.rowType(),
-                                            blobAsDescriptor,
-                                            table.catalogEnvironment().catalogContext()),
-                                    commitUser,
-                                    null)
+                            FlinkSinkBuilder.mapToInternalRow(
+                                    sorted,
+                                    table.rowType(),
+                                    blobAsDescriptor,
+                                    table.catalogEnvironment().catalogContext()),
+                            commitUser,
+                            null);
+            DataStream<Committable> clusterCommittable =
+                    written.forward()
                             .transform(
                                     "Rewrite cluster committable",
                                     new CommittableTypeInfo(),
@@ -329,7 +329,8 @@ public class CompactAction extends TableActionBase {
                                                                     Map.Entry::getKey,
                                                                     unit ->
                                                                             unit.getValue()
-                                                                                    .outputLevel()))));
+                                                                                    .outputLevel()))))
+                            .setParallelism(written.getParallelism());
             dataStreams.add(clusterCommittable);
             dataStreams.add(sourcePair.getRight());
         }

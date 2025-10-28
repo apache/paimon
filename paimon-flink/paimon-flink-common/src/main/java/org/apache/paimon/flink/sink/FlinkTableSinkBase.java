@@ -45,6 +45,7 @@ import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.CLUSTERING_COLUMNS;
+import static org.apache.paimon.CoreOptions.CLUSTERING_INCREMENTAL;
 import static org.apache.paimon.CoreOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
@@ -140,12 +141,14 @@ public abstract class FlinkTableSinkBase
                             .forRowData(
                                     new DataStream<>(
                                             dataStream.getExecutionEnvironment(),
-                                            dataStream.getTransformation()))
-                            .clusteringIfPossible(
-                                    conf.get(CLUSTERING_COLUMNS),
-                                    conf.get(CLUSTERING_STRATEGY),
-                                    conf.get(CLUSTERING_SORT_IN_CLUSTER),
-                                    conf.get(CLUSTERING_SAMPLE_FACTOR));
+                                            dataStream.getTransformation()));
+                    if (!conf.get(CLUSTERING_INCREMENTAL)) {
+                        builder.clusteringIfPossible(
+                                conf.get(CLUSTERING_COLUMNS),
+                                conf.get(CLUSTERING_STRATEGY),
+                                conf.get(CLUSTERING_SORT_IN_CLUSTER),
+                                conf.get(CLUSTERING_SAMPLE_FACTOR));
+                    }
                     if (overwrite) {
                         builder.overwrite(staticPartitions);
                     }

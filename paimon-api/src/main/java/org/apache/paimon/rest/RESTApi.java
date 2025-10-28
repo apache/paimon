@@ -92,7 +92,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -192,8 +191,7 @@ public class RESTApi {
                                             ResourcePaths.config(),
                                             queryParams,
                                             ConfigResponse.class,
-                                            new RESTAuthFunction(
-                                                    Collections.emptyMap(), authProvider))
+                                            new RESTAuthFunction(baseHeaders, authProvider))
                                     .merge(options.toMap()));
             baseHeaders.putAll(extractPrefixMap(options, HEADER_PREFIX));
         }

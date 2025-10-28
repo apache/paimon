@@ -21,13 +21,14 @@ import uuid
 from pathlib import Path
 from typing import List
 
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.table_scan import TableScan
+from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
@@ -66,7 +67,7 @@ class FileStoreCommit:
 
         commit_entries = []
         for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.table_schema.get_partition_key_fields())
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,
@@ -88,7 +89,7 @@ class FileStoreCommit:
         partition_filter = None
         # sanity check, all changes must be done within the given partition, meanwhile build a partition filter
         if len(overwrite_partition) > 0:
-            predicate_builder = PredicateBuilder(self.table.table_schema.get_partition_key_fields())
+            predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
             sub_predicates = []
             for key, value in overwrite_partition.items():
                 sub_predicates.append(predicate_builder.equal(key, value))
@@ -101,12 +102,12 @@ class FileStoreCommit:
                                        f"in {msg.partition} does not belong to this partition")
 
         commit_entries = []
-        current_entries = TableScan(self.table, partition_filter, None, []).plan_files()
+        current_entries = FullStartingScanner(self.table, partition_filter, None).plan_files()
         for entry in current_entries:
             entry.kind = 1
             commit_entries.append(entry)
         for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.table_schema.get_partition_key_fields())
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,
@@ -134,7 +135,7 @@ class FileStoreCommit:
         new_snapshot_id = self._generate_snapshot_id()
 
         # Check if row tracking is enabled
-        row_tracking_enabled = self.table.options.get('row-tracking.enabled', 'false').lower() == 'true'
+        row_tracking_enabled = self.table.options.get(CoreOptions.ROW_TRACKING_ENABLED, 'false').lower() == 'true'
 
         # Apply row tracking logic if enabled
         next_row_id = None
@@ -173,11 +174,11 @@ class FileStoreCommit:
             partition_stats=SimpleStats(
                 min_values=GenericRow(
                     values=partition_min_stats,
-                    fields=self.table.table_schema.get_partition_key_fields(),
+                    fields=self.table.partition_keys_fields
                 ),
                 max_values=GenericRow(
                     values=partition_max_stats,
-                    fields=self.table.table_schema.get_partition_key_fields(),
+                    fields=self.table.partition_keys_fields
                 ),
                 null_counts=partition_null_counts,
             ),

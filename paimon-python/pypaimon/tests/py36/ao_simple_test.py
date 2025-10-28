@@ -20,8 +20,10 @@ from unittest.mock import patch
 import pyarrow as pa
 
 from pypaimon import Schema
-from pypaimon.catalog.catalog_exception import TableNotExistException, TableAlreadyExistException, \
-    DatabaseNotExistException, DatabaseAlreadyExistException
+from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
+                                                DatabaseNotExistException,
+                                                TableAlreadyExistException,
+                                                TableNotExistException)
 from pypaimon.common.config import OssOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by

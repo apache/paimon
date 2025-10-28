@@ -45,7 +45,6 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
-import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -279,7 +278,8 @@ public class RESTCatalog implements Catalog {
                 this::loadTableMetadata,
                 null,
                 null,
-                context);
+                context,
+                true);
     }
 
     @Override
@@ -355,7 +355,7 @@ public class RESTCatalog implements Catalog {
         try {
             return api.commitSnapshot(identifier, tableUuid, snapshot, statistics);
         } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
+            throw new TableNotExistException(identifier, e);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (BadRequestException e) {
@@ -428,7 +428,8 @@ public class RESTCatalog implements Catalog {
                     i -> toTableMetadata(db, response),
                     null,
                     null,
-                    context);
+                    context,
+                    true);
         } catch (TableNotExistException e) {
             throw new RuntimeException(e);
         }
@@ -970,17 +971,6 @@ public class RESTCatalog implements Catalog {
     @VisibleForTesting
     RESTApi api() {
         return api;
-    }
-
-    protected GetTableTokenResponse loadTableToken(Identifier identifier)
-            throws TableNotExistException {
-        try {
-            return api.loadTableToken(identifier);
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
     }
 
     private FileIO fileIOForData(Path path, Identifier identifier) {

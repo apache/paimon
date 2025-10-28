@@ -288,7 +288,7 @@ CREATE TABLE my_table_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 
 ## View
 
 Views are based on the result-set of an SQL query, when using `org.apache.paimon.spark.SparkCatalog`, views are managed by paimon itself. 
-And in this case, views are supported when the `metastore` type is `hive`, and temporary views are not supported yet.
+And in this case, views are supported when the `metastore` type is `hive` or `rest`.
 
 ### Create Or Replace View
 
@@ -296,10 +296,10 @@ CREATE VIEW constructs a virtual table that has no physical data.
 
 ```sql
 -- create a view.
-CREATE VIEW v1 AS SELECT * FROM t1;
+CREATE [TEMPORARY] VIEW v1 AS SELECT * FROM t1;
 
 -- create a view, if a view of same name already exists, it will be replaced.
-CREATE OR REPLACE VIEW v1 AS SELECT * FROM t1;
+CREATE OR REPLACE [TEMPORARY] VIEW v1 AS SELECT * FROM t1;
 ```
 
 ### Drop View

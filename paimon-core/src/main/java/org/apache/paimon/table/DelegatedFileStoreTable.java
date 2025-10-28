@@ -42,6 +42,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
@@ -152,6 +153,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public void setStatsCache(Cache<String, Statistics> cache) {
         wrapped.setStatsCache(cache);
+    }
+
+    @Override
+    public void setDVMetaCache(DVMetaCache cache) {
+        wrapped.setDVMetaCache(cache);
     }
 
     @Override

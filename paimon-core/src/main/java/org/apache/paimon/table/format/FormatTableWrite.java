@@ -42,6 +42,7 @@ import java.util.stream.Collectors;
 /** {@link TableWrite} implementation for format table. */
 public class FormatTableWrite implements BatchTableWrite {
 
+    private FileIO fileIO;
     private RowType rowType;
     private final FormatTableFileWriter write;
     private final FormatTableRowPartitionKeyExtractor partitionKeyExtractor;
@@ -55,6 +56,7 @@ public class FormatTableWrite implements BatchTableWrite {
             CoreOptions options,
             RowType partitionType,
             List<String> partitionKeys) {
+        this.fileIO = fileIO;
         this.rowType = rowType;
         this.write = new FormatTableFileWriter(fileIO, rowType, options, partitionType);
         this.partitionKeyExtractor =
@@ -103,7 +105,7 @@ public class FormatTableWrite implements BatchTableWrite {
         for (CommitMessage commitMessage : commitMessages) {
             if (commitMessage instanceof TwoPhaseCommitMessage) {
                 TwoPhaseCommitMessage twoPhaseCommitMessage = (TwoPhaseCommitMessage) commitMessage;
-                twoPhaseCommitMessage.getCommitter().commit();
+                twoPhaseCommitMessage.getCommitter().commit(this.fileIO);
             } else {
                 throw new RuntimeException(
                         "Unsupported commit message type: " + commitMessage.getClass().getName());

@@ -46,9 +46,15 @@ class FileStoreTable(Table):
 
         self.table_schema = table_schema
         self.fields = table_schema.fields
+        self.field_names = [field.name for field in table_schema.fields]
         self.field_dict = {field.name: field for field in self.fields}
         self.primary_keys = table_schema.primary_keys
+        self.primary_keys_fields = [self.field_dict[name] for name in self.primary_keys]
         self.partition_keys = table_schema.partition_keys
+        self.partition_keys_fields = [self.field_dict[name] for name in self.partition_keys]
+        self.trimmed_primary_keys = [pk for pk in self.primary_keys if pk not in self.partition_keys]
+        self.trimmed_primary_keys_fields = [self.field_dict[name] for name in self.trimmed_primary_keys]
+
         self.options = table_schema.options
         self.cross_partition_update = self.table_schema.cross_partition_update()
         self.is_primary_key_table = bool(self.primary_keys)
@@ -104,3 +110,20 @@ class FileStoreTable(Table):
             return DynamicBucketRowKeyExtractor(self.table_schema)
         else:
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
+
+    def copy(self, options: dict) -> 'FileStoreTable':
+        if CoreOptions.BUCKET in options and options.get(CoreOptions.BUCKET) != self.options.get(CoreOptions.BUCKET):
+            raise ValueError("Cannot change bucket number")
+        new_options = self.options.copy()
+        for k, v in options.items():
+            if v is None:
+                new_options.pop(k)
+            else:
+                new_options[k] = v
+        new_table_schema = self.table_schema.copy(new_options=new_options)
+        return FileStoreTable(self.file_io, self.identifier, self.table_path, new_table_schema,
+                              self.catalog_environment)
+
+    def add_options(self, options: dict):
+        for key, value in options.items():
+            self.options[key] = value

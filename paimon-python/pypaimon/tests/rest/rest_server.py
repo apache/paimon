@@ -428,12 +428,15 @@ class RESTCatalogServer:
                 if create_table.identifier.get_full_name() in self.table_metadata_store:
                     raise TableAlreadyExistException(create_table.identifier)
                 table_metadata = self._create_table_metadata(
-                    create_table.identifier, 1, create_table.schema, str(uuid.uuid4()), False
+                    create_table.identifier, 0, create_table.schema, str(uuid.uuid4()), False
                 )
                 self.table_metadata_store.update({create_table.identifier.get_full_name(): table_metadata})
-                table_dir = Path(self.data_path) / self.warehouse / database_name / create_table.identifier.object_name
+                table_dir = Path(
+                    self.data_path) / self.warehouse / database_name / create_table.identifier.object_name / 'schema'
                 if not table_dir.exists():
                     table_dir.mkdir(parents=True)
+                with open(table_dir / "schema-0", "w") as f:
+                    f.write(JSON.to_json(table_metadata.schema, indent=2))
                 return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 

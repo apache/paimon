@@ -19,6 +19,9 @@
 import io
 from abc import ABC, abstractmethod
 from typing import Optional, Union
+from urllib.parse import urlparse
+
+from pypaimon.common.uri_reader import UriReader, FileUriReader
 
 
 class BlobDescriptor:
@@ -144,21 +147,33 @@ class Blob(ABC):
 
     @staticmethod
     def from_local(file: str) -> 'Blob':
-        return Blob.from_file(file)
+        # Import FileIO locally to avoid circular imports
+        from pypaimon.common.file_io import FileIO
+
+        parsed = urlparse(file)
+        if parsed.scheme == "file":
+            file_uri = file
+        else:
+            file_uri = f"file://{file}"
+        file_io = FileIO(file_uri, {})
+        uri_reader = FileUriReader(file_io)
+        descriptor = BlobDescriptor(file, 0, -1)
+        return Blob.from_descriptor(uri_reader, descriptor)
 
     @staticmethod
     def from_http(uri: str) -> 'Blob':
         descriptor = BlobDescriptor(uri, 0, -1)
-        return BlobRef(descriptor)
+        return BlobRef(UriReader.from_http(), descriptor)
 
     @staticmethod
-    def from_file(file: str, offset: int = 0, length: int = -1) -> 'Blob':
-        descriptor = BlobDescriptor(file, offset, length)
-        return BlobRef(descriptor)
+    def from_file(file_io, file_path: str, offset: int, length: int) -> 'Blob':
+        uri_reader = FileUriReader(file_io)
+        descriptor = BlobDescriptor(file_path, offset, length)
+        return Blob.from_descriptor(uri_reader, descriptor)
 
     @staticmethod
-    def from_descriptor(descriptor: BlobDescriptor) -> 'Blob':
-        return BlobRef(descriptor)
+    def from_descriptor(uri_reader: UriReader, descriptor: BlobDescriptor) -> 'Blob':
+        return BlobRef(uri_reader, descriptor)
 
 
 class BlobData(Blob):
@@ -199,7 +214,8 @@ class BlobData(Blob):
 
 class BlobRef(Blob):
 
-    def __init__(self, descriptor: BlobDescriptor):
+    def __init__(self, uri_reader: UriReader, descriptor: BlobDescriptor):
+        self._uri_reader = uri_reader
         self._descriptor = descriptor
 
     def to_data(self) -> bytes:
@@ -216,27 +232,14 @@ class BlobRef(Blob):
         uri = self._descriptor.uri
         offset = self._descriptor.offset
         length = self._descriptor.length
-
-        if uri.startswith('http://') or uri.startswith('https://'):
-            raise NotImplementedError("HTTP blob reading not implemented yet")
-        elif uri.startswith('file://') or '://' not in uri:
-            file_path = uri.replace('file://', '') if uri.startswith('file://') else uri
-
-            try:
-                with open(file_path, 'rb') as f:
-                    if offset > 0:
-                        f.seek(offset)
-
-                    if length == -1:
-                        data = f.read()
-                    else:
-                        data = f.read(length)
-
-                    return io.BytesIO(data)
-            except Exception as e:
-                raise IOError(f"Failed to read file {file_path}: {e}")
-        else:
-            raise ValueError(f"Unsupported URI scheme: {uri}")
+        with self._uri_reader.new_input_stream(uri) as input_stream:
+            if offset > 0:
+                input_stream.seek(offset)
+            if length == -1:
+                data = input_stream.read()
+            else:
+                data = input_stream.read(length)
+            return io.BytesIO(data)
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, BlobRef):

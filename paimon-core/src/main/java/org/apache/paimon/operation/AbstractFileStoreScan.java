@@ -74,7 +74,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private final ConcurrentMap<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
-    private final TableSchema schema;
+    protected final TableSchema schema;
 
     private Snapshot specifiedSnapshot = null;
     private boolean onlyReadRealBuckets = false;
@@ -255,6 +255,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             files.add(iterator.next());
         }
 
+        files = postFilter(files);
+
         if (wholeBucketFilterEnabled()) {
             // We group files by bucket here, and filter them by the whole bucket filter.
             // Why do this: because in primary key table, we can't just filter the value
@@ -421,6 +423,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     /** Note: Keep this thread-safe. */
     protected abstract boolean filterByStats(ManifestEntry entry);
+
+    protected abstract List<ManifestEntry> postFilter(List<ManifestEntry> entries);
 
     protected boolean wholeBucketFilterEnabled() {
         return false;
