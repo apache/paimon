@@ -448,7 +448,6 @@ under the License.
                 <test.flink.version>1.20.1</test.flink.version>
             </properties>
             <modules>
-                <module>paimon-flink/paimon-flink-1.15</module>
                 <module>paimon-flink/paimon-flink-1.16</module>
                 <module>paimon-flink/paimon-flink-1.17</module>
                 <module>paimon-flink/paimon-flink-1.18</module>
