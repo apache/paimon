@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -30,7 +31,6 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsEvolution;
-import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.SnapshotManager;
@@ -38,6 +38,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
@@ -98,7 +99,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     private boolean filterByStats(List<ManifestEntry> metas) {
         long rowCount = metas.get(0).file().rowCount();
-        SimpleStatsEvolution.Result evolutionResult = evolutionStats(metas);
+        SimpleStatsEvolution.Result evolutionResult =
+                evolutionStats(schema, this::scanTableSchema, metas);
         return inputFilter.test(
                 rowCount,
                 evolutionResult.minValues(),
@@ -106,7 +108,11 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 evolutionResult.nullCounts());
     }
 
-    private SimpleStatsEvolution.Result evolutionStats(List<ManifestEntry> metas) {
+    @VisibleForTesting
+    static SimpleStatsEvolution.Result evolutionStats(
+            TableSchema schema,
+            Function<Long, TableSchema> scanTableSchema,
+            List<ManifestEntry> metas) {
         int[] allFields = schema.fields().stream().mapToInt(DataField::id).toArray();
         int fieldsCount = schema.fields().size();
         int[] rowOffsets = new int[fieldsCount];
@@ -127,31 +133,43 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
         for (int i = 0; i < metas.size(); i++) {
             DataFileMeta fileMeta = metas.get(i).file();
+
             TableSchema dataFileSchema =
-                    scanTableSchema(fileMeta.schemaId())
-                            .project(
-                                    fileMeta.valueStatsCols() == null
-                                            ? fileMeta.writeCols()
-                                            : fileMeta.valueStatsCols());
+                    scanTableSchema.apply(fileMeta.schemaId()).project(fileMeta.writeCols());
+
+            TableSchema dataFileSchemaWithStats = dataFileSchema.project(fileMeta.valueStatsCols());
+
             int[] fieldIds =
-                    SpecialFields.rowTypeWithRowTracking(dataFileSchema.logicalRowType())
-                            .getFields().stream()
+                    dataFileSchema.logicalRowType().getFields().stream()
                             .mapToInt(DataField::id)
                             .toArray();
 
-            int count = 0;
+            int[] fieldIdsWithStats =
+                    dataFileSchemaWithStats.logicalRowType().getFields().stream()
+                            .mapToInt(DataField::id)
+                            .toArray();
+
+            loop1:
             for (int j = 0; j < fieldsCount; j++) {
+                if (rowOffsets[j] != -1) {
+                    continue;
+                }
+                int targetFieldId = allFields[j];
                 for (int fieldId : fieldIds) {
-                    if (allFields[j] == fieldId) {
-                        // TODO: If type not match (e.g. int -> string), we need to skip this, set
-                        // rowOffsets[j] = -1 always. (may -2, after all, set it back to -1)
-                        // Because schema evolution may happen to change int to string or something
-                        // like that.
-                        if (rowOffsets[j] == -1) {
-                            rowOffsets[j] = i;
-                            fieldOffsets[j] = count++;
+                    if (targetFieldId == fieldId) {
+                        for (int k = 0; k < fieldIdsWithStats.length; k++) {
+                            if (fieldId == fieldIdsWithStats[k]) {
+                                // TODO: If type not match (e.g. int -> string), we need to skip
+                                // this, set rowOffsets[j] = -1 always. (may -2, after all, set it
+                                // back to -1) Because schema evolution may happen to change int to
+                                // string or something like that.
+                                rowOffsets[j] = i;
+                                fieldOffsets[j] = k;
+                                continue loop1;
+                            }
                         }
-                        break;
+                        rowOffsets[j] = -2;
+                        continue loop1;
                     }
                 }
             }

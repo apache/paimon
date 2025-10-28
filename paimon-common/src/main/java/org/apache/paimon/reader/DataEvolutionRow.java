@@ -96,7 +96,7 @@ public class DataEvolutionRow implements InternalRow {
 
     @Override
     public boolean isNullAt(int pos) {
-        if (rowOffsets[pos] == -1) {
+        if (rowOffsets[pos] < 0) {
             return true;
         }
         return chooseRow(pos).isNullAt(offsetInRow(pos));

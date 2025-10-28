@@ -72,7 +72,7 @@ public class DataEvolutionArray implements InternalArray {
 
     @Override
     public boolean isNullAt(int pos) {
-        if (rowOffsets[pos] == -1) {
+        if (rowOffsets[pos] < 0) {
             return true;
         }
         return chooseArray(pos).isNullAt(offsetInRow(pos));
