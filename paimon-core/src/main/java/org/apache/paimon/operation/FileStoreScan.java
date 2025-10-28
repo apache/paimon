@@ -75,7 +75,7 @@ public interface FileStoreScan {
 
     FileStoreScan withLevelFilter(Filter<Integer> levelFilter);
 
-    FileStoreScan withManifestLevelFilter(Filter<Integer> manifestLevelFilter);
+    FileStoreScan withManifestLevelFilter(BiFilter<Integer, Integer> manifestLevelFilter);
 
     FileStoreScan enableValueFilter();
 

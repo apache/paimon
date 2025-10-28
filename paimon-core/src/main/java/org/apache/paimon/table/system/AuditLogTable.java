@@ -59,6 +59,7 @@ import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -360,7 +361,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public SnapshotReader withManifestLevelFilter(Filter<Integer> manifestLevelFilter) {
+        public SnapshotReader withManifestLevelFilter(
+                BiFilter<Integer, Integer> manifestLevelFilter) {
             wrapped.withManifestLevelFilter(manifestLevelFilter);
             return this;
         }

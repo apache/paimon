@@ -27,7 +27,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -53,7 +53,7 @@ public class ManifestsReader {
     @Nullable private Integer specifiedBucket = null;
     @Nullable private Integer specifiedLevel = null;
     @Nullable private PartitionPredicate partitionFilter = null;
-    @Nullable private Filter<Integer> manifestLevelFilter = null;
+    @Nullable private BiFilter<Integer, Integer> manifestLevelFilter = null;
 
     public ManifestsReader(
             RowType partitionType,
@@ -81,7 +81,7 @@ public class ManifestsReader {
         return this;
     }
 
-    public ManifestsReader withManifestLevelFilter(Filter<Integer> manifestLevelFilter) {
+    public ManifestsReader withManifestLevelFilter(BiFilter<Integer, Integer> manifestLevelFilter) {
         this.manifestLevelFilter = manifestLevelFilter;
         return this;
     }
@@ -167,7 +167,7 @@ public class ManifestsReader {
                     && (specifiedLevel < minLevel || specifiedLevel > maxLevel)) {
                 return false;
             }
-            if (manifestLevelFilter != null && !manifestLevelFilter.test(minLevel)) {
+            if (manifestLevelFilter != null && !manifestLevelFilter.test(minLevel, maxLevel)) {
                 return false;
             }
         }

@@ -34,6 +34,7 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
@@ -87,7 +88,7 @@ public interface SnapshotReader {
 
     SnapshotReader withLevelFilter(Filter<Integer> levelFilter);
 
-    SnapshotReader withManifestLevelFilter(Filter<Integer> manifestLevelFilter);
+    SnapshotReader withManifestLevelFilter(BiFilter<Integer, Integer> manifestLevelFilter);
 
     SnapshotReader enableValueFilter();
 
