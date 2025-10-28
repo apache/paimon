@@ -160,11 +160,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                         for (int k = 0; k < fieldIdsWithStats.length; k++) {
                             if (fieldId == fieldIdsWithStats[k]) {
                                 // TODO: If type not match (e.g. int -> string), we need to skip
-                                // this, set
-                                // rowOffsets[j] = -1 always. (may -2, after all, set it back to -1)
-                                // Because schema evolution may happen to change int to string or
-                                // something
-                                // like that.
+                                // this, set rowOffsets[j] = -1 always. (may -2, after all, set it
+                                // back to -1) Because schema evolution may happen to change int to
+                                // string or something like that.
                                 rowOffsets[j] = i;
                                 fieldOffsets[j] = k;
                                 continue loop1;
