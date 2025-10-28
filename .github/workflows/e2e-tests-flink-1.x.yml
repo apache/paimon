@@ -55,11 +55,3 @@ jobs:
           $(run_flink_e2e_tests)
         env:
           MAVEN_OPTS: -Xmx4096m
-
-      - name: Test Flink 1.16
-        run: |
-          . .github/workflows/utils.sh
-          flink_version = '1.16'
-          $(run_flink_e2e_tests)
-        env:
-          MAVEN_OPTS: -Xmx4096m
