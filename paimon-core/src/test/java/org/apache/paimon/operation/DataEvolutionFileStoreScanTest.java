@@ -50,6 +50,7 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** Tests for {@link DataEvolutionFileStoreScan}. */
 public class DataEvolutionFileStoreScanTest {
 
     private Map<Long, TableSchema> schemas;
