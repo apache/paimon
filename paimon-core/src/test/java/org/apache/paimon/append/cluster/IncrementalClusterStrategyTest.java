@@ -199,7 +199,7 @@ public class IncrementalClusterStrategyTest {
                 SchemaChange.setOption(CoreOptions.CLUSTERING_COLUMNS.key(), "f2,f3"));
     }
 
-    private static DataFileMeta createFile(long size, long schemaId, int level) {
+    protected static DataFileMeta createFile(long size, long schemaId, int level) {
         return DataFileMeta.create(
                 "",
                 size,
