@@ -29,6 +29,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+
 /** A {@link SplitReadProvider} to create {@link DataEvolutionSplitRead}. */
 public class DataEvolutionSplitReadProvider implements SplitReadProvider {
 
@@ -54,6 +56,9 @@ public class DataEvolutionSplitReadProvider implements SplitReadProvider {
 
         Set<Long> firstRowIds = new HashSet<>();
         for (DataFileMeta file : files) {
+            if (isBlobFile(file.fileName())) {
+                return true;
+            }
             Long current = file.firstRowId();
             if (current == null
                     || !file.fileSource().isPresent()

@@ -197,13 +197,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         long rowCount = fieldsFiles.get(0).rowCount();
         long firstRowId = fieldsFiles.get(0).files().get(0).firstRowId();
 
-        for (FieldBunch bunch : fieldsFiles) {
-            checkArgument(
-                    bunch.rowCount() == rowCount,
-                    "All files in a field merge split should have the same row count.");
-            checkArgument(
-                    bunch.files().get(0).firstRowId() == firstRowId,
-                    "All files in a field merge split should have the same first row id and could not be null.");
+        if (indices == null) {
+            for (FieldBunch bunch : fieldsFiles) {
+                checkArgument(
+                        bunch.rowCount() == rowCount,
+                        "All files in a field merge split should have the same row count.");
+                checkArgument(
+                        bunch.files().get(0).firstRowId() == firstRowId,
+                        "All files in a field merge split should have the same first row id and could not be null.");
+            }
         }
 
         // Init all we need to create a compound reader
