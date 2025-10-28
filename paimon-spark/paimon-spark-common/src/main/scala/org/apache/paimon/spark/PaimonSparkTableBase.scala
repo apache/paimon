@@ -27,26 +27,21 @@ import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.spark.write.{PaimonV2WriteBuilder, PaimonWriteBuilder}
 import org.apache.paimon.table.{Table, _}
 import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED, POSTPONE_MODE}
-import org.apache.paimon.utils.StringUtils
 
 import org.apache.spark.sql.connector.catalog._
-import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
-import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.{Collections, EnumSet => JEnumSet, HashMap => JHashMap, Map => JMap, Set => JSet}
 
-import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 
 abstract class PaimonSparkTableBase(val table: Table)
-  extends org.apache.spark.sql.connector.catalog.Table
+  extends BaseTable
   with SupportsRead
   with SupportsWrite
-  with SupportsMetadataColumns
-  with PaimonPartitionManagement {
+  with SupportsMetadataColumns {
 
   lazy val coreOptions = new CoreOptions(table.options())
 
@@ -71,14 +66,6 @@ abstract class PaimonSparkTableBase(val table: Table)
   }
 
   def getTable: Table = table
-
-  override def name: String = table.fullName
-
-  override lazy val schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType)
-
-  override def partitioning: Array[Transform] = {
-    table.partitionKeys().asScala.map(p => Expressions.identity(StringUtils.quote(p))).toArray
-  }
 
   override def properties: JMap[String, String] = {
     table match {
@@ -162,9 +149,5 @@ abstract class PaimonSparkTableBase(val table: Table)
       case _ =>
         throw new RuntimeException("Only FileStoreTable can be written.")
     }
-  }
-
-  override def toString: String = {
-    s"${table.getClass.getSimpleName}[${table.fullName()}]"
   }
 }
