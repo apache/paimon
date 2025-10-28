@@ -34,7 +34,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for format table. */
-public class FormatTableITCaseBase extends RESTCatalogITCaseBase {
+public class FormatTableITCase extends RESTCatalogITCaseBase {
 
     @Test
     public void testParquetFileFormat() {
