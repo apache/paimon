@@ -1957,13 +1957,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable incremental clustering.");
 
-    public static final ConfigOption<Boolean> CLUSTERING_HISTORY_PARTITION_AUTO =
-            key("clustering.history-partition.auto.enabled")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether enable automatically performing full clustering for history partition.");
-
     public static final ConfigOption<Integer> CLUSTERING_HISTORY_PARTITION_LIMIT =
             key("clustering.history-partition.limit")
                     .intType()
@@ -1971,8 +1964,8 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The limit of history partition number for automatically performing full clustering.");
 
-    public static final ConfigOption<Duration> CLUSTERING_PARTITION_IDLE_TIME =
-            key("clustering.partition.idle-time")
+    public static final ConfigOption<Duration> CLUSTERING_HISTORY_PARTITION_IDLE_TIME =
+            key("clustering.history-partition.idle-to-full-sort")
                     .durationType()
                     .noDefaultValue()
                     .withDescription(
@@ -3087,12 +3080,8 @@ public class CoreOptions implements Serializable {
         return options.get(CLUSTERING_INCREMENTAL);
     }
 
-    public boolean clusteringHistoryPartitionAutoEnabled() {
-        return options.get(CLUSTERING_HISTORY_PARTITION_AUTO);
-    }
-
-    public Duration clusteringPartitionIdleTime() {
-        return options.get(CLUSTERING_PARTITION_IDLE_TIME);
+    public Duration clusteringHistoryPartitionIdleTime() {
+        return options.get(CLUSTERING_HISTORY_PARTITION_IDLE_TIME);
     }
 
     public int clusteringHistoryPartitionLimit() {

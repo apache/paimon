@@ -68,8 +68,7 @@ public class IncrementalClusterManager {
     private final CoreOptions.OrderType clusterCurve;
     private final List<String> clusterKeys;
 
-    private final boolean historyPartitionAutoCluster;
-    @Nullable private final Duration partitionIdleTime;
+    @Nullable private final Duration historyPartitionIdleTime;
     private final int historyPartitionLimit;
 
     @Nullable private final PartitionPredicate specifiedPartitions;
@@ -100,14 +99,10 @@ public class IncrementalClusterManager {
         this.specifiedPartitions = specifiedPartitions;
 
         // config for history partition auto clustering
-        this.historyPartitionAutoCluster = options.clusteringHistoryPartitionAutoEnabled();
-        this.partitionIdleTime = options.clusteringPartitionIdleTime();
+        this.historyPartitionIdleTime = options.clusteringHistoryPartitionIdleTime();
         this.historyPartitionLimit = options.clusteringHistoryPartitionLimit();
 
-        if (historyPartitionAutoCluster) {
-            checkArgument(
-                    partitionIdleTime != null,
-                    "'clustering.partition.idle-time' is required when 'clustering.history-partition.auto.enabled' is true.");
+        if (historyPartitionIdleTime != null) {
             this.snapshotReader = table.newSnapshotReader().dropStats();
         } else {
             this.snapshotReader =
@@ -164,7 +159,6 @@ public class IncrementalClusterManager {
                                                 // and history partitions should perform full
                                                 // clustering
                                                 if (specifiedPartitions != null
-                                                        && historyPartitionAutoCluster
                                                         && (!specifiedPartitions.test(
                                                                 entry.getKey()))) {
                                                     return incrementalClusterStrategy.pick(
@@ -229,7 +223,7 @@ public class IncrementalClusterManager {
         }
 
         if (specifiedPartitions != null
-                && historyPartitionAutoCluster
+                && historyPartitionIdleTime != null
                 && historyPartitionLimit > 0) {
             List<PartitionEntry> partitionEntries = snapshotReader.partitionEntries();
             // sort by last file creation time, and we will pick the oldest N partitions
@@ -310,10 +304,10 @@ public class IncrementalClusterManager {
             Map<BinaryRow, List<DataFileMeta>> partitionFiles) {
         Set<BinaryRow> partitions = new HashSet<>();
 
-        checkArgument(partitionIdleTime != null);
+        checkArgument(historyPartitionIdleTime != null);
         long historyMilli =
                 LocalDateTime.now()
-                        .minus(partitionIdleTime)
+                        .minus(historyPartitionIdleTime)
                         .atZone(ZoneId.systemDefault())
                         .toInstant()
                         .toEpochMilli();

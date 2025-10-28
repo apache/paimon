@@ -169,8 +169,7 @@ public class IncrementalClusterManagerTest {
     @Test
     public void testFindHistoryPartitions() throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_AUTO.key(), "true");
-        options.put(CoreOptions.CLUSTERING_PARTITION_IDLE_TIME.key(), "1s");
+        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_IDLE_TIME.key(), "1s");
         options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_LIMIT.key(), "1");
 
         FileStoreTable table = createTable(options, Collections.emptyList());
@@ -222,8 +221,7 @@ public class IncrementalClusterManagerTest {
     @Test
     public void testHistoryPartitionAutoClustering() throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_AUTO.key(), "true");
-        options.put(CoreOptions.CLUSTERING_PARTITION_IDLE_TIME.key(), "2s");
+        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_IDLE_TIME.key(), "2s");
         options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_LIMIT.key(), "1");
 
         FileStoreTable table = createTable(options, Collections.singletonList("f2"));
@@ -265,11 +263,13 @@ public class IncrementalClusterManagerTest {
         assertThat(partitionLevels.size()).isEqualTo(4);
 
         // test specify partition and disable history partition auto clustering
-        Map<String, String> newOptions = new HashMap<>();
-        newOptions.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_AUTO.key(), "false");
+        SchemaChange schemaChange =
+                SchemaChange.removeOption(CoreOptions.CLUSTERING_HISTORY_PARTITION_IDLE_TIME.key());
         incrementalClusterManager =
                 new IncrementalClusterManager(
-                        table.copy(newOptions),
+                        table.copy(
+                                table.schemaManager()
+                                        .commitChanges(Collections.singletonList(schemaChange))),
                         PartitionPredicate.fromMultiple(
                                 RowType.of(DataTypes.INT()),
                                 Lists.newArrayList(BinaryRow.singleColumn("pt3"))));
@@ -278,19 +278,21 @@ public class IncrementalClusterManagerTest {
         assertThat(partitionLevels.get(BinaryRow.singleColumn("pt3"))).isNotEmpty();
 
         // test specify partition and disable history partition auto clustering
-        SchemaChange schemaChange =
-                SchemaChange.removeOption(CoreOptions.CLUSTERING_PARTITION_IDLE_TIME.key());
-        assertThatThrownBy(
-                        () ->
-                                new IncrementalClusterManager(
-                                        table.copy(
-                                                table.schemaManager()
-                                                        .commitChanges(
-                                                                Collections.singletonList(
-                                                                        schemaChange)))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "'clustering.partition.idle-time' is required when 'clustering.history-partition.auto.enabled' is true.");
+        //        SchemaChange schemaChange =
+        //
+        // SchemaChange.removeOption(CoreOptions.CLUSTERING_PARTITION_IDLE_TIME.key());
+        //        assertThatThrownBy(
+        //                        () ->
+        //                                new IncrementalClusterManager(
+        //                                        table.copy(
+        //                                                table.schemaManager()
+        //                                                        .commitChanges(
+        //                                                                Collections.singletonList(
+        //                                                                        schemaChange)))))
+        //                .isInstanceOf(IllegalArgumentException.class)
+        //                .hasMessageContaining(
+        //                        "'clustering.partition.idle-time' is required when
+        // 'clustering.history-partition.auto.enabled' is true.");
     }
 
     private FileStoreTable createTable(

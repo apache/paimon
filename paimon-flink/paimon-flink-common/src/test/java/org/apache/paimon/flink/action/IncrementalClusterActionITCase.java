@@ -369,8 +369,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
     @Test
     public void testClusterHistoryPartition() throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_AUTO.key(), "true");
-        options.put(CoreOptions.CLUSTERING_PARTITION_IDLE_TIME.key(), "3s");
+        options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_IDLE_TIME.key(), "3s");
         FileStoreTable table = createTable("pt", 1, options);
 
         BinaryString randomStr = BinaryString.fromString(randomString(150));
