@@ -24,8 +24,6 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
@@ -39,70 +37,18 @@ import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.append.cluster.IncrementalClusterManagerTest.writeOnce;
-import static org.apache.paimon.append.cluster.IncrementalClusterStrategyTest.createFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link HistoryPartitionCluster}. */
 public class HistoryPartitionClusterTest {
 
     @TempDir java.nio.file.Path tempDir;
-
-    @Test
-    public void testFindLowLevelPartitions() throws Exception {
-        FileStoreTable table = createTable(Collections.emptyMap(), Collections.emptyList());
-        long now = LocalDateTime.now().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        Map<BinaryRow, List<DataFileMeta>> partitionFiles = new HashMap<>();
-
-        // specified partition, has low-level files
-        BinaryRow partition1 = BinaryRow.singleColumn(1);
-        PartitionEntry partitionEntry1 = new PartitionEntry(partition1, 0, 0, 0, now);
-        partitionFiles.put(
-                partition1, Lists.newArrayList(createFile(100, 1, 3), createFile(100, 1, 5)));
-        // has no low-level files
-        BinaryRow partition2 = BinaryRow.singleColumn(2);
-        PartitionEntry partitionEntry2 = new PartitionEntry(partition2, 0, 0, 0, now);
-        partitionFiles.put(partition2, Lists.newArrayList(createFile(100, 1, 0)));
-        // has low-level files
-        BinaryRow partition3 = BinaryRow.singleColumn(3);
-        PartitionEntry partitionEntry3 = new PartitionEntry(partition3, 0, 0, 0, now);
-        partitionFiles.put(
-                partition3, Lists.newArrayList(createFile(100, 1, 0), createFile(100, 1, 2)));
-        // has no low-level files
-        BinaryRow partition4 = BinaryRow.singleColumn(4);
-        PartitionEntry partitionEntry4 = new PartitionEntry(partition3, 0, 0, 0, now);
-        partitionFiles.put(partition4, Lists.newArrayList(createFile(100, 1, 0)));
-
-        IncrementalClusterManager incrementalClusterManager =
-                new IncrementalClusterManager(
-                        table,
-                        PartitionPredicate.fromMultiple(
-                                RowType.of(DataTypes.INT()), Lists.newArrayList(partition1)));
-        HistoryPartitionCluster historyPartitionCluster =
-                incrementalClusterManager.historyPartitionCluster();
-        Set<BinaryRow> selectedPartitions =
-                historyPartitionCluster.findLowLevelPartitions(
-                        Lists.newArrayList(
-                                        partitionEntry1,
-                                        partitionEntry2,
-                                        partitionEntry3,
-                                        partitionEntry4)
-                                .stream()
-                                .map(PartitionEntry::partition)
-                                .collect(Collectors.toList()),
-                        partitionFiles);
-
-        assertThat(selectedPartitions).contains(partition2);
-    }
 
     @Test
     public void testHistoryPartitionAutoClustering() throws Exception {
@@ -153,8 +99,7 @@ public class HistoryPartitionClusterTest {
 
         // test not specify partition and disable history partition auto clustering
         historyPartitionCluster = new IncrementalClusterManager(table).historyPartitionCluster();
-        partitionLevels = historyPartitionCluster.constructLevelsForHistoryPartitions();
-        assertThat(partitionLevels.isEmpty()).isTrue();
+        assertThat(historyPartitionCluster).isNull();
     }
 
     protected FileStoreTable createTable(

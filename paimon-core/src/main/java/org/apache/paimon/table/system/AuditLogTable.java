@@ -361,9 +361,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public SnapshotReader withManifestLevelFilter(
-                BiFilter<Integer, Integer> manifestLevelFilter) {
-            wrapped.withManifestLevelFilter(manifestLevelFilter);
+        public SnapshotReader withLevelMinMaxFilter(BiFilter<Integer, Integer> minMaxFilter) {
+            wrapped.withLevelMinMaxFilter(minMaxFilter);
             return this;
         }
 

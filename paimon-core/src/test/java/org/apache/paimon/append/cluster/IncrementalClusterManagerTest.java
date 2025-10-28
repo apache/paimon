@@ -58,7 +58,7 @@ public class IncrementalClusterManagerTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testNonUnAwareBucketTable() throws Exception {
+    public void testNonUnAwareBucketTable() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.BUCKET_KEY.key(), "f0");

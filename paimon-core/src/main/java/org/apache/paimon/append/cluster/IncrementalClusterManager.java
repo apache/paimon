@@ -19,6 +19,7 @@
 package org.apache.paimon.append.cluster;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -52,17 +53,14 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class IncrementalClusterManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(IncrementalClusterManager.class);
+
     private final InternalRowPartitionComputer partitionComputer;
-
     private final SnapshotReader snapshotReader;
-
     private final IncrementalClusterStrategy incrementalClusterStrategy;
     private final CoreOptions.OrderType clusterCurve;
     private final List<String> clusterKeys;
-
-    private final HistoryPartitionCluster historyPartitionCluster;
-
-    private int maxLevel;
+    private final int numLevels;
+    private final @Nullable HistoryPartitionCluster historyPartitionCluster;
 
     public IncrementalClusterManager(FileStoreTable table) {
         this(table, null);
@@ -78,7 +76,7 @@ public class IncrementalClusterManager {
                 options.clusteringIncrementalEnabled(),
                 "Only support incremental clustering when '%s' is true.",
                 CLUSTERING_INCREMENTAL.key());
-        this.maxLevel = options.numLevels();
+        this.numLevels = options.numLevels();
         this.partitionComputer =
                 new InternalRowPartitionComputer(
                         table.coreOptions().partitionDefaultName(),
@@ -96,16 +94,9 @@ public class IncrementalClusterManager {
                         options.numSortedRunCompactionTrigger());
         this.clusterCurve = options.clusteringStrategy(options.clusteringColumns().size());
         this.clusterKeys = options.clusteringColumns();
-
         this.historyPartitionCluster =
-                new HistoryPartitionCluster(
-                        table,
-                        incrementalClusterStrategy,
-                        partitionComputer,
-                        maxLevel,
-                        options.clusteringHistoryPartitionLimit(),
-                        specifiedPartitions,
-                        options.clusteringHistoryPartitionIdleTime());
+                HistoryPartitionCluster.create(
+                        table, incrementalClusterStrategy, partitionComputer, specifiedPartitions);
     }
 
     public Map<BinaryRow, CompactUnit> prepareForCluster(boolean fullCompaction) {
@@ -114,30 +105,20 @@ public class IncrementalClusterManager {
         logForPartitionLevel(partitionLevels, partitionComputer);
 
         // 2. pick files to be clustered for each partition
-        Map<BinaryRow, Optional<CompactUnit>> units =
-                partitionLevels.entrySet().stream()
-                        .collect(
-                                Collectors.toMap(
-                                        Map.Entry::getKey,
-                                        entry ->
-                                                incrementalClusterStrategy.pick(
-                                                        maxLevel,
-                                                        entry.getValue(),
-                                                        fullCompaction)));
+        Map<BinaryRow, CompactUnit> units = new HashMap<>();
+        partitionLevels.forEach(
+                (k, v) -> {
+                    Optional<CompactUnit> pick =
+                            incrementalClusterStrategy.pick(numLevels, v, fullCompaction);
+                    pick.ifPresent(compactUnit -> units.put(k, compactUnit));
+                });
 
-        Map<BinaryRow, Optional<CompactUnit>> historyUnits =
-                historyPartitionCluster.pickForHistoryPartitions();
-        units.putAll(historyUnits);
+        if (historyPartitionCluster != null) {
+            units.putAll(historyPartitionCluster.pickForHistoryPartitions());
+        }
 
-        // 3. filter out empty units
-        Map<BinaryRow, CompactUnit> filteredUnits =
-                units.entrySet().stream()
-                        .filter(entry -> entry.getValue().isPresent())
-                        .collect(
-                                Collectors.toMap(
-                                        Map.Entry::getKey, entry -> entry.getValue().get()));
         if (LOG.isDebugEnabled()) {
-            filteredUnits.forEach(
+            units.forEach(
                     (partition, compactUnit) -> {
                         String filesInfo =
                                 compactUnit.files().stream()
@@ -157,24 +138,17 @@ public class IncrementalClusterManager {
                                 filesInfo);
                     });
         }
-        return filteredUnits;
+        return units;
     }
 
     public Map<BinaryRow, List<LevelSortedRun>> constructLevels() {
         List<DataSplit> dataSplits = snapshotReader.read().dataSplits();
-
-        maxLevel =
-                Math.max(
-                        maxLevel,
-                        dataSplits.stream()
-                                        .flatMap(split -> split.dataFiles().stream())
-                                        .mapToInt(DataFileMeta::level)
-                                        .max()
-                                        .orElse(-1)
-                                + 1);
-        checkArgument(maxLevel > 1, "Number of levels must be at least 2.");
-
-        Map<BinaryRow, List<DataFileMeta>> partitionFiles = getPartitionFiles(dataSplits);
+        Map<BinaryRow, List<DataFileMeta>> partitionFiles = new HashMap<>();
+        for (DataSplit dataSplit : dataSplits) {
+            partitionFiles
+                    .computeIfAbsent(dataSplit.partition(), k -> new ArrayList<>())
+                    .addAll(dataSplit.dataFiles());
+        }
         return partitionFiles.entrySet().stream()
                 .collect(
                         Collectors.toMap(
@@ -206,16 +180,6 @@ public class IncrementalClusterManager {
         // sort by level
         partitionLevels.sort(Comparator.comparing(LevelSortedRun::level));
         return partitionLevels;
-    }
-
-    private Map<BinaryRow, List<DataFileMeta>> getPartitionFiles(List<DataSplit> dataSplits) {
-        Map<BinaryRow, List<DataFileMeta>> partitionFiles = new HashMap<>();
-        for (DataSplit dataSplit : dataSplits) {
-            partitionFiles
-                    .computeIfAbsent(dataSplit.partition(), k -> new ArrayList<>())
-                    .addAll(dataSplit.dataFiles());
-        }
-        return partitionFiles;
     }
 
     public List<DataSplit> toSplits(BinaryRow partition, List<DataFileMeta> files) {
@@ -283,7 +247,8 @@ public class IncrementalClusterManager {
         return clusterKeys;
     }
 
-    public HistoryPartitionCluster historyPartitionCluster() {
+    @VisibleForTesting
+    HistoryPartitionCluster historyPartitionCluster() {
         return historyPartitionCluster;
     }
 }

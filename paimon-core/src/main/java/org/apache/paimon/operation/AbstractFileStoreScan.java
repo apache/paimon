@@ -197,8 +197,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
-    public FileStoreScan withManifestLevelFilter(BiFilter<Integer, Integer> manifestLevelFilter) {
-        manifestsReader.withManifestLevelFilter(manifestLevelFilter);
+    public FileStoreScan withLevelMinMaxFilter(BiFilter<Integer, Integer> minMaxFilter) {
+        manifestsReader.withLevelMinMaxFilter(minMaxFilter);
         return this;
     }
 

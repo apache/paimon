@@ -27,7 +27,6 @@ import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import org.slf4j.Logger;
@@ -39,14 +38,11 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.append.cluster.IncrementalClusterManager.constructPartitionLevels;
@@ -56,70 +52,86 @@ import static org.apache.paimon.append.cluster.IncrementalClusterManager.logForP
 public class HistoryPartitionCluster {
 
     private static final Logger LOG = LoggerFactory.getLogger(HistoryPartitionCluster.class);
-    private final InternalRowPartitionComputer partitionComputer;
 
     private final FileStoreTable table;
     private final IncrementalClusterStrategy incrementalClusterStrategy;
-    private final int maxLevel;
-
+    private final InternalRowPartitionComputer partitionComputer;
+    private final PartitionPredicate specifiedPartitions;
+    private final Duration historyPartitionIdleTime;
     private final int historyPartitionLimit;
-    @Nullable private final PartitionPredicate specifiedPartitions;
-    @Nullable private final Duration historyPartitionIdleTime;
-    @Nullable private final BiFilter<Integer, Integer> partitionLevelFilter;
+    private final int maxLevel;
 
     public HistoryPartitionCluster(
             FileStoreTable table,
             IncrementalClusterStrategy incrementalClusterStrategy,
             InternalRowPartitionComputer partitionComputer,
-            int maxLevel,
-            int historyPartitionLimit,
-            @Nullable PartitionPredicate specifiedPartitions,
-            @Nullable Duration historyPartitionIdleTime) {
+            PartitionPredicate specifiedPartitions,
+            Duration historyPartitionIdleTime,
+            int historyPartitionLimit) {
         this.table = table;
         this.incrementalClusterStrategy = incrementalClusterStrategy;
         this.partitionComputer = partitionComputer;
-        this.maxLevel = maxLevel;
-        this.historyPartitionLimit = historyPartitionLimit;
         this.specifiedPartitions = specifiedPartitions;
         this.historyPartitionIdleTime = historyPartitionIdleTime;
-        // (maxLevel + 1) / 2 is used to calculate the ceiling of maxLevel divided by 2
-        this.partitionLevelFilter =
-                (partitionMinLevel, partitionMaxLevel) -> partitionMinLevel < (maxLevel + 1) / 2;
+        this.historyPartitionLimit = historyPartitionLimit;
+        this.maxLevel = table.coreOptions().numLevels() - 1;
     }
 
-    public Map<BinaryRow, Optional<CompactUnit>> pickForHistoryPartitions() {
+    @Nullable
+    public static HistoryPartitionCluster create(
+            FileStoreTable table,
+            IncrementalClusterStrategy incrementalClusterStrategy,
+            InternalRowPartitionComputer partitionComputer,
+            @Nullable PartitionPredicate specifiedPartitions) {
+        if (table.schema().partitionKeys().isEmpty()) {
+            return null;
+        }
+        if (specifiedPartitions == null) {
+            return null;
+        }
+
+        Duration idleTime = table.coreOptions().clusteringHistoryPartitionIdleTime();
+        if (idleTime == null) {
+            return null;
+        }
+
+        int limit = table.coreOptions().clusteringHistoryPartitionLimit();
+        return new HistoryPartitionCluster(
+                table,
+                incrementalClusterStrategy,
+                partitionComputer,
+                specifiedPartitions,
+                idleTime,
+                limit);
+    }
+
+    public Map<BinaryRow, CompactUnit> pickForHistoryPartitions() {
         Map<BinaryRow, List<LevelSortedRun>> partitionLevels =
                 constructLevelsForHistoryPartitions();
         logForPartitionLevel(partitionLevels, partitionComputer);
 
-        return partitionLevels.entrySet().stream()
-                .collect(
-                        Collectors.toMap(
-                                Map.Entry::getKey,
-                                entry ->
-                                        incrementalClusterStrategy.pick(
-                                                maxLevel, entry.getValue(), true)));
+        Map<BinaryRow, CompactUnit> units = new HashMap<>();
+        partitionLevels.forEach(
+                (k, v) -> {
+                    Optional<CompactUnit> pick =
+                            incrementalClusterStrategy.pick(maxLevel + 1, v, true);
+                    pick.ifPresent(compactUnit -> units.put(k, compactUnit));
+                });
+        return units;
     }
 
     @VisibleForTesting
     public Map<BinaryRow, List<LevelSortedRun>> constructLevelsForHistoryPartitions() {
-        if (specifiedPartitions == null
-                || historyPartitionIdleTime == null
-                || historyPartitionLimit <= 0) {
-            return Collections.emptyMap();
-        }
-
         long historyMilli =
                 LocalDateTime.now()
                         .minus(historyPartitionIdleTime)
                         .atZone(ZoneId.systemDefault())
                         .toInstant()
                         .toEpochMilli();
-        // read partitionEntries filter by partitionLevelFilter historyPartitionIdleTime
-        // sort partitionEntries by lastFileCreation time, and we will pick the oldest N partitions
+
         List<BinaryRow> historyPartitions =
-                table.newSnapshotReader().withManifestLevelFilter(partitionLevelFilter)
-                        .partitionEntries().stream()
+                table.newSnapshotReader().withLevelMinMaxFilter((min, max) -> min < maxLevel)
+                        .withLevelFilter(level -> level < maxLevel).partitionEntries().stream()
                         .filter(entry -> entry.lastFileCreationTime() < historyMilli)
                         .sorted(Comparator.comparingLong(PartitionEntry::lastFileCreationTime))
                         .map(PartitionEntry::partition)
@@ -131,6 +143,7 @@ public class HistoryPartitionCluster {
                         .withPartitionFilter(historyPartitions)
                         .read()
                         .dataSplits();
+
         Map<BinaryRow, List<DataFileMeta>> historyPartitionFiles = new HashMap<>();
         for (DataSplit dataSplit : historyDataSplits) {
             historyPartitionFiles
@@ -138,52 +151,34 @@ public class HistoryPartitionCluster {
                     .addAll(dataSplit.dataFiles());
         }
 
-        // find history partitions which have low-level files
-        Set<BinaryRow> selectedHistoryPartitions =
-                findLowLevelPartitions(historyPartitions, historyPartitionFiles);
-        historyPartitionFiles =
-                historyPartitionFiles.entrySet().stream()
-                        .filter(entry -> selectedHistoryPartitions.contains(entry.getKey()))
-                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-
-        return historyPartitionFiles.entrySet().stream()
+        return filterPartitions(historyPartitionFiles).entrySet().stream()
                 .collect(
                         Collectors.toMap(
                                 Map.Entry::getKey,
                                 entry -> constructPartitionLevels(entry.getValue())));
     }
 
-    @VisibleForTesting
-    protected Set<BinaryRow> findLowLevelPartitions(
-            List<BinaryRow> historyPartitions, Map<BinaryRow, List<DataFileMeta>> partitionFiles) {
-        Set<BinaryRow> partitions = new HashSet<>();
-        // 1. the partition is not specified in specifiedPartitions
-        // 2. the min file level in partition should be less than Math.ceil(maxLevel/2)
-        for (BinaryRow historyPartition : historyPartitions) {
-            if (specifiedPartitions != null && !specifiedPartitions.test(historyPartition)) {
-                List<DataFileMeta> files =
-                        partitionFiles.getOrDefault(historyPartition, Collections.emptyList());
-                if (!files.isEmpty()) {
-                    int partitionMinLevel = maxLevel + 1;
-                    for (DataFileMeta file : files) {
-                        partitionMinLevel = Math.min(partitionMinLevel, file.level());
+    private Map<BinaryRow, List<DataFileMeta>> filterPartitions(
+            Map<BinaryRow, List<DataFileMeta>> partitionFiles) {
+        Map<BinaryRow, List<DataFileMeta>> result = new HashMap<>();
+        partitionFiles.forEach(
+                (part, files) -> {
+                    if (specifiedPartitions.test(part)) {
+                        // already contain in specified partitions
+                        return;
                     }
-                    if (partitionLevelFilter != null
-                            && partitionLevelFilter.test(partitionMinLevel, maxLevel)) {
-                        partitions.add(historyPartition);
-                        if (partitions.size() >= historyPartitionLimit) {
-                            break;
-                        }
+
+                    if (result.size() < historyPartitionLimit) {
+                        // in limit, can be picked
+                        result.put(part, files);
                     }
-                }
-            }
-        }
+                });
         LOG.info(
                 "Find {} history partitions for full clustering, the history partitions are {}",
-                partitions.size(),
-                partitions.stream()
+                result.size(),
+                result.keySet().stream()
                         .map(partitionComputer::generatePartValues)
                         .collect(Collectors.toSet()));
-        return partitions;
+        return result;
     }
 }
