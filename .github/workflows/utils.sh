@@ -33,10 +33,3 @@ function random_timezone() {
         echo "GMT-$hh:$mm"
     fi
 }
-
-function run_flink_e2e_tests() {
-    jvm_timezone=$(random_timezone)
-    echo "JVM timezone is set to $jvm_timezone"
-    profile="flink-$flink_version"
-    mvn -T 1C -B test -Pflink1,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -P${profile}
-}
