@@ -233,7 +233,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withRowIds(List<Long> indices) {
-        throw new UnsupportedOperationException("Not supported for this yet.");
+        // do nothing by default
+        return this;
     }
 
     @Nullable
