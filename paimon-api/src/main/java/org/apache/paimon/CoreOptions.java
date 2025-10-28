@@ -1957,6 +1957,22 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable incremental clustering.");
 
+    public static final ConfigOption<Integer> CLUSTERING_HISTORY_PARTITION_LIMIT =
+            key("clustering.history-partition.limit")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription(
+                            "The limit of history partition number for automatically performing full clustering.");
+
+    public static final ConfigOption<Duration> CLUSTERING_HISTORY_PARTITION_IDLE_TIME =
+            key("clustering.history-partition.idle-to-full-sort")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The duration after which a partition without new updates is considered a historical partition. "
+                                    + "Historical partitions will be automatically fully clustered during the cluster operation."
+                                    + "This option takes effects when 'clustering.history-partition.auto.enabled' is true.");
+
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
                     .booleanType()
@@ -3072,6 +3088,14 @@ public class CoreOptions implements Serializable {
 
     public boolean clusteringIncrementalEnabled() {
         return options.get(CLUSTERING_INCREMENTAL);
+    }
+
+    public Duration clusteringHistoryPartitionIdleTime() {
+        return options.get(CLUSTERING_HISTORY_PARTITION_IDLE_TIME);
+    }
+
+    public int clusteringHistoryPartitionLimit() {
+        return options.get(CLUSTERING_HISTORY_PARTITION_LIMIT);
     }
 
     public OrderType clusteringStrategy(int columnSize) {
