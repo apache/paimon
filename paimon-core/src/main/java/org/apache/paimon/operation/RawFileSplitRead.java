@@ -63,7 +63,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.io.DataFileMeta.readIndices;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
 
@@ -260,7 +259,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             selection = ((BitmapIndexResult) fileIndexResult).get();
         }
         if (indices != null) {
-            RoaringBitmap32 selectionRowIds = readIndices(indices, file);
+            RoaringBitmap32 selectionRowIds = file.toFileSelection(indices);
             if (selection == null) {
                 selection = selectionRowIds;
             } else {

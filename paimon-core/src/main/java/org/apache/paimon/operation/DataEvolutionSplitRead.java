@@ -63,7 +63,6 @@ import java.util.stream.Collectors;
 
 import static java.lang.String.format;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
-import static org.apache.paimon.io.DataFileMeta.readIndices;
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -322,7 +321,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
         List<ReaderSupplier<InternalRow>> readerSuppliers = new ArrayList<>();
         for (DataFileMeta file : bunch.files()) {
-            RoaringBitmap32 selection = readIndices(indices, file);
+            RoaringBitmap32 selection = file.toFileSelection(indices);
             FormatReaderContext formatReaderContext =
                     new FormatReaderContext(
                             fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);
@@ -350,7 +349,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             FormatReaderMapping formatReaderMapping)
             throws IOException {
-        RoaringBitmap32 selection = readIndices(indices, file);
+        RoaringBitmap32 selection = file.toFileSelection(indices);
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(
                         fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);

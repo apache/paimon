@@ -149,6 +149,12 @@ public interface ReadBuilder extends Serializable {
      */
     ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
 
+    /**
+     * Specify the row ids to be read. This is usually used to read specific rows in data-evolution
+     * table.
+     *
+     * @param indices the row ids to be read
+     */
     ReadBuilder withRowIds(List<Long> indices);
 
     /** Delete stats in scan plan result. */
