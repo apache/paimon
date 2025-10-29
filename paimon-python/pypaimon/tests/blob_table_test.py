@@ -1334,7 +1334,10 @@ class DataBlobWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
-        result = table_read.to_arrow(table_scan.plan().splits())
+        splits = table_scan.plan().splits();
+        result = table_read.to_arrow(splits)
+
+        self.assertEqual(sum([s._row_count for s in splits]), 40)
 
         # Verify the data
         self.assertEqual(result.num_rows, 40, "Should have 40 rows")
