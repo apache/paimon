@@ -133,6 +133,11 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     @Override
+    public boolean moveToTrash(Path path) throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public boolean mkdirs(Path path) throws IOException {
         return fileIO().mkdirs(path);
     }

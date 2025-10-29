@@ -77,6 +77,11 @@ public class GSFileIO extends HadoopCompliantFileIO {
     }
 
     @Override
+    public boolean moveToTrash(org.apache.paimon.fs.Path path) throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     protected FileSystem createFileSystem(Path path) throws IOException {
         final String scheme = path.toUri().getScheme();
         final String authority = path.toUri().getAuthority();
