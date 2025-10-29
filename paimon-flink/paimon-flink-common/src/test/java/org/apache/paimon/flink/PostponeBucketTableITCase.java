@@ -1105,7 +1105,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testBatchWritePartition() throws Exception {
+    public void testWriteWritePostponeBucketThenWriteFixedBucket() throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv =
                 tableEnvironmentBuilder()
@@ -1123,39 +1123,84 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         tEnv.executeSql("USE CATALOG mycat");
         tEnv.executeSql(
                 "CREATE TABLE T (\n"
-                        + "  pt INT,\n"
                         + "  k INT,\n"
                         + "  v STRING,\n"
-                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
-                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
                         + "  'bucket' = '-2'\n"
                         + ")");
 
         tEnv.executeSql(
                         "INSERT INTO T /*+ OPTIONS('postpone.batch-write-fixed-bucket' = 'false') */ "
-                                + "PARTITION (pt = 1) VALUES (1, 'a')")
+                                + "VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e'), (6, 'f'), (7, 'g'), (8, 'h');")
                 .await();
         assertThat(collect(tEnv.executeSql("SELECT * FROM T"))).isEmpty();
 
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql("INSERT INTO T PARTITION (pt = 2) VALUES (1, 'a')")
-                                        .await())
-                .hasMessageContaining(
-                        "There are uncompacted files of postpone-bucket table. Please compact them before "
-                                + "writing into fixed bucket directly.");
-        // Can write to a new partition with options
+        // use sink.parallelism
         tEnv.executeSql(
-                        "INSERT INTO T /*+ OPTIONS('postpone.batch-write-partitions' = 'pt=2') */ "
-                                + "PARTITION (pt = 2) VALUES (1, 'a')")
+                        "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '4') */ "
+                                + "VALUES (1, 'A'), (2, 'B'), (3, 'C'), (4, 'D'), (5, 'E'), (6, 'F'), (7, 'G'), (8, 'H'), "
+                                + "(9, '9'), (10, '10'), (11, '11'), (12, '12'), (13, '13'), (14, '14'), (15, '15'), (16, '16');")
                 .await();
         assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
-                .containsExactlyInAnyOrder("+I[2, 1, a]");
+                .containsExactlyInAnyOrder(
+                        "+I[1, A]",
+                        "+I[2, B]",
+                        "+I[3, C]",
+                        "+I[4, D]",
+                        "+I[5, E]",
+                        "+I[6, F]",
+                        "+I[7, G]",
+                        "+I[8, H]",
+                        "+I[9, 9]",
+                        "+I[10, 10]",
+                        "+I[11, 11]",
+                        "+I[12, 12]",
+                        "+I[13, 13]",
+                        "+I[14, 14]",
+                        "+I[15, 15]",
+                        "+I[16, 16]");
+        assertThat(
+                        collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
+                                .map(row -> (Integer) row.getField(1))
+                                .collect(Collectors.toSet()))
+                .containsExactlyInAnyOrder(-2, 0, 1, 2, 3);
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
 
-        // can read two partitions
+        // compact and check result again
+        boolean forceUpLevel0 = ThreadLocalRandom.current().nextBoolean();
+        if (forceUpLevel0) {
+            tEnv.executeSql("ALTER TABLE T set ('compaction.force-up-level-0' = 'true')").await();
+        }
         tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
         assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
-                .containsExactlyInAnyOrder("+I[1, 1, a]", "+I[2, 1, a]");
+                .containsExactlyInAnyOrder(
+                        "+I[1, a]",
+                        "+I[2, b]",
+                        "+I[3, c]",
+                        "+I[4, d]",
+                        "+I[5, e]",
+                        "+I[6, f]",
+                        "+I[7, g]",
+                        "+I[8, h]",
+                        "+I[9, 9]",
+                        "+I[10, 10]",
+                        "+I[11, 11]",
+                        "+I[12, 12]",
+                        "+I[13, 13]",
+                        "+I[14, 14]",
+                        "+I[15, 15]",
+                        "+I[16, 16]");
+        assertThat(
+                        collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
+                                .map(row -> (Integer) row.getField(1))
+                                .collect(Collectors.toSet()))
+                .containsExactlyInAnyOrder(0, 1, 2, 3);
+        if (forceUpLevel0) {
+            assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level = 0")))
+                    .isEmpty();
+        }
     }
 
     @Test
@@ -1188,11 +1233,6 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         "INSERT INTO T /*+ OPTIONS('postpone.batch-write-fixed-bucket' = 'false') */ VALUES (1, 'a')")
                 .await();
         assertThat(collect(tEnv.executeSql("SELECT * FROM T"))).isEmpty();
-
-        assertThatThrownBy(() -> tEnv.executeSql("INSERT INTO T VALUES (1, 'A')").await())
-                .hasMessageContaining(
-                        "There are uncompacted files of postpone-bucket table. Please compact them before "
-                                + "writing into fixed bucket directly.");
 
         tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
         assertThat(collect(tEnv.executeSql("SELECT * FROM T")))

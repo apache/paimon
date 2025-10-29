@@ -335,24 +335,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 }
 
                 if (latestSnapshot != null && checkAppendFiles) {
-                    List<SimpleFileEntry> latestEntries =
+                    // it is possible that some partitions only have compact changes,
+                    // so we need to contain all changes
+                    baseEntries.addAll(
                             readAllEntriesFromChangedPartitions(
                                     latestSnapshot,
                                     changedPartitions(
-                                            appendTableFiles, compactTableFiles, appendIndexFiles));
-                    if (numBucket != BucketMode.POSTPONE_BUCKET) {
-                        for (SimpleFileEntry entry : latestEntries) {
-                            if (entry.bucket() == BucketMode.POSTPONE_BUCKET) {
-                                throw new UnsupportedOperationException(
-                                        "There are uncompacted files of postpone-bucket table. "
-                                                + "Please compact them before writing into fixed bucket directly.");
-                            }
-                        }
-                    }
-
-                    // it is possible that some partitions only have compact changes,
-                    // so we need to contain all changes
-                    baseEntries.addAll(latestEntries);
+                                            appendTableFiles,
+                                            compactTableFiles,
+                                            appendIndexFiles)));
                     if (discardDuplicate) {
                         Set<FileEntry.Identifier> baseIdentifiers =
                                 baseEntries.stream()

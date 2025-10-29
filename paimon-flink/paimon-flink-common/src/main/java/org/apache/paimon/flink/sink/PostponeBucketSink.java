@@ -37,14 +37,9 @@ public class PostponeBucketSink extends FlinkWriteSink<InternalRow> {
 
     private static final long serialVersionUID = 2L;
 
-    private final boolean batchWriteFixedBucket;
-
     public PostponeBucketSink(
-            FileStoreTable table,
-            @Nullable Map<String, String> overwritePartition,
-            boolean batchWriteFixedBucket) {
+            FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
         super(table, overwritePartition);
-        this.batchWriteFixedBucket = batchWriteFixedBucket;
     }
 
     @Override
@@ -60,20 +55,11 @@ public class PostponeBucketSink extends FlinkWriteSink<InternalRow> {
 
     @Override
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory() {
-        if (!batchWriteFixedBucket) {
+        if (overwritePartition == null) {
+            // The table has copied bucket option outside, nothing special for insert into
             return super.createCommitterFactory();
-        } else if (overwritePartition == null) {
-            // In this case, we should check -2 bucket files
-            return context ->
-                    new StoreCommitter(
-                            table,
-                            table.newCommit(context.commitUser())
-                                    .withOverwrite(overwritePartition)
-                                    .ignoreEmptyCommit(!context.streamingCheckpointEnabled()),
-                            context,
-                            true);
         } else {
-            // In this case, the postpone bucket files need to be deleted, so using a postpone
+            // When overwriting, the postpone bucket files need to be deleted, so using a postpone
             // bucket table commit here
             FileStoreTable tableForCommit =
                     table.copy(

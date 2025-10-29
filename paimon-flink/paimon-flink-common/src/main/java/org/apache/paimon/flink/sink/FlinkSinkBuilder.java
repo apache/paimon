@@ -29,12 +29,10 @@ import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.manifest.SimpleFileEntry;
-import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
-import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -299,11 +297,9 @@ public class FlinkSinkBuilder {
                 channelComputer = new PostponeBucketChannelComputer(table.schema());
             }
             DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
-            PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition, false);
+            PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
             return sink.sinkFrom(partitioned);
         } else {
-            validatePostponeBatchWriteFixedBucket();
-
             Integer fixedBuckets = getPostponeFixedBucketNumber();
             Map<String, String> batchWriteOptions = new HashMap<>();
             batchWriteOptions.put(WRITE_ONLY.key(), "true");
@@ -329,8 +325,7 @@ public class FlinkSinkBuilder {
             }
 
             DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
-            PostponeBucketSink sink =
-                    new PostponeBucketSink(tableForWrite, overwritePartition, true);
+            PostponeBucketSink sink = new PostponeBucketSink(tableForWrite, overwritePartition);
             return sink.sinkFrom(partitioned);
         }
     }
@@ -345,25 +340,6 @@ public class FlinkSinkBuilder {
                             + " then the parallelism of writerOperator will be set to bucketNums.");
             parallelism = bucketNums;
         }
-    }
-
-    private void validatePostponeBatchWriteFixedBucket() {
-        if (overwritePartition != null) {
-            // always can overwrite
-            return;
-        }
-
-        FileStoreScan scan = table.store().newScan().withBucket(BucketMode.POSTPONE_BUCKET);
-        String partitions = table.coreOptions().postponeBatchWritePartitions();
-        if (partitions != null) {
-            scan.withPartitionsFilter(ParameterUtils.getPartitions(partitions.split(";")));
-        }
-
-        List<SimpleFileEntry> simpleFileEntries = scan.readSimpleEntries();
-        checkArgument(
-                simpleFileEntries.isEmpty(),
-                "There are uncompacted files of postpone-bucket table. "
-                        + "Please compact them before writing into fixed bucket directly.");
     }
 
     @Nullable

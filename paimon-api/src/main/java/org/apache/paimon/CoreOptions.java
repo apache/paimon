@@ -2033,13 +2033,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to write the data into fixed bucket for batch writing a postpone bucket table.");
 
-    public static final ConfigOption<String> POSTPONE_BATCH_WRITE_PARTITIONS =
-            key("postpone.batch-write-partitions")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "The partitions for batch writing a postpone bucket table. Format is 'pt1=v1,pt2=v2;...'.");
-
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3135,11 +3128,6 @@ public class CoreOptions implements Serializable {
 
     public boolean postponeBatchWriteFixedBucket() {
         return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET);
-    }
-
-    @Nullable
-    public String postponeBatchWritePartitions() {
-        return options.get(POSTPONE_BATCH_WRITE_PARTITIONS);
     }
 
     /** Specifies the merge engine for table with primary key. */
