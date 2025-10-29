@@ -16,10 +16,9 @@
 # limitations under the License.
 ##########################################################################
 import os
-from pypaimon import __version__
 from setuptools import find_packages, setup
 
-VERSION = __version__
+VERSION = "1.3.0"
 
 PACKAGES = find_packages(include=["pypaimon*"])
 
