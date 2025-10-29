@@ -1334,7 +1334,7 @@ class DataBlobWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
-        splits = table_scan.plan().splits();
+        splits = table_scan.plan().splits()
         result = table_read.to_arrow(splits)
 
         self.assertEqual(sum([s._row_count for s in splits]), 40)
