@@ -41,7 +41,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        flink_version: ['common', 'cdc', '1.15', '1.16', '1.17', '1.18', '1.19', '1.20']
+        flink_version: ['common', 'cdc', '1.16', '1.17', '1.18', '1.19', '1.20']
 
     steps:
       - name: Checkout code

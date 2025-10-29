@@ -349,17 +349,6 @@ under the License.
         </profile>
 
         <profile>
-            <id>flink-1.15</id>
-            <properties>
-                <test.flink.main.version>1.15</test.flink.main.version>
-                <test.flink.version>1.15.3</test.flink.version>
-                <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
-                <flink.sql.connector.hive>flink-sql-connector-hive-2.3.6_${scala.binary.version}</flink.sql.connector.hive>
-                <test.flink.connector.hive.version>${test.flink.version}</test.flink.connector.hive.version>
-            </properties>
-        </profile>
-
-        <profile>
             <id>java11</id>
             <activation>
                 <jdk>[11,)</jdk>
