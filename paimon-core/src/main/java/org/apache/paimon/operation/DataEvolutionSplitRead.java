@@ -73,6 +73,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * A union {@link SplitRead} to read multiple inner files to merge columns, note that this class
  * does not support filtering push down and deletion vectors, as they can interfere with the process
  * of merging columns.
+ *
+ * <p>TODO: Optimize implementation of this class.
  */
 public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 

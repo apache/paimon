@@ -20,8 +20,8 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryArray;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -31,14 +31,12 @@ import org.apache.paimon.reader.DataEvolutionRow;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsEvolution;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
@@ -46,6 +44,8 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
@@ -116,27 +116,23 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     }
 
     private boolean filterByStats(List<ManifestEntry> entries) {
-        List<ManifestEntry> dataFiles = new ArrayList<>(entries.size());
-        for (ManifestEntry entry : entries) {
-            if (BlobFileFormat.isBlobFile(entry.file().fileName())) {
-                continue;
-            }
-            dataFiles.add(entry);
-        }
-        SimpleStatsEvolution.Result evolutionResult =
-                evolutionStats(schema, this::scanTableSchema, dataFiles);
+        EvolutionStats stats = evolutionStats(schema, this::scanTableSchema, entries);
         return inputFilter.test(
-                dataFiles.get(0).file().rowCount(),
-                evolutionResult.minValues(),
-                evolutionResult.maxValues(),
-                evolutionResult.nullCounts());
+                stats.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
     }
 
+    /** TODO: Optimize implementation of this method. */
     @VisibleForTesting
-    static SimpleStatsEvolution.Result evolutionStats(
+    static EvolutionStats evolutionStats(
             TableSchema schema,
             Function<Long, TableSchema> scanTableSchema,
             List<ManifestEntry> metas) {
+        // exclude blob files, useless for predicate eval
+        metas =
+                metas.stream()
+                        .filter(entry -> !isBlobFile(entry.file().fileName()))
+                        .collect(Collectors.toList());
+
         ToLongFunction<ManifestEntry> maxSeqFunc = e -> e.file().maxSequenceNumber();
         metas.sort(Comparator.comparingLong(maxSeqFunc).reversed());
 
@@ -210,7 +206,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         finalMin.setRows(min);
         finalMax.setRows(max);
         finalNullCounts.setRows(nullCounts);
-        return new SimpleStatsEvolution.Result(finalMin, finalMax, finalNullCounts);
+        return new EvolutionStats(
+                metas.get(0).file().rowCount(), finalMin, finalMax, finalNullCounts);
     }
 
     /** Note: Keep this thread-safe. */
@@ -239,5 +236,41 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
         // No matching indices found, skip this entry
         return false;
+    }
+
+    /** Statistics for data evolution. */
+    public static class EvolutionStats {
+
+        private final long rowCount;
+        private final InternalRow minValues;
+        private final InternalRow maxValues;
+        private final InternalArray nullCounts;
+
+        public EvolutionStats(
+                long rowCount,
+                InternalRow minValues,
+                InternalRow maxValues,
+                InternalArray nullCounts) {
+            this.rowCount = rowCount;
+            this.minValues = minValues;
+            this.maxValues = maxValues;
+            this.nullCounts = nullCounts;
+        }
+
+        public long rowCount() {
+            return rowCount;
+        }
+
+        public InternalRow minValues() {
+            return minValues;
+        }
+
+        public InternalRow maxValues() {
+            return maxValues;
+        }
+
+        public InternalArray nullCounts() {
+            return nullCounts;
+        }
     }
 }
