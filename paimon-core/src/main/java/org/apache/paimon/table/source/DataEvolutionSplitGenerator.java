@@ -25,12 +25,13 @@ import org.apache.paimon.utils.RangeHelper;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.List;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.reverseOrder;
+import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -132,22 +133,16 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
             }
 
             // data files sort by reversed max sequence number
-            dataFiles.sort(Comparator.comparingLong(maxSeqF).reversed());
-            checkArgument(!dataFiles.isEmpty(), "Data files should not be empty.");
+            dataFiles.sort(comparingLong(maxSeqF).reversed());
             checkArgument(
                     rangeHelper.areAllRangesSame(dataFiles),
                     "Data files %s should be all row id ranges same.",
                     dataFiles);
 
-            // blob files sort by first row id
-            blobFiles.sort(Comparator.comparingLong(firstRowIdFunc));
-            if (!blobFiles.isEmpty()) {
-                checkArgument(
-                        rangeHelper.isContiguousAndCovered(blobFiles, dataFiles.get(0)),
-                        "Blob files %s should be contiguous and covered by data files %s.",
-                        blobFiles,
-                        dataFiles);
-            }
+            // blob files sort by first row id then by reversed max sequence number
+            blobFiles.sort(
+                    comparingLong(firstRowIdFunc)
+                            .thenComparing(reverseOrder(comparingLong(maxSeqF))));
 
             // concat data files and blob files
             group.clear();

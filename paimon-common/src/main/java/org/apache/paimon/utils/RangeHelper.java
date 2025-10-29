@@ -57,47 +57,6 @@ public class RangeHelper<T> {
         return true; // All ranges are identical
     }
 
-    public boolean isContiguousAndCovered(List<T> ranges, T target) {
-        if (ranges == null || ranges.isEmpty()) {
-            return false;
-        }
-
-        // Sort ranges by start value
-        List<T> sorted = new ArrayList<>(ranges);
-        sorted.sort(Comparator.comparingLong(startFunction));
-
-        // Check contiguity
-        T last = null;
-        for (T range : sorted) {
-            if (last != null) {
-                long lastStart = startFunction.applyAsLong(last);
-                long lastEnd = endFunction.applyAsLong(last);
-                long currentStart = startFunction.applyAsLong(range);
-                long currentEnd = endFunction.applyAsLong(range);
-
-                if (lastStart == currentStart && lastEnd == currentEnd) {
-                    // same, no need to check
-                    continue;
-                }
-
-                // Check for contiguity: current start must be last end + 1
-                if (currentStart != lastEnd + 1) {
-                    return false; // Non-contiguous gap found
-                }
-            }
-            last = range;
-        }
-
-        // Extract merged coverage
-        long mergedStart = startFunction.applyAsLong(sorted.get(0));
-        long mergedEnd = endFunction.applyAsLong(sorted.get(sorted.size() - 1));
-
-        // Check if merged coverage exactly matches target
-        long targetStart = startFunction.applyAsLong(target);
-        long targetEnd = endFunction.applyAsLong(target);
-        return (mergedStart == targetStart) && (mergedEnd == targetEnd);
-    }
-
     public List<List<T>> mergeOverlappingRanges(List<T> ranges) {
         int n = ranges.size();
         if (n == 0) {

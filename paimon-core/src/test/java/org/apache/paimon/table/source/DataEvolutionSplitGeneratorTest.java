@@ -28,10 +28,21 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test for {@link DataEvolutionSplitGenerator}. */
 public class DataEvolutionSplitGeneratorTest {
+
+    @Test
+    public void testDifferentRowIdRange() {
+        DataFileMeta file1 = createFile("file1.parquet", 1L, 100, 10);
+        DataFileMeta file2 = createFile("file2.parquet", 1L, 50, 20);
+
+        List<DataFileMeta> files = Arrays.asList(file1, file2);
+        assertThatThrownBy(() -> DataEvolutionSplitGenerator.split(files))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 
     @Test
     public void testSplitWithSameFirstRowId() {
