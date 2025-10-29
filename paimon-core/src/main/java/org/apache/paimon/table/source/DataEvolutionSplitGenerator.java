@@ -117,6 +117,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         List<List<T>> result = rangeHelper.mergeOverlappingRanges(files);
 
         // skip group which only has blob files
+        // TODO Why skip? When will this situation occur?
         result.removeIf(next -> next.stream().allMatch(t -> isBlobFile(fileNameF.apply(t))));
 
         // in group, sort by blob file and max_seq
@@ -140,6 +141,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                     dataFiles);
 
             // blob files sort by first row id then by reversed max sequence number
+            // TODO Why is it sorted like this?
             blobFiles.sort(
                     comparingLong(firstRowIdFunc)
                             .thenComparing(reverseOrder(comparingLong(maxSeqF))));
