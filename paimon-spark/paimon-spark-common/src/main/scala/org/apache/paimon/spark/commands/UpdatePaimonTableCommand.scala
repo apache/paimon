@@ -81,8 +81,6 @@ case class UpdatePaimonTableCommand(
       logDebug("No file need to rewrote. It's an empty Commit.")
       Seq.empty[CommitMessage]
     } else {
-      val pathFactory = fileStore.pathFactory()
-
       if (deletionVectorsEnabled) {
         // Step2: collect all the deletion vectors that marks the deleted rows.
         val deletionVectors = collectDeletionVectors(
@@ -95,9 +93,8 @@ case class UpdatePaimonTableCommand(
         deletionVectors.cache()
         try {
           // Step3: write these updated data
-          val touchedDataSplits = deletionVectors.collect().map {
-            SparkDeletionVector.toDataSplit(_, root, pathFactory, dataFilePathToMeta)
-          }
+          val touchedDataSplits =
+            deletionVectors.collect().map(SparkDeletionVector.toDataSplit(_, dataFilePathToMeta))
           val addCommitMessage = writeOnlyUpdatedData(sparkSession, touchedDataSplits)
 
           // Step4: write these deletion vectors.
