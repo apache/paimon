@@ -29,6 +29,7 @@ import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -59,6 +60,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     private Filter<Integer> bucketFilter;
 
     private @Nullable RowType readType;
+    private @Nullable List<Long> indices;
 
     private boolean dropStats = false;
 
@@ -144,6 +146,12 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withRowIds(List<Long> indices) {
+        this.indices = indices;
+        return this;
+    }
+
+    @Override
     public ReadBuilder withBucket(int bucket) {
         this.specifiedBucket = bucket;
         return this;
@@ -182,7 +190,10 @@ public class ReadBuilderImpl implements ReadBuilder {
         // `filter` may contains partition related predicate, but `partitionFilter` will overwrite
         // it if `partitionFilter` is not null. So we must avoid to put part of partition filter in
         // `filter`, another part in `partitionFilter`
-        scan.withFilter(filter).withReadType(readType).withPartitionFilter(partitionFilter);
+        scan.withFilter(filter)
+                .withReadType(readType)
+                .withPartitionFilter(partitionFilter)
+                .withRowIds(indices);
         checkState(
                 bucketFilter == null || shardIndexOfThisSubtask == null,
                 "Bucket filter and shard configuration cannot be used together. "
@@ -219,6 +230,9 @@ public class ReadBuilderImpl implements ReadBuilder {
         }
         if (limit != null) {
             read.withLimit(limit);
+        }
+        if (indices != null) {
+            read.withRowIds(indices);
         }
         return read;
     }

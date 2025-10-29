@@ -307,6 +307,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader withRowIds(List<Long> indices) {
+        scan.withRowIds(indices);
+        return this;
+    }
+
+    @Override
     public SnapshotReader withDataFileNameFilter(Filter<String> fileNameFilter) {
         scan.withDataFileNameFilter(fileNameFilter);
         return this;

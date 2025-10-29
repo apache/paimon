@@ -31,6 +31,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
@@ -325,6 +326,8 @@ public interface DataFileMeta {
     DataFileMeta newExternalPath(String newExternalPath);
 
     DataFileMeta copy(byte[] newEmbeddedIndex);
+
+    RoaringBitmap32 toFileSelection(List<Long> indices);
 
     static long getMaxSequenceNumber(List<DataFileMeta> fileMetas) {
         return fileMetas.stream()

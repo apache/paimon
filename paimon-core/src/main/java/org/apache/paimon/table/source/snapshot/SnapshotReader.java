@@ -110,6 +110,8 @@ public interface SnapshotReader {
 
     SnapshotReader withMetricRegistry(MetricRegistry registry);
 
+    SnapshotReader withRowIds(List<Long> indices);
+
     /** Get splits plan from snapshot. */
     Plan read();
 
