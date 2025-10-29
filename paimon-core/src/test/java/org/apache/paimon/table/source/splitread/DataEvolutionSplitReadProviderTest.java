@@ -100,6 +100,8 @@ public class DataEvolutionSplitReadProviderTest {
         when(file1.firstRowId()).thenReturn(1L);
         when(file2.firstRowId()).thenReturn(null);
         when(split.dataFiles()).thenReturn(Arrays.asList(file1, file2));
+        when(file1.fileName()).thenReturn("test1.parquet");
+        when(file2.fileName()).thenReturn("test2.parquet");
 
         assertThat(provider.match(split, false)).isFalse();
     }
@@ -113,6 +115,8 @@ public class DataEvolutionSplitReadProviderTest {
         when(file1.firstRowId()).thenReturn(1L);
         when(file2.firstRowId()).thenReturn(2L);
         when(split.dataFiles()).thenReturn(Arrays.asList(file1, file2));
+        when(file1.fileName()).thenReturn("test1.parquet");
+        when(file2.fileName()).thenReturn("test2.parquet");
 
         assertThat(provider.match(split, false)).isFalse();
     }
@@ -128,6 +132,8 @@ public class DataEvolutionSplitReadProviderTest {
         when(file1.firstRowId()).thenReturn(100L);
         when(file2.firstRowId()).thenReturn(100L);
         when(split.dataFiles()).thenReturn(Arrays.asList(file1, file2));
+        when(file1.fileName()).thenReturn("test1.parquet");
+        when(file2.fileName()).thenReturn("test2.parquet");
 
         // The forceKeepDelete parameter is not used in match, so test both values
         assertThat(provider.match(split, true)).isTrue();
