@@ -261,7 +261,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         }
         if (indices != null) {
             RoaringBitmap32 selectionRowIds = readIndices(indices, file);
-
             if (selection == null) {
                 selection = selectionRowIds;
             } else {
