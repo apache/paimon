@@ -176,7 +176,9 @@ public class TestFileStore extends KeyValueFileStore {
                         snapshotManager(),
                         changelogManager(),
                         newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()))
+                        new TagManager(fileIO, options.path()),
+                        schemaManager,
+                        options.detectExpirationSettingEnabled())
                 .config(
                         ExpireConfig.builder()
                                 .snapshotRetainMax(numRetainedMax)
@@ -190,7 +192,9 @@ public class TestFileStore extends KeyValueFileStore {
                         snapshotManager(),
                         changelogManager(),
                         newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()))
+                        new TagManager(fileIO, options.path()),
+                        schemaManager,
+                        options.detectExpirationSettingEnabled())
                 .config(expireConfig);
     }
 
@@ -200,7 +204,9 @@ public class TestFileStore extends KeyValueFileStore {
                         snapshotManager(),
                         changelogManager(),
                         new TagManager(fileIO, options.path()),
-                        newChangelogDeletion());
+                        newChangelogDeletion(),
+                        schemaManager,
+                        options.detectExpirationSettingEnabled());
         impl.config(config);
         return impl;
     }
