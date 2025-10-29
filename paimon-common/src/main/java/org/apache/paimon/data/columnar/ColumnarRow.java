@@ -20,7 +20,7 @@ package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.DataSetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -28,7 +28,9 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.UriReader;
 
 import java.io.Serializable;
 
@@ -43,6 +45,7 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
     private RowKind rowKind = RowKind.INSERT;
     private VectorizedColumnBatch vectorizedColumnBatch;
     private int rowId;
+    private FileIO fileIO;
 
     public ColumnarRow() {}
 
@@ -66,6 +69,10 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     public void setRowId(int rowId) {
         this.rowId = rowId;
+    }
+
+    public void setFileIO(FileIO fileIO) {
+        this.fileIO = fileIO;
     }
 
     @Override
@@ -150,7 +157,13 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     @Override
     public Blob getBlob(int pos) {
-        return new BlobData(getBinary(pos));
+        if (fileIO == null) {
+            throw new IllegalStateException(
+                    "FileIO is required to read Blob data, please set FileIO first!");
+        }
+        BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(getBinary(pos));
+        UriReader uriReader = UriReader.fromFile(fileIO);
+        return Blob.fromDescriptor(uriReader, blobDescriptor);
     }
 
     @Override
@@ -233,6 +246,7 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
     public ColumnarRow copy(ColumnVector[] vectors) {
         VectorizedColumnBatch vectorizedColumnBatchCopy = vectorizedColumnBatch.copy(vectors);
         ColumnarRow columnarRow = new ColumnarRow(vectorizedColumnBatchCopy, rowId);
+        columnarRow.setFileIO(fileIO);
         columnarRow.setRowKind(rowKind);
         return columnarRow;
     }

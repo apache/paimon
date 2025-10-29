@@ -99,6 +99,7 @@ public class ParquetRowDataWriter {
                     return new BooleanWriter();
                 case BINARY:
                 case VARBINARY:
+                case BLOB:
                     return new BinaryWriter();
                 case DECIMAL:
                     DecimalType decimalType = (DecimalType) t;

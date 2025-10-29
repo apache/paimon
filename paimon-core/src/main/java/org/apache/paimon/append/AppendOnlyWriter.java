@@ -92,6 +92,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     @Nullable private final IOManager ioManager;
     private final FileIndexOptions fileIndexOptions;
     private final MemorySize maxDiskSize;
+    private final boolean blobStoreDescriptor;
 
     @Nullable private CompactDeletionFile compactDeletionFile;
     private SinkWriter<InternalRow> sinkWriter;
@@ -120,7 +121,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             MemorySize maxDiskSize,
             FileIndexOptions fileIndexOptions,
             boolean asyncFileWrite,
-            boolean statsDenseStore) {
+            boolean statsDenseStore,
+            boolean blobStoreDescriptor) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -145,6 +147,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.statsCollectorFactories = statsCollectorFactories;
         this.maxDiskSize = maxDiskSize;
         this.fileIndexOptions = fileIndexOptions;
+        this.blobStoreDescriptor = blobStoreDescriptor;
 
         this.sinkWriter =
                 useWriteBuffer
@@ -296,7 +299,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
-        if (writeSchema.getFieldTypes().stream().anyMatch(t -> t.is(BLOB))) {
+        if (!blobStoreDescriptor
+                && writeSchema.getFieldTypes().stream().anyMatch(t -> t.is(BLOB))) {
             return new RollingBlobFileWriter(
                     fileIO,
                     schemaId,

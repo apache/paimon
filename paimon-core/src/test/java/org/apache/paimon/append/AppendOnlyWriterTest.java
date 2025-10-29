@@ -710,6 +710,7 @@ public class AppendOnlyWriterTest {
                         MemorySize.MAX_VALUE,
                         new FileIndexOptions(),
                         true,
+                        false,
                         false);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));

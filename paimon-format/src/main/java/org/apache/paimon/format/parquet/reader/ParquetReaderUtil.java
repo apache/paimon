@@ -92,6 +92,7 @@ public class ParquetReaderUtil {
             case VARBINARY:
                 return new HeapBytesVector(batchSize);
             case BINARY:
+            case BLOB:
                 return new HeapBytesVector(batchSize);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:

@@ -218,7 +218,14 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public UpdaterFactory visit(BlobType blobType) {
-            throw new RuntimeException("Blob type is not supported");
+            return c -> {
+                if (c.getPrimitiveType().getPrimitiveTypeName()
+                        == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY) {
+                    return new FixedLenByteArrayUpdater(c.getPrimitiveType().getTypeLength());
+                } else {
+                    return new BinaryUpdater();
+                }
+            };
         }
 
         @Override

@@ -2036,6 +2036,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
 
+    public static final ConfigOption<Boolean> BLOB_STORE_DESCRIPTOR =
+            key("blob-store-descriptor")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Store blob field using blob descriptor rather than blob bytes.");
+
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
             key("commit.discard-duplicate-files")
                     .booleanType()
@@ -3141,6 +3148,10 @@ public class CoreOptions implements Serializable {
 
     public boolean blobAsDescriptor() {
         return options.get(BLOB_AS_DESCRIPTOR);
+    }
+
+    public boolean blobStoreDescriptor() {
+        return options.get(BLOB_STORE_DESCRIPTOR);
     }
 
     /** Specifies the merge engine for table with primary key. */

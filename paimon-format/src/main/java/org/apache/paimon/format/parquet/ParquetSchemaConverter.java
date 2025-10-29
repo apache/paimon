@@ -90,6 +90,7 @@ public class ParquetSchemaConverter {
                         .withId(fieldId);
             case BINARY:
             case VARBINARY:
+            case BLOB:
                 return Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition)
                         .named(name)
                         .withId(fieldId);

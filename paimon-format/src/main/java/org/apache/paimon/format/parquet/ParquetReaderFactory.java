@@ -116,7 +116,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         List<ParquetField> fields = buildFieldsList(readFields, columnIO, shreddingSchemas);
 
         return new VectorizedParquetRecordReader(
-                context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
+                context.fileIO(),
+                context.filePath(),
+                reader,
+                fileSchema,
+                fields,
+                writableVectors,
+                batchSize);
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {

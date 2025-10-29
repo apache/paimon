@@ -48,7 +48,8 @@ public class BlobTableITCase extends CatalogITCaseBase {
     protected List<String> ddl() {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS blob_table (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')",
-                "CREATE TABLE IF NOT EXISTS blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')");
+                "CREATE TABLE IF NOT EXISTS blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')",
+                "CREATE TABLE IF NOT EXISTS blob_table_store_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-store-descriptor'='true', 'blob-as-descriptor'='true')");
     }
 
     @Test
@@ -92,6 +93,43 @@ public class BlobTableITCase extends CatalogITCaseBase {
         assertThat(blob.toData()).isEqualTo(blobData);
         batchSql("ALTER TABLE blob_table_descriptor SET ('blob-as-descriptor'='false')");
         assertThat(batchSql("SELECT * FROM blob_table_descriptor"))
+                .containsExactlyInAnyOrder(Row.of(1, "paimon", blobData));
+    }
+
+    @Test
+    public void testWriteBlobStoreDescriptor() throws Exception {
+        byte[] blobData = new byte[1024 * 1024];
+        RANDOM.nextBytes(blobData);
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + warehouse + "/external_blob";
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(blobData);
+        }
+
+        BlobDescriptor blobDescriptor = new BlobDescriptor(uri, 0, blobData.length);
+        batchSql(
+                "INSERT INTO blob_table_store_descriptor VALUES (1, 'paimon', X'"
+                        + bytesToHex(blobDescriptor.serialize())
+                        + "')");
+        byte[] newDescriptorBytes =
+                (byte[])
+                        batchSql("SELECT picture FROM blob_table_store_descriptor")
+                                .get(0)
+                                .getField(0);
+
+        assertThat(newDescriptorBytes).isEqualTo(blobDescriptor.serialize());
+        BlobDescriptor newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes);
+        Options options = new Options();
+        options.set("warehouse", warehouse.toString());
+        CatalogContext catalogContext = CatalogContext.create(options);
+        UriReaderFactory uriReaderFactory = new UriReaderFactory(catalogContext);
+        Blob blob =
+                Blob.fromDescriptor(
+                        uriReaderFactory.create(newBlobDescriptor.uri()), blobDescriptor);
+        assertThat(blob.toData()).isEqualTo(blobData);
+        batchSql("ALTER TABLE blob_table_store_descriptor SET ('blob-as-descriptor'='false')");
+        assertThat(batchSql("SELECT * FROM blob_table_store_descriptor"))
                 .containsExactlyInAnyOrder(Row.of(1, "paimon", blobData));
     }
 

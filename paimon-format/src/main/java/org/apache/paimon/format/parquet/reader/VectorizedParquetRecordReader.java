@@ -29,6 +29,7 @@ import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
@@ -86,6 +87,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
 
     private ColumnarBatch columnarBatch;
 
+    private final FileIO fileIO;
     private final Path filePath;
     private final MessageType fileSchema;
     private final List<ParquetField> fields;
@@ -95,6 +97,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
     private VersionParser.ParsedVersion writerVersion;
 
     public VectorizedParquetRecordReader(
+            FileIO fileIO,
             Path filePath,
             ParquetFileReader reader,
             MessageType fileSchema,
@@ -102,6 +105,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
             WritableColumnVector[] vectors,
             int batchSize)
             throws IOException {
+        this.fileIO = fileIO;
         this.filePath = filePath;
         this.reader = reader;
         this.fileSchema = fileSchema;
@@ -127,6 +131,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
     private void initBatch(WritableColumnVector[] vectors) {
         columnarBatch =
                 new ColumnarBatch(
+                        fileIO,
                         filePath,
                         createVectorizedColumnBatch(
                                 fields.stream()
