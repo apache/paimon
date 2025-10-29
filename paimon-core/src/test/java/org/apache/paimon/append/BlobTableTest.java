@@ -179,6 +179,14 @@ public class BlobTableTest extends TableTestBase {
         assertThat(i.get()).isEqualTo(1);
     }
 
+    @Test
+    public void testSnapshotRowCount() throws Exception {
+        createTableDefault();
+        commitDefault(writeDataDefault(100, 1));
+        assertThat(getTableDefault().snapshotManager().latestSnapshot().totalRecordCount())
+                .isEqualTo(100);
+    }
+
     protected Schema schemaDefault() {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
