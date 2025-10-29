@@ -41,8 +41,10 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.function.Function;
+import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
@@ -121,11 +123,10 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             }
             dataFiles.add(entry);
         }
-        long rowCount = dataFiles.get(0).file().rowCount();
         SimpleStatsEvolution.Result evolutionResult =
                 evolutionStats(schema, this::scanTableSchema, dataFiles);
         return inputFilter.test(
-                rowCount,
+                dataFiles.get(0).file().rowCount(),
                 evolutionResult.minValues(),
                 evolutionResult.maxValues(),
                 evolutionResult.nullCounts());
@@ -136,6 +137,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             TableSchema schema,
             Function<Long, TableSchema> scanTableSchema,
             List<ManifestEntry> metas) {
+        ToLongFunction<ManifestEntry> maxSeqFunc = e -> e.file().maxSequenceNumber();
+        metas.sort(Comparator.comparingLong(maxSeqFunc).reversed());
+
         int[] allFields = schema.fields().stream().mapToInt(DataField::id).toArray();
         int fieldsCount = schema.fields().size();
         int[] rowOffsets = new int[fieldsCount];
