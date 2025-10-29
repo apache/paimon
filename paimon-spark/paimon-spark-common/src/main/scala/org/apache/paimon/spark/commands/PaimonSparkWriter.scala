@@ -25,6 +25,7 @@ import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer
+import org.apache.paimon.fs.Path
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.FileKind
@@ -310,7 +311,7 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
     val sparkSession = deletionVectors.sparkSession
     import sparkSession.implicits._
     val serializedCommits = deletionVectors
-      .groupByKey(_.partitionAndBucket)
+      .groupByKey(_.bucketPath)
       .mapGroups {
         (_, iter: Iterator[SparkDeletionVector]) =>
           val indexHandler = table.store().newIndexFileHandler()
@@ -334,7 +335,7 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
             }
 
             dvIndexFileMaintainer.notifyNewDeletionVector(
-              sdv.dataFileName,
+              new Path(sdv.dataFilePath).getName,
               DeletionVector.deserializeFromBytes(sdv.deletionVector))
           }
           val indexEntries = dvIndexFileMaintainer.persist()
