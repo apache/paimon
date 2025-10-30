@@ -105,7 +105,7 @@ public class PostponeBatchWriteOperator extends StatelessRowDataStoreWriteOperat
                                 new CommitMessageImpl(
                                         message.partition(),
                                         message.bucket(),
-                                        getBucketNum(message.partition()),
+                                        checkNotNull(knownNumBuckets.get(message.partition())),
                                         message.newFilesIncrement(),
                                         message.compactIncrement())));
             } else {
@@ -114,9 +114,5 @@ public class PostponeBatchWriteOperator extends StatelessRowDataStoreWriteOperat
         }
 
         return committables;
-    }
-
-    private int getBucketNum(BinaryRow partition) {
-        return checkNotNull(knownNumBuckets.get(partition));
     }
 }
