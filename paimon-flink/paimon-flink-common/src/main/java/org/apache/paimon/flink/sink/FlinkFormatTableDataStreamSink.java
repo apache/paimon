@@ -95,7 +95,7 @@ public class FlinkFormatTableDataStreamSink {
                     FormatTable table, boolean overwrite, Map<String, String> staticPartitions) {
                 this.writeBuilder = table.newBatchWriteBuilder();
                 this.tableWrite = (FormatTableWrite) writeBuilder.newWrite();
-                this.tableCommit = table.newCommit(overwrite, staticPartitions);
+                this.tableCommit = writeBuilder.withOverwrite(staticPartitions).newCommit();
             }
 
             @Override

@@ -22,8 +22,8 @@ import org.apache.paimon.format.csv.CsvOptions
 import org.apache.paimon.spark.{BaseTable, FormatTableScanBuilder, SparkInternalRowWrapper}
 import org.apache.paimon.spark.write.BaseV2WriteBuilder
 import org.apache.paimon.table.FormatTable
-import org.apache.paimon.table.format.TwoPhaseCommitMessage
-import org.apache.paimon.table.sink.BatchTableWrite
+import org.apache.paimon.table.format.{FormatTableCommit, TwoPhaseCommitMessage}
+import org.apache.paimon.table.sink.{BatchTableWrite, CommitMessage}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.internal.Logging
@@ -99,7 +99,10 @@ private case class FormatTableBatchWrite(
     !(overwriteDynamic && overwritePartitions.exists(_.nonEmpty)),
     "Cannot overwrite dynamically and by filter both")
 
-  val commit = table.newCommit(overwritePartitions.isDefined, overwritePartitions)
+  val commit: FormatTableCommit = {
+    val staticPartitions: util.Map[String, String] = overwritePartitions.getOrElse(Map.empty).asJava
+    table.newCommit(overwritePartitions.isDefined, staticPartitions)
+  }
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
     FormatTableWriterFactory(table, writeSchema)
@@ -108,14 +111,7 @@ private case class FormatTableBatchWrite(
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
     logInfo(s"Committing to FormatTable ${table.name()}")
-    val commitMessages = messages
-      .collect {
-        case taskCommit: FormatTableTaskCommit => taskCommit.commitMessages()
-        case other =>
-          throw new IllegalArgumentException(s"${other.getClass.getName} is not supported")
-      }
-      .flatten
-      .toSeq
+    val commitMessages = getPaimonCommitMessages(messages)
 
     try {
       val start = System.currentTimeMillis()
@@ -130,10 +126,21 @@ private case class FormatTableBatchWrite(
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {
     logInfo(s"Aborting write to FormatTable ${table.name()}")
-    val commitMessages = messages.collect {
-      case taskCommit: FormatTableTaskCommit => taskCommit.commitMessages()
-    }.flatten
+    val commitMessages = getPaimonCommitMessages(messages)
     commit.abort(commitMessages)
+  }
+
+  private def getPaimonCommitMessages(
+      messages: Array[WriterCommitMessage]): util.List[CommitMessage] = {
+    messages
+      .collect {
+        case taskCommit: FormatTableTaskCommit => taskCommit.commitMessages()
+        case other =>
+          throw new IllegalArgumentException(s"${other.getClass.getName} is not supported")
+      }
+      .flatten
+      .toList
+      .asJava
   }
 }
 
@@ -200,14 +207,14 @@ private class FormatTableDataWriter(
 }
 
 /** Commit message container for FormatTable writes, holding committers that need to be executed. */
-class FormatTableTaskCommit private (private val _commitMessages: Seq[TwoPhaseCommitMessage])
+class FormatTableTaskCommit private (private val _commitMessages: Seq[CommitMessage])
   extends WriterCommitMessage {
 
-  def commitMessages(): Seq[TwoPhaseCommitMessage] = _commitMessages
+  def commitMessages(): Seq[CommitMessage] = _commitMessages
 }
 
 object FormatTableTaskCommit {
-  def apply(commitMessages: Seq[TwoPhaseCommitMessage]): FormatTableTaskCommit = {
+  def apply(commitMessages: Seq[CommitMessage]): FormatTableTaskCommit = {
     new FormatTableTaskCommit(commitMessages)
   }
 }

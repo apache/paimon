@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.Identifier;
@@ -255,8 +256,9 @@ public interface FormatTable extends Table {
 
         @Override
         public FormatTableCommit newCommit(
-                boolean overwrite, Map<String, String> staticOverWritePartitions) {
-            return new FormatTableCommit(location, fileIO, overwrite, staticOverWritePartitions);
+                boolean overwrite, Map<String, String> staticPartitions) {
+            return new FormatTableCommit(
+                    location, new CoreOptions(options), fileIO, overwrite, staticPartitions);
         }
     }
 

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -41,18 +42,21 @@ import java.util.Set;
 public class FormatTableCommit implements BatchTableCommit {
 
     private String location;
+    private final CoreOptions coreOptions;
     private FileIO fileIO;
-    protected Map<String, String> staticOverWritePartitions;
+    protected Map<String, String> staticPartitions;
     protected boolean overwrite = false;
 
     public FormatTableCommit(
             String location,
+            CoreOptions coreOptions,
             FileIO fileIO,
             boolean overwrite,
-            Map<String, String> staticOverWritePartitions) {
+            Map<String, String> staticPartitions) {
         this.location = location;
+        this.coreOptions = coreOptions;
         this.fileIO = fileIO;
-        this.staticOverWritePartitions = staticOverWritePartitions;
+        this.staticPartitions = staticPartitions;
         this.overwrite = overwrite;
     }
 
@@ -62,30 +66,27 @@ public class FormatTableCommit implements BatchTableCommit {
             List<TwoPhaseOutputStream.Committer> committers = new ArrayList<>();
             for (CommitMessage commitMessage : commitMessages) {
                 if (commitMessage instanceof TwoPhaseCommitMessage) {
-                    TwoPhaseCommitMessage twoPhaseCommitMessage =
-                            (TwoPhaseCommitMessage) commitMessage;
-                    committers.add(twoPhaseCommitMessage.getCommitter());
+                    committers.add(((TwoPhaseCommitMessage) commitMessage).getCommitter());
                 } else {
                     throw new RuntimeException(
                             "Unsupported commit message type: "
                                     + commitMessage.getClass().getName());
                 }
             }
-            if (overwrite
-                    && staticOverWritePartitions != null
-                    && !staticOverWritePartitions.isEmpty()) {
-                String child = PartitionUtils.buildPartitionName(staticOverWritePartitions);
-                Path partitionPath = new Path(location, child);
+            if (overwrite && staticPartitions != null && !staticPartitions.isEmpty()) {
+                Path partitionPath =
+                        new Path(
+                                location,
+                                PartitionUtils.buildPartitionName(
+                                        staticPartitions,
+                                        coreOptions.formatTablePartitionOnlyValueInPath()));
                 deletePreviousDataFile(partitionPath);
             } else if (overwrite) {
-                Set<Path> parents = new HashSet<>();
+                Set<Path> partitionPaths = new HashSet<>();
                 for (TwoPhaseOutputStream.Committer c : committers) {
-                    Path parent = c.targetFilePath().getParent();
-                    if (parent != null) {
-                        parents.add(parent);
-                    }
+                    partitionPaths.add(c.targetFilePath().getParent());
                 }
-                for (Path p : parents) {
+                for (Path p : partitionPaths) {
                     deletePreviousDataFile(p);
                 }
             }
@@ -127,8 +128,7 @@ public class FormatTableCommit implements BatchTableCommit {
                 if (FormatTableScan.isDataFileName(file.getPath().getName())) {
                     try {
                         fileIO.delete(file.getPath(), false);
-                    } catch (FileNotFoundException e) {
-                        // file already deleted
+                    } catch (FileNotFoundException ignore) {
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }

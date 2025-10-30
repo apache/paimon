@@ -38,6 +38,8 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
 
     private final FormatTable table;
     protected final CoreOptions options;
+    private Map<String, String> staticPartition;
+    private boolean overwrite = false;
 
     public FormatBatchWriteBuilder(FormatTable table) {
         this.table = table;
@@ -71,11 +73,13 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
 
     @Override
     public BatchTableCommit newCommit() {
-        throw new UnsupportedOperationException("FormatTable does not support commit");
+        return table.newCommit(overwrite, staticPartition);
     }
 
     @Override
     public BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition) {
-        throw new UnsupportedOperationException("FormatTable does not support commit");
+        this.overwrite = true;
+        this.staticPartition = staticPartition;
+        return this;
     }
 }
