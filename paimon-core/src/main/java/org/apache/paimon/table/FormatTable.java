@@ -257,8 +257,14 @@ public interface FormatTable extends Table {
         @Override
         public FormatTableCommit newCommit(
                 boolean overwrite, Map<String, String> staticPartitions) {
+            boolean formatTablePartitionOnlyValueInPath =
+                    (new CoreOptions(options)).formatTablePartitionOnlyValueInPath();
             return new FormatTableCommit(
-                    location, new CoreOptions(options), fileIO, overwrite, staticPartitions);
+                    location,
+                    fileIO,
+                    formatTablePartitionOnlyValueInPath,
+                    overwrite,
+                    staticPartitions);
         }
     }
 

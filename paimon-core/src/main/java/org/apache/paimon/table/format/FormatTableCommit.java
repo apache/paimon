@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.format;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -42,20 +41,20 @@ import java.util.Set;
 public class FormatTableCommit implements BatchTableCommit {
 
     private String location;
-    private final CoreOptions coreOptions;
+    private final boolean formatTablePartitionOnlyValueInPath;
     private FileIO fileIO;
     protected Map<String, String> staticPartitions;
     protected boolean overwrite = false;
 
     public FormatTableCommit(
             String location,
-            CoreOptions coreOptions,
             FileIO fileIO,
+            boolean formatTablePartitionOnlyValueInPath,
             boolean overwrite,
             Map<String, String> staticPartitions) {
         this.location = location;
-        this.coreOptions = coreOptions;
         this.fileIO = fileIO;
+        this.formatTablePartitionOnlyValueInPath = formatTablePartitionOnlyValueInPath;
         this.staticPartitions = staticPartitions;
         this.overwrite = overwrite;
     }
@@ -78,8 +77,7 @@ public class FormatTableCommit implements BatchTableCommit {
                         new Path(
                                 location,
                                 PartitionUtils.buildPartitionName(
-                                        staticPartitions,
-                                        coreOptions.formatTablePartitionOnlyValueInPath()));
+                                        staticPartitions, formatTablePartitionOnlyValueInPath));
                 deletePreviousDataFile(partitionPath);
             } else if (overwrite) {
                 Set<Path> partitionPaths = new HashSet<>();
