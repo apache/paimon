@@ -44,6 +44,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
@@ -300,6 +301,12 @@ public interface DataFileMeta {
 
     @Nullable
     Long firstRowId();
+
+    default long nonNullFirstRowId() {
+        Long firstRowId = firstRowId();
+        checkArgument(firstRowId != null, "First row id of '%s' should not be null.", fileName());
+        return firstRowId;
+    }
 
     @Nullable
     List<String> writeCols();

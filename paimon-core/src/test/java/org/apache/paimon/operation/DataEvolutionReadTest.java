@@ -24,7 +24,6 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.DataEvolutionSplitRead.BlobBunch;
 import org.apache.paimon.operation.DataEvolutionSplitRead.FieldBunch;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -199,7 +198,7 @@ public class DataEvolutionReadTest {
         waited.add(createBlobFile("blob8", 850, 150, 3));
         waited.add(createBlobFile("blob9", 100, 650, 4));
 
-        List<List<DataFileMeta>> batches = DataEvolutionSplitGenerator.split(waited);
+        List<List<DataFileMeta>> batches = DataEvolutionSplitRead.mergeRangesAndSort(waited);
         assertThat(batches.size()).isEqualTo(1);
 
         List<DataFileMeta> batch = batches.get(0);
@@ -259,7 +258,7 @@ public class DataEvolutionReadTest {
         waited.add(
                 createBlobFileWithCols("blob19", 100, 650, 4, Collections.singletonList("blobc2")));
 
-        List<List<DataFileMeta>> batches = DataEvolutionSplitGenerator.split(waited);
+        List<List<DataFileMeta>> batches = DataEvolutionSplitRead.mergeRangesAndSort(waited);
         assertThat(batches.size()).isEqualTo(1);
 
         List<DataFileMeta> batch = batches.get(0);

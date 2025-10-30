@@ -32,7 +32,6 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
-import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 
@@ -114,7 +113,7 @@ public class BlobTableTest extends TableTestBase {
                         .map(ManifestEntry::file)
                         .collect(Collectors.toList());
 
-        List<List<DataFileMeta>> batches = DataEvolutionSplitGenerator.split(filesMetas);
+        List<List<DataFileMeta>> batches = DataEvolutionSplitRead.mergeRangesAndSort(filesMetas);
         assertThat(batches.size()).isEqualTo(2);
         for (List<DataFileMeta> batch : batches) {
             List<DataEvolutionSplitRead.FieldBunch> fieldGroups =
