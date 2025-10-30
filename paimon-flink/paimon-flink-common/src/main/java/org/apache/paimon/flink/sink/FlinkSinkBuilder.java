@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.PartitionSinkStrategy;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowWrapper;
@@ -60,7 +61,6 @@ import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.CoreOptions.clusteringStrategy;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
-import static org.apache.paimon.flink.FlinkConnectorOptions.POSTPONE_CHANGE_BUCKET_RUNTIME;
 import static org.apache.paimon.flink.sink.FlinkSink.isStreaming;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
@@ -300,32 +300,23 @@ public class FlinkSinkBuilder {
             PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
             return sink.sinkFrom(partitioned);
         } else {
-            Integer fixedBuckets = getPostponeFixedBucketNumber();
+            Map<BinaryRow, Integer> knownNumBuckets = getKnownNumBuckets();
+
+            DataStream<InternalRow> partitioned =
+                    partition(
+                            input,
+                            new PostponeFixedBucketChannelComputer(table.schema(), knownNumBuckets),
+                            parallelism);
+
             Map<String, String> batchWriteOptions = new HashMap<>();
             batchWriteOptions.put(WRITE_ONLY.key(), "true");
-            ChannelComputer<InternalRow> channelComputer;
-            FileStoreTable tableForWrite;
-            if (fixedBuckets != null) {
-                LOG.info(
-                        "Initializing Postpone table {} batch write fixed buckets to {}.",
-                        table.name(),
-                        fixedBuckets);
-                setFixedBucketParallelism(fixedBuckets);
-                batchWriteOptions.put(BUCKET.key(), String.valueOf(fixedBuckets));
-                tableForWrite = table.copy(batchWriteOptions);
-                channelComputer = new RowDataChannelComputer(tableForWrite.schema(), false);
-            } else {
-                LOG.info(
-                        "Initializing Postpone table {} batch write fixed buckets to default num 1. It will be changed at runtime.",
-                        table.name());
-                batchWriteOptions.put(BUCKET.key(), "1");
-                batchWriteOptions.put(POSTPONE_CHANGE_BUCKET_RUNTIME.key(), "true");
-                tableForWrite = table.copy(batchWriteOptions);
-                channelComputer = new RowDataRuntimeChannelComputer(tableForWrite.schema());
-            }
+            // It's just used to create merge tree writer for writing files to fixed bucket.
+            // The real bucket number is determined at runtime.
+            batchWriteOptions.put(BUCKET.key(), "1");
+            FileStoreTable tableForWrite = table.copy(batchWriteOptions);
 
-            DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
-            PostponeBucketSink sink = new PostponeBucketSink(tableForWrite, overwritePartition);
+            PostponeFixedBucketSink sink =
+                    new PostponeFixedBucketSink(tableForWrite, overwritePartition, knownNumBuckets);
             return sink.sinkFrom(partitioned);
         }
     }
@@ -342,20 +333,26 @@ public class FlinkSinkBuilder {
         }
     }
 
-    @Nullable
-    private Integer getPostponeFixedBucketNumber() {
-        // If data exists, use the current bucket number; otherwise, use sink.parallelism if set. If
-        // neither is set, use Flink's parallelism (get at runtime), but here we should use a
-        // default number.
+    private Map<BinaryRow, Integer> getKnownNumBuckets() {
+        Map<BinaryRow, Integer> knownNumBuckets = new HashMap<>();
         List<SimpleFileEntry> simpleFileEntries =
                 table.store().newScan().onlyReadRealBuckets().readSimpleEntries();
-        if (!simpleFileEntries.isEmpty()) {
-            return simpleFileEntries.get(0).totalBuckets();
-        } else if (parallelism != null) {
-            return parallelism;
-        } else {
-            return null;
+        for (SimpleFileEntry entry : simpleFileEntries) {
+            if (entry.totalBuckets() >= 0) {
+                Integer oldTotalBuckets =
+                        knownNumBuckets.put(entry.partition(), entry.totalBuckets());
+                if (oldTotalBuckets != null && oldTotalBuckets != entry.totalBuckets()) {
+                    throw new IllegalStateException(
+                            "Partition "
+                                    + entry.partition()
+                                    + " has different totalBuckets "
+                                    + oldTotalBuckets
+                                    + " and "
+                                    + entry.totalBuckets());
+                }
+            }
         }
+        return knownNumBuckets;
     }
 
     private DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {

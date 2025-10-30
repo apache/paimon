@@ -32,7 +32,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -852,7 +856,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testWriteFixedBucketWithFlinkParallelism() throws Exception {
+    public void testWriteFixedBucketWithDifferentBucketNumber() throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv =
                 tableEnvironmentBuilder()
@@ -872,90 +876,27 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                 "CREATE TABLE T (\n"
                         + "  k INT,\n"
                         + "  v STRING,\n"
-                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
-                        + ") WITH (\n"
-                        + "  'bucket' = '-2'\n"
-                        + ")");
-
-        // flink runtime sink parallelism is 1 here
-        tEnv.executeSql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')").await();
-
-        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
-                .containsExactlyInAnyOrder("+I[1, a]", "+I[2, b]", "+I[3, c]", "+I[4, d]");
-
-        assertThat(
-                        collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
-                                .map(row -> (Integer) row.getField(1))
-                                .collect(Collectors.toSet()))
-                .containsExactly(0);
-        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
-
-        // add Flink and Paimon sink.parallelism to verify that the postpone writer will use current
-        // bucket number
-        tEnv.getConfig().set("sink.parallelism", "2");
-        tEnv.executeSql(
-                        "INSERT INTO T /*+ OPTIONS ('sink.parallelism' = '2') */ "
-                                + "VALUES (1, 'A'), (2, 'B'), (3, 'C'), (4, 'D'), (5, 'E'), (6, 'F'), (7, 'G'), (8, 'H')")
-                .await();
-        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
-                .containsExactlyInAnyOrder(
-                        "+I[1, A]",
-                        "+I[2, B]",
-                        "+I[3, C]",
-                        "+I[4, D]",
-                        "+I[5, E]",
-                        "+I[6, F]",
-                        "+I[7, G]",
-                        "+I[8, H]");
-        assertThat(
-                        collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
-                                .map(row -> (Integer) row.getField(1))
-                                .collect(Collectors.toSet()))
-                .containsExactly(0);
-        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
-    }
-
-    @Test
-    public void testWriteFixedBucketWithSinkParallelism() throws Exception {
-        String warehouse = getTempDirPath();
-        TableEnvironment tEnv =
-                tableEnvironmentBuilder()
-                        .batchMode()
-                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
-                        .build();
-
-        tEnv.executeSql(
-                "CREATE CATALOG mycat WITH (\n"
-                        + "  'type' = 'paimon',\n"
-                        + "  'warehouse' = '"
-                        + warehouse
-                        + "'\n"
-                        + ")");
-        tEnv.executeSql("USE CATALOG mycat");
-        tEnv.executeSql(
-                "CREATE TABLE T (\n"
-                        + "  k INT,\n"
-                        + "  v STRING,\n"
-                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
-                        + ") WITH (\n"
+                        + "  pt STRING,"
+                        + "  PRIMARY KEY (k, pt) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
                         + "  'bucket' = '-2'\n"
                         + ")");
 
         // use sink.parallelism
+        List<String> values1 = new ArrayList<>();
+        List<String> expected1 = new ArrayList<>();
+        for (int i = 1; i <= 8; i++) {
+            values1.add(String.format("(%d, '%c', 'pt1')", i, (i - 1 + 'a')));
+            values1.add(String.format("(%d, '%c', 'pt2')", i, (i - 1 + 'a')));
+            expected1.add(String.format("+I[%d, %c, pt1]", i, (i - 1 + 'a')));
+            expected1.add(String.format("+I[%d, %c, pt2]", i, (i - 1 + 'a')));
+        }
         tEnv.executeSql(
-                        "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '4') */ "
-                                + "VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e'), (6, 'f'), (7, 'g'), (8, 'h');")
+                        "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '4') */ VALUES "
+                                + String.join(",", values1))
                 .await();
         assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
-                .containsExactlyInAnyOrder(
-                        "+I[1, a]",
-                        "+I[2, b]",
-                        "+I[3, c]",
-                        "+I[4, d]",
-                        "+I[5, e]",
-                        "+I[6, f]",
-                        "+I[7, g]",
-                        "+I[8, h]");
+                .containsExactlyInAnyOrderElementsOf(expected1);
         assertThat(
                         collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
                                 .map(row -> (Integer) row.getField(1))
@@ -963,37 +904,45 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                 .containsExactlyInAnyOrder(0, 1, 2, 3);
         assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
 
-        // add Flink and Paimon sink.parallelism to verify that the postpone writer will use current
-        // bucket number
-        tEnv.getConfig().set("sink.parallelism", "5");
+        // test bucket number strategy: pt1 = 3, pt2 = 4, pt3 = 5 (runtime)
         tEnv.executeSql(
-                        "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '5') */ "
-                                + "VALUES (1, 'A'), (2, 'B'), (3, 'C'), (4, 'D'), (5, 'E'), (6, 'F'), (7, 'G'), (8, 'H'), "
-                                + "(9, '9'), (10, '10'), (11, '11'), (12, '12'), (13, '13'), (14, '14'), (15, '15'), (16, '16');")
+                "CALL sys.rescale(`table` => 'default.T', `bucket_num` => 3, `partition` => 'pt=pt1')");
+
+        List<String> values2 = new ArrayList<>();
+        List<String> expected2 = new ArrayList<>();
+        for (int i = 1; i <= 8; i++) {
+            values2.add(String.format("(%d, '%c', 'pt1')", i, (i - 1 + 'A')));
+            values2.add(String.format("(%d, '%c', 'pt2')", i, (i - 1 + 'A')));
+            values2.add(String.format("(%d, '%c', 'pt3')", i, (i - 1 + 'A')));
+            expected2.add(String.format("+I[%d, %c, pt1]", i, (i - 1 + 'A')));
+            expected2.add(String.format("+I[%d, %c, pt2]", i, (i - 1 + 'A')));
+            expected2.add(String.format("+I[%d, %c, pt3]", i, (i - 1 + 'A')));
+        }
+        for (int i = 9; i <= 16; i++) {
+            values2.add(String.format("(%d, '%d', 'pt1')", i, i));
+            values2.add(String.format("(%d, '%d', 'pt2')", i, i));
+            values2.add(String.format("(%d, '%d', 'pt3')", i, i));
+            expected2.add(String.format("+I[%d, %d, pt1]", i, i));
+            expected2.add(String.format("+I[%d, %d, pt2]", i, i));
+            expected2.add(String.format("+I[%d, %d, pt3]", i, i));
+        }
+
+        tEnv.executeSql(
+                        "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '5') */ VALUES "
+                                + String.join(",", values2))
                 .await();
         assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
-                .containsExactlyInAnyOrder(
-                        "+I[1, A]",
-                        "+I[2, B]",
-                        "+I[3, C]",
-                        "+I[4, D]",
-                        "+I[5, E]",
-                        "+I[6, F]",
-                        "+I[7, G]",
-                        "+I[8, H]",
-                        "+I[9, 9]",
-                        "+I[10, 10]",
-                        "+I[11, 11]",
-                        "+I[12, 12]",
-                        "+I[13, 13]",
-                        "+I[14, 14]",
-                        "+I[15, 15]",
-                        "+I[16, 16]");
-        assertThat(
-                        collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`")).stream()
-                                .map(row -> (Integer) row.getField(1))
-                                .collect(Collectors.toSet()))
-                .containsExactlyInAnyOrder(0, 1, 2, 3);
+                .containsExactlyInAnyOrderElementsOf(expected2);
+        Map<String, Set<Integer>> partitionBuckets = new HashMap<>();
+        for (Row row : collectRow(tEnv.executeSql("SELECT * FROM `T$buckets`"))) {
+            partitionBuckets
+                    .computeIfAbsent((String) row.getField(0), p -> new HashSet<>())
+                    .add((Integer) row.getField(1));
+        }
+        assertThat(partitionBuckets).hasSize(3);
+        assertThat(partitionBuckets.get("{pt1}")).containsExactly(0, 1, 2);
+        assertThat(partitionBuckets.get("{pt2}")).containsExactly(0, 1, 2, 3);
+        assertThat(partitionBuckets.get("{pt3}")).containsExactly(0, 1, 2, 3, 4);
         assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
     }
 

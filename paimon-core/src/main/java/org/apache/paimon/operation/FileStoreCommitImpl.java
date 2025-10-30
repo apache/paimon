@@ -300,6 +300,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestEntry> compactTableFiles = new ArrayList<>();
         List<ManifestEntry> compactChangelog = new ArrayList<>();
         List<IndexManifestEntry> compactIndexFiles = new ArrayList<>();
+        Map<BinaryRow, Integer> commitPartitionAndTotalBuckets = new HashMap<>();
         collectChanges(
                 committable.fileCommittables(),
                 appendTableFiles,
@@ -307,7 +308,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 appendIndexFiles,
                 compactTableFiles,
                 compactChangelog,
-                compactIndexFiles);
+                compactIndexFiles,
+                commitPartitionAndTotalBuckets);
         try {
             List<SimpleFileEntry> appendSimpleEntries = SimpleFileEntry.from(appendTableFiles);
             if (!ignoreEmptyCommit
@@ -335,15 +337,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 }
 
                 if (latestSnapshot != null && checkAppendFiles) {
-                    // it is possible that some partitions only have compact changes,
-                    // so we need to contain all changes
-                    baseEntries.addAll(
+                    List<SimpleFileEntry> latestEntries =
                             readAllEntriesFromChangedPartitions(
                                     latestSnapshot,
-                                    changedPartitions(
-                                            appendTableFiles,
-                                            compactTableFiles,
-                                            appendIndexFiles)));
+                                    new ArrayList<>(commitPartitionAndTotalBuckets.keySet()));
+                    validateTotalBuckets(commitPartitionAndTotalBuckets, latestEntries);
+
+                    // it is possible that some partitions only have compact changes,
+                    // so we need to contain all changes
+                    baseEntries.addAll(latestEntries);
                     if (discardDuplicate) {
                         Set<FileEntry.Identifier> baseIdentifiers =
                                 baseEntries.stream()
@@ -506,7 +508,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 appendIndexFiles,
                 compactTableFiles,
                 compactChangelog,
-                compactIndexFiles);
+                compactIndexFiles,
+                new HashMap<>());
 
         if (!appendChangelog.isEmpty() || !compactChangelog.isEmpty()) {
             StringBuilder warnMessage =
@@ -604,6 +607,28 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
         return generatedSnapshot;
+    }
+
+    private void validateTotalBuckets(
+            Map<BinaryRow, Integer> commitPartitionAndTotalBuckets,
+            List<SimpleFileEntry> latestEntries) {
+        for (SimpleFileEntry entry : latestEntries) {
+            BinaryRow partition = entry.partition();
+            int oldTotalBuckets = entry.totalBuckets();
+            Integer newTotalBuckets = commitPartitionAndTotalBuckets.get(partition);
+            if (oldTotalBuckets > 0
+                    && newTotalBuckets != null
+                    && oldTotalBuckets != newTotalBuckets) {
+                throw new RuntimeException(
+                        String.format(
+                                "Trying to commit %s with a new bucket num %d, but the previous bucket num is %d.",
+                                partition.getFieldCount() > 0
+                                        ? "partition " + pathFactory.getPartitionString(partition)
+                                        : "table",
+                                newTotalBuckets,
+                                oldTotalBuckets));
+            }
+        }
     }
 
     @Override
@@ -716,7 +741,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<IndexManifestEntry> appendIndexFiles,
             List<ManifestEntry> compactTableFiles,
             List<ManifestEntry> compactChangelog,
-            List<IndexManifestEntry> compactIndexFiles) {
+            List<IndexManifestEntry> compactIndexFiles,
+            Map<BinaryRow, Integer> commitPartitionAndTotalBuckets) {
         for (CommitMessage message : commitMessages) {
             CommitMessageImpl commitMessage = (CommitMessageImpl) message;
             commitMessage
@@ -794,6 +820,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                     commitMessage.partition(),
                                                     commitMessage.bucket(),
                                                     m)));
+
+            commitPartitionAndTotalBuckets.put(
+                    commitMessage.partition(), commitMessage.totalBuckets());
         }
         if (!commitMessages.isEmpty()) {
             List<String> msg = new ArrayList<>();
