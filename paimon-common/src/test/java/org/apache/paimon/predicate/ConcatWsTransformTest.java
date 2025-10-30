@@ -72,7 +72,7 @@ class ConcatWsTransformTest {
                                 BinaryString.fromString(""),
                                 BinaryString.fromString(""),
                                 BinaryString.fromString(""),
-                                BinaryString.fromString("-he")));
+                                BinaryString.fromString("he")));
         assertThat(result).isEqualTo(BinaryString.fromString("ha-he"));
     }
 }
