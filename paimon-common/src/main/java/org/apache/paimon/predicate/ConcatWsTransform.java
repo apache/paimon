@@ -18,30 +18,25 @@
 
 package org.apache.paimon.predicate;
 
-import java.util.ArrayList;
+import org.apache.paimon.data.BinaryString;
+
 import java.util.List;
-import java.util.Optional;
 
-/** A {@link PredicateVisitor} to replace {@link Predicate}. */
-@FunctionalInterface
-public interface PredicateReplaceVisitor extends PredicateVisitor<Optional<Predicate>> {
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-    @Override
-    default Optional<Predicate> visit(CompoundPredicate predicate) {
-        List<Predicate> converted = new ArrayList<>();
-        for (Predicate child : predicate.children()) {
-            Optional<Predicate> optional = child.visit(this);
-            if (optional.isPresent()) {
-                converted.add(optional.get());
-            } else {
-                return Optional.empty();
-            }
-        }
-        return Optional.of(new CompoundPredicate(predicate.function(), converted));
+/** ConcatWs {@link Transform}. */
+public class ConcatWsTransform extends StringTransform {
+
+    private static final long serialVersionUID = 1L;
+
+    public ConcatWsTransform(List<Object> inputs) {
+        super(inputs);
+        checkArgument(inputs.size() >= 2);
     }
 
     @Override
-    default Optional<Predicate> visit(TransformPredicate predicate) {
-        throw new UnsupportedOperationException();
+    public BinaryString transform(List<BinaryString> inputs) {
+        BinaryString separator = inputs.get(0);
+        return BinaryString.concatWs(separator, inputs.subList(1, inputs.size()));
     }
 }

@@ -121,4 +121,9 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
     public Boolean visitOr(List<Boolean> children) {
         return false;
     }
+
+    @Override
+    public Boolean visit(TransformPredicate predicate) {
+        return false;
+    }
 }

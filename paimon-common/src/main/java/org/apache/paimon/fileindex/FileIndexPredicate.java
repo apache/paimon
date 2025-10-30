@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.types.RowType;
 
 import org.slf4j.Logger;
@@ -131,6 +132,11 @@ public class FileIndexPredicate implements Closeable {
                         }
                         return names;
                     }
+
+                    @Override
+                    public Set<String> visit(TransformPredicate predicate) {
+                        throw new UnsupportedOperationException();
+                    }
                 });
     }
 
@@ -196,6 +202,11 @@ public class FileIndexPredicate implements Closeable {
                 }
                 return compoundResult == null ? REMAIN : compoundResult;
             }
+        }
+
+        @Override
+        public FileIndexResult visit(TransformPredicate predicate) {
+            throw new UnsupportedOperationException();
         }
     }
 }
