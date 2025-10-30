@@ -88,14 +88,7 @@ public class PartitionUtils {
     }
 
     public static String buildPartitionName(Map<String, String> partitionSpec) {
-        if (partitionSpec.isEmpty()) {
-            return "";
-        }
-        List<String> partitionName =
-                partitionSpec.keySet().stream()
-                        .map(key -> key + "=" + partitionSpec.get(key))
-                        .collect(Collectors.toList());
-        return String.join("/", partitionName);
+        return buildPartitionName(partitionSpec, false);
     }
 
     public static String buildPartitionName(
