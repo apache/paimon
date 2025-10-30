@@ -1017,6 +1017,14 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
      * Concatenates input strings together into a single string. Returns NULL if any argument is
      * NULL.
      */
+    public static BinaryString concat(BinaryString... inputs) {
+        return concat(Arrays.asList(inputs));
+    }
+
+    /**
+     * Concatenates input strings together into a single string. Returns NULL if any argument is
+     * NULL.
+     */
     public static BinaryString concat(Iterable<BinaryString> inputs) {
         // Compute the total length of the result.
         int totalLength = 0;
@@ -1040,6 +1048,17 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
             }
         }
         return fromBytes(result);
+    }
+
+    /**
+     * Concatenates input strings together into a single string using the separator. Returns NULL If
+     * the separator is NULL.
+     *
+     * <p>Note: CONCAT_WS() does not skip any empty strings, however it does skip any NULL values
+     * after the separator. For example, concat_ws(",", "a", null, "c") would yield "a,c".
+     */
+    public static BinaryString concatWs(BinaryString separator, BinaryString... inputs) {
+        return concatWs(separator, Arrays.asList(inputs));
     }
 
     /**
