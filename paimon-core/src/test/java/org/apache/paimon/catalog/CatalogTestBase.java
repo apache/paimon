@@ -711,6 +711,89 @@ public abstract class CatalogTestBase {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFormatTableOverwrite(boolean partitionPathOnlyValue) throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        String dbName = "format_overwrite_db";
+        catalog.createDatabase(dbName, true);
+
+        Identifier id = Identifier.create(dbName, "format_overwrite_table");
+        Schema nonPartitionedSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .options(getFormatTableOptions())
+                        .option("file.format", "csv")
+                        .option("file.compression", HadoopCompressionType.GZIP.value())
+                        .option(
+                                "format-table.partition-path-only-value",
+                                "" + partitionPathOnlyValue)
+                        .build();
+        catalog.createTable(id, nonPartitionedSchema, true);
+        FormatTable nonPartitionedTable = (FormatTable) catalog.getTable(id);
+
+        try (FormatTableWrite write =
+                        (FormatTableWrite) nonPartitionedTable.newBatchWriteBuilder().newWrite();
+                FormatTableCommit commit = nonPartitionedTable.newCommit(false, new HashMap<>())) {
+            write.write(GenericRow.of(1, 10));
+            write.write(GenericRow.of(2, 20));
+            commit.commit(write.prepareCommit());
+        }
+
+        try (FormatTableWrite write =
+                        (FormatTableWrite) nonPartitionedTable.newBatchWriteBuilder().newWrite();
+                FormatTableCommit commit = nonPartitionedTable.newCommit(true, new HashMap<>())) {
+            write.write(GenericRow.of(3, 30));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<InternalRow> fullOverwriteRows = read(nonPartitionedTable, null, null, null, null);
+        assertThat(fullOverwriteRows).containsExactlyInAnyOrder(GenericRow.of(3, 30));
+        catalog.dropTable(id, true);
+
+        Identifier pid = Identifier.create(dbName, "format_overwrite_partitioned");
+        Schema partitionedSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .column("dt", DataTypes.INT())
+                        .partitionKeys("dt")
+                        .options(getFormatTableOptions())
+                        .option("file.format", "csv")
+                        .option("file.compression", HadoopCompressionType.GZIP.value())
+                        .option(
+                                "format-table.partition-path-only-value",
+                                "" + partitionPathOnlyValue)
+                        .build();
+        catalog.createTable(pid, partitionedSchema, true);
+        FormatTable partitionedTable = (FormatTable) catalog.getTable(pid);
+
+        try (FormatTableWrite write =
+                        (FormatTableWrite) partitionedTable.newBatchWriteBuilder().newWrite();
+                FormatTableCommit commit = partitionedTable.newCommit(false, new HashMap<>())) {
+            write.write(GenericRow.of(1, 100, 1));
+            write.write(GenericRow.of(2, 200, 2));
+            commit.commit(write.prepareCommit());
+        }
+
+        Map<String, String> staticPartition = new HashMap<>();
+        staticPartition.put("dt", "1");
+        try (FormatTableWrite write =
+                        (FormatTableWrite) partitionedTable.newBatchWriteBuilder().newWrite();
+                FormatTableCommit commit = partitionedTable.newCommit(true, staticPartition)) {
+            write.write(GenericRow.of(10, 1000, 1));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<InternalRow> partitionOverwriteRows = read(partitionedTable, null, null, null, null);
+        assertThat(partitionOverwriteRows)
+                .containsExactlyInAnyOrder(GenericRow.of(10, 1000, 1), GenericRow.of(2, 200, 2));
+        catalog.dropTable(pid, true);
+    }
+
     private void writeAndCheckCommitFormatTable(
             FormatTable table, InternalRow[] datas, InternalRow dataWithDiffPartition)
             throws Exception {
