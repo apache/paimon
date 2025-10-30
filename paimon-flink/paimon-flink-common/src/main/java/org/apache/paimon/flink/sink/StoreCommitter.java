@@ -46,14 +46,8 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     @Nullable private final CommitterMetrics committerMetrics;
     private final CommitListeners commitListeners;
     private final boolean allowLogOffsetDuplicate;
-    private final boolean checkAppendFiles;
 
     public StoreCommitter(FileStoreTable table, TableCommit commit, Context context) {
-        this(table, commit, context, false);
-    }
-
-    public StoreCommitter(
-            FileStoreTable table, TableCommit commit, Context context, boolean checkAppendFiles) {
         this.commit = (TableCommitImpl) commit;
 
         if (context.metricGroup() != null) {
@@ -69,7 +63,6 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
             throw new RuntimeException(e);
         }
         allowLogOffsetDuplicate = table.bucketMode() == BucketMode.BUCKET_UNAWARE;
-        this.checkAppendFiles = checkAppendFiles;
     }
 
     @VisibleForTesting
@@ -125,9 +118,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
             List<ManifestCommittable> globalCommittables,
             boolean checkAppendFiles,
             boolean partitionMarkDoneRecoverFromState) {
-        int committed =
-                commit.filterAndCommitMultiple(
-                        globalCommittables, this.checkAppendFiles || checkAppendFiles);
+        int committed = commit.filterAndCommitMultiple(globalCommittables, checkAppendFiles);
         // update bytes/records metrics for filter-and-commit path as well
         calcNumBytesAndRecordsOut(globalCommittables);
         commitListeners.notifyCommittable(globalCommittables, partitionMarkDoneRecoverFromState);

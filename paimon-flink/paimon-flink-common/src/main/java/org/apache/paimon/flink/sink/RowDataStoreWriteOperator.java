@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.log.LogWriteCallback;
-import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -42,29 +41,21 @@ import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.util.functions.StreamingFunctionUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.LOG_IGNORE_DELETE;
-import static org.apache.paimon.flink.FlinkConnectorOptions.POSTPONE_CHANGE_BUCKET_RUNTIME;
 
 /** A {@link PrepareCommitOperator} to write {@link InternalRow}. Record schema is fixed. */
 public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
 
     private static final long serialVersionUID = 3L;
-
-    private static final Logger LOG = LoggerFactory.getLogger(RowDataStoreWriteOperator.class);
 
     @Nullable private final LogSinkFunction logSinkFunction;
     private transient SimpleContext sinkContext;
@@ -105,32 +96,12 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
     public void open() throws Exception {
         super.open();
 
-        tryChangeBucketNumber();
         this.sinkContext = new SimpleContext(getProcessingTimeService());
         if (logSinkFunction != null) {
             openFunction(logSinkFunction);
             logCallback = new LogWriteCallback();
             logSinkFunction.setWriteCallback(logCallback);
             logIgnoreDelete = Options.fromMap(table.options()).get(LOG_IGNORE_DELETE);
-        }
-    }
-
-    private void tryChangeBucketNumber() throws Exception {
-        int sinkParallelism = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
-        if (sinkParallelism != options.get(BUCKET) && options.get(POSTPONE_CHANGE_BUCKET_RUNTIME)) {
-            LOG.info(
-                    "Initializing Postpone table {} batch write fixed buckets to {} at runtime.",
-                    table.name(),
-                    sinkParallelism);
-            options.set(BUCKET, sinkParallelism);
-            options.set(POSTPONE_CHANGE_BUCKET_RUNTIME, false);
-
-            Map<String, String> newOptions = new HashMap<>();
-            newOptions.put(BUCKET.key(), String.valueOf(sinkParallelism));
-            newOptions.put(POSTPONE_CHANGE_BUCKET_RUNTIME.key(), "false");
-            table = table.copy(newOptions);
-            // to recreate postpone writer
-            write.replace(table);
         }
     }
 

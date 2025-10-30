@@ -539,10 +539,6 @@ public class FlinkConnectorOptions {
                                     + "multiple option group separated by commas. "
                                     + "Now only 'external-paths' is supported.");
 
-    @ExcludeFromDocumentation("Only used internally to support postpone bucket table batch write.")
-    public static final ConfigOption<Boolean> POSTPONE_CHANGE_BUCKET_RUNTIME =
-            key("postpone.change-bucket-runtime").booleanType().defaultValue(false);
-
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

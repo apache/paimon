@@ -71,15 +71,8 @@ public class PostponeFixedBucketSink extends FlinkWriteSink<InternalRow> {
     @Override
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory() {
         if (overwritePartition == null) {
-            // The table has copied bucket option outside, no need to change table
-            // Need to check the total buckets
-            return context ->
-                    new StoreCommitter(
-                            table,
-                            table.newCommit(context.commitUser())
-                                    .ignoreEmptyCommit(!context.streamingCheckpointEnabled()),
-                            context,
-                            true);
+            // The table has copied bucket option outside, no need to change anything
+            return super.createCommitterFactory();
         } else {
             // When overwriting, the postpone bucket files need to be deleted, so using a postpone
             // bucket table commit here
