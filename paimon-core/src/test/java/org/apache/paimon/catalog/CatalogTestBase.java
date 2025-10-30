@@ -41,6 +41,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.format.FormatTableCommit;
 import org.apache.paimon.table.format.FormatTableWrite;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -711,8 +712,10 @@ public abstract class CatalogTestBase {
     }
 
     private void writeAndCheckCommitFormatTable(
-            Table table, InternalRow[] datas, InternalRow dataWithDiffPartition) throws Exception {
-        try (FormatTableWrite write = (FormatTableWrite) table.newBatchWriteBuilder().newWrite()) {
+            FormatTable table, InternalRow[] datas, InternalRow dataWithDiffPartition)
+            throws Exception {
+        try (FormatTableWrite write = (FormatTableWrite) table.newBatchWriteBuilder().newWrite();
+                FormatTableCommit commit = table.newCommit(false, new HashMap<>())) {
             for (InternalRow row : datas) {
                 write.write(row);
             }
@@ -722,7 +725,7 @@ public abstract class CatalogTestBase {
             List<CommitMessage> committers = write.prepareCommit();
             List<InternalRow> readData = read(table, null, null, null, null);
             assertThat(readData).isEmpty();
-            write.commit(committers);
+            commit.commit(committers);
         }
     }
 

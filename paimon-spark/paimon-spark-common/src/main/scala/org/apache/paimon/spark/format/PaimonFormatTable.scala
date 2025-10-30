@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.format
 
 import org.apache.paimon.format.csv.CsvOptions
-import org.apache.paimon.fs.TwoPhaseOutputStream
 import org.apache.paimon.spark.{BaseTable, FormatTableScanBuilder, SparkInternalRowWrapper}
 import org.apache.paimon.spark.write.BaseV2WriteBuilder
 import org.apache.paimon.table.FormatTable
@@ -37,7 +36,6 @@ import org.apache.spark.sql.connector.write.streaming.StreamingWrite
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import java.io.FileNotFoundException
 import java.util
 
 import scala.collection.JavaConverters._
@@ -101,6 +99,8 @@ private case class FormatTableBatchWrite(
     !(overwriteDynamic && overwritePartitions.exists(_.nonEmpty)),
     "Cannot overwrite dynamically and by filter both")
 
+  val commit = table.newCommit(overwritePartitions.isDefined, overwritePartitions)
+
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
     FormatTableWriterFactory(table, writeSchema)
 
@@ -108,10 +108,9 @@ private case class FormatTableBatchWrite(
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
     logInfo(s"Committing to FormatTable ${table.name()}")
-
-    val committers = messages
+    val commitMessages = messages
       .collect {
-        case taskCommit: FormatTableTaskCommit => taskCommit.committers()
+        case taskCommit: FormatTableTaskCommit => taskCommit.commitMessages()
         case other =>
           throw new IllegalArgumentException(s"${other.getClass.getName} is not supported")
       }
@@ -120,18 +119,7 @@ private case class FormatTableBatchWrite(
 
     try {
       val start = System.currentTimeMillis()
-      if (overwritePartitions.isDefined && overwritePartitions.get.nonEmpty) {
-        val child = org.apache.paimon.partition.PartitionUtils
-          .buildPartitionName(overwritePartitions.get.asJava)
-        val partitionPath = new org.apache.paimon.fs.Path(table.location(), child)
-        deletePreviousDataFile(partitionPath)
-      } else if (overwritePartitions.isDefined && overwritePartitions.get.isEmpty) {
-        committers
-          .map(c => c.targetFilePath().getParent)
-          .distinct
-          .foreach(deletePreviousDataFile)
-      }
-      committers.foreach(c => c.commit(table.fileIO()))
+      commit.commit(commitMessages)
       logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
     } catch {
       case e: Exception =>
@@ -140,37 +128,12 @@ private case class FormatTableBatchWrite(
     }
   }
 
-  private def deletePreviousDataFile(partitionPath: org.apache.paimon.fs.Path): Unit = {
-    if (table.fileIO().exists(partitionPath)) {
-      val files = table.fileIO().listFiles(partitionPath, true)
-      files
-        .filter(f => !f.getPath.getName.startsWith(".") && !f.getPath.getName.startsWith("_"))
-        .foreach(
-          f => {
-            try {
-              table.fileIO().deleteQuietly(f.getPath)
-            } catch {
-              case _: FileNotFoundException => logInfo(s"File ${f.getPath} already deleted")
-              case other => throw new RuntimeException(other)
-            }
-          })
-    }
-  }
-
   override def abort(messages: Array[WriterCommitMessage]): Unit = {
     logInfo(s"Aborting write to FormatTable ${table.name()}")
-    val committers = messages.collect {
-      case taskCommit: FormatTableTaskCommit => taskCommit.committers()
+    val commitMessages = messages.collect {
+      case taskCommit: FormatTableTaskCommit => taskCommit.commitMessages()
     }.flatten
-
-    committers.foreach {
-      committer =>
-        try {
-          committer.discard(table.fileIO())
-        } catch {
-          case e: Exception => logWarning(s"Failed to abort committer: ${e.getMessage}")
-        }
-    }
+    commit.abort(commitMessages)
   }
 }
 
@@ -204,17 +167,17 @@ private class FormatTableDataWriter(
 
   override def commit(): WriterCommitMessage = {
     try {
-      val committers = formatTableWrite
+      val commitMessages = formatTableWrite
         .prepareCommit()
         .asScala
         .map {
-          case committer: TwoPhaseCommitMessage => committer.getCommitter
+          case commitMessage: TwoPhaseCommitMessage => commitMessage
           case other =>
             throw new IllegalArgumentException(
               "Unsupported commit message type: " + other.getClass.getSimpleName)
         }
         .toSeq
-      FormatTableTaskCommit(committers)
+      FormatTableTaskCommit(commitMessages)
     } finally {
       close()
     }
@@ -237,14 +200,14 @@ private class FormatTableDataWriter(
 }
 
 /** Commit message container for FormatTable writes, holding committers that need to be executed. */
-class FormatTableTaskCommit private (private val _committers: Seq[TwoPhaseOutputStream.Committer])
+class FormatTableTaskCommit private (private val _commitMessages: Seq[TwoPhaseCommitMessage])
   extends WriterCommitMessage {
 
-  def committers(): Seq[TwoPhaseOutputStream.Committer] = _committers
+  def commitMessages(): Seq[TwoPhaseCommitMessage] = _commitMessages
 }
 
 object FormatTableTaskCommit {
-  def apply(committers: Seq[TwoPhaseOutputStream.Committer]): FormatTableTaskCommit = {
-    new FormatTableTaskCommit(committers)
+  def apply(commitMessages: Seq[TwoPhaseCommitMessage]): FormatTableTaskCommit = {
+    new FormatTableTaskCommit(commitMessages)
   }
 }
