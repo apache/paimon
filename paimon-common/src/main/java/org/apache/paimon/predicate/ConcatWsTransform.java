@@ -18,12 +18,25 @@
 
 package org.apache.paimon.predicate;
 
-/** A visitor to visit {@link Predicate}. */
-public interface PredicateVisitor<T> {
+import org.apache.paimon.data.BinaryString;
 
-    T visit(LeafPredicate predicate);
+import java.util.List;
 
-    T visit(CompoundPredicate predicate);
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-    T visit(TransformPredicate predicate);
+/** ConcatWs {@link Transform}. */
+public class ConcatWsTransform extends StringTransform {
+
+    private static final long serialVersionUID = 1L;
+
+    public ConcatWsTransform(List<Object> inputs) {
+        super(inputs);
+        checkArgument(inputs.size() >= 2);
+    }
+
+    @Override
+    public BinaryString transform(List<BinaryString> inputs) {
+        BinaryString separator = inputs.get(0);
+        return BinaryString.concatWs(separator, inputs.subList(1, inputs.size()));
+    }
 }
