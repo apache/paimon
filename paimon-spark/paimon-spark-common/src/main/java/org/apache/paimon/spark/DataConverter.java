@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -32,6 +33,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.spark.sql.catalyst.util.ArrayBasedMapData;
 import org.apache.spark.sql.catalyst.util.ArrayData;
@@ -113,5 +115,14 @@ public class DataConverter {
         return new ArrayBasedMapData(
                 fromPaimonArrayElementType(map.keyArray(), keyType),
                 fromPaimonArrayElementType(map.valueArray(), valueType));
+    }
+
+    public static Object[] fromPaimon(
+            BinaryRow binaryRow, RowDataToObjectArrayConverter converter) {
+        Object[] result = converter.convert(binaryRow);
+        for (int i = 0; i < result.length; i++) {
+            result[i] = fromPaimon(result[i], converter.rowType().getFields().get(i).type());
+        }
+        return result;
     }
 }

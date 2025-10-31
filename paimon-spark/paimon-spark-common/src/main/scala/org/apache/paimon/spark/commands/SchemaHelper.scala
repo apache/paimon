@@ -24,6 +24,7 @@ import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.ChainTableUtils
 
 import org.apache.spark.sql.{DataFrame, PaimonUtils, SparkSession}
 import org.apache.spark.sql.functions.{col, lit}
@@ -37,7 +38,8 @@ private[spark] trait SchemaHelper extends WithFileStoreTable {
 
   protected var newTable: Option[FileStoreTable] = None
 
-  override def table: FileStoreTable = newTable.getOrElse(originTable)
+  override def table: FileStoreTable =
+    newTable.getOrElse(ChainTableUtils.getWriteTable(originTable))
 
   def mergeSchema(sparkSession: SparkSession, input: DataFrame, options: Options): DataFrame = {
     val dataSchema = SparkSystemColumns.filterSparkSystemColumns(input.schema)
