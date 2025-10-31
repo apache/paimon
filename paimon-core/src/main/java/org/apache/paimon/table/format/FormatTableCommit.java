@@ -39,6 +39,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.StringJoiner;
 
+import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateStaticPartition;
+
 /** Commit for Format Table. */
 public class FormatTableCommit implements BatchTableCommit {
 
@@ -59,6 +61,7 @@ public class FormatTableCommit implements BatchTableCommit {
         this.location = location;
         this.fileIO = fileIO;
         this.formatTablePartitionOnlyValueInPath = formatTablePartitionOnlyValueInPath;
+        validateStaticPartition(staticPartitions, partitionKeys);
         this.staticPartitions = staticPartitions;
         this.overwrite = overwrite;
         this.partitionKeys = partitionKeys;
@@ -79,12 +82,11 @@ public class FormatTableCommit implements BatchTableCommit {
             }
             if (overwrite && staticPartitions != null && !staticPartitions.isEmpty()) {
                 Path partitionPath =
-                        new Path(
+                        buildPartitionPath(
                                 location,
-                                buildPartitionName(
-                                        staticPartitions,
-                                        formatTablePartitionOnlyValueInPath,
-                                        partitionKeys));
+                                staticPartitions,
+                                formatTablePartitionOnlyValueInPath,
+                                partitionKeys);
                 deletePreviousDataFile(partitionPath);
             } else if (overwrite) {
                 Set<Path> partitionPaths = new HashSet<>();
@@ -104,15 +106,13 @@ public class FormatTableCommit implements BatchTableCommit {
         }
     }
 
-    public static String buildPartitionName(
+    private static Path buildPartitionPath(
+            String location,
             Map<String, String> partitionSpec,
             boolean formatTablePartitionOnlyValueInPath,
             List<String> partitionKeys) {
         if (partitionSpec.isEmpty() || partitionKeys.isEmpty()) {
-            return "";
-        }
-        if (partitionKeys.size() < partitionSpec.size()) {
-            throw new RuntimeException("partitionKeys size is less than partitionSpec size");
+            throw new IllegalArgumentException("partitionSpec or partitionKeys is empty.");
         }
         StringJoiner joiner = new StringJoiner("/");
         for (int i = 0; i < partitionSpec.size(); i++) {
@@ -127,7 +127,7 @@ public class FormatTableCommit implements BatchTableCommit {
                 throw new RuntimeException("partitionSpec does not contain key: " + key);
             }
         }
-        return joiner.toString();
+        return new Path(location, joiner.toString());
     }
 
     @Override

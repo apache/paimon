@@ -28,6 +28,7 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -73,13 +74,53 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
 
     @Override
     public BatchTableCommit newCommit() {
-        return table.newCommit(overwrite, staticPartition);
+        boolean formatTablePartitionOnlyValueInPath =
+                (new CoreOptions(table.options())).formatTablePartitionOnlyValueInPath();
+        return new FormatTableCommit(
+                table.location(),
+                table.partitionKeys(),
+                table.fileIO(),
+                formatTablePartitionOnlyValueInPath,
+                overwrite,
+                staticPartition);
     }
 
     @Override
     public BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition) {
         this.overwrite = true;
+        validateStaticPartition(staticPartition, table.partitionKeys());
         this.staticPartition = staticPartition;
         return this;
+    }
+
+    protected static void validateStaticPartition(
+            Map<String, String> staticPartition, List<String> partitionKeys) {
+        if (staticPartition != null && !staticPartition.isEmpty()) {
+            if (partitionKeys == null || partitionKeys.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Format table is not partitioned, static partition values are not allowed.");
+            }
+
+            boolean missingLeadingKey = false;
+            for (String partitionKey : partitionKeys) {
+                boolean contains = staticPartition.containsKey(partitionKey);
+                if (missingLeadingKey && contains) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Static partition column '%s' cannot be specified without its leading partition.",
+                                    partitionKey));
+                }
+                if (!contains) {
+                    missingLeadingKey = true;
+                }
+            }
+
+            for (String key : staticPartition.keySet()) {
+                if (!partitionKeys.contains(key)) {
+                    throw new IllegalArgumentException(
+                            String.format("Unknown static partition column '%s'.", key));
+                }
+            }
+        }
     }
 }

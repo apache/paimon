@@ -41,8 +41,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.format.FormatTableCommit;
-import org.apache.paimon.table.format.FormatTableWrite;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -734,18 +732,18 @@ public abstract class CatalogTestBase {
                         .build();
         catalog.createTable(id, nonPartitionedSchema, true);
         FormatTable nonPartitionedTable = (FormatTable) catalog.getTable(id);
-
-        try (FormatTableWrite write =
-                        (FormatTableWrite) nonPartitionedTable.newBatchWriteBuilder().newWrite();
-                FormatTableCommit commit = nonPartitionedTable.newCommit(false, new HashMap<>())) {
+        BatchWriteBuilder nonPartitionedTableWriteBuilder =
+                nonPartitionedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = nonPartitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit = nonPartitionedTableWriteBuilder.newCommit()) {
             write.write(GenericRow.of(1, 10));
             write.write(GenericRow.of(2, 20));
             commit.commit(write.prepareCommit());
         }
 
-        try (FormatTableWrite write =
-                        (FormatTableWrite) nonPartitionedTable.newBatchWriteBuilder().newWrite();
-                FormatTableCommit commit = nonPartitionedTable.newCommit(true, new HashMap<>())) {
+        try (BatchTableWrite write = nonPartitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        nonPartitionedTableWriteBuilder.withOverwrite().newCommit()) {
             write.write(GenericRow.of(3, 30));
             commit.commit(write.prepareCommit());
         }
@@ -771,10 +769,9 @@ public abstract class CatalogTestBase {
                         .build();
         catalog.createTable(pid, partitionedSchema, true);
         FormatTable partitionedTable = (FormatTable) catalog.getTable(pid);
-
-        try (FormatTableWrite write =
-                        (FormatTableWrite) partitionedTable.newBatchWriteBuilder().newWrite();
-                FormatTableCommit commit = partitionedTable.newCommit(false, new HashMap<>())) {
+        BatchWriteBuilder partitionedTableWriteBuilder = partitionedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit = partitionedTableWriteBuilder.newCommit()) {
             write.write(GenericRow.of(1, 100, 2024, 10));
             write.write(GenericRow.of(2, 200, 2025, 10));
             write.write(GenericRow.of(3, 300, 2025, 11));
@@ -784,9 +781,9 @@ public abstract class CatalogTestBase {
         Map<String, String> staticPartition = new HashMap<>();
         staticPartition.put("year", "2024");
         staticPartition.put("month", "10");
-        try (FormatTableWrite write =
-                        (FormatTableWrite) partitionedTable.newBatchWriteBuilder().newWrite();
-                FormatTableCommit commit = partitionedTable.newCommit(true, staticPartition)) {
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        partitionedTableWriteBuilder.withOverwrite(staticPartition).newCommit()) {
             write.write(GenericRow.of(10, 1000, 2024, 10));
             commit.commit(write.prepareCommit());
         }
@@ -800,9 +797,9 @@ public abstract class CatalogTestBase {
 
         staticPartition = new HashMap<>();
         staticPartition.put("year", "2025");
-        try (FormatTableWrite write =
-                        (FormatTableWrite) partitionedTable.newBatchWriteBuilder().newWrite();
-                FormatTableCommit commit = partitionedTable.newCommit(true, staticPartition)) {
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        partitionedTableWriteBuilder.withOverwrite(staticPartition).newCommit()) {
             write.write(GenericRow.of(10, 1000, 2025, 10));
             commit.commit(write.prepareCommit());
         }
@@ -812,13 +809,17 @@ public abstract class CatalogTestBase {
                 .containsExactlyInAnyOrder(
                         GenericRow.of(10, 1000, 2024, 10), GenericRow.of(10, 1000, 2025, 10));
 
-        staticPartition = new HashMap<>();
-        staticPartition.put("month", "10");
-        try (FormatTableWrite write =
-                        (FormatTableWrite) partitionedTable.newBatchWriteBuilder().newWrite();
-                FormatTableCommit commit = partitionedTable.newCommit(true, staticPartition)) {
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite()) {
             write.write(GenericRow.of(10, 1000, 2025, 10));
-            assertThrows(RuntimeException.class, () -> commit.commit(write.prepareCommit()));
+            assertThrows(
+                    RuntimeException.class,
+                    () -> {
+                        Map<String, String> staticOverwritePartition = new HashMap<>();
+                        staticOverwritePartition.put("month", "10");
+                        partitionedTableWriteBuilder
+                                .withOverwrite(staticOverwritePartition)
+                                .newCommit();
+                    });
         }
         catalog.dropTable(pid, true);
     }
@@ -826,8 +827,8 @@ public abstract class CatalogTestBase {
     private void writeAndCheckCommitFormatTable(
             FormatTable table, InternalRow[] datas, InternalRow dataWithDiffPartition)
             throws Exception {
-        try (FormatTableWrite write = (FormatTableWrite) table.newBatchWriteBuilder().newWrite();
-                FormatTableCommit commit = table.newCommit(false, new HashMap<>())) {
+        try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
+                BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             for (InternalRow row : datas) {
                 write.write(row);
             }

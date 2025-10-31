@@ -24,7 +24,7 @@ import org.apache.paimon.spark.{BaseTable, FormatTableScanBuilder, SparkInternal
 import org.apache.paimon.spark.write.BaseV2WriteBuilder
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.{FormatTableCommit, TwoPhaseCommitMessage}
-import org.apache.paimon.table.sink.{BatchTableWrite, CommitMessage}
+import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessage}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.internal.Logging
@@ -104,23 +104,28 @@ private case class FormatTableBatchWrite(
     !(overwriteDynamic && overwritePartitions.exists(_.nonEmpty)),
     "Cannot overwrite dynamically and by filter both")
 
-  val commit: FormatTableCommit = {
-    val staticPartitions: util.Map[String, String] = overwritePartitions.getOrElse(Map.empty).asJava
-    table.newCommit(overwritePartitions.isDefined, staticPartitions)
+  private val batchWriteBuilder = {
+    val builder = table.newBatchWriteBuilder()
+    if (overwriteDynamic) {
+      builder.withOverwrite()
+    } else {
+      overwritePartitions.foreach(partitions => builder.withOverwrite(partitions.asJava))
+    }
+    builder
   }
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
-    FormatTableWriterFactory(table, writeSchema)
+    FormatTableWriterFactory(batchWriteBuilder, writeSchema)
 
   override def useCommitCoordinator(): Boolean = false
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
     logInfo(s"Committing to FormatTable ${table.name()}")
+    val batchTableCommit = batchWriteBuilder.newCommit()
     val commitMessages = getPaimonCommitMessages(messages)
-
     try {
       val start = System.currentTimeMillis()
-      commit.commit(commitMessages)
+      batchTableCommit.commit(commitMessages)
       logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
     } catch {
       case e: Exception =>
@@ -131,8 +136,9 @@ private case class FormatTableBatchWrite(
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {
     logInfo(s"Aborting write to FormatTable ${table.name()}")
+    val batchTableCommit = batchWriteBuilder.newCommit()
     val commitMessages = getPaimonCommitMessages(messages)
-    commit.abort(commitMessages)
+    batchTableCommit.abort(commitMessages)
   }
 
   private def getPaimonCommitMessages(
@@ -149,19 +155,17 @@ private case class FormatTableBatchWrite(
   }
 }
 
-private case class FormatTableWriterFactory(table: FormatTable, writeSchema: StructType)
+private case class FormatTableWriterFactory(
+    batchWriteBuilder: BatchWriteBuilder,
+    writeSchema: StructType)
   extends DataWriterFactory {
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
-    val formatTableWrite = table.newBatchWriteBuilder().newWrite()
-    new FormatTableDataWriter(table, formatTableWrite, writeSchema)
+    new FormatTableDataWriter(batchWriteBuilder, writeSchema)
   }
 }
 
-private class FormatTableDataWriter(
-    table: FormatTable,
-    formatTableWrite: BatchTableWrite,
-    writeSchema: StructType)
+private class FormatTableDataWriter(batchWriteBuilder: BatchWriteBuilder, writeSchema: StructType)
   extends DataWriter[InternalRow]
   with Logging {
 
@@ -172,14 +176,16 @@ private class FormatTableDataWriter(
     }
   }
 
+  private val write: BatchTableWrite = batchWriteBuilder.newWrite()
+
   override def write(record: InternalRow): Unit = {
     val paimonRow = rowConverter.apply(record)
-    formatTableWrite.write(paimonRow)
+    write.write(paimonRow)
   }
 
   override def commit(): WriterCommitMessage = {
     try {
-      val commitMessages = formatTableWrite
+      val commitMessages = write
         .prepareCommit()
         .asScala
         .map {
@@ -202,7 +208,7 @@ private class FormatTableDataWriter(
 
   override def close(): Unit = {
     try {
-      formatTableWrite.close()
+      write.close()
     } catch {
       case e: Exception =>
         logError("Error closing FormatTableDataWriter", e)

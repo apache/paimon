@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.Identifier;
@@ -29,7 +28,6 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.format.FormatBatchWriteBuilder;
 import org.apache.paimon.table.format.FormatReadBuilder;
-import org.apache.paimon.table.format.FormatTableCommit;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -69,8 +67,6 @@ public interface FormatTable extends Table {
 
     @Override
     FormatTable copy(Map<String, String> dynamicOptions);
-
-    FormatTableCommit newCommit(boolean overwrite, Map<String, String> staticOverWritePartitions);
 
     /** Currently supported formats. */
     enum Format {
@@ -252,20 +248,6 @@ public interface FormatTable extends Table {
                     format,
                     newOptions,
                     comment);
-        }
-
-        @Override
-        public FormatTableCommit newCommit(
-                boolean overwrite, Map<String, String> staticPartitions) {
-            boolean formatTablePartitionOnlyValueInPath =
-                    (new CoreOptions(options)).formatTablePartitionOnlyValueInPath();
-            return new FormatTableCommit(
-                    location,
-                    partitionKeys,
-                    fileIO,
-                    formatTablePartitionOnlyValueInPath,
-                    overwrite,
-                    staticPartitions);
         }
     }
 
