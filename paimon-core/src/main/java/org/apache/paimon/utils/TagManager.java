@@ -280,7 +280,7 @@ public class TagManager {
             SnapshotManager snapshotManager,
             TagDeletion tagDeletion) {
         // collect skipping sets from the left neighbor tag and the nearest right neighbor (either
-        // the earliest snapshot or right neighbor tag)
+        // the earliest snapshot and right neighbor tag)
         List<Snapshot> skippedSnapshots = new ArrayList<>();
 
         int index = findIndex(taggedSnapshot, taggedSnapshots);
@@ -288,13 +288,16 @@ public class TagManager {
         if (index - 1 >= 0) {
             skippedSnapshots.add(taggedSnapshots.get(index - 1));
         }
+        // the earliest snapshot
+        Snapshot earliestSnapshot = snapshotManager.copyWithBranch(branch).earliestSnapshot();
+        skippedSnapshots.add(earliestSnapshot);
         // the nearest right neighbor
-        Snapshot right = snapshotManager.copyWithBranch(branch).earliestSnapshot();
         if (index + 1 < taggedSnapshots.size()) {
             Snapshot rightTag = taggedSnapshots.get(index + 1);
-            right = right.id() < rightTag.id() ? right : rightTag;
+            if (rightTag.id() < earliestSnapshot.id()) {
+                skippedSnapshots.add(rightTag);
+            }
         }
-        skippedSnapshots.add(right);
 
         // delete data files and empty directories
         Predicate<ExpireFileEntry> dataFileSkipper = null;
