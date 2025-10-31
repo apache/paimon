@@ -36,6 +36,7 @@ public interface SplitGenerator {
 
         public final List<DataFileMeta> files;
         public final boolean rawConvertible;
+        public long rowCount = -1L;
 
         private SplitGroup(List<DataFileMeta> files, boolean rawConvertible) {
             this.files = files;
@@ -48,6 +49,11 @@ public interface SplitGenerator {
 
         public static SplitGroup nonRawConvertibleGroup(List<DataFileMeta> files) {
             return new SplitGroup(files, false);
+        }
+
+        public SplitGroup rowCount(long rowCount) {
+            this.rowCount = rowCount;
+            return this;
         }
     }
 }

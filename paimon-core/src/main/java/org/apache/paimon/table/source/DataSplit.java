@@ -62,7 +62,7 @@ public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 8;
+    private static final int VERSION = 9;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -78,6 +78,7 @@ public class DataSplit implements Split {
 
     private boolean isStreaming = false;
     private boolean rawConvertible;
+    private long rowCount = -1L;
 
     public DataSplit() {}
 
@@ -136,6 +137,9 @@ public class DataSplit implements Split {
 
     @Override
     public long rowCount() {
+        if (this.rowCount > 0L) {
+            return this.rowCount;
+        }
         long rowCount = 0;
         for (DataFileMeta file : dataFiles) {
             rowCount += file.rowCount();
@@ -309,7 +313,8 @@ public class DataSplit implements Split {
                 && Objects.equals(beforeFiles, dataSplit.beforeFiles)
                 && Objects.equals(beforeDeletionFiles, dataSplit.beforeDeletionFiles)
                 && Objects.equals(dataFiles, dataSplit.dataFiles)
-                && Objects.equals(dataDeletionFiles, dataSplit.dataDeletionFiles);
+                && Objects.equals(dataDeletionFiles, dataSplit.dataDeletionFiles)
+                && Objects.equals(rowCount, dataSplit.rowCount);
     }
 
     @Override
@@ -325,7 +330,8 @@ public class DataSplit implements Split {
                 dataFiles,
                 dataDeletionFiles,
                 isStreaming,
-                rawConvertible);
+                rawConvertible,
+                rowCount);
     }
 
     @Override
@@ -364,6 +370,7 @@ public class DataSplit implements Split {
         this.dataDeletionFiles = other.dataDeletionFiles;
         this.isStreaming = other.isStreaming;
         this.rawConvertible = other.rawConvertible;
+        this.rowCount = other.rowCount;
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -396,8 +403,8 @@ public class DataSplit implements Split {
         DeletionFile.serializeList(out, dataDeletionFiles);
 
         out.writeBoolean(isStreaming);
-
         out.writeBoolean(rawConvertible);
+        out.writeLong(rowCount);
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
@@ -433,6 +440,10 @@ public class DataSplit implements Split {
 
         boolean isStreaming = in.readBoolean();
         boolean rawConvertible = in.readBoolean();
+        long rowCount = -1L;
+        if (version >= 9) {
+            rowCount = in.readLong();
+        }
 
         DataSplit.Builder builder =
                 builder()
@@ -444,7 +455,8 @@ public class DataSplit implements Split {
                         .withBeforeFiles(beforeFiles)
                         .withDataFiles(dataFiles)
                         .isStreaming(isStreaming)
-                        .rawConvertible(rawConvertible);
+                        .rawConvertible(rawConvertible)
+                        .withRowCount(rowCount);
 
         if (beforeDeletionFiles != null) {
             builder.withBeforeDeletionFiles(beforeDeletionFiles);
@@ -473,7 +485,7 @@ public class DataSplit implements Split {
             DataFileMetaFirstRowIdLegacySerializer serializer =
                     new DataFileMetaFirstRowIdLegacySerializer();
             return serializer::deserialize;
-        } else if (version == 8) {
+        } else if (version == 8 || version == 9) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {
@@ -553,6 +565,11 @@ public class DataSplit implements Split {
 
         public Builder rawConvertible(boolean rawConvertible) {
             this.split.rawConvertible = rawConvertible;
+            return this;
+        }
+
+        public Builder withRowCount(long rowCount) {
+            this.split.rowCount = rowCount;
             return this;
         }
 
