@@ -23,11 +23,12 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommit;
+
+import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -36,6 +37,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.StringJoiner;
 
 /** Commit for Format Table. */
 public class FormatTableCommit implements BatchTableCommit {
@@ -43,20 +45,23 @@ public class FormatTableCommit implements BatchTableCommit {
     private String location;
     private final boolean formatTablePartitionOnlyValueInPath;
     private FileIO fileIO;
+    private List<String> partitionKeys;
     protected Map<String, String> staticPartitions;
     protected boolean overwrite = false;
 
     public FormatTableCommit(
             String location,
+            List<String> partitionKeys,
             FileIO fileIO,
             boolean formatTablePartitionOnlyValueInPath,
             boolean overwrite,
-            Map<String, String> staticPartitions) {
+            @Nullable Map<String, String> staticPartitions) {
         this.location = location;
         this.fileIO = fileIO;
         this.formatTablePartitionOnlyValueInPath = formatTablePartitionOnlyValueInPath;
         this.staticPartitions = staticPartitions;
         this.overwrite = overwrite;
+        this.partitionKeys = partitionKeys;
     }
 
     @Override
@@ -76,8 +81,10 @@ public class FormatTableCommit implements BatchTableCommit {
                 Path partitionPath =
                         new Path(
                                 location,
-                                PartitionUtils.buildPartitionName(
-                                        staticPartitions, formatTablePartitionOnlyValueInPath));
+                                buildPartitionName(
+                                        staticPartitions,
+                                        formatTablePartitionOnlyValueInPath,
+                                        partitionKeys));
                 deletePreviousDataFile(partitionPath);
             } else if (overwrite) {
                 Set<Path> partitionPaths = new HashSet<>();
@@ -95,6 +102,32 @@ public class FormatTableCommit implements BatchTableCommit {
             this.abort(commitMessages);
             throw new RuntimeException(e);
         }
+    }
+
+    public static String buildPartitionName(
+            Map<String, String> partitionSpec,
+            boolean formatTablePartitionOnlyValueInPath,
+            List<String> partitionKeys) {
+        if (partitionSpec.isEmpty() || partitionKeys.isEmpty()) {
+            return "";
+        }
+        if (partitionKeys.size() < partitionSpec.size()) {
+            throw new RuntimeException("partitionKeys size is less than partitionSpec size");
+        }
+        StringJoiner joiner = new StringJoiner("/");
+        for (int i = 0; i < partitionSpec.size(); i++) {
+            String key = partitionKeys.get(i);
+            if (partitionSpec.containsKey(key)) {
+                if (formatTablePartitionOnlyValueInPath) {
+                    joiner.add(partitionSpec.get(key));
+                } else {
+                    joiner.add(key + "=" + partitionSpec.get(key));
+                }
+            } else {
+                throw new RuntimeException("partitionSpec does not contain key: " + key);
+            }
+        }
+        return joiner.toString();
     }
 
     @Override

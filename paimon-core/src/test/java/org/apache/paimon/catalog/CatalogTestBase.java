@@ -759,8 +759,9 @@ public abstract class CatalogTestBase {
                 Schema.newBuilder()
                         .column("a", DataTypes.INT())
                         .column("b", DataTypes.INT())
-                        .column("dt", DataTypes.INT())
-                        .partitionKeys("dt")
+                        .column("year", DataTypes.INT())
+                        .column("month", DataTypes.INT())
+                        .partitionKeys("year", "month")
                         .options(getFormatTableOptions())
                         .option("file.format", "csv")
                         .option("file.compression", HadoopCompressionType.GZIP.value())
@@ -774,23 +775,51 @@ public abstract class CatalogTestBase {
         try (FormatTableWrite write =
                         (FormatTableWrite) partitionedTable.newBatchWriteBuilder().newWrite();
                 FormatTableCommit commit = partitionedTable.newCommit(false, new HashMap<>())) {
-            write.write(GenericRow.of(1, 100, 1));
-            write.write(GenericRow.of(2, 200, 2));
+            write.write(GenericRow.of(1, 100, 2024, 10));
+            write.write(GenericRow.of(2, 200, 2025, 10));
+            write.write(GenericRow.of(3, 300, 2025, 11));
             commit.commit(write.prepareCommit());
         }
 
         Map<String, String> staticPartition = new HashMap<>();
-        staticPartition.put("dt", "1");
+        staticPartition.put("year", "2024");
+        staticPartition.put("month", "10");
         try (FormatTableWrite write =
                         (FormatTableWrite) partitionedTable.newBatchWriteBuilder().newWrite();
                 FormatTableCommit commit = partitionedTable.newCommit(true, staticPartition)) {
-            write.write(GenericRow.of(10, 1000, 1));
+            write.write(GenericRow.of(10, 1000, 2024, 10));
             commit.commit(write.prepareCommit());
         }
 
         List<InternalRow> partitionOverwriteRows = read(partitionedTable, null, null, null, null);
         assertThat(partitionOverwriteRows)
-                .containsExactlyInAnyOrder(GenericRow.of(10, 1000, 1), GenericRow.of(2, 200, 2));
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(10, 1000, 2024, 10),
+                        GenericRow.of(2, 200, 2025, 10),
+                        GenericRow.of(3, 300, 2025, 11));
+
+        staticPartition = new HashMap<>();
+        staticPartition.put("year", "2025");
+        try (FormatTableWrite write =
+                        (FormatTableWrite) partitionedTable.newBatchWriteBuilder().newWrite();
+                FormatTableCommit commit = partitionedTable.newCommit(true, staticPartition)) {
+            write.write(GenericRow.of(10, 1000, 2025, 10));
+            commit.commit(write.prepareCommit());
+        }
+
+        partitionOverwriteRows = read(partitionedTable, null, null, null, null);
+        assertThat(partitionOverwriteRows)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(10, 1000, 2024, 10), GenericRow.of(10, 1000, 2025, 10));
+
+        staticPartition = new HashMap<>();
+        staticPartition.put("month", "10");
+        try (FormatTableWrite write =
+                        (FormatTableWrite) partitionedTable.newBatchWriteBuilder().newWrite();
+                FormatTableCommit commit = partitionedTable.newCommit(true, staticPartition)) {
+            write.write(GenericRow.of(10, 1000, 2025, 10));
+            assertThrows(RuntimeException.class, () -> commit.commit(write.prepareCommit()));
+        }
         catalog.dropTable(pid, true);
     }
 

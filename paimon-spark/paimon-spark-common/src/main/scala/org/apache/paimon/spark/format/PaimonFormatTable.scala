@@ -52,7 +52,6 @@ case class PaimonFormatTable(table: FormatTable)
 
   override def properties: util.Map[String, String] = {
     val properties = new util.HashMap[String, String](table.options())
-    val options = new CoreOptions(table.options())
     if (table.comment.isPresent) {
       properties.put(TableCatalog.PROP_COMMENT, table.comment.get)
     }

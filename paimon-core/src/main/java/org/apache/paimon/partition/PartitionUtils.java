@@ -88,23 +88,12 @@ public class PartitionUtils {
     }
 
     public static String buildPartitionName(Map<String, String> partitionSpec) {
-        return buildPartitionName(partitionSpec, false);
-    }
-
-    public static String buildPartitionName(
-            Map<String, String> partitionSpec, boolean formatTablePartitionOnlyValueInPath) {
         if (partitionSpec.isEmpty()) {
             return "";
         }
         List<String> partitionName =
                 partitionSpec.keySet().stream()
-                        .map(
-                                key -> {
-                                    if (formatTablePartitionOnlyValueInPath) {
-                                        return partitionSpec.get(key);
-                                    }
-                                    return key + "=" + partitionSpec.get(key);
-                                })
+                        .map(key -> key + "=" + partitionSpec.get(key))
                         .collect(Collectors.toList());
         return String.join("/", partitionName);
     }

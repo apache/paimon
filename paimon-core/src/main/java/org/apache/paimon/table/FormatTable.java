@@ -261,6 +261,7 @@ public interface FormatTable extends Table {
                     (new CoreOptions(options)).formatTablePartitionOnlyValueInPath();
             return new FormatTableCommit(
                     location,
+                    partitionKeys,
                     fileIO,
                     formatTablePartitionOnlyValueInPath,
                     overwrite,
