@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.format
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.format.csv.CsvOptions
 import org.apache.paimon.spark.{BaseTable, FormatTableScanBuilder, SparkInternalRowWrapper}
 import org.apache.paimon.spark.write.BaseV2WriteBuilder
@@ -51,11 +52,16 @@ case class PaimonFormatTable(table: FormatTable)
 
   override def properties: util.Map[String, String] = {
     val properties = new util.HashMap[String, String](table.options())
+    val options = new CoreOptions(table.options())
     if (table.comment.isPresent) {
       properties.put(TableCatalog.PROP_COMMENT, table.comment.get)
     }
     if (FormatTable.Format.CSV == table.format) {
-      properties.put("sep", properties.get(CsvOptions.FIELD_DELIMITER.key()))
+      properties.put(
+        "sep",
+        properties.getOrDefault(
+          CsvOptions.FIELD_DELIMITER.key(),
+          CsvOptions.FIELD_DELIMITER.defaultValue()))
     }
     properties
   }
