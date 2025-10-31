@@ -50,7 +50,7 @@ public class StatelessRowDataStoreWriteOperator extends RowDataStoreWriteOperato
     }
 
     @Override
-    protected String getCommitUser(StateInitializationContext context) throws Exception {
+    protected String getCommitUser(StateInitializationContext context) {
         // No conflicts will occur in append only unaware bucket writer, so
         // commitUser does not matter.
         return commitUser == null ? initialCommitUser : commitUser;

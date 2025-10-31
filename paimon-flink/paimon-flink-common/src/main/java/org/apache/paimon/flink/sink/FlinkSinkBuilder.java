@@ -29,9 +29,9 @@ import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
-import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
 
@@ -308,8 +308,7 @@ public class FlinkSinkBuilder {
             PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
             return sink.sinkFrom(partitioned);
         } else {
-            Map<BinaryRow, Integer> knownNumBuckets = getKnownNumBuckets();
-
+            Map<BinaryRow, Integer> knownNumBuckets = PostponeUtils.getKnownNumBuckets(table);
             DataStream<InternalRow> partitioned =
                     partition(
                             input,
@@ -327,28 +326,6 @@ public class FlinkSinkBuilder {
                     new PostponeFixedBucketSink(tableForWrite, overwritePartition, knownNumBuckets);
             return sink.sinkFrom(partitioned);
         }
-    }
-
-    private Map<BinaryRow, Integer> getKnownNumBuckets() {
-        Map<BinaryRow, Integer> knownNumBuckets = new HashMap<>();
-        List<SimpleFileEntry> simpleFileEntries =
-                table.store().newScan().onlyReadRealBuckets().readSimpleEntries();
-        for (SimpleFileEntry entry : simpleFileEntries) {
-            if (entry.totalBuckets() >= 0) {
-                Integer oldTotalBuckets =
-                        knownNumBuckets.put(entry.partition(), entry.totalBuckets());
-                if (oldTotalBuckets != null && oldTotalBuckets != entry.totalBuckets()) {
-                    throw new IllegalStateException(
-                            "Partition "
-                                    + entry.partition()
-                                    + " has different totalBuckets "
-                                    + oldTotalBuckets
-                                    + " and "
-                                    + entry.totalBuckets());
-                }
-            }
-        }
-        return knownNumBuckets;
     }
 
     private DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {
