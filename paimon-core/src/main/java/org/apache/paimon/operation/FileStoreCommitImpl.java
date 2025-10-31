@@ -149,6 +149,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private Long strictModeLastSafeSnapshot;
     private final InternalRowPartitionComputer partitionComputer;
     private final boolean rowTrackingEnabled;
+    private final boolean dataEvolutionEnabled;
     private final boolean discardDuplicateFiles;
     private final ConflictDetection conflictDetection;
 
@@ -186,6 +187,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long commitMaxRetryWait,
             @Nullable Long strictModeLastSafeSnapshot,
             boolean rowTrackingEnabled,
+            boolean dataEvolutionEnabled,
             boolean discardDuplicateFiles,
             ConflictDetection conflictDetection) {
         this.snapshotCommit = snapshotCommit;
@@ -230,6 +232,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.statsFileHandler = statsFileHandler;
         this.bucketMode = bucketMode;
         this.rowTrackingEnabled = rowTrackingEnabled;
+        this.dataEvolutionEnabled = dataEvolutionEnabled;
         this.discardDuplicateFiles = discardDuplicateFiles;
         this.conflictDetection = conflictDetection;
     }
@@ -1120,8 +1123,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             // the added records subtract the deleted records from
-            long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
-            long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
+            long deltaRecordCount;
+            long totalRecordCount;
+
+            if (dataEvolutionEnabled) {
+                deltaRecordCount = nextRowIdStart - firstRowIdStart;
+                totalRecordCount = nextRowIdStart;
+            } else {
+                deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
+                totalRecordCount = previousTotalRecordCount + deltaRecordCount;
+            }
 
             // write new delta files into manifest files
             deltaStatistics = new ArrayList<>(PartitionEntry.merge(deltaFiles));

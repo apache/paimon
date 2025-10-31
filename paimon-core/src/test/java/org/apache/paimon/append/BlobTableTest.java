@@ -33,6 +33,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
@@ -177,6 +178,19 @@ public class BlobTableTest extends TableTestBase {
                             .isEqualTo("This is the specified message".getBytes());
                 });
         assertThat(i.get()).isEqualTo(1);
+    }
+
+    @Test
+    public void testSnapshotRowCount() throws Exception {
+        createTableDefault();
+        commitDefault(writeDataDefault(100, 1));
+        long rowCount =
+                getTableDefault().newScan().plan().splits().stream()
+                        .mapToLong(Split::rowCount)
+                        .sum();
+        assertThat(rowCount).isEqualTo(100);
+        assertThat(getTableDefault().snapshotManager().latestSnapshot().totalRecordCount())
+                .isEqualTo(100);
     }
 
     protected Schema schemaDefault() {

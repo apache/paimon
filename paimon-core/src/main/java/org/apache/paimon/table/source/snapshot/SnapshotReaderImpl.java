@@ -404,6 +404,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
                     builder.withDataFiles(dataFiles)
                             .rawConvertible(splitGroup.rawConvertible)
+                            .withRowCount(splitGroup.rowCount > 0 ? splitGroup.rowCount : -1)
                             .withBucketPath(bucketPath);
                     if (deletionVectors && deletionFilesMap != null) {
                         builder.withDataDeletionFiles(
