@@ -29,12 +29,12 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.DataEvolutionFileStoreScan.EvolutionStats;
 import org.apache.paimon.reader.DataEvolutionArray;
 import org.apache.paimon.reader.DataEvolutionRow;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.stats.SimpleStatsEvolution;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -77,7 +77,7 @@ public class DataEvolutionFileStoreScanTest {
                                 createBinaryArray(new int[] {0, 1}),
                                 new int[] {0, 1}));
 
-        SimpleStatsEvolution.Result result =
+        EvolutionStats result =
                 DataEvolutionFileStoreScan.evolutionStats(
                         tableSchema, scanTableSchema, Collections.singletonList(entry));
 
@@ -133,7 +133,7 @@ public class DataEvolutionFileStoreScanTest {
 
         List<ManifestEntry> entries = Arrays.asList(entry2, entry1);
 
-        SimpleStatsEvolution.Result result =
+        EvolutionStats result =
                 DataEvolutionFileStoreScan.evolutionStats(tableSchema, scanTableSchema, entries);
 
         assertThat(result).isNotNull();
@@ -182,7 +182,7 @@ public class DataEvolutionFileStoreScanTest {
 
         List<ManifestEntry> entries = Arrays.asList(entry1, entry2);
 
-        SimpleStatsEvolution.Result result =
+        EvolutionStats result =
                 DataEvolutionFileStoreScan.evolutionStats(
                         evolvedTableSchema, scanTableSchema, entries);
 
@@ -236,7 +236,7 @@ public class DataEvolutionFileStoreScanTest {
 
         List<ManifestEntry> entries = Arrays.asList(entry1, entry2);
 
-        SimpleStatsEvolution.Result result =
+        EvolutionStats result =
                 DataEvolutionFileStoreScan.evolutionStats(tableSchema, scanTableSchema, entries);
 
         assertThat(result).isNotNull();

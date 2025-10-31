@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
@@ -189,7 +188,6 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         write.restore((List) states);
     }
 
-    @VisibleForTesting
     public TableWriteImpl<?> getWrite() {
         return write;
     }

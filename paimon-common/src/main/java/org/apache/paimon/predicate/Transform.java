@@ -18,12 +18,18 @@
 
 package org.apache.paimon.predicate;
 
-/** A visitor to visit {@link Predicate}. */
-public interface PredicateVisitor<T> {
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataType;
 
-    T visit(LeafPredicate predicate);
+import java.io.Serializable;
+import java.util.List;
 
-    T visit(CompoundPredicate predicate);
+/** Represents a transform function. */
+public interface Transform extends Serializable {
 
-    T visit(TransformPredicate predicate);
+    List<Object> inputs();
+
+    DataType outputType();
+
+    Object transform(InternalRow row);
 }

@@ -2042,6 +2042,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether discard duplicate files in commit.");
 
+    public static final ConfigOption<Boolean> POSTPONE_BATCH_WRITE_FIXED_BUCKET =
+            key("postpone.batch-write-fixed-bucket")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to write the data into fixed bucket for batch writing a postpone bucket table.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3141,6 +3148,10 @@ public class CoreOptions implements Serializable {
 
     public boolean blobAsDescriptor() {
         return options.get(BLOB_AS_DESCRIPTOR);
+    }
+
+    public boolean postponeBatchWriteFixedBucket() {
+        return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET);
     }
 
     /** Specifies the merge engine for table with primary key. */

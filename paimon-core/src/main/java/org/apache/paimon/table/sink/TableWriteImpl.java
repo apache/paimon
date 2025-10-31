@@ -19,7 +19,6 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.FileStore;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.casting.DefaultValueRow;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -277,7 +276,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         write.restore(state);
     }
 
-    @VisibleForTesting
     public FileStoreWrite<T> getWrite() {
         return write;
     }

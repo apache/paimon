@@ -63,4 +63,9 @@ public class PredicateProjectionConverter implements PredicateVisitor<Optional<P
         }
         return Optional.of(new CompoundPredicate(predicate.function(), converted));
     }
+
+    @Override
+    public Optional<Predicate> visit(TransformPredicate predicate) {
+        throw new UnsupportedOperationException("TODO");
+    }
 }

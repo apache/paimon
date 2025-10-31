@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source;
+package org.apache.paimon.operation;
 
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
@@ -28,10 +28,20 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Test for {@link DataEvolutionSplitGenerator}. */
-public class DataEvolutionSplitGeneratorTest {
+class DataEvolutionSplitReadTest {
+
+    @Test
+    public void testDifferentRowIdRange() {
+        DataFileMeta file1 = createFile("file1.parquet", 1L, 100, 10);
+        DataFileMeta file2 = createFile("file2.parquet", 1L, 50, 20);
+
+        List<DataFileMeta> files = Arrays.asList(file1, file2);
+        assertThatThrownBy(() -> DataEvolutionSplitRead.mergeRangesAndSort(files))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 
     @Test
     public void testSplitWithSameFirstRowId() {
@@ -40,7 +50,7 @@ public class DataEvolutionSplitGeneratorTest {
         DataFileMeta file3 = createFile("file3.parquet", 1L, 1, 30);
 
         List<DataFileMeta> files = Arrays.asList(file1, file2, file3);
-        List<List<DataFileMeta>> result = DataEvolutionSplitGenerator.split(files);
+        List<List<DataFileMeta>> result = DataEvolutionSplitRead.mergeRangesAndSort(files);
 
         assertEquals(1, result.size());
         assertEquals(Arrays.asList(file3, file2, file1), result.get(0));
@@ -55,7 +65,7 @@ public class DataEvolutionSplitGeneratorTest {
         DataFileMeta file5 = createFile("file5.parquet", 3L, 1, 5);
 
         List<DataFileMeta> files = Arrays.asList(file1, file2, file3, file4, file5);
-        List<List<DataFileMeta>> result = DataEvolutionSplitGenerator.split(files);
+        List<List<DataFileMeta>> result = DataEvolutionSplitRead.mergeRangesAndSort(files);
 
         assertEquals(3, result.size());
         assertEquals(Arrays.asList(file3, file1), result.get(0));
@@ -77,7 +87,7 @@ public class DataEvolutionSplitGeneratorTest {
 
         List<DataFileMeta> files =
                 Arrays.asList(file1, file2, file3, file4, file5, file6, file7, file8, file9);
-        List<List<DataFileMeta>> result = DataEvolutionSplitGenerator.split(files);
+        List<List<DataFileMeta>> result = DataEvolutionSplitRead.mergeRangesAndSort(files);
 
         assertEquals(5, result.size());
         assertEquals(Arrays.asList(file4, file1), result.get(0));
@@ -98,7 +108,7 @@ public class DataEvolutionSplitGeneratorTest {
         DataFileMeta file7 = createFile("file7.parquet", 1L, 10, 3);
 
         List<DataFileMeta> files = Arrays.asList(file1, file2, file3, file4, file5, file6, file7);
-        List<List<DataFileMeta>> result = DataEvolutionSplitGenerator.split(files);
+        List<List<DataFileMeta>> result = DataEvolutionSplitRead.mergeRangesAndSort(files);
 
         assertEquals(2, result.size());
         assertEquals(Arrays.asList(file7, file1, file2, file3), result.get(0));
