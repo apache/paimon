@@ -113,6 +113,6 @@ public class FormatTableFileWriter {
                 pathFactory.createFormatTableDataFilePathFactory(
                         partition, options.formatTablePartitionOnlyValueInPath()),
                 writeRowType,
-                options.fileCompression());
+                options.formatTableFileImplementation());
     }
 }

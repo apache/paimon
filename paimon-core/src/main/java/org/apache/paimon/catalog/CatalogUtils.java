@@ -58,6 +58,8 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.AUTO_CREATE;
+import static org.apache.paimon.CoreOptions.FILE_COMPRESSION;
+import static org.apache.paimon.CoreOptions.FORMAT_TABLE_FILE_COMPRESSION;
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.CoreOptions.PARTITION_GENERATE_LEGACY_NAME;
 import static org.apache.paimon.CoreOptions.PATH;
@@ -65,6 +67,8 @@ import static org.apache.paimon.CoreOptions.PRIMARY_KEY;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.table.FormatTable.Format.CSV;
+import static org.apache.paimon.table.FormatTable.Format.JSON;
 import static org.apache.paimon.table.system.AllPartitionsTable.ALL_PARTITIONS;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.AllTablesTable.ALL_TABLES;
@@ -271,6 +275,32 @@ public class CatalogUtils {
         }
 
         return table;
+    }
+
+    public static String getFormatTableFileCompression(Map<String, String> options) {
+        if (options.containsKey(FILE_COMPRESSION.key())) {
+            return options.get(FILE_COMPRESSION.key());
+        } else if (options.containsKey(FORMAT_TABLE_FILE_COMPRESSION.key())) {
+            return options.get(FORMAT_TABLE_FILE_COMPRESSION.key());
+        } else {
+            FormatTable.Format format =
+                    FormatTable.parseFormat(
+                            options.getOrDefault(
+                                    CoreOptions.FILE_FORMAT.key(),
+                                    CoreOptions.FILE_FORMAT.defaultValue()));
+            switch (format) {
+                case PARQUET:
+                    return "snappy";
+                case ORC:
+                    return "zstd";
+                case CSV:
+                case JSON:
+                    return "none";
+                default:
+                    throw new UnsupportedOperationException(
+                            String.format("Unsupported format: %s", format));
+            }
+        }
     }
 
     private static Table createGlobalSystemTable(String tableName, Catalog catalog)

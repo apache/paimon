@@ -35,8 +35,7 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
 
   test("Format table: csv with field-delimiter") {
     withTable("t") {
-      sql(
-        s"CREATE TABLE t (f0 INT, f1 INT) USING CSV OPTIONS ('csv.field-delimiter' ';') TBLPROPERTIES ('file.compression'='none')")
+      sql(s"CREATE TABLE t (f0 INT, f1 INT) USING CSV OPTIONS ('csv.field-delimiter' ';')")
       val table =
         paimonCatalog.getTable(Identifier.create(hiveDbName, "t")).asInstanceOf[FormatTable]
       val csvFile =
@@ -107,8 +106,7 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
 
   test("Format table: CTAS with partitioned table") {
     withTable("t1", "t2") {
-      sql(
-        "CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv PARTITIONED BY (p1, p2) TBLPROPERTIES ('file.compression'='none')")
+      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv PARTITIONED BY (p1, p2)")
       sql("INSERT INTO t1 VALUES (1, 2, 3)")
 
       assertThrows[UnsupportedOperationException] {
@@ -125,8 +123,7 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
   test("Format table: read compressed files") {
     for (format <- Seq("csv", "json")) {
       withTable("compress_t") {
-        sql(
-          s"CREATE TABLE compress_t (a INT, b INT, c INT) USING $format TBLPROPERTIES ('file.compression'='none')")
+        sql(s"CREATE TABLE compress_t (a INT, b INT, c INT) USING $format")
         sql("INSERT INTO compress_t VALUES (1, 2, 3)")
         val table =
           paimonCatalog
@@ -149,8 +146,7 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
 
   test("Format table: field delimiter in HMS") {
     withTable("t1") {
-      sql(
-        "CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv OPTIONS ('csv.field-delimiter' ';') TBLPROPERTIES ('file.compression'='none')")
+      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv OPTIONS ('csv.field-delimiter' ';')")
       val row = sql("SHOW CREATE TABLE t1").collect()(0)
       assert(row.toString().contains("'csv.field-delimiter' = ';'"))
     }
