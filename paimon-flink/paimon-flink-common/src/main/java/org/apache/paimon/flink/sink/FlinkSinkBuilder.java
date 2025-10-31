@@ -22,12 +22,14 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.PartitionSinkStrategy;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
+import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -54,6 +56,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.CoreOptions.clusteringStrategy;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
@@ -292,16 +296,59 @@ public class FlinkSinkBuilder {
     }
 
     private DataStreamSink<?> buildPostponeBucketSink(DataStream<InternalRow> input) {
-        ChannelComputer<InternalRow> channelComputer;
-        if (!table.partitionKeys().isEmpty()
-                && table.coreOptions().partitionSinkStrategy() == PartitionSinkStrategy.HASH) {
-            channelComputer = new RowDataHashPartitionChannelComputer(table.schema());
+        if (isStreaming(input) || !table.coreOptions().postponeBatchWriteFixedBucket()) {
+            ChannelComputer<InternalRow> channelComputer;
+            if (!table.partitionKeys().isEmpty()
+                    && table.coreOptions().partitionSinkStrategy() == PartitionSinkStrategy.HASH) {
+                channelComputer = new RowDataHashPartitionChannelComputer(table.schema());
+            } else {
+                channelComputer = new PostponeBucketChannelComputer(table.schema());
+            }
+            DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
+            PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
+            return sink.sinkFrom(partitioned);
         } else {
-            channelComputer = new PostponeBucketChannelComputer(table.schema());
+            Map<BinaryRow, Integer> knownNumBuckets = getKnownNumBuckets();
+
+            DataStream<InternalRow> partitioned =
+                    partition(
+                            input,
+                            new PostponeFixedBucketChannelComputer(table.schema(), knownNumBuckets),
+                            parallelism);
+
+            Map<String, String> batchWriteOptions = new HashMap<>();
+            batchWriteOptions.put(WRITE_ONLY.key(), "true");
+            // It's just used to create merge tree writer for writing files to fixed bucket.
+            // The real bucket number is determined at runtime.
+            batchWriteOptions.put(BUCKET.key(), "1");
+            FileStoreTable tableForWrite = table.copy(batchWriteOptions);
+
+            PostponeFixedBucketSink sink =
+                    new PostponeFixedBucketSink(tableForWrite, overwritePartition, knownNumBuckets);
+            return sink.sinkFrom(partitioned);
         }
-        DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
-        PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
-        return sink.sinkFrom(partitioned);
+    }
+
+    private Map<BinaryRow, Integer> getKnownNumBuckets() {
+        Map<BinaryRow, Integer> knownNumBuckets = new HashMap<>();
+        List<SimpleFileEntry> simpleFileEntries =
+                table.store().newScan().onlyReadRealBuckets().readSimpleEntries();
+        for (SimpleFileEntry entry : simpleFileEntries) {
+            if (entry.totalBuckets() >= 0) {
+                Integer oldTotalBuckets =
+                        knownNumBuckets.put(entry.partition(), entry.totalBuckets());
+                if (oldTotalBuckets != null && oldTotalBuckets != entry.totalBuckets()) {
+                    throw new IllegalStateException(
+                            "Partition "
+                                    + entry.partition()
+                                    + " has different totalBuckets "
+                                    + oldTotalBuckets
+                                    + " and "
+                                    + entry.totalBuckets());
+                }
+            }
+        }
+        return knownNumBuckets;
     }
 
     private DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {

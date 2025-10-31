@@ -137,12 +137,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
     public void processElement(StreamRecord<InternalRow> element) throws Exception {
         sinkContext.timestamp = element.hasTimestamp() ? element.getTimestamp() : null;
 
-        SinkRecord record;
-        try {
-            record = write.write(element.getValue());
-        } catch (Exception e) {
-            throw new IOException(e);
-        }
+        SinkRecord record = write(element.getValue());
 
         if (record != null
                 && logSinkFunction != null
@@ -150,6 +145,15 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
             // write to log store, need to preserve original pk (which includes partition fields)
             SinkRecord logRecord = write.toLogRecord(record);
             logSinkFunction.invoke(logRecord, sinkContext);
+        }
+    }
+
+    @Nullable
+    protected SinkRecord write(InternalRow row) throws Exception {
+        try {
+            return write.write(row);
+        } catch (Exception e) {
+            throw new IOException(e);
         }
     }
 
