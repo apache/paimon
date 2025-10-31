@@ -523,9 +523,7 @@ class IcebergMetadataTest {
         // Verify change fields
         assertThat(snapshot.summary().getSummary().get("added-data-files")).isEqualTo("1");
         assertThat(snapshot.summary().getSummary().get("added-records")).isEqualTo("10");
-
-        // Note: added-files-size is verified in the Iceberg native table test above
-        // as it's computed by Iceberg, not Paimon
+        assertThat(snapshot.summary().getSummary().get("added-files-size")).isEqualTo("100");
     }
 
     /** Helper method to create a basic Iceberg table with simple schema. */
