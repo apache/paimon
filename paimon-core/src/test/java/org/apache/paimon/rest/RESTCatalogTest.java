@@ -2828,7 +2828,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     private void createExternalTableDirectory(Path externalTablePath, Schema schema)
             throws Exception {
         // Create external table directory structure
-        FileIO fileIO = FileIO.get(externalTablePath, CatalogContext.create(new Options()));
+        FileIO fileIO =
+                FileIO.get(
+                        externalTablePath, CatalogContext.create(new Options(catalog.options())));
 
         // Create the external table directory
         if (!fileIO.exists(externalTablePath)) {
