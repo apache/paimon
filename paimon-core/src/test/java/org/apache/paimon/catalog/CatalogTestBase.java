@@ -41,7 +41,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.format.FormatTableWrite;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -710,9 +709,126 @@ public abstract class CatalogTestBase {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFormatTableOverwrite(boolean partitionPathOnlyValue) throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        String dbName = "format_overwrite_db";
+        catalog.createDatabase(dbName, true);
+
+        Identifier id = Identifier.create(dbName, "format_overwrite_table");
+        Schema nonPartitionedSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .options(getFormatTableOptions())
+                        .option("file.format", "csv")
+                        .option("file.compression", HadoopCompressionType.GZIP.value())
+                        .option(
+                                "format-table.partition-path-only-value",
+                                "" + partitionPathOnlyValue)
+                        .build();
+        catalog.createTable(id, nonPartitionedSchema, true);
+        FormatTable nonPartitionedTable = (FormatTable) catalog.getTable(id);
+        BatchWriteBuilder nonPartitionedTableWriteBuilder =
+                nonPartitionedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = nonPartitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit = nonPartitionedTableWriteBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 10));
+            write.write(GenericRow.of(2, 20));
+            commit.commit(write.prepareCommit());
+        }
+
+        try (BatchTableWrite write = nonPartitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        nonPartitionedTableWriteBuilder.withOverwrite().newCommit()) {
+            write.write(GenericRow.of(3, 30));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<InternalRow> fullOverwriteRows = read(nonPartitionedTable, null, null, null, null);
+        assertThat(fullOverwriteRows).containsExactlyInAnyOrder(GenericRow.of(3, 30));
+        catalog.dropTable(id, true);
+
+        Identifier pid = Identifier.create(dbName, "format_overwrite_partitioned");
+        Schema partitionedSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .column("year", DataTypes.INT())
+                        .column("month", DataTypes.INT())
+                        .partitionKeys("year", "month")
+                        .options(getFormatTableOptions())
+                        .option("file.format", "csv")
+                        .option("file.compression", HadoopCompressionType.GZIP.value())
+                        .option(
+                                "format-table.partition-path-only-value",
+                                "" + partitionPathOnlyValue)
+                        .build();
+        catalog.createTable(pid, partitionedSchema, true);
+        FormatTable partitionedTable = (FormatTable) catalog.getTable(pid);
+        BatchWriteBuilder partitionedTableWriteBuilder = partitionedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit = partitionedTableWriteBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 100, 2024, 10));
+            write.write(GenericRow.of(2, 200, 2025, 10));
+            write.write(GenericRow.of(3, 300, 2025, 11));
+            commit.commit(write.prepareCommit());
+        }
+
+        Map<String, String> staticPartition = new HashMap<>();
+        staticPartition.put("year", "2024");
+        staticPartition.put("month", "10");
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        partitionedTableWriteBuilder.withOverwrite(staticPartition).newCommit()) {
+            write.write(GenericRow.of(10, 1000, 2024, 10));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<InternalRow> partitionOverwriteRows = read(partitionedTable, null, null, null, null);
+        assertThat(partitionOverwriteRows)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(10, 1000, 2024, 10),
+                        GenericRow.of(2, 200, 2025, 10),
+                        GenericRow.of(3, 300, 2025, 11));
+
+        staticPartition = new HashMap<>();
+        staticPartition.put("year", "2025");
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        partitionedTableWriteBuilder.withOverwrite(staticPartition).newCommit()) {
+            write.write(GenericRow.of(10, 1000, 2025, 10));
+            commit.commit(write.prepareCommit());
+        }
+
+        partitionOverwriteRows = read(partitionedTable, null, null, null, null);
+        assertThat(partitionOverwriteRows)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(10, 1000, 2024, 10), GenericRow.of(10, 1000, 2025, 10));
+
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite()) {
+            write.write(GenericRow.of(10, 1000, 2025, 10));
+            assertThrows(
+                    RuntimeException.class,
+                    () -> {
+                        Map<String, String> staticOverwritePartition = new HashMap<>();
+                        staticOverwritePartition.put("month", "10");
+                        partitionedTableWriteBuilder
+                                .withOverwrite(staticOverwritePartition)
+                                .newCommit();
+                    });
+        }
+        catalog.dropTable(pid, true);
+    }
+
     private void writeAndCheckCommitFormatTable(
-            Table table, InternalRow[] datas, InternalRow dataWithDiffPartition) throws Exception {
-        try (FormatTableWrite write = (FormatTableWrite) table.newBatchWriteBuilder().newWrite()) {
+            FormatTable table, InternalRow[] datas, InternalRow dataWithDiffPartition)
+            throws Exception {
+        try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
+                BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             for (InternalRow row : datas) {
                 write.write(row);
             }
@@ -722,7 +838,7 @@ public abstract class CatalogTestBase {
             List<CommitMessage> committers = write.prepareCommit();
             List<InternalRow> readData = read(table, null, null, null, null);
             assertThat(readData).isEmpty();
-            write.commit(committers);
+            commit.commit(committers);
         }
     }
 
