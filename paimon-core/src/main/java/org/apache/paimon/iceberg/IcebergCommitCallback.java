@@ -303,45 +303,86 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     private void createMetadataWithoutBase(long snapshotId) throws IOException {
         SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshotId);
+        Snapshot paimonSnapshot = table.snapshotManager().snapshot(snapshotId);
         SchemaCache schemaCache = new SchemaCache();
         List<IcebergManifestEntry> dataFileEntries = new ArrayList<>();
         List<IcebergManifestEntry> dvFileEntries = new ArrayList<>();
+        SummaryMetrics metrics = new SummaryMetrics();
+        Set<BinaryRow> changedPartitions = new HashSet<>();
 
         List<DataSplit> filteredDataSplits =
                 snapshotReader.read().dataSplits().stream()
                         .filter(DataSplit::rawConvertible)
                         .collect(Collectors.toList());
         for (DataSplit dataSplit : filteredDataSplits) {
+            changedPartitions.add(dataSplit.partition());
             dataSplitToManifestEntries(
                     dataSplit, snapshotId, schemaCache, dataFileEntries, dvFileEntries);
+
+            for (DataFileMeta paimonFileMeta : dataSplit.dataFiles()) {
+                metrics.addedDataFiles++;
+                metrics.addedRecords += paimonFileMeta.rowCount();
+                metrics.addedFilesSize += paimonFileMeta.fileSize();
+            }
         }
 
-        List<IcebergManifestFileMeta> manifestFileMetas = new ArrayList<>();
+        List<IcebergManifestFileMeta> dataManifestFileMetas = new ArrayList<>();
         if (!dataFileEntries.isEmpty()) {
-            manifestFileMetas.addAll(
+            dataManifestFileMetas.addAll(
                     manifestFile.rollingWrite(dataFileEntries.iterator(), snapshotId));
         }
+
+        List<IcebergManifestFileMeta> dvManifestFileMetas = new ArrayList<>();
         if (!dvFileEntries.isEmpty()) {
-            manifestFileMetas.addAll(
+            dvManifestFileMetas.addAll(
                     manifestFile.rollingWrite(
                             dvFileEntries.iterator(),
                             snapshotId,
                             IcebergManifestFileMeta.Content.DELETES));
         }
 
-        String manifestListFileName = manifestList.writeWithoutRolling(manifestFileMetas);
+        List<IcebergManifestFileMeta> allManifestFileMetas = new ArrayList<>();
+        allManifestFileMetas.addAll(dataManifestFileMetas);
+        allManifestFileMetas.addAll(dvManifestFileMetas);
+
+        metrics.changedPartitionCount = changedPartitions.size();
+        metrics.totalDataFiles = metrics.addedDataFiles;
+        metrics.deletedDataFiles = 0;
+        metrics.deletedRecords = 0;
+        metrics.deletedFilesSize = 0;
+        metrics.totalRecords =
+                paimonSnapshot.totalRecordCount() == null
+                        ? metrics.addedRecords
+                        : paimonSnapshot.totalRecordCount();
+        metrics.totalFilesSize = metrics.addedFilesSize;
+        long totalDeleteFiles = dvFileEntries.stream().filter(IcebergManifestEntry::isLive).count();
+        long totalPositionDeleteRecords =
+                dvFileEntries.stream()
+                        .filter(IcebergManifestEntry::isLive)
+                        .mapToLong(entry -> entry.file().recordCount())
+                        .sum();
+        metrics.totalDeleteFiles = totalDeleteFiles;
+        metrics.totalPositionDeletes = totalPositionDeleteRecords;
+        metrics.totalEqualityDeletes = 0;
+
+        String manifestListFileName = manifestList.writeWithoutRolling(allManifestFileMetas);
 
         int schemaId = (int) schemaCache.getLatestSchemaId();
         IcebergSchema icebergSchema = schemaCache.get(schemaId);
         List<IcebergPartitionField> partitionFields =
                 getPartitionFields(table.schema().partitionKeys(), icebergSchema);
+
+        IcebergSnapshotSummary snapshotSummary =
+                computeSnapshotSummary(
+                        IcebergSnapshotSummary.APPEND.operation(), paimonSnapshot, metrics);
+
         IcebergSnapshot snapshot =
                 new IcebergSnapshot(
                         snapshotId,
                         snapshotId,
                         null,
                         System.currentTimeMillis(),
-                        IcebergSnapshotSummary.APPEND,
+                        snapshotSummary,
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
                         schemaId,
                         null,
@@ -525,12 +566,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         .filter(meta -> meta.content() == IcebergManifestFileMeta.Content.DELETES)
                         .collect(Collectors.toList());
 
-        Map<String, BinaryRow> removedFiles = new LinkedHashMap<>();
+        Map<String, Pair<BinaryRow, DataFileMeta>> removedFiles = new LinkedHashMap<>();
         Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles = new LinkedHashMap<>();
         boolean isAddOnly = fileChangesCollector.collect(removedFiles, addedFiles);
-        Set<BinaryRow> modifiedPartitionsSet = new LinkedHashSet<>(removedFiles.values());
-        modifiedPartitionsSet.addAll(
-                addedFiles.values().stream().map(Pair::getLeft).collect(Collectors.toList()));
+        Set<BinaryRow> modifiedPartitionsSet =
+                removedFiles.values().stream()
+                        .map(Pair::getLeft)
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+        addedFiles.values().stream().map(Pair::getLeft).forEach(modifiedPartitionsSet::add);
         List<BinaryRow> modifiedPartitions = new ArrayList<>(modifiedPartitionsSet);
 
         // Note that this check may be different from `removedFiles.isEmpty()`,
@@ -538,16 +581,16 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         // In this case, if `baseMetadata` already contains this file, we should not add a
         // duplicate.
         List<IcebergManifestFileMeta> newDataManifestFileMetas;
-        IcebergSnapshotSummary snapshotSummary;
+        String operation;
         if (isAddOnly) {
             // Fast case. We don't need to remove files from `baseMetadata`. We only need to append
             // new metadata files.
             newDataManifestFileMetas = new ArrayList<>(baseDataManifestFileMetas);
             newDataManifestFileMetas.addAll(
                     createNewlyAddedManifestFileMetas(addedFiles, snapshotId));
-            snapshotSummary = IcebergSnapshotSummary.APPEND;
+            operation = IcebergSnapshotSummary.APPEND.operation();
         } else {
-            Pair<List<IcebergManifestFileMeta>, IcebergSnapshotSummary> result =
+            Pair<List<IcebergManifestFileMeta>, String> result =
                     createWithDeleteManifestFileMetas(
                             removedFiles,
                             addedFiles,
@@ -555,7 +598,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             baseDataManifestFileMetas,
                             snapshotId);
             newDataManifestFileMetas = result.getLeft();
-            snapshotSummary = result.getRight();
+            operation = result.getRight();
         }
 
         List<IcebergManifestFileMeta> newDVManifestFileMetas = new ArrayList<>();
@@ -578,6 +621,62 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                         newDataManifestFileMetas.stream(),
                                         newDVManifestFileMetas.stream())
                                 .collect(Collectors.toList()));
+
+        SummaryMetrics metrics = new SummaryMetrics();
+        metrics.addedDataFiles = addedFiles.size();
+        metrics.addedRecords =
+                addedFiles.values().stream().mapToLong(p -> p.getRight().rowCount()).sum();
+        metrics.addedFilesSize =
+                addedFiles.values().stream().mapToLong(p -> p.getRight().fileSize()).sum();
+        metrics.deletedDataFiles = removedFiles.size();
+        metrics.deletedRecords =
+                removedFiles.values().stream().mapToLong(p -> p.getRight().rowCount()).sum();
+        metrics.deletedFilesSize =
+                removedFiles.values().stream().mapToLong(p -> p.getRight().fileSize()).sum();
+        metrics.changedPartitionCount = modifiedPartitionsSet.size();
+
+        IcebergSnapshot baseSnapshot = baseMetadata.currentSnapshot();
+        Long snapshotTotalRecords = snapshot.totalRecordCount();
+        Long previousTotalRecordsValue = getSummaryLong(baseSnapshot, "total-records");
+        long previousTotalRecords =
+                previousTotalRecordsValue != null
+                        ? previousTotalRecordsValue
+                        : computeLiveRowCount(baseDataManifestFileMetas);
+        if (snapshotTotalRecords != null) {
+            metrics.totalRecords = snapshotTotalRecords;
+        } else {
+            metrics.totalRecords =
+                    Math.max(
+                            0,
+                            previousTotalRecords + metrics.addedRecords - metrics.deletedRecords);
+        }
+
+        Long previousTotalDataFilesValue = getSummaryLong(baseSnapshot, "total-data-files");
+        long previousTotalDataFiles =
+                previousTotalDataFilesValue != null
+                        ? previousTotalDataFilesValue
+                        : computeLiveDataFileCount(baseDataManifestFileMetas);
+        metrics.totalDataFiles =
+                Math.max(
+                        0,
+                        previousTotalDataFiles + metrics.addedDataFiles - metrics.deletedDataFiles);
+
+        Long previousTotalFilesSizeValue = getSummaryLong(baseSnapshot, "total-files-size");
+        long previousTotalFilesSize =
+                previousTotalFilesSizeValue != null
+                        ? previousTotalFilesSizeValue
+                        : computeTotalFilesSizeFromManifests(baseDataManifestFileMetas);
+        metrics.totalFilesSize =
+                Math.max(
+                        0,
+                        previousTotalFilesSize + metrics.addedFilesSize - metrics.deletedFilesSize);
+
+        metrics.totalDeleteFiles = computeLiveDeleteFileCount(newDVManifestFileMetas);
+        metrics.totalPositionDeletes = computeDeleteRowCount(newDVManifestFileMetas);
+        metrics.totalEqualityDeletes = 0;
+
+        IcebergSnapshotSummary snapshotSummary =
+                computeSnapshotSummary(operation, snapshot, metrics);
 
         // add new schemas if needed
         SchemaCache schemaCache = new SchemaCache();
@@ -680,14 +779,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     private interface FileChangesCollector {
         boolean collect(
-                Map<String, BinaryRow> removedFiles,
+                Map<String, Pair<BinaryRow, DataFileMeta>> removedFiles,
                 Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles)
                 throws IOException;
     }
 
     private boolean collectFileChanges(
             List<ManifestEntry> manifestEntries,
-            Map<String, BinaryRow> removedFiles,
+            Map<String, Pair<BinaryRow, DataFileMeta>> removedFiles,
             Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles) {
         boolean isAddOnly = true;
         DataFilePathFactories factories = new DataFilePathFactories(fileStorePathFactory);
@@ -705,7 +804,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 case DELETE:
                     isAddOnly = false;
                     addedFiles.remove(path);
-                    removedFiles.put(path, entry.partition());
+                    removedFiles.put(path, Pair.of(entry.partition(), entry.file()));
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -717,7 +816,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     private boolean collectFileChanges(
             long snapshotId,
-            Map<String, BinaryRow> removedFiles,
+            Map<String, Pair<BinaryRow, DataFileMeta>> removedFiles,
             Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles) {
         return collectFileChanges(
                 table.store()
@@ -777,15 +876,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 currentSnapshotId);
     }
 
-    private Pair<List<IcebergManifestFileMeta>, IcebergSnapshotSummary>
-            createWithDeleteManifestFileMetas(
-                    Map<String, BinaryRow> removedFiles,
-                    Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles,
-                    List<BinaryRow> modifiedPartitions,
-                    List<IcebergManifestFileMeta> baseManifestFileMetas,
-                    long currentSnapshotId)
-                    throws IOException {
-        IcebergSnapshotSummary snapshotSummary = IcebergSnapshotSummary.APPEND;
+    private Pair<List<IcebergManifestFileMeta>, String> createWithDeleteManifestFileMetas(
+            Map<String, Pair<BinaryRow, DataFileMeta>> removedFiles,
+            Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles,
+            List<BinaryRow> modifiedPartitions,
+            List<IcebergManifestFileMeta> baseManifestFileMetas,
+            long currentSnapshotId)
+            throws IOException {
+        String operation = IcebergSnapshotSummary.APPEND.operation();
         List<IcebergManifestFileMeta> newManifestFileMetas = new ArrayList<>();
 
         RowType partitionType = table.schema().logicalPartitionType();
@@ -838,7 +936,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     newManifestFileMetas.add(fileMeta);
                 } else {
                     // some file is removed, rewrite this file meta
-                    snapshotSummary = IcebergSnapshotSummary.OVERWRITE;
+                    operation = IcebergSnapshotSummary.OVERWRITE.operation();
                     List<IcebergManifestEntry> newEntries = new ArrayList<>();
                     for (IcebergManifestEntry entry : entries) {
                         if (entry.isLive()) {
@@ -865,7 +963,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         newManifestFileMetas.addAll(
                 createNewlyAddedManifestFileMetas(addedFiles, currentSnapshotId));
-        return Pair.of(newManifestFileMetas, snapshotSummary);
+        return Pair.of(newManifestFileMetas, operation);
     }
 
     // -------------------------------------------------------------------------------------
@@ -1228,6 +1326,147 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         return manifestFile.rollingWrite(
                 icebergDvEntries.iterator(), snapshotId, IcebergManifestFileMeta.Content.DELETES);
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Snapshot Summary Computation
+    // -------------------------------------------------------------------------------------
+
+    private static class SummaryMetrics {
+        long addedDataFiles;
+        long addedRecords;
+        long addedFilesSize;
+        long deletedDataFiles;
+        long deletedRecords;
+        long deletedFilesSize;
+        long changedPartitionCount;
+        long totalDataFiles;
+        long totalRecords;
+        long totalFilesSize;
+        long totalDeleteFiles;
+        long totalPositionDeletes;
+        long totalEqualityDeletes;
+    }
+
+    private IcebergSnapshotSummary computeSnapshotSummary(
+            String operation, Snapshot snapshot, SummaryMetrics metrics) {
+
+        IcebergSnapshotSummary summary = new IcebergSnapshotSummary(operation);
+
+        long addedDataFiles = Math.max(0, metrics.addedDataFiles);
+        long addedRecords = Math.max(0, metrics.addedRecords);
+        long addedFilesSize = Math.max(0, metrics.addedFilesSize);
+        long deletedDataFiles = Math.max(0, metrics.deletedDataFiles);
+        long deletedRecords = Math.max(0, metrics.deletedRecords);
+        long deletedFilesSize = Math.max(0, metrics.deletedFilesSize);
+        long changedPartitionCount = Math.max(0, metrics.changedPartitionCount);
+        long totalRecords = Math.max(0, metrics.totalRecords);
+        long totalDataFiles = Math.max(0, metrics.totalDataFiles);
+        long totalFilesSize = Math.max(0, metrics.totalFilesSize);
+        long totalDeleteFiles = Math.max(0, metrics.totalDeleteFiles);
+        long totalPositionDeletes = Math.max(0, metrics.totalPositionDeletes);
+        long totalEqualityDeletes = Math.max(0, metrics.totalEqualityDeletes);
+
+        summary.put("added-data-files", Long.toString(addedDataFiles));
+        summary.put("added-records", Long.toString(addedRecords));
+        summary.put("added-files-size", Long.toString(addedFilesSize));
+        summary.put("deleted-data-files", Long.toString(deletedDataFiles));
+        summary.put("deleted-records", Long.toString(deletedRecords));
+        summary.put("deleted-files-size", Long.toString(deletedFilesSize));
+        summary.put("changed-partition-count", Long.toString(changedPartitionCount));
+        summary.put("total-records", Long.toString(totalRecords));
+        summary.put("total-data-files", Long.toString(totalDataFiles));
+        summary.put("total-files-size", Long.toString(totalFilesSize));
+        summary.put("total-delete-files", Long.toString(totalDeleteFiles));
+        summary.put("total-position-deletes", Long.toString(totalPositionDeletes));
+        summary.put("total-equality-deletes", Long.toString(totalEqualityDeletes));
+
+        Map<String, String> properties = snapshot.properties();
+        if (properties != null) {
+            properties.forEach(
+                    (key, value) -> {
+                        if (value != null) {
+                            summary.put(key, value);
+                        }
+                    });
+        }
+
+        return summary;
+    }
+
+    private long computeLiveDataFileCount(List<IcebergManifestFileMeta> manifestMetas) {
+        return manifestMetas.stream()
+                .mapToLong(
+                        meta ->
+                                meta.addedFilesCount()
+                                        + meta.existingFilesCount()
+                                        - meta.deletedFilesCount())
+                .sum();
+    }
+
+    private long computeLiveRowCount(List<IcebergManifestFileMeta> manifestMetas) {
+        return manifestMetas.stream()
+                .mapToLong(
+                        meta ->
+                                meta.addedRowsCount()
+                                        + meta.existingRowsCount()
+                                        - meta.deletedRowsCount())
+                .sum();
+    }
+
+    private long computeLiveDeleteFileCount(List<IcebergManifestFileMeta> manifestMetas) {
+        return manifestMetas.stream()
+                .mapToLong(
+                        meta ->
+                                meta.addedFilesCount()
+                                        + meta.existingFilesCount()
+                                        - meta.deletedFilesCount())
+                .sum();
+    }
+
+    private long computeDeleteRowCount(List<IcebergManifestFileMeta> manifestMetas) {
+        return manifestMetas.stream()
+                .mapToLong(
+                        meta ->
+                                meta.addedRowsCount()
+                                        + meta.existingRowsCount()
+                                        - meta.deletedRowsCount())
+                .sum();
+    }
+
+    @Nullable
+    private Long getSummaryLong(@Nullable IcebergSnapshot snapshot, String key) {
+        if (snapshot == null) {
+            return null;
+        }
+        Map<String, String> summaryMap = snapshot.summary().getSummary();
+        String value = summaryMap.get(key);
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            LOG.warn(
+                    "Unable to parse snapshot summary field {}={} as long. The value will be recomputed.",
+                    key,
+                    value);
+            return null;
+        }
+    }
+
+    private long computeTotalFilesSizeFromManifests(List<IcebergManifestFileMeta> manifestMetas)
+            throws IOException {
+        long total = 0;
+        for (IcebergManifestFileMeta meta : manifestMetas) {
+            for (IcebergManifestEntry entry :
+                    manifestFile.read(new Path(meta.manifestPath()).getName())) {
+                if (entry.isLive()) {
+                    total += entry.file().fileSizeInBytes();
+                }
+            }
+        }
+        return total;
     }
 
     // -------------------------------------------------------------------------------------
