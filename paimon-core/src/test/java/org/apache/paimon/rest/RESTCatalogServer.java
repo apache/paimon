@@ -683,6 +683,19 @@ public class RESTCatalogServer {
     }
 
     private MockResponse snapshotHandle(Identifier identifier) throws Exception {
+        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+        if (tableMetadata.isExternal()) {
+            ErrorResponse response =
+                    new ErrorResponse(
+                            ErrorResponse.RESOURCE_TYPE_TABLE,
+                            identifier.getFullName(),
+                            "external paimon table does not support get table snapshot in rest server",
+                            501);
+            return mockResponse(response, 404);
+        }
         RESTResponse response;
         Optional<TableSnapshot> snapshotOptional =
                 Optional.ofNullable(tableLatestSnapshotStore.get(identifier.getFullName()));
@@ -714,17 +727,7 @@ public class RESTCatalogServer {
     }
 
     private MockResponse loadSnapshot(Identifier identifier, String version) throws Exception {
-        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
-            throw new Catalog.TableNotExistException(identifier);
-        }
-        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
-        if (tableMetadata.isExternal()) {
-            new ErrorResponse(
-                    ErrorResponse.RESOURCE_TYPE_TABLE,
-                    identifier.getFullName(),
-                    "external paimon table does not support load snapshot in rest server",
-                    403);
-        }
+
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         SnapshotManager snapshotManager = table.snapshotManager();
         Snapshot snapshot = null;
@@ -2095,7 +2098,7 @@ public class RESTCatalogServer {
                     ErrorResponse.RESOURCE_TYPE_TABLE,
                     identifier.getFullName(),
                     "external paimon table does not support commit in rest server",
-                    403);
+                    501);
         }
         FileStoreTable table = getFileTable(identifier);
         if (!tableId.equals(table.catalogEnvironment().uuid())) {
