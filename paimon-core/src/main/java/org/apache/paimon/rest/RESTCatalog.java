@@ -1015,11 +1015,15 @@ public class RESTCatalog implements Catalog {
                     new SchemaManager(fileIOFromOptions(externalPath), externalPath);
             Optional<TableSchema> latest = schemaManager.latest();
             if (latest.isPresent()) {
-                // Note we just validate schema here, not create a new table
+                // Note we just validate schema here, will not create a new table
                 schemaManager.createTable(schema, true);
-                Schema newSchema = latest.get().toSchema();
-                newSchema.options().putAll(schema.options());
-                return newSchema;
+                Schema existsSchema = latest.get().toSchema();
+                // use `owner` and `path` from the user provide schema
+                existsSchema
+                        .options()
+                        .put(Catalog.OWNER_PROP, schema.options().get(Catalog.OWNER_PROP));
+                existsSchema.options().put(PATH.key(), schema.options().get(PATH.key()));
+                return existsSchema;
             }
         }
         return schema;
