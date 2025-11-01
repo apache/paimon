@@ -25,6 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -323,6 +324,8 @@ public class CatalogUtils {
                         snapshot = optional.get();
                     }
                 } catch (Catalog.TableNotExistException ignored) {
+                } catch (NotImplementedException ignored) {
+                    // does not support supportsVersionManagement for external paimon table
                 }
             }
             tableAndSnapshots.add(Pair.of(table, snapshot));
