@@ -23,7 +23,7 @@ import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
-import org.apache.spark.sql.connector.read.{SupportsPushDownLimit, SupportsPushDownRequiredColumns, SupportsPushDownV2Filters}
+import org.apache.spark.sql.connector.read.{SupportsPushDownLimit, SupportsPushDownV2Filters}
 import org.apache.spark.sql.sources.Filter
 
 import java.util.{List => JList}
@@ -56,7 +56,7 @@ trait PaimonBasePushDown extends SupportsPushDownV2Filters with SupportsPushDown
             pushable.append((predicate, paimonPredicate))
             if (paimonPredicate.visit(visitor)) {
               // We need to filter the stats using filter instead of predicate.
-              reserved.append(PaimonUtils.filterV2ToV1(predicate).get)
+              PaimonUtils.filterV2ToV1(predicate).map(reserved.append(_))
             } else {
               postScan.append(predicate)
             }

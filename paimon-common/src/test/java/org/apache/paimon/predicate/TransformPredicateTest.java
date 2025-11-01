@@ -76,6 +76,6 @@ class TransformPredicateTest {
         ConcatTransform transform = new ConcatTransform(inputs);
         List<Object> literals = new ArrayList<>();
         literals.add(BinaryString.fromString("ha-he"));
-        return new TransformPredicate(transform, Equal.INSTANCE, literals);
+        return TransformPredicate.of(transform, Equal.INSTANCE, literals);
     }
 }
