@@ -19,7 +19,6 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.TableType;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -325,18 +324,8 @@ public class CatalogUtils {
                         snapshot = optional.get();
                     }
                 } catch (Catalog.TableNotExistException ignored) {
-                } catch (NotImplementedException e) {
-                    // does not support load external paimon table snapshot from rest server
-                    // construct TableSnapshot from local snapshot and table scan
-                    if (table instanceof FileStoreTable) {
-                        FileStoreTable fileStoreTable = (FileStoreTable) table;
-                        Snapshot lastSnapshot = table.latestSnapshot().orElse(null);
-                        if (lastSnapshot != null) {
-                            snapshot = tableSnapshotIdFromFileSystem(fileStoreTable, lastSnapshot);
-                        }
-                    } else {
-                        throw new NotImplementedException(e.getMessage());
-                    }
+                } catch (NotImplementedException ignored) {
+                    // does not support supportsVersionManagement for external paimon table
                 }
             }
             tableAndSnapshots.add(Pair.of(table, snapshot));
@@ -440,30 +429,5 @@ public class CatalogUtils {
                 .options(options)
                 .comment(schema.comment())
                 .build();
-    }
-
-    private static TableSnapshot tableSnapshotIdFromFileSystem(
-            FileStoreTable fileStoreTable, Snapshot snapshot) {
-        Long totalRecordCount = snapshot.totalRecordCount();
-        long recordCount = totalRecordCount != null ? totalRecordCount : 0L;
-        long fileSizeInBytes = 0L;
-        long fileCount = 0L;
-        long lastFileCreationTime = 0L;
-
-        List<PartitionEntry> partitionEntries =
-                fileStoreTable.newSnapshotReader().withSnapshot(snapshot).partitionEntries();
-        if (partitionEntries != null) {
-            for (PartitionEntry entry : partitionEntries) {
-                if (entry != null) {
-                    fileSizeInBytes += entry.fileSizeInBytes();
-                    fileCount += entry.fileCount();
-                    lastFileCreationTime =
-                            Math.max(lastFileCreationTime, entry.lastFileCreationTime());
-                }
-            }
-        }
-
-        return new TableSnapshot(
-                snapshot, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
     }
 }
