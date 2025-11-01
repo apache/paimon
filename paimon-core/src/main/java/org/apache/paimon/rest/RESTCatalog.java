@@ -21,6 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TableType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -33,6 +34,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
@@ -76,10 +78,13 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BRANCH;
+import static org.apache.paimon.CoreOptions.FORMAT_TABLE_FILE_COMPRESSION;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
+import static org.apache.paimon.catalog.CatalogUtils.getFormatTableFileCompression;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
@@ -443,6 +448,10 @@ public class RESTCatalog implements Catalog {
             checkNotSystemTable(identifier, "createTable");
             validateCreateTable(schema);
             createExternalTablePathIfNotExist(schema);
+            if (Options.fromMap(schema.options()).get(TYPE) == TableType.FORMAT_TABLE) {
+                String fileCompression = getFormatTableFileCompression(schema.options());
+                schema.options().put(FORMAT_TABLE_FILE_COMPRESSION.key(), fileCompression);
+            }
             api.createTable(identifier, schema);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {

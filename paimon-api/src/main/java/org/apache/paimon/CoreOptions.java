@@ -2023,6 +2023,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Format table file path only contain partition value.");
 
+    public static final ConfigOption<String> FORMAT_TABLE_FILE_COMPRESSION =
+            ConfigOptions.key("format-table.file.compression")
+                    .stringType()
+                    .noDefaultValue()
+                    .withFallbackKeys(FILE_COMPRESSION.key())
+                    .withDescription("Format table file compression.");
+
     public static final ConfigOption<String> BLOB_FIELD =
             key("blob-field")
                     .stringType()
@@ -2293,6 +2300,16 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String fileCompression() {
         return options.get(FILE_COMPRESSION);
+    }
+
+    public String formatTableFileImplementation() {
+        if (options.containsKey(FILE_COMPRESSION.key())) {
+            return options.get(FILE_COMPRESSION);
+        } else if (options.containsKey(FORMAT_TABLE_FILE_COMPRESSION.key())) {
+            return options.get(FORMAT_TABLE_FILE_COMPRESSION);
+        } else {
+            return fileCompression();
+        }
     }
 
     public MemorySize fileReaderAsyncThreshold() {

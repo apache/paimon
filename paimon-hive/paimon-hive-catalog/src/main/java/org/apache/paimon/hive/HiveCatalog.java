@@ -111,6 +111,7 @@ import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
+import static org.apache.paimon.catalog.CatalogUtils.getFormatTableFileCompression;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
@@ -914,7 +915,8 @@ public class HiveCatalog extends AbstractCatalog {
         List<String> primaryKeys = schema.primaryKeys();
         Map<String, String> options = schema.options();
         int highestFieldId = RowType.currentHighestFieldId(fields);
-
+        String fileCompression = getFormatTableFileCompression(schema.options());
+        options.put(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION.key(), fileCompression);
         TableSchema newSchema =
                 new TableSchema(
                         0,
