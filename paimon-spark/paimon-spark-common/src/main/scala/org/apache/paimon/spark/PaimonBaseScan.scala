@@ -27,8 +27,6 @@ import org.apache.paimon.spark.statistics.StatisticsHelper
 import org.apache.paimon.table.{DataTable, InnerTable}
 import org.apache.paimon.table.source.{InnerTableScan, Split}
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil
-import org.apache.paimon.table.system.FilesTable
-import org.apache.paimon.utils.{SnapshotManager, TagManager}
 
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
