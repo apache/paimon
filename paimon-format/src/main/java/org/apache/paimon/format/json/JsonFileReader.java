@@ -60,11 +60,6 @@ public class JsonFileReader extends BaseTextFileReader {
     }
 
     @Override
-    protected BaseTextRecordIterator createRecordIterator() {
-        return new JsonRecordIterator();
-    }
-
-    @Override
     protected InternalRow parseLine(String line) throws IOException {
         try {
             JsonNode jsonNode = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(line);
@@ -82,11 +77,6 @@ public class JsonFileReader extends BaseTextFileReader {
                 throw new IOException("Failed to convert JSON line: " + line, e);
             }
         }
-    }
-
-    private class JsonRecordIterator extends BaseTextRecordIterator {
-        // Inherits all functionality from BaseTextRecordIterator
-        // No additional JSON-specific iterator logic needed
     }
 
     private Object convertJsonValue(JsonNode node, DataType dataType, JsonOptions options) {

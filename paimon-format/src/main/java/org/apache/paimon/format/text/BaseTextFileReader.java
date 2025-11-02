@@ -36,12 +36,14 @@ import java.nio.charset.StandardCharsets;
 /** Base class for text-based file readers that provides common functionality. */
 public abstract class BaseTextFileReader implements FileRecordReader<InternalRow> {
 
-    protected final Path filePath;
+    private final Path filePath;
+    private final InputStream decompressedStream;
+    private final TextRecordIterator reader;
+
     protected final RowType rowType;
-    protected final InputStream decompressedStream;
     protected final BufferedReader bufferedReader;
+
     protected boolean readerClosed = false;
-    protected BaseTextRecordIterator reader;
 
     protected BaseTextFileReader(FileIO fileIO, Path filePath, RowType rowType) throws IOException {
         this.filePath = filePath;
@@ -52,19 +54,14 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
         this.bufferedReader =
                 new BufferedReader(
                         new InputStreamReader(this.decompressedStream, StandardCharsets.UTF_8));
-        this.reader = createRecordIterator();
+        this.reader = new TextRecordIterator();
     }
-
-    /**
-     * Creates the specific record iterator for this file reader type. Subclasses should implement
-     * this method to return their specific iterator.
-     */
-    protected abstract BaseTextRecordIterator createRecordIterator();
 
     /**
      * Parses a single line of text into an InternalRow. Subclasses must implement this method to
      * handle their specific format.
      */
+    @Nullable
     protected abstract InternalRow parseLine(String line) throws IOException;
 
     /**
@@ -106,25 +103,30 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
         }
     }
 
-    /** Base record iterator for text-based file readers. */
-    protected abstract class BaseTextRecordIterator implements FileRecordIterator<InternalRow> {
+    /** Record iterator for text-based file readers. */
+    private class TextRecordIterator implements FileRecordIterator<InternalRow> {
 
         protected long currentPosition = 0;
         protected boolean end = false;
 
         @Override
         public InternalRow next() throws IOException {
-            if (readerClosed) {
-                return null;
-            }
-            String nextLine = bufferedReader.readLine();
-            if (nextLine == null) {
-                end = true;
-                return null;
-            }
+            while (true) {
+                if (readerClosed) {
+                    return null;
+                }
+                String nextLine = bufferedReader.readLine();
+                if (nextLine == null) {
+                    end = true;
+                    return null;
+                }
 
-            currentPosition++;
-            return parseLine(nextLine);
+                currentPosition++;
+                InternalRow row = parseLine(nextLine);
+                if (row != null) {
+                    return row;
+                }
+            }
         }
 
         @Override
