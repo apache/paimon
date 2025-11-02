@@ -1019,9 +1019,11 @@ public class RESTCatalog implements Catalog {
                 schemaManager.createTable(schema, true);
                 Schema existsSchema = latest.get().toSchema();
                 // use `owner` and `path` from the user provide schema
-                existsSchema
-                        .options()
-                        .put(Catalog.OWNER_PROP, schema.options().get(Catalog.OWNER_PROP));
+                if (Objects.nonNull(schema.options().get(Catalog.OWNER_PROP))) {
+                    existsSchema
+                            .options()
+                            .put(Catalog.OWNER_PROP, schema.options().get(Catalog.OWNER_PROP));
+                }
                 existsSchema.options().put(PATH.key(), schema.options().get(PATH.key()));
                 return existsSchema;
             }

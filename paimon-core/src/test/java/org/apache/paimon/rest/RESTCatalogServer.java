@@ -2258,7 +2258,7 @@ public class RESTCatalogServer {
             Identifier identifier, long schemaId, Schema schema, String uuid, boolean isExternal) {
         Map<String, String> options = new HashMap<>(schema.options());
         Path path =
-                isExternal
+                isExternal && Objects.nonNull(schema.options().get(PATH.key()))
                         ? new Path(schema.options().get(PATH.key()))
                         : catalog.getTableLocation(identifier);
         String restPath = path.toString();
