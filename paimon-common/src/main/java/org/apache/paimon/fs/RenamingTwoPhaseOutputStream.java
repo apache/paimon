@@ -87,7 +87,7 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
      * directory as the target with a unique suffix.
      */
     private Path generateTempPath(Path targetPath) {
-        String tempFileName = ".tmp." + UUID.randomUUID();
+        String tempFileName = "_temporary/.tmp." + UUID.randomUUID();
         return new Path(targetPath.getParent(), tempFileName);
     }
 
