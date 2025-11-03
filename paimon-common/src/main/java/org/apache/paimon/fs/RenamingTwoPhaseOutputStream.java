@@ -29,6 +29,7 @@ import java.util.UUID;
  */
 @Public
 public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
+    private static final String TEMP_DIR_NAME = "_temporary";
 
     private final Path targetPath;
     private final Path tempPath;
@@ -87,12 +88,12 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
      * directory as the target with a unique suffix.
      */
     private Path generateTempPath(Path targetPath) {
-        String tempFileName = ".tmp." + UUID.randomUUID();
+        String tempFileName = TEMP_DIR_NAME + "/.tmp." + UUID.randomUUID();
         return new Path(targetPath.getParent(), tempFileName);
     }
 
     /** Committer implementation that renames temporary file to target path. */
-    private static class TempFileCommitter implements Committer {
+    public static class TempFileCommitter implements Committer {
 
         private static final long serialVersionUID = 1L;
 
@@ -131,6 +132,14 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
         @Override
         public Path targetFilePath() {
             return targetPath;
+        }
+
+        @Override
+        public void clean(FileIO fileIO) throws IOException {
+            Path path = tempPath.getParent();
+            if (fileIO.exists(path)) {
+                fileIO.deleteQuietly(path);
+            }
         }
     }
 }
