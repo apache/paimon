@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.util
 
 import org.apache.paimon.data.{BinaryString, Decimal, Timestamp}
-import org.apache.paimon.predicate.{ConcatTransform, FieldRef, FieldTransform, Transform}
+import org.apache.paimon.predicate.{ConcatTransform, FieldRef, FieldTransform, Transform, UpperTransform}
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
 import org.apache.paimon.types.{DecimalType, RowType}
@@ -34,6 +34,7 @@ object SparkExpressionConverter {
 
   // Supported transform names
   private val CONCAT = "CONCAT"
+  private val UPPER = "UPPER"
 
   /** Convert Spark [[Expression]] to Paimon [[Transform]], return None if not supported. */
   def toPaimonTransform(exp: Expression, rowType: RowType): Option[Transform] = {
@@ -48,6 +49,13 @@ object SparkExpressionConverter {
               case _ => return None
             }
             Some(new ConcatTransform(inputs.toList.asJava))
+          case UPPER =>
+            val inputs = exp.children().map {
+              case n: NamedReference => toPaimonFieldRef(n, rowType)
+              case l: Literal[_] => toPaimonLiteral(l)
+              case _ => return None
+            }
+            Some(new UpperTransform(inputs.toList.asJava))
           case _ => None
         }
       case _ => None
