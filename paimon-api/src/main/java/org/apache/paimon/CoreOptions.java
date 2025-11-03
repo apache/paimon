@@ -1121,12 +1121,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Define partition by table options, cannot define partition on DDL and table options at the same time.");
 
-    public static final ConfigOption<LookupLocalFileType> LOOKUP_LOCAL_FILE_TYPE =
-            key("lookup.local-file-type")
-                    .enumType(LookupLocalFileType.class)
-                    .defaultValue(LookupLocalFileType.SORT)
-                    .withDescription("The local file type for lookup.");
-
     public static final ConfigOption<Float> LOOKUP_HASH_LOAD_FACTOR =
             key("lookup.hash-load-factor")
                     .floatType()
@@ -2463,10 +2457,6 @@ public class CoreOptions implements Serializable {
 
     public int cachePageSize() {
         return (int) options.get(CACHE_PAGE_SIZE).getBytes();
-    }
-
-    public LookupLocalFileType lookupLocalFileType() {
-        return options.get(LOOKUP_LOCAL_FILE_TYPE);
     }
 
     public MemorySize lookupCacheMaxMemory() {
