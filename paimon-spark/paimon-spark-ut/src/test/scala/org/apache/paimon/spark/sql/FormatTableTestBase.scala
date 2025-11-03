@@ -155,4 +155,15 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
       assert(row.toString().contains("'csv.field-delimiter' = ';'"))
     }
   }
+
+  test("Format table: broadcast join for small table") {
+    withTable("t") {
+      sql("CREATE TABLE t1 (f0 INT, f1 INT) USING CSV TBLPROPERTIES ('file.compression'='none')")
+      sql("CREATE TABLE t2 (f0 INT, f2 INT) USING CSV TBLPROPERTIES ('file.compression'='none')")
+      sql("INSERT INTO t1 VALUES (1, 1)")
+      sql("INSERT INTO t2 VALUES (1, 1)")
+      val df = sql("SELECT t1.f0, t1.f1, t2.f2 FROM t1, t2 WHERE t1.f0 = t2.f0")
+      assert(df.queryExecution.executedPlan.toString().contains("BroadcastExchange"))
+    }
+  }
 }
