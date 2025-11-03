@@ -429,6 +429,7 @@ public class PredicateBuilder {
 
     public static Optional<Predicate> transformFieldMapping(
             Predicate predicate, int[] fieldIdxMapping) {
+        // TODO: merge PredicateProjectionConverter
         if (predicate instanceof CompoundPredicate) {
             CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
             List<Predicate> children = new ArrayList<>();
@@ -458,7 +459,7 @@ public class PredicateBuilder {
                     newInputs.add(input);
                 }
             }
-            return Optional.of(transformPredicate.withNewInputs(newInputs));
+            return Optional.of(transformPredicate.copyWithNewInputs(newInputs));
         } else {
             return Optional.empty();
         }

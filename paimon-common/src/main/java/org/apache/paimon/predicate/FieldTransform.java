@@ -58,7 +58,7 @@ public class FieldTransform implements Transform {
     }
 
     @Override
-    public Transform copy(List<Object> inputs) {
+    public Transform copyWithNewInputs(List<Object> inputs) {
         assert inputs.size() == 1;
         return new FieldTransform((FieldRef) inputs.get(0));
     }

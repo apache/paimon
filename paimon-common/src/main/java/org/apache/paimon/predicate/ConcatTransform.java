@@ -37,7 +37,7 @@ public class ConcatTransform extends StringTransform {
     }
 
     @Override
-    public Transform copy(List<Object> inputs) {
+    public Transform copyWithNewInputs(List<Object> inputs) {
         return new ConcatTransform(inputs);
     }
 }
