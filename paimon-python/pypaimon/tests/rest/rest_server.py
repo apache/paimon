@@ -253,9 +253,9 @@ class RESTCatalogServer:
                 source = self.table_metadata_store.get(source_table.get_full_name())
                 self.table_metadata_store.update({destination_table.get_full_name(): source})
                 source_table_dir = (Path(self.data_path) / self.warehouse
-                                    / source_table.database_name / source_table.object_name)
+                                    / source_table.get_database_name() / source_table.get_object_name())
                 destination_table_dir = (Path(self.data_path) / self.warehouse
-                                         / destination_table.database_name / destination_table.object_name)
+                                         / destination_table.get_database_name() / destination_table.get_object_name())
                 if not source_table_dir.exists():
                     destination_table_dir.mkdir(parents=True)
                 else:
@@ -352,7 +352,7 @@ class RESTCatalogServer:
                 table_name_part = table_parts[0]
                 branch_part = table_parts[1]
                 # Recreate identifier without branch for lookup
-                lookup_identifier = Identifier.create(identifier.database_name, table_name_part)
+                lookup_identifier = Identifier.create(identifier.get_database_name(), table_name_part)
             else:
                 lookup_identifier = identifier
                 branch_part = None
@@ -431,8 +431,10 @@ class RESTCatalogServer:
                     create_table.identifier, 0, create_table.schema, str(uuid.uuid4()), False
                 )
                 self.table_metadata_store.update({create_table.identifier.get_full_name(): table_metadata})
-                table_dir = Path(
-                    self.data_path) / self.warehouse / database_name / create_table.identifier.object_name / 'schema'
+                table_dir = (
+                    Path(self.data_path) / self.warehouse / database_name /
+                    create_table.identifier.get_object_name() / 'schema'
+                )
                 if not table_dir.exists():
                     table_dir.mkdir(parents=True)
                 with open(table_dir / "schema-0", "w") as f:
@@ -446,7 +448,8 @@ class RESTCatalogServer:
             if identifier.get_full_name() not in self.table_metadata_store:
                 raise TableNotExistException(identifier)
             table_metadata = self.table_metadata_store[identifier.get_full_name()]
-            table_path = f'file://{self.data_path}/{self.warehouse}/{identifier.database_name}/{identifier.object_name}'
+            table_path = (f'file://{self.data_path}/{self.warehouse}/'
+                          f'{identifier.get_database_name()}/{identifier.get_object_name()}')
             schema = table_metadata.schema.to_schema()
             response = self.mock_table(identifier, table_metadata, table_path, schema)
             return self._mock_response(response, 200)
@@ -522,7 +525,8 @@ class RESTCatalogServer:
         import uuid
 
         # Construct table path: {warehouse}/{database}/{table}
-        table_path = os.path.join(self.data_path, self.warehouse, identifier.database_name, identifier.object_name)
+        table_path = os.path.join(self.data_path, self.warehouse, identifier.get_database_name(),
+                                  identifier.get_object_name())
 
         # Create directory structure
         snapshot_dir = os.path.join(table_path, "snapshot")
