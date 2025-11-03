@@ -41,7 +41,7 @@ public class ConcatWsTransform extends StringTransform {
     }
 
     @Override
-    public Transform withNewInputs(List<Object> inputs) {
+    public Transform copy(List<Object> inputs) {
         return new ConcatWsTransform(inputs);
     }
 }

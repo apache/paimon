@@ -30,6 +30,8 @@ import static org.apache.paimon.utils.InternalRowUtils.get;
 /** Transform that extracts a field from a row. */
 public class FieldTransform implements Transform {
 
+    private static final long serialVersionUID = 1L;
+
     private final FieldRef fieldRef;
 
     public FieldTransform(FieldRef fieldRef) {
@@ -56,7 +58,7 @@ public class FieldTransform implements Transform {
     }
 
     @Override
-    public Transform withNewInputs(List<Object> inputs) {
+    public Transform copy(List<Object> inputs) {
         assert inputs.size() == 1;
         return new FieldTransform((FieldRef) inputs.get(0));
     }

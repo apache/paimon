@@ -63,7 +63,7 @@ public class TransformPredicate implements Predicate {
     }
 
     public TransformPredicate withNewInputs(List<Object> newInputs) {
-        return TransformPredicate.of(transform.withNewInputs(newInputs), function, literals);
+        return TransformPredicate.of(transform.copy(newInputs), function, literals);
     }
 
     public List<String> fieldNames() {

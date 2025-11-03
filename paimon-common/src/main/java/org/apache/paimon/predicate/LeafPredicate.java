@@ -40,7 +40,7 @@ import static org.apache.paimon.utils.InternalRowUtils.get;
 /** Leaf node of a {@link Predicate} tree. Compares a field in the row with literals. */
 public class LeafPredicate extends TransformPredicate {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     public LeafPredicate(
             LeafFunction function,
