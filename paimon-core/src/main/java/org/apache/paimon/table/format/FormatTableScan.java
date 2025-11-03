@@ -151,6 +151,7 @@ public class FormatTableScan implements InnerTableScan {
     }
 
     private List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
+        boolean onlyValueInPath = coreOptions.formatTablePartitionOnlyValueInPath();
         if (partitionFilter instanceof MultiplePartitionPredicate) {
             // generate partitions directly
             Set<BinaryRow> partitions = ((MultiplePartitionPredicate) partitionFilter).partitions();
@@ -160,7 +161,7 @@ public class FormatTableScan implements InnerTableScan {
                     table.defaultPartName(),
                     new Path(table.location()),
                     partitions,
-                    coreOptions.formatTablePartitionOnlyValueInPath());
+                    onlyValueInPath);
         } else {
             // search paths
             Pair<Path, Integer> scanPathAndLevel =
@@ -169,15 +170,13 @@ public class FormatTableScan implements InnerTableScan {
                             table.partitionKeys(),
                             partitionFilter,
                             table.partitionType(),
-                            coreOptions.formatTablePartitionOnlyValueInPath());
-            Path scanPath = scanPathAndLevel.getLeft();
-            int level = scanPathAndLevel.getRight();
+                            onlyValueInPath);
             return searchPartSpecAndPaths(
                     table.fileIO(),
-                    scanPath,
-                    level,
+                    scanPathAndLevel.getLeft(),
+                    scanPathAndLevel.getRight(),
                     table.partitionKeys(),
-                    coreOptions.formatTablePartitionOnlyValueInPath());
+                    onlyValueInPath);
         }
     }
 
