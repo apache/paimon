@@ -109,9 +109,9 @@ public class InternalRowPartitionComputer {
             Map<String, String> spec, RowType partType, String defaultPartValue) {
         checkArgument(
                 spec.size() == partType.getFieldCount(),
-                "Partition spec size %s not match partition field count %s",
-                spec.size(),
-                partType.getFieldCount());
+                "Partition spec %s size not match partition type %s",
+                spec,
+                partType);
         GenericRow partRow = new GenericRow(spec.size());
         List<String> fieldNames = partType.getFieldNames();
         for (Map.Entry<String, String> entry : spec.entrySet()) {
