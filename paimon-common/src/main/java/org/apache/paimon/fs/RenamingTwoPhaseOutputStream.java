@@ -93,14 +93,14 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
     }
 
     /** Committer implementation that renames temporary file to target path. */
-    public static class TempFileCommitter implements Committer {
+    private static class TempFileCommitter implements Committer {
 
         private static final long serialVersionUID = 1L;
 
         private final Path tempPath;
         private final Path targetPath;
 
-        public TempFileCommitter(Path tempPath, Path targetPath) {
+        private TempFileCommitter(Path tempPath, Path targetPath) {
             this.tempPath = tempPath;
             this.targetPath = targetPath;
         }
@@ -135,11 +135,8 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
         }
 
         @Override
-        public void clean(FileIO fileIO) throws IOException {
-            Path path = tempPath.getParent();
-            if (fileIO.exists(path)) {
-                fileIO.deleteQuietly(path);
-            }
+        public void clean(FileIO fileIO) {
+            fileIO.deleteDirectoryQuietly(tempPath.getParent());
         }
     }
 }
