@@ -57,7 +57,7 @@ public class BlobTableTest extends TableTestBase {
     public void testBasic() throws Exception {
         createTableDefault();
 
-        commitDefault(writeDataDefault(100, 1));
+        commitDefault(writeDataDefault(1000, 1));
 
         AtomicInteger integer = new AtomicInteger(0);
 
@@ -71,7 +71,7 @@ public class BlobTableTest extends TableTestBase {
 
         assertThat(fieldGroups.size()).isEqualTo(2);
         assertThat(fieldGroups.get(0).files().size()).isEqualTo(1);
-        assertThat(fieldGroups.get(1).files().size()).isEqualTo(8);
+        assertThat(fieldGroups.get(1).files().size()).isEqualTo(10);
 
         readDefault(
                 row -> {
@@ -81,7 +81,7 @@ public class BlobTableTest extends TableTestBase {
                     }
                 });
 
-        assertThat(integer.get()).isEqualTo(100);
+        assertThat(integer.get()).isEqualTo(1000);
     }
 
     @Test
@@ -104,7 +104,7 @@ public class BlobTableTest extends TableTestBase {
     public void testMultiBatch() throws Exception {
         createTableDefault();
 
-        commitDefault(writeDataDefault(100, 2));
+        commitDefault(writeDataDefault(1000, 2));
 
         AtomicInteger integer = new AtomicInteger(0);
 
@@ -120,7 +120,7 @@ public class BlobTableTest extends TableTestBase {
                     DataEvolutionSplitRead.splitFieldBunches(batch, file -> 0);
             assertThat(fieldGroups.size()).isEqualTo(2);
             assertThat(fieldGroups.get(0).files().size()).isEqualTo(1);
-            assertThat(fieldGroups.get(1).files().size()).isEqualTo(8);
+            assertThat(fieldGroups.get(1).files().size()).isEqualTo(10);
         }
 
         readDefault(
@@ -129,7 +129,7 @@ public class BlobTableTest extends TableTestBase {
                         assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
                     }
                 });
-        assertThat(integer.get()).isEqualTo(200);
+        assertThat(integer.get()).isEqualTo(2000);
     }
 
     @Test
@@ -179,6 +179,21 @@ public class BlobTableTest extends TableTestBase {
         assertThat(i.get()).isEqualTo(1);
     }
 
+    @Test
+    public void testRolling() throws Exception {
+        createTableDefault();
+        commitDefault(writeDataDefault(1025, 1));
+        AtomicInteger integer = new AtomicInteger(0);
+        readDefault(
+                row -> {
+                    integer.incrementAndGet();
+                    if (integer.get() % 50 == 0) {
+                        assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
+                    }
+                });
+        assertThat(integer.get()).isEqualTo(1025);
+    }
+
     protected Schema schemaDefault() {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
@@ -191,12 +206,13 @@ public class BlobTableTest extends TableTestBase {
     }
 
     protected InternalRow dataDefault(int time, int size) {
-        return GenericRow.of(RANDOM.nextInt(), randomString(), new BlobData(blobBytes));
+        return GenericRow.of(
+                RANDOM.nextInt(), BinaryString.fromBytes(randomBytes()), new BlobData(blobBytes));
     }
 
     @Override
     protected byte[] randomBytes() {
-        byte[] binary = new byte[2 * 1024 * 1024];
+        byte[] binary = new byte[2 * 1024 * 124];
         RANDOM.nextBytes(binary);
         return binary;
     }
