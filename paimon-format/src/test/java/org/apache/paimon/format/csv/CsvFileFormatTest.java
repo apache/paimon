@@ -39,6 +39,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.csv.CsvSchema;
 
 import org.junit.jupiter.api.Test;
@@ -494,6 +495,38 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    public void testSpecialCases() throws IOException {
+        RowType rowType =
+                DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.DOUBLE());
+
+        FileFormat format =
+                new CsvFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
+        Path testFile = new Path(parent, "test_mode_" + UUID.randomUUID() + ".csv");
+
+        fileIO.writeFile(
+                testFile,
+                "1,Alice,aaaa,100.23\n"
+                        + "2,\"Bob\",200.75\n"
+                        + "3,\"Json\"v,300.64\n"
+                        + "4,Jack\"o\"n,400.81",
+                false);
+        List<InternalRow> permissiveResult = read(format, rowType, rowType, testFile);
+        assertThat(permissiveResult).hasSize(4);
+        assertThat(permissiveResult.get(0).getInt(0)).isEqualTo(1);
+        assertThat(permissiveResult.get(0).getString(1).toString()).isEqualTo("Alice");
+        assertThat(permissiveResult.get(0).isNullAt(2)).isTrue();
+        assertThat(permissiveResult.get(1).getInt(0)).isEqualTo(2);
+        assertThat(permissiveResult.get(1).getString(1).toString()).isEqualTo("Bob");
+        assertThat(permissiveResult.get(1).getDouble(2)).isEqualTo(200.75);
+        assertThat(permissiveResult.get(2).getInt(0)).isEqualTo(3);
+        assertThat(permissiveResult.get(2).getString(1).toString()).isEqualTo("Json\"v");
+        assertThat(permissiveResult.get(2).getDouble(2)).isEqualTo(300.64);
+        assertThat(permissiveResult.get(3).getInt(0)).isEqualTo(4);
+        assertThat(permissiveResult.get(3).getString(1).toString()).isEqualTo("Jack\"o\"n");
+        assertThat(permissiveResult.get(3).getDouble(2)).isEqualTo(400.81);
+    }
+
     private List<InternalRow> read(
             FileFormat format, RowType fullRowType, RowType readRowType, Path testFile)
             throws IOException {
@@ -622,7 +655,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                         .withColumnSeparator(',')
                         .withoutHeader()
                         .withNullValue("null");
-        return CsvFileReader.parseCsvLineToArray(csvLine, schema);
+        return new CsvMapper().readerFor(String[].class).with(schema).readValue(csvLine);
     }
 
     /**
