@@ -191,7 +191,7 @@ public class LookupLevelsTest {
         }
         Levels levels = new Levels(comparator, files, 1);
         LookupLevels<KeyValue> lookupLevels =
-                createLookupLevels(levels, MemorySize.ofKibiBytes(20));
+                createLookupLevels(levels, MemorySize.ofKibiBytes(10));
 
         for (int i = 0; i < fileNum * recordInFile; i++) {
             KeyValue kv = lookupLevels.lookup(row(i), 1);
