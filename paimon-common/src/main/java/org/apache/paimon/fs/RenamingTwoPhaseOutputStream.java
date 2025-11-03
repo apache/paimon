@@ -29,7 +29,7 @@ import java.util.UUID;
  */
 @Public
 public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
-    public static final String TEMP_DIR_NAME = "_temporary";
+    private static final String TEMP_DIR_NAME = "_temporary";
 
     private final Path targetPath;
     private final Path tempPath;
@@ -132,6 +132,14 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
         @Override
         public Path targetFilePath() {
             return targetPath;
+        }
+
+        @Override
+        public void clean(FileIO fileIO) throws IOException {
+            Path path = tempPath.getParent();
+            if (fileIO.exists(path)) {
+                fileIO.deleteQuietly(path);
+            }
         }
     }
 }

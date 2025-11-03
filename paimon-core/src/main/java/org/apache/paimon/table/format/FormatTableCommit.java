@@ -21,7 +21,6 @@ package org.apache.paimon.table.format;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.RenamingTwoPhaseOutputStream;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.stats.Statistics;
@@ -81,7 +80,6 @@ public class FormatTableCommit implements BatchTableCommit {
                                     + commitMessage.getClass().getName());
                 }
             }
-            Set<Path> partitionPaths = new HashSet<>();
             if (overwrite && staticPartitions != null && !staticPartitions.isEmpty()) {
                 Path partitionPath =
                         buildPartitionPath(
@@ -89,9 +87,9 @@ public class FormatTableCommit implements BatchTableCommit {
                                 staticPartitions,
                                 formatTablePartitionOnlyValueInPath,
                                 partitionKeys);
-                partitionPaths.add(partitionPath);
                 deletePreviousDataFile(partitionPath);
             } else if (overwrite) {
+                Set<Path> partitionPaths = new HashSet<>();
                 for (TwoPhaseOutputStream.Committer c : committers) {
                     partitionPaths.add(c.targetFilePath().getParent());
                 }
@@ -102,21 +100,10 @@ public class FormatTableCommit implements BatchTableCommit {
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 committer.commit(this.fileIO);
             }
-            if (committers.stream()
-                    .filter(c -> c instanceof RenamingTwoPhaseOutputStream.TempFileCommitter)
-                    .findAny()
-                    .isPresent()) {
-                if (partitionPaths.size() > 1) {
-                    for (Path partitionPath : partitionPaths) {
-                        Path tempPath =
-                                new Path(partitionPath, RenamingTwoPhaseOutputStream.TEMP_DIR_NAME);
-                        fileIO.deleteQuietly(tempPath);
-                    }
-                } else {
-                    Path tempPath = new Path(location, RenamingTwoPhaseOutputStream.TEMP_DIR_NAME);
-                    fileIO.deleteQuietly(tempPath);
-                }
+            for (TwoPhaseOutputStream.Committer committer : committers) {
+                committer.clean(this.fileIO);
             }
+
         } catch (Exception e) {
             this.abort(commitMessages);
             throw new RuntimeException(e);
