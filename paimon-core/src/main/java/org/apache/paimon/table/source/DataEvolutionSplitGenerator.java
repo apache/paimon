@@ -59,13 +59,18 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                 .map(
                         f -> {
                             boolean rawConvertible = f.stream().allMatch(file -> file.size() == 1);
+                            long rowCount =
+                                    f.stream()
+                                            .mapToLong(entries -> entries.get(0).rowCount())
+                                            .sum();
                             List<DataFileMeta> groupFiles =
                                     f.stream()
                                             .flatMap(Collection::stream)
                                             .collect(Collectors.toList());
                             return rawConvertible
-                                    ? SplitGroup.rawConvertibleGroup(groupFiles)
-                                    : SplitGroup.nonRawConvertibleGroup(groupFiles);
+                                    ? SplitGroup.rawConvertibleGroup(groupFiles).rowCount(rowCount)
+                                    : SplitGroup.nonRawConvertibleGroup(groupFiles)
+                                            .rowCount(rowCount);
                         })
                 .collect(Collectors.toList());
     }

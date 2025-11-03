@@ -435,13 +435,23 @@ class FullStartingScanner(StartingScanner):
             packed_files: List[List[List[DataFileMeta]]] = self._pack_for_ordered(split_by_row_id, weight_func,
                                                                                   self.target_split_size)
 
+            rowCounts: List[int] = [
+                sum([m[0].row_count for m in bunch])
+                for bunch in packed_files
+            ]
+
             # Flatten the packed files and build splits
             flatten_packed_files: List[List[DataFileMeta]] = [
                 [file for sub_pack in pack for file in sub_pack]
                 for pack in packed_files
             ]
 
-            splits += self._build_split_from_pack(flatten_packed_files, file_entries, False)
+            splits_temp = self._build_split_from_pack(flatten_packed_files, file_entries, False)
+
+            for i in range(len(splits_temp)):
+                splits_temp[i].set_row_count(rowCounts[i])
+
+            splits += splits_temp
 
         if self.idx_of_this_subtask is not None:
             self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)

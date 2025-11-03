@@ -47,3 +47,6 @@ class Split:
     @property
     def file_paths(self) -> List[str]:
         return self._file_paths
+
+    def set_row_count(self, row_count: int) -> None:
+        self._row_count = row_count

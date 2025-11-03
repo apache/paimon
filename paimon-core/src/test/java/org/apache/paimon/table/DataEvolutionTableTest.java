@@ -600,6 +600,36 @@ public class DataEvolutionTableTest extends TableTestBase {
         assertThat(i.get()).isEqualTo(2);
     }
 
+    @Test
+    public void testSplit() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("a"), BinaryString.fromString("b")));
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write.prepareCommit();
+            commit.commit(commitables);
+        }
+
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            write1.write(GenericRow.of(BinaryString.fromString("c")));
+
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, 0L);
+            commit.commit(commitables);
+        }
+
+        ReadBuilder readBuilder = getTableDefault().newReadBuilder();
+
+        long rowCount =
+                readBuilder.newScan().plan().splits().stream().mapToLong(Split::rowCount).sum();
+        assertThat(rowCount).isEqualTo(1L);
+    }
+
     protected Schema schemaDefault() {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());

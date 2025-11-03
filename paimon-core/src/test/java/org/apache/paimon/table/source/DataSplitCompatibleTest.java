@@ -765,6 +765,78 @@ public class DataSplitCompatibleTest {
         assertThat(actual).isEqualTo(split);
     }
 
+    @Test
+    public void testSerializerCompatibleV9() throws Exception {
+        SimpleStats keyStats =
+                new SimpleStats(
+                        singleColumn("min_key"),
+                        singleColumn("max_key"),
+                        fromLongArray(new Long[] {0L}));
+        SimpleStats valueStats =
+                new SimpleStats(
+                        singleColumn("min_value"),
+                        singleColumn("max_value"),
+                        fromLongArray(new Long[] {0L}));
+
+        DataFileMeta dataFile =
+                DataFileMeta.create(
+                        "my_file",
+                        1024 * 1024,
+                        1024,
+                        singleColumn("min_key"),
+                        singleColumn("max_key"),
+                        keyStats,
+                        valueStats,
+                        15,
+                        200,
+                        5,
+                        3,
+                        Arrays.asList("extra1", "extra2"),
+                        Timestamp.fromLocalDateTime(LocalDateTime.parse("2022-03-02T20:20:12")),
+                        11L,
+                        new byte[] {1, 2, 4},
+                        FileSource.COMPACT,
+                        Arrays.asList("field1", "field2", "field3"),
+                        "hdfs:///path/to/warehouse",
+                        12L,
+                        Arrays.asList("a", "b", "c", "f"));
+        List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
+
+        DeletionFile deletionFile = new DeletionFile("deletion_file", 100, 22, 33L);
+        List<DeletionFile> deletionFiles = Collections.singletonList(deletionFile);
+
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter binaryRowWriter = new BinaryRowWriter(partition);
+        binaryRowWriter.writeString(0, BinaryString.fromString("aaaaa"));
+        binaryRowWriter.complete();
+
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(18)
+                        .withPartition(partition)
+                        .withBucket(20)
+                        .withTotalBuckets(32)
+                        .withDataFiles(dataFiles)
+                        .withDataDeletionFiles(deletionFiles)
+                        .withBucketPath("my path")
+                        .withRowCount(1024L)
+                        .build();
+
+        assertThat(InstantiationUtil.clone(InstantiationUtil.clone(split))).isEqualTo(split);
+
+        byte[] v6Bytes =
+                IOUtils.readFully(
+                        DataSplitCompatibleTest.class
+                                .getClassLoader()
+                                .getResourceAsStream("compatibility/datasplit-v9"),
+                        true);
+
+        DataSplit actual =
+                InstantiationUtil.deserializeObject(v6Bytes, DataSplit.class.getClassLoader());
+        assertThat(actual).isEqualTo(split);
+        assertThat(actual.rowCount()).isEqualTo(1024L);
+    }
+
     private DataFileMeta newDataFile(long rowCount) {
         return newDataFile(rowCount, null, null);
     }
