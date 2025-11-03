@@ -20,10 +20,15 @@ package org.apache.paimon.spark.table
 
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
-import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
+import org.apache.paimon.spark.{PaimonFormatTableScan, PaimonSparkTestWithRestCatalogBase}
 import org.apache.paimon.table.FormatTable
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
+import org.apache.spark.sql.execution.exchange.BroadcastExchangeExec
+import org.apache.spark.sql.execution.joins.BroadcastHashJoinExec
+
+import scala.util.control.NonFatal
 
 class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
 
@@ -307,6 +312,64 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
         sql("SHOW PARTITIONS t PARTITION (p1=2)"),
         Seq(Row("p1=2/p2=1"), Row("p1=2/p2=2")))
       checkAnswer(sql("SHOW PARTITIONS t PARTITION (p1=2, p2='2')"), Seq(Row("p1=2/p2=2")))
+    }
+  }
+
+  test("PaimonFormatTable broadcast join support") {
+    val formatTable = "paimon_format_broadcast_join"
+    withTable(formatTable) {
+      spark.sql(s"""
+                   |CREATE TABLE $formatTable (id INT, name STRING)
+                   |USING parquet
+                   |TBLPROPERTIES ('format-table.implementation'='paimon')
+                   |""".stripMargin)
+      val table =
+        paimonCatalog
+          .getTable(Identifier.create("test_db", formatTable))
+          .asInstanceOf[FormatTable]
+      val path = table.options().get("path")
+      fileIO.mkdirs(new Path(path))
+      spark.sql(s"INSERT INTO $formatTable VALUES (1, 'Alice'), (2, 'Bob')")
+
+      spark.range(0, 10000).toDF("id").createOrReplaceTempView("big_table")
+      try {
+        // Use a very high threshold (100MB) to ensure broadcast join is chosen
+        withSparkSQLConf(
+          "spark.sql.autoBroadcastJoinThreshold" -> "104857600",
+          "spark.sql.adaptive.enabled" -> "false") {
+          val df =
+            spark.sql(s"SELECT b.id, f.name FROM big_table b JOIN $formatTable f ON b.id = f.id")
+
+          val broadcastJoins = df.queryExecution.executedPlan.collect {
+            case join: BroadcastHashJoinExec => join
+          }
+          assert(broadcastJoins.nonEmpty, "Expected broadcast hash join but none found")
+
+          val broadcastChild =
+            broadcastJoins.head.left
+              .collectFirst { case exchange: BroadcastExchangeExec => exchange.child }
+              .orElse(broadcastJoins.head.right.collectFirst {
+                case exchange: BroadcastExchangeExec => exchange.child
+              })
+
+          assert(broadcastChild.isDefined, "Expected broadcast exchange on one side of the join")
+
+          val formatScanExists = broadcastChild.get.collect {
+            case scan: BatchScanExec if scan.scan.isInstanceOf[PaimonFormatTableScan] => scan
+          }
+
+          assert(formatScanExists.nonEmpty, "Broadcast side should be Paimon format table scan")
+
+          // Verify the join produces correct results
+          checkAnswer(df.orderBy("id"), Seq(Row(1, "Alice"), Row(2, "Bob")))
+        }
+      } finally {
+        try {
+          spark.catalog.dropTempView("big_table")
+        } catch {
+          case NonFatal(_) =>
+        }
+      }
     }
   }
 }

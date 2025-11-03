@@ -19,13 +19,25 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.table.FormatTable
+import org.apache.paimon.table.FormatTable.Format
+import org.apache.paimon.table.format.FormatDataSplit
+import org.apache.paimon.table.source.ReadBuilder
 import org.apache.paimon.table.source.Split
 
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.{Path => HadoopPath}
+import org.apache.orc.OrcFile
+import org.apache.parquet.hadoop.ParquetFileReader
+import org.apache.spark.sql.PaimonSparkSession
+import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
-import org.apache.spark.sql.connector.read.Batch
+import org.apache.spark.sql.connector.read.{Batch, Statistics, SupportsReportStatistics}
+import org.apache.spark.sql.connector.read.colstats.ColumnStatistics
 import org.apache.spark.sql.types.StructType
+
+import java.util.OptionalLong
 
 import scala.collection.JavaConverters._
 
@@ -36,11 +48,23 @@ abstract class PaimonFormatTableBaseScan(
     filters: Seq[Predicate],
     pushDownLimit: Option[Int])
   extends ColumnPruningAndPushDown
-  with ScanHelper {
+  with ScanHelper
+  with SupportsReportStatistics {
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
   protected var inputSplits: Array[Split] = _
   protected var inputPartitions: Seq[PaimonInputPartition] = _
+
+  override lazy val readBuilder: ReadBuilder = {
+    val builder = table.newReadBuilder().withReadType(readTableRowType)
+    if (filters.nonEmpty) {
+      val pushedPredicate = PredicateBuilder.and(filters: _*)
+      builder.withFilter(pushedPredicate)
+    }
+    pushDownLimit.foreach(builder.withLimit)
+    pushDownTopN.foreach(builder.withTopN)
+    builder
+  }
 
   def getOriginSplits: Array[Split] = {
     if (inputSplits == null) {
@@ -63,6 +87,35 @@ abstract class PaimonFormatTableBaseScan(
 
   override def toBatch: Batch = {
     PaimonBatch(lazyInputPartitions, readBuilder, coreOptions.blobAsDescriptor(), metadataColumns)
+  }
+
+  override def estimateStatistics(): Statistics = {
+    new Statistics {
+      override def sizeInBytes(): OptionalLong = {
+        var totalFileSize = 0L
+        lazyInputPartitions
+          .flatMap(_.splits)
+          .foreach(
+            split => {
+              split match {
+                case formatSplit: FormatDataSplit if totalFileSize != Long.MaxValue =>
+                  val length = math.max(0L, formatSplit.length())
+                  if (length > 0) {
+                    try {
+                      totalFileSize = Math.addExact(totalFileSize, length)
+                    } catch {
+                      case _: ArithmeticException =>
+                        totalFileSize = Long.MaxValue
+                    }
+                  }
+                case _ =>
+              }
+            })
+        OptionalLong.of(totalFileSize)
+      }
+
+      override def numRows(): OptionalLong = OptionalLong.empty()
+    }
   }
 
   override def supportedCustomMetrics: Array[CustomMetric] = {
