@@ -95,6 +95,14 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.dvFactory = dvFactory;
     }
 
+    public TableSchema schema() {
+        return schema;
+    }
+
+    public DataFilePathFactory pathFactory() {
+        return pathFactory;
+    }
+
     @Override
     public RecordReader<KeyValue> createRecordReader(DataFileMeta file) throws IOException {
         if (file.fileSize() >= asyncThreshold && file.fileName().endsWith(".orc")) {

@@ -140,7 +140,8 @@ public class LocalTableQuery implements TableQuery {
                         levels,
                         keyComparatorSupplier.get(),
                         readerFactoryBuilder.keyType(),
-                        new LookupLevels.KeyValueProcessor(readerFactoryBuilder.readValueType()),
+                        new LookupLevels.PersistValueProcessor(
+                                readerFactoryBuilder.readValueType()),
                         file -> {
                             RecordReader<KeyValue> reader = factory.createRecordReader(file);
                             if (cacheRowFilter != null) {
