@@ -287,7 +287,7 @@ public class PartitionPathUtils {
                                 part.getPath()));
             } else {
                 LinkedHashMap<String, String> spec = extractPartitionSpecFromPath(part.getPath());
-                if (spec.isEmpty() && !partitionKeys.isEmpty()) {
+                if (spec.size() != partitionKeys.size()) {
                     // illegal path, for example: /path/to/table/tmp/unknown, path without "="
                     continue;
                 }
