@@ -41,7 +41,7 @@ public class CsvFileReader extends BaseTextFileReader {
             RowType projectedRowType,
             CsvOptions options)
             throws IOException {
-        super(fileIO, filePath, projectedRowType);
+        super(fileIO, filePath, projectedRowType, options.lineDelimiter());
         this.includeHeader = options.includeHeader();
         this.csvParser =
                 new CsvParser(
@@ -59,7 +59,7 @@ public class CsvFileReader extends BaseTextFileReader {
     protected void setupReading() throws IOException {
         // Skip header if needed
         if (includeHeader && !headerSkipped) {
-            bufferedReader.readLine();
+            readLine();
             headerSkipped = true;
         }
     }
