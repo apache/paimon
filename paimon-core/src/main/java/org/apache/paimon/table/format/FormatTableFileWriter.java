@@ -65,7 +65,7 @@ public class FormatTableFileWriter {
                         options.changelogFilePrefix(),
                         options.legacyPartitionName(),
                         options.fileSuffixIncludeCompression(),
-                        options.fileCompression(),
+                        options.formatTableFileImplementation(),
                         options.dataFilePathDirectory(),
                         null,
                         false);
