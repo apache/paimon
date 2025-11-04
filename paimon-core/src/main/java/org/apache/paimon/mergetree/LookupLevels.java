@@ -158,7 +158,6 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         }
         LookupStoreWriter kvWriter =
                 lookupStoreFactory.createWriter(localFile, bfGenerator.apply(file.rowCount()));
-        LookupStoreFactory.Context context;
         try (RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             KeyValue kv;
             if (valueProcessor.withPosition()) {
@@ -187,14 +186,14 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             FileIOUtils.deleteFileOrDirectory(localFile);
             throw e;
         } finally {
-            context = kvWriter.close();
+            kvWriter.close();
         }
 
         ownCachedFiles.add(file.fileName());
         return new LookupFile(
                 localFile,
                 file,
-                lookupStoreFactory.createReader(localFile, context),
+                lookupStoreFactory.createReader(localFile),
                 () -> ownCachedFiles.remove(file.fileName()));
     }
 
