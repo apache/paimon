@@ -29,6 +29,7 @@ import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -38,18 +39,41 @@ public class TransformPredicate implements Predicate {
 
     private static final long serialVersionUID = 1L;
 
-    private final Transform transform;
-    private final LeafFunction function;
-    private transient List<Object> literals;
+    protected final Transform transform;
+    protected final LeafFunction function;
+    protected transient List<Object> literals;
 
-    public TransformPredicate(Transform transform, LeafFunction function, List<Object> literals) {
+    protected TransformPredicate(
+            Transform transform, LeafFunction function, List<Object> literals) {
         this.transform = transform;
         this.function = function;
         this.literals = literals;
     }
 
+    public static TransformPredicate of(
+            Transform transform, LeafFunction function, List<Object> literals) {
+        if (transform instanceof FieldTransform) {
+            return new LeafPredicate((FieldTransform) transform, function, literals);
+        }
+        return new TransformPredicate(transform, function, literals);
+    }
+
     public Transform transform() {
         return transform;
+    }
+
+    public TransformPredicate copyWithNewInputs(List<Object> newInputs) {
+        return TransformPredicate.of(transform.copyWithNewInputs(newInputs), function, literals);
+    }
+
+    public List<String> fieldNames() {
+        List<String> names = new ArrayList<>();
+        for (Object input : transform.inputs()) {
+            if (input instanceof FieldRef) {
+                names.add(((FieldRef) input).name());
+            }
+        }
+        return names;
     }
 
     @Override

@@ -42,6 +42,6 @@ public interface PredicateReplaceVisitor extends PredicateVisitor<Optional<Predi
 
     @Override
     default Optional<Predicate> visit(TransformPredicate predicate) {
-        throw new UnsupportedOperationException();
+        return Optional.empty();
     }
 }

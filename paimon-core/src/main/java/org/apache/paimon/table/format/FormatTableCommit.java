@@ -100,6 +100,10 @@ public class FormatTableCommit implements BatchTableCommit {
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 committer.commit(this.fileIO);
             }
+            for (TwoPhaseOutputStream.Committer committer : committers) {
+                committer.clean(this.fileIO);
+            }
+
         } catch (Exception e) {
             this.abort(commitMessages);
             throw new RuntimeException(e);

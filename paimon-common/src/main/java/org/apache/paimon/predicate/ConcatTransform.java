@@ -35,4 +35,9 @@ public class ConcatTransform extends StringTransform {
     public BinaryString transform(List<BinaryString> inputs) {
         return BinaryString.concat(inputs);
     }
+
+    @Override
+    public Transform copyWithNewInputs(List<Object> inputs) {
+        return new ConcatTransform(inputs);
+    }
 }
