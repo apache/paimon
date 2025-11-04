@@ -49,6 +49,7 @@ class FileStoreWrite:
     def _create_data_writer(self, partition: Tuple, bucket: int) -> DataWriter:
         def max_seq_number():
             return self._seq_number_stats(partition).get(bucket, 1)
+
         # Check if table has blob columns
         if self._has_blob_columns():
             return DataBlobWriter(
@@ -84,7 +85,7 @@ class FileStoreWrite:
                 return True
         return False
 
-    def prepare_commit(self,commit_identifier) -> List[CommitMessage]:
+    def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
         self.commit_identifier = commit_identifier
         commit_messages = []
         for (partition, bucket), writer in self.data_writers.items():
