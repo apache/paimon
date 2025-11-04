@@ -89,9 +89,7 @@ class ReadBuilder:
         return TableScan(
             table=self.table,
             predicate=self._predicate,
-            limit=self._limit,
-            target_split_size=self._target_split_size,
-            open_file_cost=self._open_file_cost
+            limit=self._limit
         )
 
     def new_read(self) -> TableRead:

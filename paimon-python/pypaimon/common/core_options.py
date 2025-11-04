@@ -20,7 +20,6 @@ from enum import Enum
 
 from pypaimon.common.memory_size import MemorySize
 
-
 class CoreOptions(str, Enum):
     """Core options for paimon."""
 
@@ -61,40 +60,18 @@ class CoreOptions(str, Enum):
     def get_blob_as_descriptor(options: dict) -> bool:
         return options.get(CoreOptions.FILE_BLOB_AS_DESCRIPTOR, "false").lower() == 'true'
 
+    @staticmethod
+    def get_split_target_size(options: dict) -> int:
+        """Get split target size from options, default to 128MB."""
+        if CoreOptions.SOURCE_SPLIT_TARGET_SIZE in options:
+            size_str = options[CoreOptions.SOURCE_SPLIT_TARGET_SIZE]
+            return MemorySize.parse(size_str).get_bytes()
+        return MemorySize.of_mebi_bytes(128).get_bytes()
 
-def parse_memory_size(size_str: str) -> int:
-    return MemorySize.parse_bytes(size_str)
-
-
-def get_split_target_size(options: dict, default_bytes: int = 128 * 1024 * 1024) -> int:
-    if CoreOptions.SOURCE_SPLIT_TARGET_SIZE in options:
-        size_str = options[CoreOptions.SOURCE_SPLIT_TARGET_SIZE]
-        if isinstance(size_str, int):
-            return size_str
-        elif isinstance(size_str, str):
-            return parse_memory_size(size_str)
-        else:
-            return default_bytes
-    return default_bytes
-
-
-def get_split_open_file_cost(options: dict, default_bytes: int = 4 * 1024 * 1024) -> int:
-    """
-    Get split open file cost from options, default to 4MB.
-    
-    Args:
-        options: Table options dictionary
-        default_bytes: Default size in bytes (4MB)
-    
-    Returns:
-        Open file cost in bytes
-    """
-    if CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST in options:
-        cost_str = options[CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST]
-        if isinstance(cost_str, int):
-            return cost_str
-        elif isinstance(cost_str, str):
-            return parse_memory_size(cost_str)
-        else:
-            return default_bytes
-    return default_bytes
+    @staticmethod
+    def get_split_open_file_cost(options: dict) -> int:
+        """Get split open file cost from options, default to 4MB."""
+        if CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST in options:
+            cost_str = options[CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST]
+            return MemorySize.parse(cost_str).get_bytes()
+        return MemorySize.of_mebi_bytes(4).get_bytes()

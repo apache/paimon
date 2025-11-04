@@ -41,16 +41,9 @@ class FullStartingScanner(StartingScanner):
         self, 
         table, 
         predicate: Optional[Predicate], 
-        limit: Optional[int],
-        target_split_size: Optional[int] = None,
-        open_file_cost: Optional[int] = None
+        limit: Optional[int]
     ):
         from pypaimon.table.file_store_table import FileStoreTable
-        from pypaimon.common.core_options import (
-            CoreOptions, 
-            get_split_target_size, 
-            get_split_open_file_cost
-        )
 
         self.table: FileStoreTable = table
         self.predicate = predicate
@@ -66,17 +59,9 @@ class FullStartingScanner(StartingScanner):
         self.partition_key_predicate = trim_and_transform_predicate(
             self.predicate, self.table.field_names, self.table.partition_keys)
 
-        # Use provided values or fall back to table options or defaults
-        # Priority: parameter > table option > default (matches Java behavior)
-        if target_split_size is not None:
-            self.target_split_size = target_split_size
-        else:
-            self.target_split_size = get_split_target_size(self.table.options)
-        
-        if open_file_cost is not None:
-            self.open_file_cost = open_file_cost
-        else:
-            self.open_file_cost = get_split_open_file_cost(self.table.options)
+        # Get split target size and open file cost from table options
+        self.target_split_size = CoreOptions.get_split_target_size(self.table.options)
+        self.open_file_cost = CoreOptions.get_split_open_file_cost(self.table.options)
 
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None

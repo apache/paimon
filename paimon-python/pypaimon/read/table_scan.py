@@ -37,17 +37,13 @@ class TableScan:
         self, 
         table, 
         predicate: Optional[Predicate], 
-        limit: Optional[int],
-        target_split_size: Optional[int] = None,
-        open_file_cost: Optional[int] = None
+        limit: Optional[int]
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.limit = limit
-        self.target_split_size = target_split_size
-        self.open_file_cost = open_file_cost
         self.starting_scanner = self._create_starting_scanner()
 
     def plan(self) -> Plan:
@@ -75,16 +71,12 @@ class TableScan:
                 return EmptyStartingScanner()
             return IncrementalStartingScanner.between_timestamps(
                 self.table, self.predicate, self.limit,
-                start_timestamp, end_timestamp,
-                target_split_size=self.target_split_size,
-                open_file_cost=self.open_file_cost
+                start_timestamp, end_timestamp
             )
         return FullStartingScanner(
             self.table, 
             self.predicate, 
-            self.limit,
-            target_split_size=self.target_split_size,
-            open_file_cost=self.open_file_cost
+            self.limit
         )
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
