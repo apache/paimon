@@ -21,7 +21,6 @@ package org.apache.paimon.lookup.sort;
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.BlockCompressionType;
 import org.apache.paimon.compression.BlockCompressor;
-import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.lookup.LookupStoreWriter;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
@@ -166,7 +165,7 @@ public class SortLookupStoreWriter implements LookupStoreWriter {
     }
 
     @Override
-    public LookupStoreFactory.Context close() throws IOException {
+    public void close() throws IOException {
         // flush current data block
         flush();
 
@@ -195,7 +194,6 @@ public class SortLookupStoreWriter implements LookupStoreWriter {
 
         LOG.info("totalUncompressedSize: {}", MemorySize.ofBytes(totalUncompressedSize));
         LOG.info("totalCompressedSize: {}", MemorySize.ofBytes(totalCompressedSize));
-        return new SortContext(position);
     }
 
     private void writeSlice(MemorySlice slice) throws IOException {

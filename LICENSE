@@ -213,8 +213,6 @@ paimon-common/src/main/java/org/apache/paimon/fs/FileRange.java
 paimon-common/src/main/java/org/apache/paimon/fs/VectoredReadUtils.java
 from http://hadoop.apache.org/ version 2.10.2
 
-paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreWriter.java
-paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreReader.java
 paimon-common/src/main/java/org/apache/paimon/utils/VarLengthIntUtils.java
 from https://github.com/linkedin/PalDB version 1.2.0
 
