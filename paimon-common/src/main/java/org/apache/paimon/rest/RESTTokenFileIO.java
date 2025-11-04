@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
@@ -110,6 +111,12 @@ public class RESTTokenFileIO implements FileIO {
     @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
         return fileIO().newOutputStream(path, overwrite);
+    }
+
+    @Override
+    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        return fileIO().newTwoPhaseOutputStream(path, overwrite);
     }
 
     @Override
