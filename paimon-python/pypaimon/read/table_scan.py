@@ -33,12 +33,7 @@ from pypaimon.snapshot.snapshot_manager import SnapshotManager
 class TableScan:
     """Implementation of TableScan for native Python reading."""
 
-    def __init__(
-        self, 
-        table, 
-        predicate: Optional[Predicate], 
-        limit: Optional[int]
-    ):
+    def __init__(self, table, predicate: Optional[Predicate], limit: Optional[int]):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
