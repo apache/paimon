@@ -16,9 +16,9 @@
 # limitations under the License.
 ################################################################################
 
-import time
 from typing import List, Optional
 
+from pypaimon.snapshot.snapshot import COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import FileStoreCommit
 
@@ -41,14 +41,12 @@ class BatchTableCommit:
         self.file_store_commit = FileStoreCommit(snapshot_commit, table, commit_user)
         self.batch_committed = False
 
-    def commit(self, commit_messages: List[CommitMessage]):
+    def commit(self, commit_messages: List[CommitMessage], commit_identifier: int = COMMIT_IDENTIFIER):
         self._check_committed()
 
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
         if not non_empty_messages:
             return
-
-        commit_identifier = int(time.time() * 1000)
 
         try:
             if self.overwrite_partition is not None:

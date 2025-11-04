@@ -22,6 +22,7 @@ from typing import List
 import pyarrow as pa
 
 from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.snapshot.snapshot import COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 
@@ -58,8 +59,8 @@ class BatchTableWrite:
         record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema)
         return self.write_arrow_batch(record_batch)
 
-    def prepare_commit(self) -> List[CommitMessage]:
-        return self.file_store_write.prepare_commit()
+    def prepare_commit(self, commit_identifier: int = COMMIT_IDENTIFIER) -> List[CommitMessage]:
+        return self.file_store_write.prepare_commit(commit_identifier)
 
     def with_write_type(self, write_cols: List[str]):
         for col in write_cols:

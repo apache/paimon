@@ -439,7 +439,7 @@ class AOSimpleTest(RESTBaseTest):
         }
         pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit()
+        table_write.prepare_commit(0)
         # write 2
         data2 = {
             'user_id': [5, 6, 7, 8],
@@ -449,7 +449,7 @@ class AOSimpleTest(RESTBaseTest):
         }
         pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
-        table_write.prepare_commit()
+        table_write.prepare_commit(1)
         # write 3
         data3 = {
             'user_id': [9, 10],
@@ -459,12 +459,13 @@ class AOSimpleTest(RESTBaseTest):
         }
         pa_table = pa.Table.from_pydict(data3, schema=self.pa_schema)
         table_write.write_arrow(pa_table)
-        cm = table_write.prepare_commit()
+        cm = table_write.prepare_commit(2)
         # commit
-        table_commit.commit(cm)
+        table_commit.commit(cm, 2)
         table_write.close()
         table_commit.close()
-        self.assertEqual(3, table_write.file_store_write.commit_identifier)
+        self.assertEqual(2, table_write.file_store_write.commit_identifier)
+
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()

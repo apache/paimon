@@ -84,8 +84,8 @@ class FileStoreWrite:
                 return True
         return False
 
-    def prepare_commit(self) -> List[CommitMessage]:
-        self.commit_identifier += 1
+    def prepare_commit(self,commit_identifier) -> List[CommitMessage]:
+        self.commit_identifier = commit_identifier
         commit_messages = []
         for (partition, bucket), writer in self.data_writers.items():
             committed_files = writer.prepare_commit()
