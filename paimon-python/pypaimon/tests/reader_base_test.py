@@ -802,4 +802,5 @@ class ReaderBasicTest(unittest.TestCase):
         # With default open_file_cost (4MB), more files can be packed into each split
         self.assertGreater(len(splits_large_cost), len(splits_default),
                           f"Large open_file_cost should generate more splits. "
-                          f"Got {len(splits_large_cost)} splits with 64MB cost vs {len(splits_default)} splits with default")
+                          f"Got {len(splits_large_cost)} splits with 64MB cost vs "
+                          f"{len(splits_default)} splits with default")
