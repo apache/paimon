@@ -35,6 +35,8 @@ class ReadBuilder:
         self._predicate: Optional[Predicate] = None
         self._projection: Optional[List[str]] = None
         self._limit: Optional[int] = None
+        self._target_split_size: Optional[int] = None
+        self._open_file_cost: Optional[int] = None
 
     def with_filter(self, predicate: Predicate) -> 'ReadBuilder':
         self._predicate = predicate
@@ -48,11 +50,48 @@ class ReadBuilder:
         self._limit = limit
         return self
 
+    def with_target_split_size(self, size: int) -> 'ReadBuilder':
+        """
+        Set target size of a source split when scanning a bucket.
+        This overrides the table option 'source.split.target-size'.
+        
+        Args:
+            size: Target split size in bytes
+        
+        Returns:
+            ReadBuilder instance for method chaining
+        
+        Example:
+            builder.with_target_split_size(256 * 1024 * 1024)  # 256MB
+        """
+        self._target_split_size = size
+        return self
+
+    def with_open_file_cost(self, cost: int) -> 'ReadBuilder':
+        """
+        Set open file cost of a source file.
+        It is used to avoid reading too many files with a source split.
+        This overrides the table option 'source.split.open-file-cost'.
+        
+        Args:
+            cost: Open file cost in bytes
+        
+        Returns:
+            ReadBuilder instance for method chaining
+        
+        Example:
+            builder.with_open_file_cost(8 * 1024 * 1024)  # 8MB
+        """
+        self._open_file_cost = cost
+        return self
+
     def new_scan(self) -> TableScan:
         return TableScan(
             table=self.table,
             predicate=self._predicate,
-            limit=self._limit
+            limit=self._limit,
+            target_split_size=self._target_split_size,
+            open_file_cost=self._open_file_cost
         )
 
     def new_read(self) -> TableRead:

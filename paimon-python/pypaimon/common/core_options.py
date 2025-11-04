@@ -18,6 +18,8 @@
 
 from enum import Enum
 
+from pypaimon.common.memory_size import MemorySize
+
 
 class CoreOptions(str, Enum):
     """Core options for paimon."""
@@ -48,6 +50,8 @@ class CoreOptions(str, Enum):
     # Scan options
     SCAN_FALLBACK_BRANCH = "scan.fallback-branch"
     INCREMENTAL_BETWEEN_TIMESTAMP = "incremental-between-timestamp"
+    SOURCE_SPLIT_TARGET_SIZE = "source.split.target-size"
+    SOURCE_SPLIT_OPEN_FILE_COST = "source.split.open-file-cost"
     # Commit options
     COMMIT_USER_PREFIX = "commit.user-prefix"
     ROW_TRACKING_ENABLED = "row-tracking.enabled"
@@ -56,3 +60,41 @@ class CoreOptions(str, Enum):
     @staticmethod
     def get_blob_as_descriptor(options: dict) -> bool:
         return options.get(CoreOptions.FILE_BLOB_AS_DESCRIPTOR, "false").lower() == 'true'
+
+
+def parse_memory_size(size_str: str) -> int:
+    return MemorySize.parse_bytes(size_str)
+
+
+def get_split_target_size(options: dict, default_bytes: int = 128 * 1024 * 1024) -> int:
+    if CoreOptions.SOURCE_SPLIT_TARGET_SIZE in options:
+        size_str = options[CoreOptions.SOURCE_SPLIT_TARGET_SIZE]
+        if isinstance(size_str, int):
+            return size_str
+        elif isinstance(size_str, str):
+            return parse_memory_size(size_str)
+        else:
+            return default_bytes
+    return default_bytes
+
+
+def get_split_open_file_cost(options: dict, default_bytes: int = 4 * 1024 * 1024) -> int:
+    """
+    Get split open file cost from options, default to 4MB.
+    
+    Args:
+        options: Table options dictionary
+        default_bytes: Default size in bytes (4MB)
+    
+    Returns:
+        Open file cost in bytes
+    """
+    if CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST in options:
+        cost_str = options[CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST]
+        if isinstance(cost_str, int):
+            return cost_str
+        elif isinstance(cost_str, str):
+            return parse_memory_size(cost_str)
+        else:
+            return default_bytes
+    return default_bytes

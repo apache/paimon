@@ -25,8 +25,9 @@ from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 class IncrementalStartingScanner(FullStartingScanner):
     def __init__(self, table, predicate: Optional[Predicate], limit: Optional[int],
-                 start: int, end: int):
-        super().__init__(table, predicate, limit)
+                 start: int, end: int, target_split_size: Optional[int] = None,
+                 open_file_cost: Optional[int] = None):
+        super().__init__(table, predicate, limit, target_split_size, open_file_cost)
         self.startingSnapshotId = start
         self.endingSnapshotId = end
 
@@ -48,7 +49,9 @@ class IncrementalStartingScanner(FullStartingScanner):
 
     @staticmethod
     def between_timestamps(table, predicate: Optional[Predicate], limit: Optional[int],
-                           start_timestamp: int, end_timestamp: int) -> 'IncrementalStartingScanner':
+                           start_timestamp: int, end_timestamp: int,
+                           target_split_size: Optional[int] = None,
+                           open_file_cost: Optional[int] = None) -> 'IncrementalStartingScanner':
         """
         Create an IncrementalStartingScanner for snapshots between two timestamps.
         """
@@ -66,4 +69,5 @@ class IncrementalStartingScanner(FullStartingScanner):
         latest_snapshot = snapshot_manager.get_latest_snapshot()
         end_id = end_snapshot.id if end_snapshot else (latest_snapshot.id if latest_snapshot else -1)
 
-        return IncrementalStartingScanner(table, predicate, limit, start_id, end_id)
+        return IncrementalStartingScanner(table, predicate, limit, start_id, end_id,
+                                          target_split_size, open_file_cost)
