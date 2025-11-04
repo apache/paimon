@@ -730,10 +730,11 @@ class ReaderBasicTest(unittest.TestCase):
         read_builder = table_default.new_read_builder()
         splits_default = read_builder.new_scan().plan().splits()
 
-        self.assertGreater(len(splits_small), len(splits_default),
-                            f"Small target_split_size should generate more splits. "
-                            f"Got {len(splits_small)} splits with 512B vs "
-                            f"{len(splits_default)} splits with default")
+        self.assertGreater(
+            len(splits_small), len(splits_default),
+            f"Small target_split_size should generate more splits. "
+            f"Got {len(splits_small)} splits with 512B vs "
+            f"{len(splits_default)} splits with default")
 
     def test_split_open_file_cost(self):
         """Test source.split.open-file-cost configuration effect on split generation."""
@@ -801,7 +802,8 @@ class ReaderBasicTest(unittest.TestCase):
         splits_default = read_builder.new_scan().plan().splits()
 
         # With default open_file_cost (4MB), more files can be packed into each split
-        self.assertGreater(len(splits_large_cost), len(splits_default),
-                            f"Large open_file_cost should generate more splits. "
-                            f"Got {len(splits_large_cost)} splits with 64MB cost vs "
-                            f"{len(splits_default)} splits with default")
+        self.assertGreater(
+            len(splits_large_cost), len(splits_default),
+            f"Large open_file_cost should generate more splits. "
+            f"Got {len(splits_large_cost)} splits with 64MB cost vs "
+            f"{len(splits_default)} splits with default")
