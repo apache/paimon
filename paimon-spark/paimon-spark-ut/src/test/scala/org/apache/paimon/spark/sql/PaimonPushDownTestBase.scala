@@ -129,6 +129,36 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test(s"Paimon push down: apply UPPER") {
+    // Spark support push down UPPER since Spark 3.4.
+    if (gteqSpark3_4) {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id int, value int, dt STRING)
+              |using paimon
+              |PARTITIONED BY (dt)
+              |""".stripMargin)
+
+        sql("""
+              |INSERT INTO t values
+              |(1, 100, '2024', 'hello')
+              |""".stripMargin)
+
+        val q =
+          """
+            |SELECT * FROM t
+            |WHERE UPPER(dt) = 'HELLO'
+            |""".stripMargin
+        assert(!checkFilterExists(q))
+
+        checkAnswer(
+          spark.sql(q),
+          Seq(Row(1, 100, "hello"))
+        )
+      }
+    }
+  }
+
   test("Paimon pushDown: limit for append-only tables with deletion vector") {
     withTable("dv_test") {
       spark.sql(
