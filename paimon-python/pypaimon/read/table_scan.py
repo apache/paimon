@@ -69,15 +69,9 @@ class TableScan:
             if (start_timestamp == end_timestamp or start_timestamp > latest_snapshot.time_millis
                     or end_timestamp < earliest_snapshot.time_millis):
                 return EmptyStartingScanner()
-            return IncrementalStartingScanner.between_timestamps(
-                self.table, self.predicate, self.limit,
-                start_timestamp, end_timestamp
-            )
-        return FullStartingScanner(
-            self.table, 
-            self.predicate, 
-            self.limit
-        )
+            return IncrementalStartingScanner.between_timestamps(self.table, self.predicate, self.limit,
+                                                                 start_timestamp, end_timestamp)
+        return FullStartingScanner(self.table, self.predicate, self.limit)
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
         self.starting_scanner.with_shard(idx_of_this_subtask, number_of_para_subtasks)

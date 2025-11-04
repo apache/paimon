@@ -37,12 +37,7 @@ from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 
 
 class FullStartingScanner(StartingScanner):
-    def __init__(
-        self, 
-        table, 
-        predicate: Optional[Predicate], 
-        limit: Optional[int]
-    ):
+    def __init__(self, table, predicate: Optional[Predicate], limit: Optional[int]):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
