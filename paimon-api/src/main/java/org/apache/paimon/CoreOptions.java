@@ -3805,32 +3805,6 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    /** Specifies the local file type for lookup. */
-    public enum LookupLocalFileType implements DescribedEnum {
-        SORT("sort", "Construct a sorted file for lookup."),
-
-        HASH("hash", "Construct a hash file for lookup.");
-
-        private final String value;
-
-        private final String description;
-
-        LookupLocalFileType(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
-
     /** The time unit of materialized table freshness. */
     public enum MaterializedTableIntervalFreshnessTimeUnit {
         SECOND,
