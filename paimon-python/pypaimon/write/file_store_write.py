@@ -37,6 +37,7 @@ class FileStoreWrite:
         self.data_writers: Dict[Tuple, DataWriter] = {}
         self.max_seq_numbers: dict = {}
         self.write_cols = None
+        self.commit_identifier = 0
 
     def write(self, partition: Tuple, bucket: int, data: pa.RecordBatch):
         key = (partition, bucket)
@@ -84,6 +85,7 @@ class FileStoreWrite:
         return False
 
     def prepare_commit(self) -> List[CommitMessage]:
+        self.commit_identifier += 1
         commit_messages = []
         for (partition, bucket), writer in self.data_writers.items():
             committed_files = writer.prepare_commit()

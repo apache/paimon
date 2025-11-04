@@ -34,7 +34,6 @@ class BatchTableWrite:
         self.table_pyarrow_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
         self.file_store_write = FileStoreWrite(self.table)
         self.row_key_extractor = self.table.create_row_key_extractor()
-        self.batch_committed = False
 
     def write_arrow(self, table: pa.Table):
         batches_iterator = table.to_batches()
@@ -60,9 +59,6 @@ class BatchTableWrite:
         return self.write_arrow_batch(record_batch)
 
     def prepare_commit(self) -> List[CommitMessage]:
-        if self.batch_committed:
-            raise RuntimeError("BatchTableWrite only supports one-time committing.")
-        self.batch_committed = True
         return self.file_store_write.prepare_commit()
 
     def with_write_type(self, write_cols: List[str]):
