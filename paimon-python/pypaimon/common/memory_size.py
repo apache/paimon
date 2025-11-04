@@ -70,7 +70,7 @@ class MemorySize:
     def format_to_string(self) -> str:
         ORDERED_UNITS = [MemoryUnit.BYTES, MemoryUnit.KILO_BYTES, MemoryUnit.MEGA_BYTES,
                          MemoryUnit.GIGA_BYTES, MemoryUnit.TERA_BYTES]
-        
+
         highest_integer_unit = MemoryUnit.BYTES
         for idx, unit in enumerate(ORDERED_UNITS):
             if self.bytes % unit.multiplier != 0:
@@ -81,7 +81,7 @@ class MemorySize:
                 break
         else:
             highest_integer_unit = MemoryUnit.BYTES
-        
+
         return f"{self.bytes // highest_integer_unit.multiplier} {highest_integer_unit.units[1]}"
 
     def __repr__(self) -> str:

@@ -20,6 +20,7 @@ from enum import Enum
 
 from pypaimon.common.memory_size import MemorySize
 
+
 class CoreOptions(str, Enum):
     """Core options for paimon."""
 
