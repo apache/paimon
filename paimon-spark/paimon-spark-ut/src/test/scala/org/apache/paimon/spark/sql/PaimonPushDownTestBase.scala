@@ -141,7 +141,7 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
 
         sql("""
               |INSERT INTO t values
-              |(1, 100, '2024', 'hello')
+              |(1, 100, 'hello')
               |""".stripMargin)
 
         val q =
