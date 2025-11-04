@@ -28,6 +28,7 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -35,6 +36,8 @@ import java.nio.charset.StandardCharsets;
 
 /** Base class for text-based file readers that provides common functionality. */
 public abstract class BaseTextFileReader implements FileRecordReader<InternalRow> {
+
+    private static final int MAX_LINE_LENGTH = Integer.MAX_VALUE;
 
     private final Path filePath;
     private final InputStream decompressedStream;
@@ -46,17 +49,15 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
 
     protected boolean readerClosed = false;
 
-    protected BaseTextFileReader(FileIO fileIO, Path filePath, RowType rowType) throws IOException {
-        this(fileIO, filePath, rowType, null);
-    }
-
     protected BaseTextFileReader(
             FileIO fileIO, Path filePath, RowType rowType, String recordDelimiter)
             throws IOException {
         this.filePath = filePath;
         this.rowType = rowType;
         this.recordDelimiterBytes =
-                recordDelimiter != null ? recordDelimiter.getBytes(StandardCharsets.UTF_8) : null;
+                recordDelimiter != null && !"\n".equals(recordDelimiter)
+                        ? recordDelimiter.getBytes(StandardCharsets.UTF_8)
+                        : null;
         this.decompressedStream =
                 HadoopCompressionUtils.createDecompressedInputStream(
                         fileIO.newInputStream(filePath), filePath);
@@ -155,52 +156,70 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
     }
 
     /**
-     * Reads a line from the buffered reader using custom record delimiter if configured. Following
-     * Hadoop's textinputformat.record.delimiter approach. If no custom delimiter is set, uses the
-     * default BufferedReader.readLine().
+     * Reads a single line from the input stream, using either the default line delimiter or a
+     * custom delimiter.
+     *
+     * <p>This method supports multi-character custom delimiters by using a simple pattern matching
+     * algorithm. For standard delimiters (null or empty), it delegates to BufferedReader's
+     * readLine() for optimal performance.
+     *
+     * <p>The algorithm maintains a partial match index and accumulates bytes until:
+     *
+     * <ul>
+     *   <li>A complete delimiter is found (returns line without delimiter)
+     *   <li>End of stream is reached (returns accumulated data or null if empty)
+     *   <li>Maximum line length is exceeded (throws IOException)
+     * </ul>
+     *
+     * @return the next line as a string (without delimiter), or null if end of stream
+     * @throws IOException if an I/O error occurs or line exceeds maximum length
      */
     protected String readLine() throws IOException {
-        if (recordDelimiterBytes == null) {
-            // Use default readLine for standard delimiters
+        // Fast path: use BufferedReader for standard delimiters
+        if (recordDelimiterBytes == null || recordDelimiterBytes.length == 0) {
             return bufferedReader.readLine();
         }
 
-        // Custom delimiter handling following Hadoop's LineReader approach
-        StringBuilder line = new StringBuilder();
+        ByteArrayOutputStream out = new ByteArrayOutputStream(1024);
         int matchIndex = 0;
-        int c;
 
-        while ((c = bufferedReader.read()) != -1) {
-            byte currentByte = (byte) c;
+        while (true) {
+            int b = decompressedStream.read();
+            if (b == -1) {
+                // End of stream: flush any partially matched delimiter bytes to output
+                if (matchIndex > 0) {
+                    out.write(recordDelimiterBytes, 0, matchIndex);
+                }
+                // Return null if nothing was read, otherwise return the accumulated line
+                return out.size() == 0 ? null : out.toString(StandardCharsets.UTF_8.name());
+            }
 
-            if (currentByte == recordDelimiterBytes[matchIndex]) {
+            // Guard against extremely long lines that could cause memory issues
+            if (MAX_LINE_LENGTH - matchIndex < out.size()) {
+                throw new IOException("Line exceeds maximum length: " + MAX_LINE_LENGTH);
+            }
+
+            byte current = (byte) b;
+            if (current == recordDelimiterBytes[matchIndex]) {
+                // Current byte matches the next expected delimiter byte
                 matchIndex++;
                 if (matchIndex == recordDelimiterBytes.length) {
-                    // Found complete delimiter, return line without delimiter
-                    return line.toString();
+                    // Complete delimiter found, return the line without the delimiter
+                    return out.toString(StandardCharsets.UTF_8.name());
                 }
-            } else {
-                // No match, append any previously matched delimiter bytes
-                if (matchIndex > 0) {
-                    line.append(
-                            new String(
-                                    recordDelimiterBytes, 0, matchIndex, StandardCharsets.UTF_8));
+            } else if (matchIndex > 0) {
+                // Mismatch: handle partial matches
+                out.write(recordDelimiterBytes, 0, matchIndex);
+                if (current == recordDelimiterBytes[0]) {
+                    matchIndex = 1;
+                } else {
+                    out.write(current);
                     matchIndex = 0;
                 }
-                line.append((char) currentByte);
+            } else {
+                // just add the current byte to output
+                out.write(current);
             }
         }
-
-        // End of stream - append any remaining matched bytes
-        if (matchIndex > 0) {
-            line.append(new String(recordDelimiterBytes, 0, matchIndex, StandardCharsets.UTF_8));
-        }
-
-        // Return null if nothing was read
-        if (line.length() == 0) {
-            return null;
-        }
-
-        return line.toString();
     }
 }
