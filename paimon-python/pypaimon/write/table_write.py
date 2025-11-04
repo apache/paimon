@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
 from collections import defaultdict
 from typing import List
 
@@ -27,7 +26,7 @@ from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 
 
-class BatchTableWrite:
+class TableWrite:
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -59,9 +58,6 @@ class BatchTableWrite:
         record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema)
         return self.write_arrow_batch(record_batch)
 
-    def prepare_commit(self, commit_identifier: int = COMMIT_IDENTIFIER) -> List[CommitMessage]:
-        return self.file_store_write.prepare_commit(commit_identifier)
-
     def with_write_type(self, write_cols: List[str]):
         for col in write_cols:
             if col not in self.table_pyarrow_schema.names:
@@ -80,3 +76,21 @@ class BatchTableWrite:
                              f"Input schema is: {data_schema} "
                              f"Table schema is: {self.table_pyarrow_schema} "
                              f"Write cols is: {self.file_store_write.write_cols}")
+
+
+class BatchTableWrite(TableWrite):
+    def __init__(self, table):
+        super().__init__(table)
+        self.batch_committed = False
+
+    def prepare_commit(self) -> List[CommitMessage]:
+        if self.batch_committed:
+            raise RuntimeError("BatchTableWrite only supports one-time committing.")
+        self.batch_committed = True
+        return self.file_store_write.prepare_commit(COMMIT_IDENTIFIER)
+
+
+class StreamTableWrite(TableWrite):
+
+    def prepare_commit(self, commit_identifier: int = COMMIT_IDENTIFIER) -> List[CommitMessage]:
+        return self.file_store_write.prepare_commit(commit_identifier)

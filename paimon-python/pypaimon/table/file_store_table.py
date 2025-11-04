@@ -28,7 +28,7 @@ from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
-from pypaimon.write.batch_write_builder import BatchWriteBuilder
+from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
                                               FixedBucketRowKeyExtractor,
                                               PostponeBucketRowKeyExtractor,
@@ -97,6 +97,9 @@ class FileStoreTable(Table):
 
     def new_batch_write_builder(self) -> BatchWriteBuilder:
         return BatchWriteBuilder(self)
+
+    def new_stream_write_builder(self) -> StreamWriteBuilder:
+        return StreamWriteBuilder(self)
 
     def create_row_key_extractor(self) -> RowKeyExtractor:
         bucket_mode = self.bucket_mode()

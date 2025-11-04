@@ -426,7 +426,7 @@ class AOSimpleTest(RESTBaseTest):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.create_table('default.test_append_only_parquet', schema, False)
         table = self.rest_catalog.get_table('default.test_append_only_parquet')
-        write_builder = table.new_batch_write_builder()
+        write_builder = table.new_stream_write_builder()
 
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
