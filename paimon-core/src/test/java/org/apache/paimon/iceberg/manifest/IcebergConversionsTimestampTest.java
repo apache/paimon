@@ -102,8 +102,8 @@ class IcebergConversionsTimestampTest {
     private static Stream<Arguments> provideTimestampToPaimonCases() {
         return Stream.of(
                 // Provide binary in micros; p=3..6 should all parse as micros
-                Arguments.of(3, -1356022717123000L, "1927-01-12T07:01:22.877"),
-                Arguments.of(3, 1713790983524000L, "2024-04-22T13:03:03.524"),
+                Arguments.of(3, -1356022717123L, "1927-01-12T07:01:22.877"),
+                Arguments.of(3, 1713790983524L, "2024-04-22T13:03:03.524"),
                 Arguments.of(6, 1640690931207203L, "2021-12-28T11:28:51.207203"));
     }
 
