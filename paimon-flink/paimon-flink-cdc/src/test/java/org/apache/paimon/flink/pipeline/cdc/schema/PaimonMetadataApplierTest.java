@@ -564,7 +564,7 @@ class PaimonMetadataApplierTest {
     }
 
     @Test
-    public void testMysqlDefaultTimestampValueConversionInAddColumn()
+    public void testInvalidTimestampDefaultValueConversionInAddColumn()
             throws SchemaEvolveException, Catalog.TableNotExistException {
         String databaseName = "test_" + UUID.randomUUID();
         TableId tableId = TableId.tableId(databaseName, "timestamp_test");
