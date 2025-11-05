@@ -54,8 +54,9 @@ class FullStartingScanner(StartingScanner):
         self.partition_key_predicate = trim_and_transform_predicate(
             self.predicate, self.table.field_names, self.table.partition_keys)
 
-        self.target_split_size = 128 * 1024 * 1024
-        self.open_file_cost = 4 * 1024 * 1024
+        # Get split target size and open file cost from table options
+        self.target_split_size = CoreOptions.get_split_target_size(self.table.options)
+        self.open_file_cost = CoreOptions.get_split_open_file_cost(self.table.options)
 
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
