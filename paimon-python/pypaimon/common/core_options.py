@@ -18,6 +18,8 @@
 
 from enum import Enum
 
+from pypaimon.common.memory_size import MemorySize
+
 
 class CoreOptions(str, Enum):
     """Core options for paimon."""
@@ -48,6 +50,8 @@ class CoreOptions(str, Enum):
     # Scan options
     SCAN_FALLBACK_BRANCH = "scan.fallback-branch"
     INCREMENTAL_BETWEEN_TIMESTAMP = "incremental-between-timestamp"
+    SOURCE_SPLIT_TARGET_SIZE = "source.split.target-size"
+    SOURCE_SPLIT_OPEN_FILE_COST = "source.split.open-file-cost"
     # Commit options
     COMMIT_USER_PREFIX = "commit.user-prefix"
     ROW_TRACKING_ENABLED = "row-tracking.enabled"
@@ -56,3 +60,19 @@ class CoreOptions(str, Enum):
     @staticmethod
     def get_blob_as_descriptor(options: dict) -> bool:
         return options.get(CoreOptions.FILE_BLOB_AS_DESCRIPTOR, "false").lower() == 'true'
+
+    @staticmethod
+    def get_split_target_size(options: dict) -> int:
+        """Get split target size from options, default to 128MB."""
+        if CoreOptions.SOURCE_SPLIT_TARGET_SIZE in options:
+            size_str = options[CoreOptions.SOURCE_SPLIT_TARGET_SIZE]
+            return MemorySize.parse(size_str).get_bytes()
+        return MemorySize.of_mebi_bytes(128).get_bytes()
+
+    @staticmethod
+    def get_split_open_file_cost(options: dict) -> int:
+        """Get split open file cost from options, default to 4MB."""
+        if CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST in options:
+            cost_str = options[CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST]
+            return MemorySize.parse(cost_str).get_bytes()
+        return MemorySize.of_mebi_bytes(4).get_bytes()
