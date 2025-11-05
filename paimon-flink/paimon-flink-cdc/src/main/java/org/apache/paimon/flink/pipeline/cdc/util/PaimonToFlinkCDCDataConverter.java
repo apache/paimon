@@ -61,7 +61,7 @@ public class PaimonToFlinkCDCDataConverter {
                     return DataChangeEvent.deleteEvent(tableId, binaryRecordData, new HashMap<>());
                 }
             default:
-                throw new IllegalArgumentException("don't support type of " + row.getRowKind());
+                throw new IllegalArgumentException("Unsupported RowKind type: " + row.getRowKind());
         }
     }
 
@@ -143,8 +143,7 @@ public class PaimonToFlinkCDCDataConverter {
                                                 .toInstant());
                 break;
             default:
-                throw new IllegalArgumentException(
-                        "don't support type of " + fieldType.getTypeRoot());
+                throw new IllegalArgumentException("Unsupported type: " + fieldType.getTypeRoot());
         }
         if (!fieldType.isNullable()) {
             return fieldGetter;
