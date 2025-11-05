@@ -409,7 +409,9 @@ case class PaimonSparkWriter(
 
   def commit(commitMessages: Seq[CommitMessage]): Unit = {
     val finalWriteBuilder = if (postponeBatchWriteFixedBucket) {
-      writeBuilder.copyWithNewTable(PostponeUtils.tableForCommit(table))
+      writeBuilder
+        .asInstanceOf[BatchWriteBuilderImpl]
+        .copyWithNewTable(PostponeUtils.tableForCommit(table))
     } else {
       writeBuilder
     }

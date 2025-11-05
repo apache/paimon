@@ -89,7 +89,6 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
         return commit;
     }
 
-    @Override
     public BatchWriteBuilder copyWithNewTable(Table newTable) {
         return new BatchWriteBuilderImpl((InnerTable) newTable, commitUser, staticPartition);
     }
