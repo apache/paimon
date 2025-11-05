@@ -20,7 +20,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 
-import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.AfterAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
@@ -40,14 +40,14 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlActionITCaseBase.class);
 
-    protected final MySqlContainer mysqlContainer = createMySqlContainer(MySqlVersion.V5_7);
+    protected static final MySqlContainer MYSQL_CONTAINER = createMySqlContainer(MySqlVersion.V5_7);
     private static final String USER = "paimonuser";
     private static final String PASSWORD = "paimonpw";
 
-    @AfterEach
-    public void stopContainers() {
+    @AfterAll
+    public static void stopContainers() {
         LOG.info("Stopping containers...");
-        mysqlContainer.stop();
+        MYSQL_CONTAINER.stop();
         LOG.info("Containers are stopped.");
     }
 
@@ -61,25 +61,25 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
                         .withLogConsumer(new Slf4jLogConsumer(LOG));
     }
 
-    protected void start() {
+    protected static void start() {
         LOG.info("Starting containers...");
-        Startables.deepStart(Stream.of(mysqlContainer)).join();
+        Startables.deepStart(Stream.of(MYSQL_CONTAINER)).join();
         LOG.info("Containers are started.");
     }
 
     protected Statement getStatement() throws SQLException {
         Connection conn =
                 DriverManager.getConnection(
-                        mysqlContainer.getJdbcUrl(),
-                        mysqlContainer.getUsername(),
-                        mysqlContainer.getPassword());
+                        MYSQL_CONTAINER.getJdbcUrl(),
+                        MYSQL_CONTAINER.getUsername(),
+                        MYSQL_CONTAINER.getPassword());
         return conn.createStatement();
     }
 
     protected Map<String, String> getBasicMySqlConfig() {
         Map<String, String> config = new HashMap<>();
-        config.put("hostname", mysqlContainer.getHost());
-        config.put("port", String.valueOf(mysqlContainer.getDatabasePort()));
+        config.put("hostname", MYSQL_CONTAINER.getHost());
+        config.put("port", String.valueOf(MYSQL_CONTAINER.getDatabasePort()));
         config.put("username", USER);
         config.put("password", PASSWORD);
         // see mysql/my.cnf in test resources

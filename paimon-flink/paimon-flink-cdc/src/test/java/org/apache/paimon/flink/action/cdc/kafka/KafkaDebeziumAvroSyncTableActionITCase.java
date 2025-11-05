@@ -49,7 +49,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig.AUTO_REGISTER_SCHEMAS;
@@ -119,7 +118,7 @@ public class KafkaDebeziumAvroSyncTableActionITCase extends KafkaActionITCaseBas
         JobClient client = runActionWithDefaultEnv(action);
 
         testAllTypesImpl();
-        client.cancel().get(1, TimeUnit.MINUTES);
+        client.cancel().get();
     }
 
     protected void writeRecordsToKafka(String topic, String resourceDirFormat, Object... args)

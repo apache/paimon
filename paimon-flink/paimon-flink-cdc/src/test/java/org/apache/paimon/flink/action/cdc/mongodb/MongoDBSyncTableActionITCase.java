@@ -33,7 +33,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -187,7 +186,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
                 syncTableActionBuilder(mongodbConfig).withTableConfig(tableConfig).build();
         JobClient jobClient = runActionWithDefaultEnv(action1);
         waitingTables(tableName);
-        jobClient.cancel().get(1, TimeUnit.MINUTES);
+        jobClient.cancel();
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");

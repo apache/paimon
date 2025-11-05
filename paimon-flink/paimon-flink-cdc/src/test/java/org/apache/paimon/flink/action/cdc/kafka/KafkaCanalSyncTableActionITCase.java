@@ -37,7 +37,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_MODE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
@@ -291,7 +290,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
         JobClient client = runActionWithDefaultEnv(action);
 
         testAllTypesImpl();
-        client.cancel().get(1, TimeUnit.MINUTES);
+        client.cancel().get();
     }
 
     private void testAllTypesImpl() throws Exception {

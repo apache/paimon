@@ -36,7 +36,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -54,7 +54,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -69,9 +68,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     private static final String DATABASE_NAME = "paimon_sync_table";
 
-    @BeforeEach
-    public void startContainers() {
-        mysqlContainer.withSetupSQL("mysql/sync_table_setup.sql");
+    @BeforeAll
+    public static void startContainers() {
+        MYSQL_CONTAINER.withSetupSQL("mysql/sync_table_setup.sql");
         start();
     }
 
@@ -464,7 +463,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             testAllTypesImpl(statement);
         }
 
-        client.cancel().get(1, TimeUnit.MINUTES);
+        client.cancel().get();
     }
 
     private void testAllTypesImpl(Statement statement) throws Exception {
@@ -1272,7 +1271,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                     "INSERT INTO test_options_change VALUES (2, '2023-03-23', null, null)");
         }
         waitingTables(tableName);
-        jobClient.cancel().get(1, TimeUnit.MINUTES);
+        jobClient.cancel();
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");
@@ -1291,11 +1290,10 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .withComputedColumnArgs("pt=substring(_date,5)")
                         .withTableConfig(tableConfig)
                         .build();
-        jobClient = runActionWithDefaultEnv(action2);
+        runActionWithDefaultEnv(action2);
 
         FileStoreTable table = getFileStoreTable();
         assertThat(table.options()).containsAllEntriesOf(tableConfig);
-        jobClient.cancel().get(1, TimeUnit.MINUTES);
     }
 
     @Test

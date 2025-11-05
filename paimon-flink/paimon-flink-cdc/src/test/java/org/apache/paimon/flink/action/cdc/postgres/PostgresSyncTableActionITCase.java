@@ -27,7 +27,7 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.flink.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 import org.apache.flink.core.execution.JobClient;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -38,7 +38,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,9 +49,9 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
     private static final String DATABASE_NAME = "paimon_sync_table";
     private static final String SCHEMA_NAME = "public";
 
-    @BeforeEach
-    public void startContainers() {
-        postgresContainer.withSetupSQL("postgres/sync_table_setup.sql");
+    @BeforeAll
+    public static void startContainers() {
+        POSTGRES_CONTAINER.withSetupSQL("postgres/sync_table_setup.sql");
         start();
     }
 
@@ -329,7 +328,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
 
         testAllTypesImpl();
 
-        client.cancel().get(1, TimeUnit.MINUTES);
+        client.cancel().get();
     }
 
     private void testAllTypesImpl() throws Exception {
@@ -704,7 +703,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                     "INSERT INTO test_options_change VALUES (2, '2023-03-23', null)");
         }
         waitingTables(tableName);
-        jobClient.cancel().get(1, TimeUnit.MINUTES);
+        jobClient.cancel();
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");

@@ -33,7 +33,7 @@ import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
 import org.apache.flink.streaming.api.graph.StreamGraph;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -51,7 +51,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
@@ -64,9 +63,9 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @TempDir java.nio.file.Path tempDir;
 
-    @BeforeEach
-    public void startContainers() {
-        mysqlContainer.withSetupSQL("mysql/sync_database_setup.sql");
+    @BeforeAll
+    public static void startContainers() {
+        MYSQL_CONTAINER.withSetupSQL("mysql/sync_database_setup.sql");
         start();
     }
 
@@ -1239,7 +1238,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         JobClient jobClient = runActionWithDefaultEnv(action1);
 
         waitingTables("t1");
-        jobClient.cancel().get(1, TimeUnit.MINUTES);
+        jobClient.cancel();
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");

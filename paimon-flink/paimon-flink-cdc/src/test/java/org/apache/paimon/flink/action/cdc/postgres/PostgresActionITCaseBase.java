@@ -22,7 +22,7 @@ import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 
 import org.apache.flink.cdc.connectors.postgres.source.PostgresConnectionPoolFactory;
 import org.apache.flink.cdc.connectors.postgres.source.config.PostgresSourceOptions;
-import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.AfterAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
@@ -53,7 +53,7 @@ public class PostgresActionITCaseBase extends CdcActionITCaseBase {
     protected static final DockerImageName PG_IMAGE =
             DockerImageName.parse("postgres:13").asCompatibleSubstituteFor("postgres");
 
-    protected final PostgresContainer postgresContainer =
+    protected static final PostgresContainer POSTGRES_CONTAINER =
             new PostgresContainer(PG_IMAGE)
                     .withDatabaseName(DEFAULT_DB)
                     .withUsername(USER)
@@ -72,16 +72,16 @@ public class PostgresActionITCaseBase extends CdcActionITCaseBase {
                             "-c",
                             "max_wal_senders=20");
 
-    protected void start() {
+    protected static void start() {
         LOG.info("Starting containers...");
-        Startables.deepStart(Stream.of(postgresContainer)).join();
+        Startables.deepStart(Stream.of(POSTGRES_CONTAINER)).join();
         LOG.info("Containers are started.");
     }
 
-    @AfterEach
-    public void stopContainers() {
+    @AfterAll
+    public static void stopContainers() {
         LOG.info("Stopping containers...");
-        postgresContainer.stop();
+        POSTGRES_CONTAINER.stop();
         LOG.info("Containers are stopped.");
     }
 
@@ -89,21 +89,23 @@ public class PostgresActionITCaseBase extends CdcActionITCaseBase {
         String jdbcUrl =
                 String.format(
                         PostgresConnectionPoolFactory.JDBC_URL_PATTERN,
-                        postgresContainer.getHost(),
-                        postgresContainer.getDatabasePort(),
+                        POSTGRES_CONTAINER.getHost(),
+                        POSTGRES_CONTAINER.getDatabasePort(),
                         databaseName);
         Connection conn =
                 DriverManager.getConnection(
-                        jdbcUrl, postgresContainer.getUsername(), postgresContainer.getPassword());
+                        jdbcUrl,
+                        POSTGRES_CONTAINER.getUsername(),
+                        POSTGRES_CONTAINER.getPassword());
         return conn.createStatement();
     }
 
     protected Map<String, String> getBasicPostgresConfig() {
         Map<String, String> config = new HashMap<>();
-        config.put(PostgresSourceOptions.HOSTNAME.key(), postgresContainer.getHost());
+        config.put(PostgresSourceOptions.HOSTNAME.key(), POSTGRES_CONTAINER.getHost());
         config.put(
                 PostgresSourceOptions.PG_PORT.key(),
-                String.valueOf(postgresContainer.getDatabasePort()));
+                String.valueOf(POSTGRES_CONTAINER.getDatabasePort()));
         config.put(PostgresSourceOptions.USERNAME.key(), USER);
         config.put(PostgresSourceOptions.PASSWORD.key(), PASSWORD);
         config.put(PostgresSourceOptions.SLOT_NAME.key(), getSlotName());
