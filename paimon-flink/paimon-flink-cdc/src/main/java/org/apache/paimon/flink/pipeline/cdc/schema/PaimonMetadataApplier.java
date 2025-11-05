@@ -181,6 +181,11 @@ public class PaimonMetadataApplier implements MetadataApplier {
             } else if (schema.partitionKeys() != null && !schema.partitionKeys().isEmpty()) {
                 partitionKeys.addAll(schema.partitionKeys());
             }
+            for (String partitionColumn : partitionKeys) {
+                if (!primaryKeys.contains(partitionColumn)) {
+                    primaryKeys.add(partitionColumn);
+                }
+            }
             builder.primaryKey(primaryKeys)
                     .partitionKeys(partitionKeys)
                     .comment(schema.comment())
