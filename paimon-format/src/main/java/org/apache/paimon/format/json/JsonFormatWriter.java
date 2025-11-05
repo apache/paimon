@@ -24,7 +24,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.text.BaseTextFileWriter;
+import org.apache.paimon.format.text.TextFileWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -45,11 +45,11 @@ import java.util.List;
 import java.util.Map;
 
 /** Json format writer implementation. */
-public class JsonFormatWriter extends BaseTextFileWriter {
+public class JsonFormatWriter extends TextFileWriter {
 
     private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
 
-    private final char lineDelimiter;
+    private final String lineDelimiter;
 
     public JsonFormatWriter(
             PositionOutputStream outputStream,
@@ -58,7 +58,7 @@ public class JsonFormatWriter extends BaseTextFileWriter {
             String compression)
             throws IOException {
         super(outputStream, rowType, compression);
-        this.lineDelimiter = options.getLineDelimiter().charAt(0);
+        this.lineDelimiter = options.getLineDelimiter();
     }
 
     @Override

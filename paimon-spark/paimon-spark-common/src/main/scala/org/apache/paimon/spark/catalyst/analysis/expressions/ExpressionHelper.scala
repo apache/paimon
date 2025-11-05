@@ -26,7 +26,6 @@ import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.{Column, SparkSession}
 import org.apache.spark.sql.PaimonUtils.{normalizeExprs, translateFilterV2}
-import org.apache.spark.sql.catalyst.QueryPlanningTracker
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper, SubqueryExpression}
 import org.apache.spark.sql.catalyst.optimizer.ConstantFolding

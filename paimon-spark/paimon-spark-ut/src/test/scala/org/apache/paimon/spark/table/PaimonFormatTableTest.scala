@@ -61,6 +61,25 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
+  test("PaimonFormatTable table: csv custom line delimiter") {
+    val tableName = "paimon_format_test_csv_custom_lime_delimiter"
+    withTable(tableName) {
+      spark.sql(
+        s"""
+           |CREATE TABLE $tableName (age INT, name STRING)
+           |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon', 'file.compression'='gzip', 'lineSep'='abc')
+           |""".stripMargin)
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      table.fileIO().mkdirs(new Path(table.location()))
+      spark.sql(s"INSERT INTO $tableName  VALUES (5, 'ab'), (7, 'Larry')")
+      checkAnswer(
+        spark.sql(s"SELECT age, name FROM $tableName ORDER BY age"),
+        Row(5, "ab") :: Row(7, "Larry") :: Nil
+      )
+    }
+  }
+
   test("PaimonFormatTable non partition table overwrite: csv") {
     val tableName = "paimon_non_partiiton_overwrite_test"
     withTable(tableName) {

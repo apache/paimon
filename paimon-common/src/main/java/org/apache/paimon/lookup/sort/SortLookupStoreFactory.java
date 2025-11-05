@@ -51,9 +51,8 @@ public class SortLookupStoreFactory implements LookupStoreFactory {
     }
 
     @Override
-    public SortLookupStoreReader createReader(File file, Context context) throws IOException {
-        return new SortLookupStoreReader(
-                comparator, file, blockSize, (SortContext) context, cacheManager);
+    public SortLookupStoreReader createReader(File file) throws IOException {
+        return new SortLookupStoreReader(comparator, file, blockSize, cacheManager);
     }
 
     @Override

@@ -24,7 +24,7 @@ import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.source.Split
 
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
-import org.apache.spark.sql.connector.read.Batch
+import org.apache.spark.sql.connector.read.{Batch, Statistics, SupportsReportStatistics}
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
@@ -36,6 +36,7 @@ abstract class PaimonFormatTableBaseScan(
     filters: Seq[Predicate],
     pushDownLimit: Option[Int])
   extends ColumnPruningAndPushDown
+  with SupportsReportStatistics
   with ScanHelper {
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
@@ -63,6 +64,10 @@ abstract class PaimonFormatTableBaseScan(
 
   override def toBatch: Batch = {
     PaimonBatch(lazyInputPartitions, readBuilder, coreOptions.blobAsDescriptor(), metadataColumns)
+  }
+
+  override def estimateStatistics(): Statistics = {
+    FormatTableStatistics(this)
   }
 
   override def supportedCustomMetrics: Array[CustomMetric] = {

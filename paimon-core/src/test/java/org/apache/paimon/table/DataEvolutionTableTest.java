@@ -600,6 +600,47 @@ public class DataEvolutionTableTest extends TableTestBase {
         assertThat(i.get()).isEqualTo(2);
     }
 
+    @Test
+    public void testNonNullColumn() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.STRING().copy(false));
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+
+        Schema schema = schemaBuilder.build();
+
+        catalog.createTable(identifier(), schema, true);
+        Table table = catalog.getTable(identifier());
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        BatchTableWrite write = builder.newWrite();
+        write.write(GenericRow.of(1, BinaryString.fromString("a"), BinaryString.fromString("b")));
+        BatchTableCommit commit = builder.newCommit();
+        List<CommitMessage> commitables = write.prepareCommit();
+        commit.commit(commitables);
+
+        write =
+                builder.newWrite()
+                        .withWriteType(schema.rowType().project(Collections.singletonList("f2")));
+        write.write(GenericRow.of(BinaryString.fromString("c")));
+        commit = builder.newCommit();
+        commitables = write.prepareCommit();
+        setFirstRowId(commitables, 0L);
+        commit.commit(commitables);
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        assertThat(reader).isInstanceOf(DataEvolutionFileReader.class);
+        reader.forEachRemaining(
+                r -> {
+                    assertThat(r.getInt(0)).isEqualTo(1);
+                    assertThat(r.getString(1).toString()).isEqualTo("a");
+                    assertThat(r.getString(2).toString()).isEqualTo("c");
+                });
+    }
+
     protected Schema schemaDefault() {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());

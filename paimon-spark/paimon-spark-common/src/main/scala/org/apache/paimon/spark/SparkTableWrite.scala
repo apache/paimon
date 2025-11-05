@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.catalog.CatalogContext
+import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.spark.write.DataWriteHelper
@@ -38,19 +39,23 @@ case class SparkTableWrite(
     fullCompactionDeltaCommits: Option[Int],
     batchId: Long,
     blobAsDescriptor: Boolean,
-    catalogContext: CatalogContext)
+    catalogContext: CatalogContext,
+    postponePartitionBucketComputer: Option[BinaryRow => Integer])
   extends SparkTableWriteTrait
   with DataWriteHelper {
 
   private val ioManager: IOManager = SparkUtils.createIOManager
 
   val write: TableWriteImpl[Row] = {
-    val _write = writeBuilder.newWrite()
+    val _write = writeBuilder.newWrite().asInstanceOf[TableWriteImpl[Row]]
     _write.withIOManager(ioManager)
     if (writeRowTracking) {
       _write.withWriteType(writeType)
     }
-    _write.asInstanceOf[TableWriteImpl[Row]]
+    if (postponePartitionBucketComputer.isDefined) {
+      _write.getWrite.withIgnoreNumBucketCheck(true)
+    }
+    _write
   }
 
   private val toPaimonRow = {
@@ -78,7 +83,17 @@ case class SparkTableWrite(
             bytesWritten += dataFileMeta.fileSize()
             recordsWritten += dataFileMeta.rowCount()
         }
-        commitMessages += serializer.serialize(message)
+        val finalMessage = if (postponePartitionBucketComputer.isDefined) {
+          new CommitMessageImpl(
+            message.partition(),
+            message.bucket(),
+            postponePartitionBucketComputer.get.apply(message.partition()),
+            message.newFilesIncrement(),
+            message.compactIncrement())
+        } else {
+          message
+        }
+        commitMessages += serializer.serialize(finalMessage)
     }
     reportOutputMetrics(bytesWritten, recordsWritten)
     commitMessages.iterator

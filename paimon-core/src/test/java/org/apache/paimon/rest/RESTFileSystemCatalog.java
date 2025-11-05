@@ -20,8 +20,12 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.FileSystemCatalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.schema.Schema;
+
+import static org.apache.paimon.CoreOptions.PATH;
 
 /**
  * A FileSystemCatalog that supports custom table paths for REST catalog server. This allows REST
@@ -36,5 +40,14 @@ public class RESTFileSystemCatalog extends FileSystemCatalog {
     @Override
     protected boolean allowCustomTablePath() {
         return true;
+    }
+
+    @Override
+    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
+            throws TableAlreadyExistException, DatabaseNotExistException {
+        boolean isExternal = schema.options() != null && schema.options().containsKey(PATH.key());
+        if (!isExternal) {
+            super.createTable(identifier, schema, ignoreIfExists);
+        }
     }
 }

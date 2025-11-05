@@ -182,7 +182,8 @@ public class PartitionsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
 
-            List<PartitionEntry> partitions = fileStoreTable.newScan().listPartitionEntries();
+            List<PartitionEntry> partitions =
+                    fileStoreTable.newScan().withLevelFilter(level -> true).listPartitionEntries();
 
             @SuppressWarnings("unchecked")
             CastExecutor<InternalRow, BinaryString> partitionCastExecutor =

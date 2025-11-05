@@ -42,6 +42,7 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -117,25 +118,25 @@ public class FileIndexPredicate implements Closeable {
     private Set<String> getRequiredNames(Predicate filePredicate) {
         return filePredicate.visit(
                 new PredicateVisitor<Set<String>>() {
-                    final Set<String> names = new HashSet<>();
 
                     @Override
                     public Set<String> visit(LeafPredicate predicate) {
-                        names.add(predicate.fieldName());
-                        return names;
+                        return Collections.singleton(predicate.fieldName());
                     }
 
                     @Override
                     public Set<String> visit(CompoundPredicate predicate) {
+                        Set<String> result = new HashSet<>();
                         for (Predicate child : predicate.children()) {
                             child.visit(this);
+                            result.addAll(child.visit(this));
                         }
-                        return names;
+                        return result;
                     }
 
                     @Override
                     public Set<String> visit(TransformPredicate predicate) {
-                        throw new UnsupportedOperationException();
+                        return new HashSet<>(predicate.fieldNames());
                     }
                 });
     }
@@ -206,7 +207,7 @@ public class FileIndexPredicate implements Closeable {
 
         @Override
         public FileIndexResult visit(TransformPredicate predicate) {
-            throw new UnsupportedOperationException();
+            return REMAIN;
         }
     }
 }

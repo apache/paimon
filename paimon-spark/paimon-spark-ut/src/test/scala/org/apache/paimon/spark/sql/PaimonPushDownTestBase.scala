@@ -87,6 +87,78 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
     checkAnswer(spark.sql(q), Row(1, "a", "p1") :: Row(2, "b", "p1") :: Row(3, "c", "p2") :: Nil)
   }
 
+  test(s"Paimon push down: apply CONCAT") {
+    // Spark support push down CONCAT since Spark 3.4.
+    if (gteqSpark3_4) {
+      withTable("t") {
+        sql(
+          """
+            |CREATE TABLE t (id int, value int, year STRING, month STRING, day STRING, hour STRING)
+            |using paimon
+            |PARTITIONED BY (year, month, day, hour)
+            |""".stripMargin)
+
+        sql("""
+              |INSERT INTO t values
+              |(1, 100, '2024', '07', '15', '21'),
+              |(2, 200, '2025', '07', '15', '21'),
+              |(3, 300, '2025', '07', '16', '22'),
+              |(4, 400, '2025', '07', '16', '23'),
+              |(5, 440, '2025', '07', '16', '23'),
+              |(6, 500, '2025', '07', '17', '00'),
+              |(7, 600, '2025', '07', '17', '02')
+              |""".stripMargin)
+
+        val q =
+          """
+            |SELECT * FROM t
+            |WHERE CONCAT(year,'-',month,'-',day,'-',hour) BETWEEN '2025-07-16-21' AND '2025-07-17-01'
+            |ORDER BY id
+            |""".stripMargin
+        assert(!checkFilterExists(q))
+
+        checkAnswer(
+          spark.sql(q),
+          Seq(
+            Row(3, 300, "2025", "07", "16", "22"),
+            Row(4, 400, "2025", "07", "16", "23"),
+            Row(5, 440, "2025", "07", "16", "23"),
+            Row(6, 500, "2025", "07", "17", "00"))
+        )
+      }
+    }
+  }
+
+  test(s"Paimon push down: apply UPPER") {
+    // Spark support push down UPPER since Spark 3.4.
+    if (gteqSpark3_4) {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id int, value int, dt STRING)
+              |using paimon
+              |PARTITIONED BY (dt)
+              |""".stripMargin)
+
+        sql("""
+              |INSERT INTO t values
+              |(1, 100, 'hello')
+              |""".stripMargin)
+
+        val q =
+          """
+            |SELECT * FROM t
+            |WHERE UPPER(dt) = 'HELLO'
+            |""".stripMargin
+        assert(!checkFilterExists(q))
+
+        checkAnswer(
+          spark.sql(q),
+          Seq(Row(1, 100, "hello"))
+        )
+      }
+    }
+  }
+
   test("Paimon pushDown: limit for append-only tables with deletion vector") {
     withTable("dv_test") {
       spark.sql(

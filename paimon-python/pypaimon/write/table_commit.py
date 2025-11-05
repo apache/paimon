@@ -16,14 +16,14 @@
 # limitations under the License.
 ################################################################################
 
-import time
 from typing import List, Optional
 
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import FileStoreCommit
 
 
-class BatchTableCommit:
+class TableCommit:
     """Python implementation of BatchTableCommit for batch writing scenarios."""
 
     def __init__(self, table, commit_user: str, static_partition: Optional[dict]):
@@ -41,14 +41,12 @@ class BatchTableCommit:
         self.file_store_commit = FileStoreCommit(snapshot_commit, table, commit_user)
         self.batch_committed = False
 
-    def commit(self, commit_messages: List[CommitMessage]):
+    def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
         self._check_committed()
 
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
         if not non_empty_messages:
             return
-
-        commit_identifier = int(time.time() * 1000)
 
         try:
             if self.overwrite_partition is not None:
@@ -76,3 +74,14 @@ class BatchTableCommit:
         if self.batch_committed:
             raise RuntimeError("BatchTableCommit only supports one-time committing.")
         self.batch_committed = True
+
+
+class BatchTableCommit(TableCommit):
+    def commit(self, commit_messages: List[CommitMessage]):
+        self._commit(commit_messages, BATCH_COMMIT_IDENTIFIER)
+
+
+class StreamTableCommit(TableCommit):
+
+    def commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
+        self._commit(commit_messages, commit_identifier)

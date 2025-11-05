@@ -24,8 +24,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -272,8 +270,8 @@ public class PartitionPathUtils {
             FileIO fileIO,
             Path path,
             int partitionNumber,
-            @Nullable List<String> partitionKeys,
-            boolean enablePartitionOnlyValueInPath) {
+            List<String> partitionKeys,
+            boolean onlyValueInPath) {
         FileStatus[] generatedParts = getFileStatusRecurse(path, partitionNumber, fileIO);
         List<Pair<LinkedHashMap<String, String>, Path>> ret = new ArrayList<>();
         for (FileStatus part : generatedParts) {
@@ -281,14 +279,19 @@ public class PartitionPathUtils {
             if (isHiddenFile(part)) {
                 continue;
             }
-            if (enablePartitionOnlyValueInPath && partitionKeys != null) {
+            if (onlyValueInPath) {
                 ret.add(
                         Pair.of(
                                 extractPartitionSpecFromPathOnlyValue(
                                         part.getPath(), partitionKeys),
                                 part.getPath()));
             } else {
-                ret.add(Pair.of(extractPartitionSpecFromPath(part.getPath()), part.getPath()));
+                LinkedHashMap<String, String> spec = extractPartitionSpecFromPath(part.getPath());
+                if (spec.size() != partitionKeys.size()) {
+                    // illegal path, for example: /path/to/table/tmp/unknown, path without "="
+                    continue;
+                }
+                ret.add(Pair.of(spec, part.getPath()));
             }
         }
         return ret;
@@ -314,6 +317,10 @@ public class PartitionPathUtils {
             int expectLevel,
             List<FileStatus> results)
             throws IOException {
+        if (isHiddenFile(fileStatus.getPath())) {
+            return;
+        }
+
         if (expectLevel == level) {
             results.add(fileStatus);
             return;
@@ -327,7 +334,11 @@ public class PartitionPathUtils {
     }
 
     private static boolean isHiddenFile(FileStatus fileStatus) {
-        String name = fileStatus.getPath().getName();
+        return isHiddenFile(fileStatus.getPath());
+    }
+
+    private static boolean isHiddenFile(Path path) {
+        String name = path.getName();
         return name.startsWith("_") || name.startsWith(".");
     }
 }

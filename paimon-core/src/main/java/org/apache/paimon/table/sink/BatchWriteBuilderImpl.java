@@ -21,6 +21,7 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.InnerTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -43,6 +44,13 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     public BatchWriteBuilderImpl(InnerTable table) {
         this.table = table;
         this.commitUser = createCommitUser(new Options(table.options()));
+    }
+
+    private BatchWriteBuilderImpl(
+            InnerTable table, String commitUser, @Nullable Map<String, String> staticPartition) {
+        this.table = table;
+        this.commitUser = commitUser;
+        this.staticPartition = staticPartition;
     }
 
     @Override
@@ -79,5 +87,9 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
                         .getOptional(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT)
                         .orElse(true));
         return commit;
+    }
+
+    public BatchWriteBuilder copyWithNewTable(Table newTable) {
+        return new BatchWriteBuilderImpl((InnerTable) newTable, commitUser, staticPartition);
     }
 }

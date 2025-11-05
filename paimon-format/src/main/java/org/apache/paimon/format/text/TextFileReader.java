@@ -27,44 +27,36 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 
 /** Base class for text-based file readers that provides common functionality. */
-public abstract class BaseTextFileReader implements FileRecordReader<InternalRow> {
+public abstract class TextFileReader implements FileRecordReader<InternalRow> {
 
-    protected final Path filePath;
+    private final Path filePath;
+    private final TextRecordIterator reader;
+
     protected final RowType rowType;
-    protected final InputStream decompressedStream;
-    protected final BufferedReader bufferedReader;
-    protected boolean readerClosed = false;
-    protected BaseTextRecordIterator reader;
+    protected final TextLineReader lineReader;
 
-    protected BaseTextFileReader(FileIO fileIO, Path filePath, RowType rowType) throws IOException {
+    protected boolean readerClosed = false;
+
+    protected TextFileReader(FileIO fileIO, Path filePath, RowType rowType, String delimiter)
+            throws IOException {
         this.filePath = filePath;
         this.rowType = rowType;
-        this.decompressedStream =
+        InputStream decompressedStream =
                 HadoopCompressionUtils.createDecompressedInputStream(
                         fileIO.newInputStream(filePath), filePath);
-        this.bufferedReader =
-                new BufferedReader(
-                        new InputStreamReader(this.decompressedStream, StandardCharsets.UTF_8));
-        this.reader = createRecordIterator();
+        this.lineReader = TextLineReader.create(decompressedStream, delimiter);
+        this.reader = new TextRecordIterator();
     }
-
-    /**
-     * Creates the specific record iterator for this file reader type. Subclasses should implement
-     * this method to return their specific iterator.
-     */
-    protected abstract BaseTextRecordIterator createRecordIterator();
 
     /**
      * Parses a single line of text into an InternalRow. Subclasses must implement this method to
      * handle their specific format.
      */
+    @Nullable
     protected abstract InternalRow parseLine(String line) throws IOException;
 
     /**
@@ -94,37 +86,37 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
     @Override
     public void close() throws IOException {
         if (!readerClosed) {
-            // Close the buffered reader first
-            if (bufferedReader != null) {
-                bufferedReader.close();
-            }
-            // Explicitly close the decompressed stream to prevent resource leaks
-            if (decompressedStream != null) {
-                decompressedStream.close();
+            if (lineReader != null) {
+                lineReader.close();
             }
             readerClosed = true;
         }
     }
 
-    /** Base record iterator for text-based file readers. */
-    protected abstract class BaseTextRecordIterator implements FileRecordIterator<InternalRow> {
+    /** Record iterator for text-based file readers. */
+    private class TextRecordIterator implements FileRecordIterator<InternalRow> {
 
         protected long currentPosition = 0;
         protected boolean end = false;
 
         @Override
         public InternalRow next() throws IOException {
-            if (readerClosed) {
-                return null;
-            }
-            String nextLine = bufferedReader.readLine();
-            if (nextLine == null) {
-                end = true;
-                return null;
-            }
+            while (true) {
+                if (readerClosed) {
+                    return null;
+                }
+                String nextLine = readLine();
+                if (nextLine == null) {
+                    end = true;
+                    return null;
+                }
 
-            currentPosition++;
-            return parseLine(nextLine);
+                currentPosition++;
+                InternalRow row = parseLine(nextLine);
+                if (row != null) {
+                    return row;
+                }
+            }
         }
 
         @Override
@@ -141,5 +133,28 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
         public long returnedPosition() {
             return Math.max(0, currentPosition - 1);
         }
+    }
+
+    /**
+     * Reads a single line from the input stream, using either the default line delimiter or a
+     * custom delimiter.
+     *
+     * <p>This method supports multi-character custom delimiters by using a simple pattern matching
+     * algorithm. For standard delimiters (null or empty), it delegates to BufferedReader's
+     * readLine() for optimal performance.
+     *
+     * <p>The algorithm maintains a partial match index and accumulates bytes until:
+     *
+     * <ul>
+     *   <li>A complete delimiter is found (returns line without delimiter)
+     *   <li>End of stream is reached (returns accumulated data or null if empty)
+     *   <li>Maximum line length is exceeded (throws IOException)
+     * </ul>
+     *
+     * @return the next line as a string (without delimiter), or null if end of stream
+     * @throws IOException if an I/O error occurs or line exceeds maximum length
+     */
+    protected String readLine() throws IOException {
+        return lineReader.readLine();
     }
 }

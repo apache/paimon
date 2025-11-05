@@ -30,6 +30,7 @@ import org.apache.paimon.types.DataType;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -37,16 +38,9 @@ import java.util.Optional;
 import static org.apache.paimon.utils.InternalRowUtils.get;
 
 /** Leaf node of a {@link Predicate} tree. Compares a field in the row with literals. */
-public class LeafPredicate implements Predicate {
+public class LeafPredicate extends TransformPredicate {
 
-    private static final long serialVersionUID = 1L;
-
-    private final LeafFunction function;
-    private final DataType type;
-    private final int fieldIndex;
-    private final String fieldName;
-
-    private transient List<Object> literals;
+    private static final long serialVersionUID = 2L;
 
     public LeafPredicate(
             LeafFunction function,
@@ -54,11 +48,12 @@ public class LeafPredicate implements Predicate {
             int fieldIndex,
             String fieldName,
             List<Object> literals) {
-        this.function = function;
-        this.type = type;
-        this.fieldIndex = fieldIndex;
-        this.fieldName = fieldName;
-        this.literals = literals;
+        this(new FieldTransform(new FieldRef(fieldIndex, fieldName, type)), function, literals);
+    }
+
+    public LeafPredicate(
+            FieldTransform fieldTransform, LeafFunction function, List<Object> literals) {
+        super(fieldTransform, function, literals);
     }
 
     public LeafFunction function() {
@@ -66,19 +61,23 @@ public class LeafPredicate implements Predicate {
     }
 
     public DataType type() {
-        return type;
+        return fieldRef().type();
     }
 
     public int index() {
-        return fieldIndex;
+        return fieldRef().index();
     }
 
     public String fieldName() {
-        return fieldName;
+        return fieldRef().name();
+    }
+
+    public List<String> fieldNames() {
+        return Collections.singletonList(fieldRef().name());
     }
 
     public FieldRef fieldRef() {
-        return new FieldRef(fieldIndex, fieldName, type);
+        return ((FieldTransform) transform).fieldRef();
     }
 
     public List<Object> literals() {
@@ -86,20 +85,15 @@ public class LeafPredicate implements Predicate {
     }
 
     public LeafPredicate copyWithNewIndex(int fieldIndex) {
-        return new LeafPredicate(function, type, fieldIndex, fieldName, literals);
-    }
-
-    @Override
-    public boolean test(InternalRow row) {
-        return function.test(type, get(row, fieldIndex, type), literals);
+        return new LeafPredicate(function, type(), fieldIndex, fieldName(), literals);
     }
 
     @Override
     public boolean test(
             long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts) {
-        Object min = get(minValues, fieldIndex, type);
-        Object max = get(maxValues, fieldIndex, type);
-        Long nullCount = nullCounts.isNullAt(fieldIndex) ? null : nullCounts.getLong(fieldIndex);
+        Object min = get(minValues, index(), type());
+        Object max = get(maxValues, index(), type());
+        Long nullCount = nullCounts.isNullAt(index()) ? null : nullCounts.getLong(index());
         if (nullCount == null || rowCount != nullCount) {
             // not all null
             // min or max is null
@@ -108,39 +102,18 @@ public class LeafPredicate implements Predicate {
                 return true;
             }
         }
-        return function.test(type, rowCount, min, max, nullCount, literals);
+        return function.test(type(), rowCount, min, max, nullCount, literals);
     }
 
     @Override
     public Optional<Predicate> negate() {
         return function.negate()
-                .map(negate -> new LeafPredicate(negate, type, fieldIndex, fieldName, literals));
+                .map(negate -> new LeafPredicate(negate, type(), index(), fieldName(), literals));
     }
 
     @Override
     public <T> T visit(PredicateVisitor<T> visitor) {
         return visitor.visit(this);
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        LeafPredicate that = (LeafPredicate) o;
-        return fieldIndex == that.fieldIndex
-                && Objects.equals(fieldName, that.fieldName)
-                && Objects.equals(function, that.function)
-                && Objects.equals(type, that.type)
-                && Objects.equals(literals, that.literals);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(function, type, fieldIndex, fieldName, literals);
     }
 
     @Override
@@ -154,13 +127,13 @@ public class LeafPredicate implements Predicate {
             literalsStr = literals.toString();
         }
         return literalsStr.isEmpty()
-                ? function + "(" + fieldName + ")"
-                : function + "(" + fieldName + ", " + literalsStr + ")";
+                ? function + "(" + fieldName() + ")"
+                : function + "(" + fieldName() + ", " + literalsStr + ")";
     }
 
     private ListSerializer<Object> objectsSerializer() {
         return new ListSerializer<>(
-                NullableSerializer.wrapIfNullIsNotSupported(InternalSerializers.create(type)));
+                NullableSerializer.wrapIfNullIsNotSupported(InternalSerializers.create(type())));
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {

@@ -51,15 +51,11 @@ public class SortLookupStoreReader implements LookupStoreReader {
     private final PageFileInput fileInput;
 
     public SortLookupStoreReader(
-            Comparator<MemorySlice> comparator,
-            File file,
-            int blockSize,
-            SortContext context,
-            CacheManager cacheManager)
+            Comparator<MemorySlice> comparator, File file, int blockSize, CacheManager cacheManager)
             throws IOException {
         this.comparator = comparator;
         this.filePath = file.getAbsolutePath();
-        this.fileSize = context.fileSize();
+        this.fileSize = file.length();
 
         this.fileInput = PageFileInput.create(file, blockSize, null, fileSize, null);
         this.blockCache = new BlockCache(fileInput.file(), cacheManager);

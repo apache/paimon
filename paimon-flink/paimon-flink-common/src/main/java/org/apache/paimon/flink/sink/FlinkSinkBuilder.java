@@ -56,8 +56,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.CoreOptions.BUCKET;
-import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.CoreOptions.clusteringStrategy;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.MIN_CLUSTERING_SAMPLE_FACTOR;
@@ -315,12 +313,7 @@ public class FlinkSinkBuilder {
                             new PostponeFixedBucketChannelComputer(table.schema(), knownNumBuckets),
                             parallelism);
 
-            Map<String, String> batchWriteOptions = new HashMap<>();
-            batchWriteOptions.put(WRITE_ONLY.key(), "true");
-            // It's just used to create merge tree writer for writing files to fixed bucket.
-            // The real bucket number is determined at runtime.
-            batchWriteOptions.put(BUCKET.key(), "1");
-            FileStoreTable tableForWrite = table.copy(batchWriteOptions);
+            FileStoreTable tableForWrite = PostponeUtils.tableForFixBucketWrite(table);
 
             PostponeFixedBucketSink sink =
                     new PostponeFixedBucketSink(tableForWrite, overwritePartition, knownNumBuckets);

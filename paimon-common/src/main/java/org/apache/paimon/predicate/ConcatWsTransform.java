@@ -39,4 +39,9 @@ public class ConcatWsTransform extends StringTransform {
         BinaryString separator = inputs.get(0);
         return BinaryString.concatWs(separator, inputs.subList(1, inputs.size()));
     }
+
+    @Override
+    public Transform copyWithNewInputs(List<Object> inputs) {
+        return new ConcatWsTransform(inputs);
+    }
 }

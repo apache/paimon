@@ -15,18 +15,18 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
 from collections import defaultdict
 from typing import List
 
 import pyarrow as pa
 
 from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 
 
-class BatchTableWrite:
+class TableWrite:
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -34,7 +34,6 @@ class BatchTableWrite:
         self.table_pyarrow_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
         self.file_store_write = FileStoreWrite(self.table)
         self.row_key_extractor = self.table.create_row_key_extractor()
-        self.batch_committed = False
 
     def write_arrow(self, table: pa.Table):
         batches_iterator = table.to_batches()
@@ -59,12 +58,6 @@ class BatchTableWrite:
         record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema)
         return self.write_arrow_batch(record_batch)
 
-    def prepare_commit(self) -> List[CommitMessage]:
-        if self.batch_committed:
-            raise RuntimeError("BatchTableWrite only supports one-time committing.")
-        self.batch_committed = True
-        return self.file_store_write.prepare_commit()
-
     def with_write_type(self, write_cols: List[str]):
         for col in write_cols:
             if col not in self.table_pyarrow_schema.names:
@@ -83,3 +76,21 @@ class BatchTableWrite:
                              f"Input schema is: {data_schema} "
                              f"Table schema is: {self.table_pyarrow_schema} "
                              f"Write cols is: {self.file_store_write.write_cols}")
+
+
+class BatchTableWrite(TableWrite):
+    def __init__(self, table):
+        super().__init__(table)
+        self.batch_committed = False
+
+    def prepare_commit(self) -> List[CommitMessage]:
+        if self.batch_committed:
+            raise RuntimeError("BatchTableWrite only supports one-time committing.")
+        self.batch_committed = True
+        return self.file_store_write.prepare_commit(BATCH_COMMIT_IDENTIFIER)
+
+
+class StreamTableWrite(TableWrite):
+
+    def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
+        return self.file_store_write.prepare_commit(commit_identifier)
