@@ -38,7 +38,7 @@ import java.util.TimeZone;
  */
 public class KafkaMetadataConverter implements CdcMetadataConverter {
 
-    protected static String KAFKA_METADATA_COLUMN_PREFIX = "__kafka_";
+    protected static final String KAFKA_METADATA_COLUMN_PREFIX = "__kafka_";
     private static final long serialVersionUID = 1L;
 
     private final String fieldName;
@@ -68,7 +68,8 @@ public class KafkaMetadataConverter implements CdcMetadataConverter {
 
     @Override
     public String columnName() {
-        return KAFKA_METADATA_COLUMN_PREFIX + this.fieldName;
+        //return KAFKA_METADATA_COLUMN_PREFIX + this.fieldName;
+        return this.fieldName;
     }
 
     /** Converter for Kafka topic name. */
@@ -109,7 +110,7 @@ public class KafkaMetadataConverter implements CdcMetadataConverter {
         @Override
         public String read(CdcSourceRecord record) {
             Object timestamp = record.getMetadata("timestamp");
-            if (timestamp != null && timestamp instanceof Long) {
+            if (timestamp instanceof Long) {
                 return DateTimeUtils.formatTimestamp(
                         Timestamp.fromEpochMillis((Long) timestamp), TimeZone.getDefault(), 3);
             }

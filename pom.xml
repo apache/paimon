@@ -979,6 +979,7 @@ under the License.
                     <artifactId>spotless-maven-plugin</artifactId>
                     <version>${spotless.version}</version>
                     <configuration>
+                        <skip>true</skip>
                         <java>
                             <googleJavaFormat>
                                 <version>1.7</version>

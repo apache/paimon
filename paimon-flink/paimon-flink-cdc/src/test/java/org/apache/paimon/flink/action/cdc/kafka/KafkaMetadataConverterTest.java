@@ -39,7 +39,7 @@ public class KafkaMetadataConverterTest {
 
         // Test data type and column name
         assertThat(converter.dataType()).isEqualTo(DataTypes.STRING());
-        assertThat(converter.columnName()).isEqualTo("topic");
+        assertThat(converter.columnName()).isEqualTo("__kafka_topic");
 
         // Test reading from CdcSourceRecord
         CdcSourceRecord record = new CdcSourceRecord("test-topic", null, "value");
@@ -68,7 +68,7 @@ public class KafkaMetadataConverterTest {
 
         // Test data type and column name
         assertThat(converter.dataType()).isEqualTo(DataTypes.INT());
-        assertThat(converter.columnName()).isEqualTo("partition");
+        assertThat(converter.columnName()).isEqualTo("__kafka_partition");
 
         // Test reading from CdcSourceRecord with metadata
         Map<String, Object> metadata = new HashMap<>();
@@ -88,7 +88,7 @@ public class KafkaMetadataConverterTest {
 
         // Test data type and column name
         assertThat(converter.dataType()).isEqualTo(DataTypes.BIGINT());
-        assertThat(converter.columnName()).isEqualTo("offset");
+        assertThat(converter.columnName()).isEqualTo("__kafka_offset");
 
         // Test reading from CdcSourceRecord with metadata
         Map<String, Object> metadata = new HashMap<>();
@@ -108,7 +108,7 @@ public class KafkaMetadataConverterTest {
 
         // Test data type and column name
         assertThat(converter.dataType()).isEqualTo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3));
-        assertThat(converter.columnName()).isEqualTo("timestamp");
+        assertThat(converter.columnName()).isEqualTo("__kafka_timestamp");
 
         // Test reading from CdcSourceRecord with metadata
         Map<String, Object> metadata = new HashMap<>();
@@ -137,7 +137,7 @@ public class KafkaMetadataConverterTest {
 
         // Test data type and column name
         assertThat(converter.dataType()).isEqualTo(DataTypes.STRING());
-        assertThat(converter.columnName()).isEqualTo("timestamp_type");
+        assertThat(converter.columnName()).isEqualTo("__kafka_timestamp_type");
 
         // Test reading from CdcSourceRecord with metadata
         Map<String, Object> metadata = new HashMap<>();
