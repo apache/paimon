@@ -20,8 +20,10 @@ package org.apache.paimon.flink.pipeline.cdc.util;
 
 import org.apache.paimon.data.InternalRow;
 
+import org.apache.flink.cdc.common.data.DateData;
 import org.apache.flink.cdc.common.data.DecimalData;
 import org.apache.flink.cdc.common.data.LocalZonedTimestampData;
+import org.apache.flink.cdc.common.data.TimeData;
 import org.apache.flink.cdc.common.data.TimestampData;
 import org.apache.flink.cdc.common.data.binary.BinaryRecordData;
 import org.apache.flink.cdc.common.data.binary.BinaryStringData;
@@ -119,10 +121,10 @@ public class PaimonToFlinkCDCDataConverter {
                 fieldGetter = row -> row.getInt(fieldPos);
                 break;
             case DATE:
-                fieldGetter = row -> row.getInt(fieldPos);
+                fieldGetter = row -> DateData.fromEpochDay(row.getInt(fieldPos));
                 break;
             case TIME_WITHOUT_TIME_ZONE:
-                fieldGetter = row -> row.getInt(fieldPos);
+                fieldGetter = row -> TimeData.fromMillisOfDay(row.getInt(fieldPos));
                 break;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 fieldGetter =
