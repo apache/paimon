@@ -18,7 +18,9 @@
 
 package org.apache.paimon.flink.orphan;
 
+import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
@@ -32,6 +34,7 @@ import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.functions.ReduceFunction;
@@ -376,15 +379,34 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
             String databaseName,
             @Nullable String tableName)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
-        List<String> tableNames = Collections.singletonList(tableName);
-        if (tableName == null || "*".equals(tableName)) {
-            tableNames = catalog.listTables(databaseName);
-        }
+        List<DataStream<CleanOrphanFilesResult>> orphanFilesCleans = new ArrayList<>();
 
-        List<DataStream<CleanOrphanFilesResult>> orphanFilesCleans =
-                new ArrayList<>(tableNames.size());
-        for (String t : tableNames) {
-            Identifier identifier = new Identifier(databaseName, t);
+        if (tableName == null || "*".equals(tableName)) {
+            String pageToken = null;
+            do {
+                PagedList<Table> pagedTables =
+                        catalog.listTableDetailsPaged(
+                                databaseName, null, pageToken, null, TableType.TABLE.toString());
+                for (Table table : pagedTables.getElements()) {
+                    if (!(table instanceof FileStoreTable)) {
+                        LOG.warn("table {} is not a FileStoreTable, so ignore it", table.name());
+                        continue;
+                    }
+                    DataStream<CleanOrphanFilesResult> clean =
+                            new FlinkOrphanFilesClean(
+                                            (FileStoreTable) table,
+                                            olderThanMillis,
+                                            dryRun,
+                                            parallelism)
+                                    .doOrphanClean(env);
+                    if (clean != null) {
+                        orphanFilesCleans.add(clean);
+                    }
+                }
+                pageToken = pagedTables.getNextPageToken();
+            } while (!StringUtils.isNullOrWhitespaceOnly(pageToken));
+        } else {
+            Identifier identifier = new Identifier(databaseName, tableName);
             Table table = catalog.getTable(identifier);
             checkArgument(
                     table instanceof FileStoreTable,
