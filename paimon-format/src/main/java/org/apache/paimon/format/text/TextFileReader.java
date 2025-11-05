@@ -27,43 +27,28 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 
 /** Base class for text-based file readers that provides common functionality. */
-public abstract class BaseTextFileReader implements FileRecordReader<InternalRow> {
-
-    private static final int MAX_LINE_LENGTH = Integer.MAX_VALUE;
+public abstract class TextFileReader implements FileRecordReader<InternalRow> {
 
     private final Path filePath;
-    private final InputStream decompressedStream;
     private final TextRecordIterator reader;
 
     protected final RowType rowType;
-    protected final BufferedReader bufferedReader;
-    protected final byte[] recordDelimiterBytes;
+    protected final TextLineReader lineReader;
 
     protected boolean readerClosed = false;
 
-    protected BaseTextFileReader(
-            FileIO fileIO, Path filePath, RowType rowType, String recordDelimiter)
+    protected TextFileReader(FileIO fileIO, Path filePath, RowType rowType, String delimiter)
             throws IOException {
         this.filePath = filePath;
         this.rowType = rowType;
-        this.recordDelimiterBytes =
-                recordDelimiter != null && !"\n".equals(recordDelimiter)
-                        ? recordDelimiter.getBytes(StandardCharsets.UTF_8)
-                        : null;
-        this.decompressedStream =
+        InputStream decompressedStream =
                 HadoopCompressionUtils.createDecompressedInputStream(
                         fileIO.newInputStream(filePath), filePath);
-        this.bufferedReader =
-                new BufferedReader(
-                        new InputStreamReader(this.decompressedStream, StandardCharsets.UTF_8));
+        this.lineReader = TextLineReader.create(decompressedStream, delimiter);
         this.reader = new TextRecordIterator();
     }
 
@@ -101,13 +86,8 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
     @Override
     public void close() throws IOException {
         if (!readerClosed) {
-            // Close the buffered reader first
-            if (bufferedReader != null) {
-                bufferedReader.close();
-            }
-            // Explicitly close the decompressed stream to prevent resource leaks
-            if (decompressedStream != null) {
-                decompressedStream.close();
+            if (lineReader != null) {
+                lineReader.close();
             }
             readerClosed = true;
         }
@@ -175,51 +155,6 @@ public abstract class BaseTextFileReader implements FileRecordReader<InternalRow
      * @throws IOException if an I/O error occurs or line exceeds maximum length
      */
     protected String readLine() throws IOException {
-        // Fast path: use BufferedReader for standard delimiters
-        if (recordDelimiterBytes == null || recordDelimiterBytes.length == 0) {
-            return bufferedReader.readLine();
-        }
-
-        ByteArrayOutputStream out = new ByteArrayOutputStream(1024);
-        int matchIndex = 0;
-
-        while (true) {
-            int b = decompressedStream.read();
-            if (b == -1) {
-                // End of stream: flush any partially matched delimiter bytes to output
-                if (matchIndex > 0) {
-                    out.write(recordDelimiterBytes, 0, matchIndex);
-                }
-                // Return null if nothing was read, otherwise return the accumulated line
-                return out.size() == 0 ? null : out.toString(StandardCharsets.UTF_8.name());
-            }
-
-            // Guard against extremely long lines that could cause memory issues
-            if (MAX_LINE_LENGTH - matchIndex < out.size()) {
-                throw new IOException("Line exceeds maximum length: " + MAX_LINE_LENGTH);
-            }
-
-            byte current = (byte) b;
-            if (current == recordDelimiterBytes[matchIndex]) {
-                // Current byte matches the next expected delimiter byte
-                matchIndex++;
-                if (matchIndex == recordDelimiterBytes.length) {
-                    // Complete delimiter found, return the line without the delimiter
-                    return out.toString(StandardCharsets.UTF_8.name());
-                }
-            } else if (matchIndex > 0) {
-                // Mismatch: handle partial matches
-                out.write(recordDelimiterBytes, 0, matchIndex);
-                if (current == recordDelimiterBytes[0]) {
-                    matchIndex = 1;
-                } else {
-                    out.write(current);
-                    matchIndex = 0;
-                }
-            } else {
-                // just add the current byte to output
-                out.write(current);
-            }
-        }
+        return lineReader.readLine();
     }
 }

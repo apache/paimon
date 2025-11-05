@@ -19,7 +19,7 @@
 package org.apache.paimon.format.csv;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.text.BaseTextFileReader;
+import org.apache.paimon.format.text.TextFileReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.RowType;
@@ -27,7 +27,7 @@ import org.apache.paimon.types.RowType;
 import java.io.IOException;
 
 /** CSV file reader implementation. */
-public class CsvFileReader extends BaseTextFileReader {
+public class CsvFileReader extends TextFileReader {
 
     private final boolean includeHeader;
     private final CsvParser csvParser;

@@ -40,8 +40,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link BaseTextFileReader}. */
-public class BaseTextFileReaderTest {
+/** Test for {@link TextFileReader}. */
+public class TextFileReaderTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -199,7 +199,7 @@ public class BaseTextFileReaderTest {
     }
 
     /** Concrete implementation of BaseTextFileReader for testing. */
-    private static class TestTextFileReader extends BaseTextFileReader {
+    private static class TestTextFileReader extends TextFileReader {
 
         public TestTextFileReader(
                 FileIO fileIO, Path filePath, RowType rowType, String recordDelimiter)
