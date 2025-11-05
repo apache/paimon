@@ -55,7 +55,7 @@ public class JsonFileReader extends BaseTextFileReader {
 
     public JsonFileReader(FileIO fileIO, Path filePath, RowType rowType, JsonOptions options)
             throws IOException {
-        super(fileIO, filePath, rowType);
+        super(fileIO, filePath, rowType, options.getLineDelimiter());
         this.options = options;
     }
 

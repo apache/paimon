@@ -333,14 +333,14 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
     }
 
     @Test
-    public void testJsonWriteReadWithDifferentLineDelimiters() throws IOException {
+    public void testWithCustomLineDelimiters() throws IOException {
         RowType rowType =
                 DataTypes.ROW(
                         DataTypes.INT().notNull(),
                         DataTypes.STRING(),
                         DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()));
 
-        String[] delimiters = {"\n", "\r", "\r\n"};
+        String[] delimiters = {"\n", "\r", "\r\n", "||", "###", "@@", "\t", "::"};
 
         // Create test data once (reused for all delimiters)
         List<InternalRow> testData =

@@ -49,7 +49,7 @@ public class JsonFormatWriter extends BaseTextFileWriter {
 
     private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
 
-    private final char lineDelimiter;
+    private final String lineDelimiter;
 
     public JsonFormatWriter(
             PositionOutputStream outputStream,
@@ -58,7 +58,7 @@ public class JsonFormatWriter extends BaseTextFileWriter {
             String compression)
             throws IOException {
         super(outputStream, rowType, compression);
-        this.lineDelimiter = options.getLineDelimiter().charAt(0);
+        this.lineDelimiter = options.getLineDelimiter();
     }
 
     @Override

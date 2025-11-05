@@ -240,6 +240,48 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
     }
 
     @Test
+    public void testCustomLineDelimiter() throws IOException {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.INT().notNull(),
+                        DataTypes.STRING(),
+                        DataTypes.DOUBLE().notNull());
+
+        String[] customDelimiters = {"|||", "###", "<EOL>", "\t\t", "abc"};
+
+        List<InternalRow> testData =
+                Arrays.asList(
+                        GenericRow.of(1, BinaryString.fromString("ab"), 100.5),
+                        GenericRow.of(2, BinaryString.fromString("Bob"), 200.75),
+                        GenericRow.of(3, BinaryString.fromString("Charlie"), 300.25));
+
+        for (String delimiter : customDelimiters) {
+            Options options = new Options();
+            options.set(CsvOptions.LINE_DELIMITER, delimiter);
+
+            List<InternalRow> result =
+                    writeThenRead(
+                            options,
+                            rowType,
+                            rowType,
+                            testData,
+                            "test_custom_line_delim_" + delimiter.hashCode());
+
+            // Verify results
+            assertThat(result).hasSize(3);
+            assertThat(result.get(0).getInt(0)).isEqualTo(1);
+            assertThat(result.get(0).getString(1).toString()).isEqualTo("ab");
+            assertThat(result.get(0).getDouble(2)).isEqualTo(100.5);
+            assertThat(result.get(1).getInt(0)).isEqualTo(2);
+            assertThat(result.get(1).getString(1).toString()).isEqualTo("Bob");
+            assertThat(result.get(1).getDouble(2)).isEqualTo(200.75);
+            assertThat(result.get(2).getInt(0)).isEqualTo(3);
+            assertThat(result.get(2).getString(1).toString()).isEqualTo("Charlie");
+            assertThat(result.get(2).getDouble(2)).isEqualTo(300.25);
+        }
+    }
+
+    @Test
     public void testCsvQuoteCharacterWriteRead() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
 
