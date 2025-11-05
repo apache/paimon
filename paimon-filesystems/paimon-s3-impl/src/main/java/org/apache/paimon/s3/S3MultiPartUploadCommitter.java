@@ -34,8 +34,12 @@ import java.util.List;
 public class S3MultiPartUploadCommitter
         extends BaseMultiPartUploadCommitter<PartETag, CompleteMultipartUploadResult> {
     public S3MultiPartUploadCommitter(
-            String uploadId, List<PartETag> uploadedParts, String objectName, long position) {
-        super(uploadId, uploadedParts, objectName, position);
+            String uploadId,
+            List<PartETag> uploadedParts,
+            String objectName,
+            long position,
+            Path targetPath) {
+        super(uploadId, uploadedParts, objectName, position, targetPath);
     }
 
     @Override

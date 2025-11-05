@@ -259,7 +259,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         private TestMultiPartUploadTwoPhaseOutputStream(
                 FakeMultiPartUploadStore store, org.apache.hadoop.fs.Path path, int threshold)
                 throws IOException {
-            super(store, path);
+            super(store, path, new Path(path.toString()));
             this.store = store;
             this.threshold = threshold;
         }
@@ -271,7 +271,11 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
 
         @Override
         public Committer committer(
-                String uploadId, List<TestPart> uploadedParts, String objectName, long position) {
+                String uploadId,
+                List<TestPart> uploadedParts,
+                String objectName,
+                long position,
+                Path targetPath) {
             return new TestCommitter(store, uploadId, uploadedParts, objectName, position);
         }
     }

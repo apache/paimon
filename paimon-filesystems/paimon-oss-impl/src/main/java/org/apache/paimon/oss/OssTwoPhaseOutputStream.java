@@ -20,6 +20,7 @@ package org.apache.paimon.oss;
 
 import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
+import org.apache.paimon.fs.Path;
 
 import com.aliyun.oss.model.CompleteMultipartUploadResult;
 import com.aliyun.oss.model.PartETag;
@@ -33,14 +34,20 @@ public class OssTwoPhaseOutputStream
 
     public OssTwoPhaseOutputStream(
             MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore,
-            org.apache.hadoop.fs.Path hadoopPath)
+            org.apache.hadoop.fs.Path hadoopPath,
+            Path targetPath)
             throws IOException {
-        super(multiPartUploadStore, hadoopPath);
+        super(multiPartUploadStore, hadoopPath, targetPath);
     }
 
     @Override
     public Committer committer(
-            String uploadId, List<PartETag> uploadedParts, String objectName, long position) {
-        return new OSSMultiPartUploadCommitter(uploadId, uploadedParts, objectName, position);
+            String uploadId,
+            List<PartETag> uploadedParts,
+            String objectName,
+            long position,
+            Path targetPath) {
+        return new OSSMultiPartUploadCommitter(
+                uploadId, uploadedParts, objectName, position, targetPath);
     }
 }

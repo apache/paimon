@@ -37,9 +37,10 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             LoggerFactory.getLogger(MultiPartUploadTwoPhaseOutputStream.class);
 
     private final ByteArrayOutputStream buffer;
-    private final List<T> uploadedParts;
     private final MultiPartUploadStore<T, C> multiPartUploadStore;
+    private final List<T> uploadedParts;
     private final String objectName;
+    private final Path targetPath;
 
     private String uploadId;
     private long position;
@@ -47,12 +48,15 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
     private Committer committer;
 
     public MultiPartUploadTwoPhaseOutputStream(
-            MultiPartUploadStore<T, C> multiPartUploadStore, org.apache.hadoop.fs.Path hadoopPath)
+            MultiPartUploadStore<T, C> multiPartUploadStore,
+            org.apache.hadoop.fs.Path hadoopPath,
+            Path path)
             throws IOException {
         this.multiPartUploadStore = multiPartUploadStore;
         this.buffer = new ByteArrayOutputStream();
         this.uploadedParts = new ArrayList<>();
         this.objectName = multiPartUploadStore.pathToObject(hadoopPath);
+        this.targetPath = path;
         this.uploadId = multiPartUploadStore.startMultiPartUpload(objectName);
         this.position = 0;
     }
@@ -65,7 +69,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
     }
 
     public abstract Committer committer(
-            String uploadId, List<T> uploadedParts, String objectName, long position);
+            String uploadId, List<T> uploadedParts, String objectName, long position, Path path);
 
     @Override
     public long getPos() throws IOException {
@@ -142,7 +146,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             uploadPart();
         }
 
-        return committer(uploadId, uploadedParts, objectName, position);
+        return committer(uploadId, uploadedParts, objectName, position, targetPath);
     }
 
     private void uploadPart() throws IOException {

@@ -81,7 +81,8 @@ public class S3FileIO extends HadoopCompliantFileIO {
         if (!overwrite && this.exists(path)) {
             throw new IOException("File " + path + " already exists.");
         }
-        return new S3TwoPhaseOutputStream(new S3MultiPartUpload(fs, fs.getConf()), hadoopPath);
+        return new S3TwoPhaseOutputStream(
+                new S3MultiPartUpload(fs, fs.getConf()), hadoopPath, path);
     }
 
     // add additional config entries from the IO config to the Hadoop config

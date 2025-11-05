@@ -37,17 +37,22 @@ import java.util.List;
 /** Provides the multipart upload by Jindo. */
 public class JindoMultiPartUpload implements MultiPartUploadStore<JdoObjectPart, String> {
 
-    private final JindoHadoopSystem fs;
     private final JindoMpuStore mpuStore;
+    private final Path workingDirectory;
 
     public JindoMultiPartUpload(JindoHadoopSystem fs, Path filePath) {
-        this.fs = fs;
+        this.workingDirectory = fs.getWorkingDirectory();
         this.mpuStore = fs.getMpuStore(filePath);
     }
 
     @Override
+    public String pathToObject(Path hadoopPath) {
+        return hadoopPath.toString();
+    }
+
+    @Override
     public Path workingDirectory() {
-        return fs.getWorkingDirectory();
+        return workingDirectory;
     }
 
     @Override
@@ -80,7 +85,7 @@ public class JindoMultiPartUpload implements MultiPartUploadStore<JdoObjectPart,
             ByteBuffer buffer;
             try (FileInputStream fis = new FileInputStream(file);
                     FileChannel channel = fis.getChannel()) {
-                buffer = ByteBuffer.allocate(byteLength);
+                buffer = ByteBuffer.allocateDirect(byteLength);
                 channel.read(buffer);
                 buffer.flip();
             }
