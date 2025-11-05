@@ -18,20 +18,32 @@
 
 package org.apache.paimon.flink.pipeline.cdc.util;
 
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.InternalRowUtils;
+
 import org.apache.flink.cdc.common.data.DateData;
 import org.apache.flink.cdc.common.data.DecimalData;
 import org.apache.flink.cdc.common.data.LocalZonedTimestampData;
+import org.apache.flink.cdc.common.data.RecordData;
 import org.apache.flink.cdc.common.data.TimeData;
 import org.apache.flink.cdc.common.data.TimestampData;
 import org.apache.flink.cdc.common.data.binary.BinaryStringData;
 import org.apache.flink.cdc.common.event.DataChangeEvent;
 import org.apache.flink.cdc.common.event.TableId;
+import org.apache.flink.cdc.common.schema.Schema;
 import org.apache.flink.cdc.common.types.DataType;
+import org.apache.flink.cdc.common.types.DataTypes;
+import org.apache.flink.cdc.common.utils.SchemaUtils;
 import org.apache.flink.cdc.runtime.typeutils.BinaryRecordDataGenerator;
-import org.junit.jupiter.api.Assertions;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * Data convert test for {@link PaimonToFlinkCDCDataConverter} and {@link
@@ -40,76 +52,42 @@ import java.math.BigDecimal;
 public class DataConvertTest {
 
     @Test
-    public void testFullTypesConverter() {
-        org.apache.flink.cdc.common.schema.Schema fullTypesSchema =
-                org.apache.flink.cdc.common.schema.Schema.newBuilder()
+    void testFullTypesConversion() {
+        Schema fullTypesSchema =
+                Schema.newBuilder()
+                        .physicalColumn("pk_string", DataTypes.STRING().notNull())
+                        .physicalColumn("boolean", DataTypes.BOOLEAN())
+                        .physicalColumn("binary", DataTypes.BINARY(3))
+                        .physicalColumn("varbinary", DataTypes.VARBINARY(10))
+                        .physicalColumn("bytes", DataTypes.BYTES())
+                        .physicalColumn("tinyint", DataTypes.TINYINT())
+                        .physicalColumn("smallint", DataTypes.SMALLINT())
+                        .physicalColumn("int", DataTypes.INT())
+                        .physicalColumn("bigint", DataTypes.BIGINT())
+                        .physicalColumn("float", DataTypes.FLOAT())
+                        .physicalColumn("double", DataTypes.DOUBLE())
+                        .physicalColumn("decimal", DataTypes.DECIMAL(6, 3))
+                        .physicalColumn("char", DataTypes.CHAR(5))
+                        .physicalColumn("varchar", DataTypes.VARCHAR(10))
+                        .physicalColumn("string", DataTypes.STRING())
+                        .physicalColumn("date", DataTypes.DATE())
+                        .physicalColumn("time", DataTypes.TIME())
+                        .physicalColumn("time_with_precision", DataTypes.TIME(6))
+                        .physicalColumn("timestamp", DataTypes.TIMESTAMP())
+                        .physicalColumn("timestamp_with_precision_3", DataTypes.TIMESTAMP(3))
+                        .physicalColumn("timestamp_with_precision_6", DataTypes.TIMESTAMP(6))
+                        .physicalColumn("timestamp_with_precision_9", DataTypes.TIMESTAMP(9))
+                        .physicalColumn("timestamp_ltz", DataTypes.TIMESTAMP_LTZ())
                         .physicalColumn(
-                                "pk_string",
-                                org.apache.flink.cdc.common.types.DataTypes.STRING().notNull())
+                                "timestamp_ltz_with_precision_3", DataTypes.TIMESTAMP_LTZ(3))
                         .physicalColumn(
-                                "boolean", org.apache.flink.cdc.common.types.DataTypes.BOOLEAN())
+                                "timestamp_ltz_with_precision_6", DataTypes.TIMESTAMP_LTZ(6))
                         .physicalColumn(
-                                "binary", org.apache.flink.cdc.common.types.DataTypes.BINARY(3))
-                        .physicalColumn(
-                                "varbinary",
-                                org.apache.flink.cdc.common.types.DataTypes.VARBINARY(10))
-                        .physicalColumn(
-                                "bytes", org.apache.flink.cdc.common.types.DataTypes.BYTES())
-                        .physicalColumn(
-                                "tinyint", org.apache.flink.cdc.common.types.DataTypes.TINYINT())
-                        .physicalColumn(
-                                "smallint", org.apache.flink.cdc.common.types.DataTypes.SMALLINT())
-                        .physicalColumn("int", org.apache.flink.cdc.common.types.DataTypes.INT())
-                        .physicalColumn(
-                                "bigint", org.apache.flink.cdc.common.types.DataTypes.BIGINT())
-                        .physicalColumn(
-                                "float", org.apache.flink.cdc.common.types.DataTypes.FLOAT())
-                        .physicalColumn(
-                                "double", org.apache.flink.cdc.common.types.DataTypes.DOUBLE())
-                        .physicalColumn(
-                                "decimal",
-                                org.apache.flink.cdc.common.types.DataTypes.DECIMAL(6, 3))
-                        .physicalColumn("char", org.apache.flink.cdc.common.types.DataTypes.CHAR(5))
-                        .physicalColumn(
-                                "varchar", org.apache.flink.cdc.common.types.DataTypes.VARCHAR(10))
-                        .physicalColumn(
-                                "string", org.apache.flink.cdc.common.types.DataTypes.STRING())
-                        .physicalColumn("date", org.apache.flink.cdc.common.types.DataTypes.DATE())
-                        .physicalColumn("time", org.apache.flink.cdc.common.types.DataTypes.TIME())
-                        .physicalColumn(
-                                "time_with_precision",
-                                org.apache.flink.cdc.common.types.DataTypes.TIME(6))
-                        .physicalColumn(
-                                "timestamp",
-                                org.apache.flink.cdc.common.types.DataTypes.TIMESTAMP())
-                        .physicalColumn(
-                                "timestamp_with_precision_3",
-                                org.apache.flink.cdc.common.types.DataTypes.TIMESTAMP(3))
-                        .physicalColumn(
-                                "timestamp_with_precision_6",
-                                org.apache.flink.cdc.common.types.DataTypes.TIMESTAMP(6))
-                        .physicalColumn(
-                                "timestamp_with_precision_9",
-                                org.apache.flink.cdc.common.types.DataTypes.TIMESTAMP(9))
-                        .physicalColumn(
-                                "timestamp_ltz",
-                                org.apache.flink.cdc.common.types.DataTypes.TIMESTAMP_LTZ())
-                        .physicalColumn(
-                                "timestamp_ltz_with_precision_3",
-                                org.apache.flink.cdc.common.types.DataTypes.TIMESTAMP_LTZ(3))
-                        .physicalColumn(
-                                "timestamp_ltz_with_precision_6",
-                                org.apache.flink.cdc.common.types.DataTypes.TIMESTAMP_LTZ(6))
-                        .physicalColumn(
-                                "timestamp_ltz_with_precision_9",
-                                org.apache.flink.cdc.common.types.DataTypes.TIMESTAMP_LTZ(9))
+                                "timestamp_ltz_with_precision_9", DataTypes.TIMESTAMP_LTZ(9))
                         .primaryKey("pk_string")
                         .partitionKey("boolean")
                         .build();
-        TableId tableId = TableId.tableId("testDatabase", "testTable");
-        BinaryRecordDataGenerator recordDataGenerator =
-                new BinaryRecordDataGenerator(
-                        fullTypesSchema.getColumnDataTypes().toArray(new DataType[0]));
+
         Object[] testData =
                 new Object[] {
                     BinaryStringData.fromString("pk_string"),
@@ -129,7 +107,7 @@ public class DataConvertTest {
                     BinaryStringData.fromString("test3"),
                     DateData.fromEpochDay(1000),
                     TimeData.fromMillisOfDay(200),
-                    TimeData.fromMillisOfDay(300).toMillisOfDay(),
+                    TimeData.fromMillisOfDay(300),
                     TimestampData.fromMillis(100, 1),
                     TimestampData.fromMillis(200, 2),
                     TimestampData.fromMillis(300, 3),
@@ -139,19 +117,99 @@ public class DataConvertTest {
                     LocalZonedTimestampData.fromEpochMillis(500, 5),
                     LocalZonedTimestampData.fromEpochMillis(600, 6),
                 };
-        org.apache.flink.cdc.common.event.DataChangeEvent dataChangeEvent =
-                DataChangeEvent.insertEvent(tableId, recordDataGenerator.generate(testData));
+        testConvertBackAndForth(
+                fullTypesSchema,
+                testData,
+                "[pk_string, true, [1, 2, 3], [4, 5, 6], [7, 8, 9], 1, 2, 3, 4, 5.1, 6.2, 7.123, test1, test2, test3, 1000, 200, 300, 1970-01-01T00:00:00.100000001, 1970-01-01T00:00:00.200000002, 1970-01-01T00:00:00.300000003, 1970-01-01T00:00:00.400000004, 1970-01-01T00:00:00.300000003, 1970-01-01T00:00:00.400000004, 1970-01-01T00:00:00.500000005, 1970-01-01T00:00:00.600000006]");
 
-        Assertions.assertEquals(
-                dataChangeEvent,
+        Object[] allNullTestData =
+                new Object[] {
+                    BinaryStringData.fromString("pk_string"),
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                };
+        testConvertBackAndForth(
+                fullTypesSchema,
+                allNullTestData,
+                "[pk_string, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]");
+    }
+
+    private void testConvertBackAndForth(Schema cdcSchema, Object[] fields, String expected) {
+        int arity = fields.length;
+        TableId tableId = TableId.tableId("testDatabase", "testTable");
+        BinaryRecordDataGenerator recordDataGenerator =
+                new BinaryRecordDataGenerator(
+                        cdcSchema.getColumnDataTypes().toArray(new DataType[0]));
+        DataChangeEvent event =
+                DataChangeEvent.insertEvent(tableId, recordDataGenerator.generate(fields));
+        org.apache.paimon.schema.Schema paimonSchema =
+                FlinkCDCToPaimonTypeConverter.convertFlinkCDCSchemaToPaimonSchema(cdcSchema);
+
+        // Step 1: Convert CDC Event to Paimon Event
+        List<RecordData.FieldGetter> cdcFieldGetters =
+                FlinkCDCToPaimonDataConverter.createFieldGetters(cdcSchema.getColumnDataTypes());
+        InternalRow paimonRow =
+                FlinkCDCToPaimonDataConverter.convertDataChangeEventToInternalRow(
+                        event, cdcFieldGetters);
+
+        // Step 2: Check Paimon Row specs
+        Assertions.assertThat(paimonRow.getRowKind()).isEqualTo(RowKind.INSERT);
+        Assertions.assertThat(paimonRow.getFieldCount()).isEqualTo(arity);
+        InternalRow.FieldGetter[] internalRowFieldGetters =
+                InternalRowUtils.createFieldGetters(paimonSchema.rowType().getFieldTypes());
+
+        List<String> internalRowRepresentation = new ArrayList<>();
+        for (InternalRow.FieldGetter internalRowFieldGetter : internalRowFieldGetters) {
+            internalRowRepresentation.add(
+                    stringify(internalRowFieldGetter.getFieldOrNull(paimonRow)));
+        }
+        Assertions.assertThat(internalRowRepresentation).hasToString(expected);
+
+        // Step 3: Convert it back
+        List<InternalRow.FieldGetter> paimonFieldGetters =
+                PaimonToFlinkCDCDataConverter.createFieldGetters(cdcSchema.getColumnDataTypes());
+        DataChangeEvent convertedEvent =
                 PaimonToFlinkCDCDataConverter.convertRowToDataChangeEvent(
-                        tableId,
-                        FlinkCDCToPaimonDataConverter.convertDataChangeEventToInternalRow(
-                                dataChangeEvent,
-                                FlinkCDCToPaimonDataConverter.createFieldGetters(
-                                        fullTypesSchema.getColumnDataTypes())),
-                        PaimonToFlinkCDCDataConverter.createFieldGetters(
-                                fullTypesSchema.getColumnDataTypes()),
-                        recordDataGenerator));
+                        tableId, paimonRow, paimonFieldGetters, recordDataGenerator);
+
+        // Step 4: Validate it
+        String[] originalFields = Arrays.stream(fields).map(this::stringify).toArray(String[]::new);
+        Assertions.assertThat(convertedEvent).isEqualTo(event);
+        Assertions.assertThat(
+                        SchemaUtils.restoreOriginalData(
+                                event.after(), SchemaUtils.createFieldGetters(cdcSchema)))
+                .map(this::stringify)
+                .containsExactly(originalFields);
+    }
+
+    // Stringify byte[] properly for checking.
+    private String stringify(Object value) {
+        if (value instanceof byte[]) {
+            return Arrays.toString((byte[]) value);
+        }
+        return Objects.toString(value);
     }
 }
