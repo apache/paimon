@@ -27,7 +27,11 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
-/** A Jdbc Connection pools implementation. */
+/**
+ * Copied from Flink CDC 3.5.0: {@code
+ * org/apache/flink/cdc/connectors/mysql/source/connection/JdbcConnectionPools.java}. Modified
+ * method {@link JdbcConnectionPools#clear()} at line 60 ~ 66.
+ */
 public class JdbcConnectionPools implements ConnectionPools {
 
     private static final Logger LOG = LoggerFactory.getLogger(JdbcConnectionPools.class);
