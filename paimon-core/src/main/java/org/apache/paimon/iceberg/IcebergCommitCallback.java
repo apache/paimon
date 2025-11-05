@@ -108,6 +108,22 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     private static final String PUFFIN_FORMAT = "puffin";
 
+    // Snapshot summary metric keys
+    private static final String SNAPSHOT_SUMMARY_ADDED_DATA_FILES = "added-data-files";
+    private static final String SNAPSHOT_SUMMARY_ADDED_RECORDS = "added-records";
+    private static final String SNAPSHOT_SUMMARY_ADDED_FILES_SIZE = "added-files-size";
+    private static final String SNAPSHOT_SUMMARY_DELETED_DATA_FILES = "deleted-data-files";
+    private static final String SNAPSHOT_SUMMARY_DELETED_RECORDS = "deleted-records";
+    private static final String SNAPSHOT_SUMMARY_REMOVED_FILES_SIZE = "removed-files-size";
+    private static final String SNAPSHOT_SUMMARY_CHANGED_PARTITION_COUNT =
+            "changed-partition-count";
+    private static final String SNAPSHOT_SUMMARY_TOTAL_RECORDS = "total-records";
+    private static final String SNAPSHOT_SUMMARY_TOTAL_DATA_FILES = "total-data-files";
+    private static final String SNAPSHOT_SUMMARY_TOTAL_FILES_SIZE = "total-files-size";
+    private static final String SNAPSHOT_SUMMARY_TOTAL_DELETE_FILES = "total-delete-files";
+    private static final String SNAPSHOT_SUMMARY_TOTAL_POSITION_DELETES = "total-position-deletes";
+    private static final String SNAPSHOT_SUMMARY_TOTAL_EQUALITY_DELETES = "total-equality-deletes";
+
     private final FileStoreTable table;
     private final String commitUser;
 
@@ -637,7 +653,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         IcebergSnapshot baseSnapshot = baseMetadata.currentSnapshot();
         Long snapshotTotalRecords = snapshot.totalRecordCount();
-        Long previousTotalRecordsValue = getSummaryLong(baseSnapshot, "total-records");
+        Long previousTotalRecordsValue =
+                getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_RECORDS);
         long previousTotalRecords =
                 previousTotalRecordsValue != null
                         ? previousTotalRecordsValue
@@ -651,7 +668,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             previousTotalRecords + metrics.addedRecords - metrics.deletedRecords);
         }
 
-        Long previousTotalDataFilesValue = getSummaryLong(baseSnapshot, "total-data-files");
+        Long previousTotalDataFilesValue =
+                getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_DATA_FILES);
         long previousTotalDataFiles =
                 previousTotalDataFilesValue != null
                         ? previousTotalDataFilesValue
@@ -661,7 +679,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         0,
                         previousTotalDataFiles + metrics.addedDataFiles - metrics.deletedDataFiles);
 
-        Long previousTotalFilesSizeValue = getSummaryLong(baseSnapshot, "total-files-size");
+        Long previousTotalFilesSizeValue =
+                getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_FILES_SIZE);
         long previousTotalFilesSize =
                 previousTotalFilesSizeValue != null
                         ? previousTotalFilesSizeValue
@@ -672,7 +691,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         previousTotalFilesSize + metrics.addedFilesSize - metrics.deletedFilesSize);
 
         metrics.totalDeleteFiles = computeLiveDeleteFileCount(newDVManifestFileMetas);
-        metrics.totalPositionDeletes = computeDeleteRowCount(newDVManifestFileMetas);
+        metrics.totalPositionDeletes = computeLiveRowCount(newDVManifestFileMetas);
         metrics.totalEqualityDeletes = 0;
 
         IcebergSnapshotSummary snapshotSummary =
@@ -1367,19 +1386,19 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         long totalPositionDeletes = Math.max(0, metrics.totalPositionDeletes);
         long totalEqualityDeletes = Math.max(0, metrics.totalEqualityDeletes);
 
-        summary.put("added-data-files", Long.toString(addedDataFiles));
-        summary.put("added-records", Long.toString(addedRecords));
-        summary.put("added-files-size", Long.toString(addedFilesSize));
-        summary.put("deleted-data-files", Long.toString(deletedDataFiles));
-        summary.put("deleted-records", Long.toString(deletedRecords));
-        summary.put("deleted-files-size", Long.toString(deletedFilesSize));
-        summary.put("changed-partition-count", Long.toString(changedPartitionCount));
-        summary.put("total-records", Long.toString(totalRecords));
-        summary.put("total-data-files", Long.toString(totalDataFiles));
-        summary.put("total-files-size", Long.toString(totalFilesSize));
-        summary.put("total-delete-files", Long.toString(totalDeleteFiles));
-        summary.put("total-position-deletes", Long.toString(totalPositionDeletes));
-        summary.put("total-equality-deletes", Long.toString(totalEqualityDeletes));
+        summary.put(SNAPSHOT_SUMMARY_ADDED_DATA_FILES, Long.toString(addedDataFiles));
+        summary.put(SNAPSHOT_SUMMARY_ADDED_RECORDS, Long.toString(addedRecords));
+        summary.put(SNAPSHOT_SUMMARY_ADDED_FILES_SIZE, Long.toString(addedFilesSize));
+        summary.put(SNAPSHOT_SUMMARY_DELETED_DATA_FILES, Long.toString(deletedDataFiles));
+        summary.put(SNAPSHOT_SUMMARY_DELETED_RECORDS, Long.toString(deletedRecords));
+        summary.put(SNAPSHOT_SUMMARY_REMOVED_FILES_SIZE, Long.toString(deletedFilesSize));
+        summary.put(SNAPSHOT_SUMMARY_CHANGED_PARTITION_COUNT, Long.toString(changedPartitionCount));
+        summary.put(SNAPSHOT_SUMMARY_TOTAL_RECORDS, Long.toString(totalRecords));
+        summary.put(SNAPSHOT_SUMMARY_TOTAL_DATA_FILES, Long.toString(totalDataFiles));
+        summary.put(SNAPSHOT_SUMMARY_TOTAL_FILES_SIZE, Long.toString(totalFilesSize));
+        summary.put(SNAPSHOT_SUMMARY_TOTAL_DELETE_FILES, Long.toString(totalDeleteFiles));
+        summary.put(SNAPSHOT_SUMMARY_TOTAL_POSITION_DELETES, Long.toString(totalPositionDeletes));
+        summary.put(SNAPSHOT_SUMMARY_TOTAL_EQUALITY_DELETES, Long.toString(totalEqualityDeletes));
 
         Map<String, String> properties = snapshot.properties();
         if (properties != null) {
@@ -1421,16 +1440,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                 meta.addedFilesCount()
                                         + meta.existingFilesCount()
                                         - meta.deletedFilesCount())
-                .sum();
-    }
-
-    private long computeDeleteRowCount(List<IcebergManifestFileMeta> manifestMetas) {
-        return manifestMetas.stream()
-                .mapToLong(
-                        meta ->
-                                meta.addedRowsCount()
-                                        + meta.existingRowsCount()
-                                        - meta.deletedRowsCount())
                 .sum();
     }
 
