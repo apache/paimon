@@ -38,6 +38,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -328,7 +329,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
 
         testAllTypesImpl();
 
-        client.cancel().get();
+        client.cancel().get(1, TimeUnit.MINUTES);
     }
 
     private void testAllTypesImpl() throws Exception {
@@ -703,7 +704,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                     "INSERT INTO test_options_change VALUES (2, '2023-03-23', null)");
         }
         waitingTables(tableName);
-        jobClient.cancel().get();
+        jobClient.cancel().get(1, TimeUnit.MINUTES);
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");

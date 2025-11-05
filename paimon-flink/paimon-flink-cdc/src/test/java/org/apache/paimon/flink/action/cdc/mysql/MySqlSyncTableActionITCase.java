@@ -54,6 +54,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -463,7 +464,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             testAllTypesImpl(statement);
         }
 
-        client.cancel().get();
+        client.cancel().get(1, TimeUnit.MINUTES);
     }
 
     private void testAllTypesImpl(Statement statement) throws Exception {
@@ -1271,7 +1272,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                     "INSERT INTO test_options_change VALUES (2, '2023-03-23', null, null)");
         }
         waitingTables(tableName);
-        jobClient.cancel().get();
+        jobClient.cancel().get(1, TimeUnit.MINUTES);
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");

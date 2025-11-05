@@ -51,6 +51,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
@@ -1238,7 +1239,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         JobClient jobClient = runActionWithDefaultEnv(action1);
 
         waitingTables("t1");
-        jobClient.cancel().get();
+        jobClient.cancel().get(1, TimeUnit.MINUTES);
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");
