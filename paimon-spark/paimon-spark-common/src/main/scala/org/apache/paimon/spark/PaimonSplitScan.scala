@@ -48,6 +48,7 @@ case class PaimonSplitScan(
     PaimonBatch(
       getInputPartitions(dataSplits.asInstanceOf[Array[Split]]),
       readBuilder,
+      coreOptions.blobAsDescriptor(),
       metadataColumns)
   }
 

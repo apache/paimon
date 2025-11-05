@@ -21,6 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TableType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -33,6 +34,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
@@ -45,10 +47,10 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
-import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
@@ -72,12 +74,14 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BRANCH;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
@@ -279,7 +283,8 @@ public class RESTCatalog implements Catalog {
                 this::loadTableMetadata,
                 null,
                 null,
-                context);
+                context,
+                true);
     }
 
     @Override
@@ -355,7 +360,7 @@ public class RESTCatalog implements Catalog {
         try {
             return api.commitSnapshot(identifier, tableUuid, snapshot, statistics);
         } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
+            throw new TableNotExistException(identifier, e);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (BadRequestException e) {
@@ -428,7 +433,8 @@ public class RESTCatalog implements Catalog {
                     i -> toTableMetadata(db, response),
                     null,
                     null,
-                    context);
+                    context,
+                    true);
         } catch (TableNotExistException e) {
             throw new RuntimeException(e);
         }
@@ -442,7 +448,8 @@ public class RESTCatalog implements Catalog {
             checkNotSystemTable(identifier, "createTable");
             validateCreateTable(schema);
             createExternalTablePathIfNotExist(schema);
-            api.createTable(identifier, schema);
+            Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
+            api.createTable(identifier, newSchema);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
@@ -972,17 +979,6 @@ public class RESTCatalog implements Catalog {
         return api;
     }
 
-    protected GetTableTokenResponse loadTableToken(Identifier identifier)
-            throws TableNotExistException {
-        try {
-            return api.loadTableToken(identifier);
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
-    }
-
     private FileIO fileIOForData(Path path, Identifier identifier) {
         return dataTokenEnabled
                 ? new RESTTokenFileIO(context, api, identifier, path)
@@ -1007,5 +1003,31 @@ public class RESTCatalog implements Catalog {
                 }
             }
         }
+    }
+
+    private Schema inferSchemaIfExternalPaimonTable(Schema schema) throws Exception {
+        TableType tableType = Options.fromMap(schema.options()).get(TYPE);
+        String externalLocation = schema.options().get(PATH.key());
+
+        if (TableType.TABLE.equals(tableType) && Objects.nonNull(externalLocation)) {
+            Path externalPath = new Path(externalLocation);
+            SchemaManager schemaManager =
+                    new SchemaManager(fileIOFromOptions(externalPath), externalPath);
+            Optional<TableSchema> latest = schemaManager.latest();
+            if (latest.isPresent()) {
+                // Note we just validate schema here, will not create a new table
+                schemaManager.createTable(schema, true);
+                Schema existsSchema = latest.get().toSchema();
+                // use `owner` and `path` from the user provide schema
+                if (Objects.nonNull(schema.options().get(Catalog.OWNER_PROP))) {
+                    existsSchema
+                            .options()
+                            .put(Catalog.OWNER_PROP, schema.options().get(Catalog.OWNER_PROP));
+                }
+                existsSchema.options().put(PATH.key(), schema.options().get(PATH.key()));
+                return existsSchema;
+            }
+        }
+        return schema;
     }
 }

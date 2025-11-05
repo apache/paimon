@@ -23,6 +23,8 @@ import org.apache.paimon.spark.{PaimonAppendTable, PaimonPrimaryKeyTable, Paimon
 
 import org.apache.spark.sql.Row
 
+import java.util.concurrent.Executors
+
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.DurationInt
@@ -537,7 +539,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
                      |THEN INSERT (a, b, c) values (a, b, c)
                      |""".stripMargin)
       }.getMessage
-      assert(error.contains("match more then one source rows"))
+      assert(error.contains("match more than one source rows"))
     }
   }
 
@@ -760,46 +762,97 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
   }
 
   test("Paimon MergeInto: concurrent merge and compact") {
-    withTable("s", "t") {
-      sql("CREATE TABLE s (id INT, b INT, c INT)")
-      sql("INSERT INTO s VALUES (1, 1, 1)")
+    for (dvEnabled <- Seq("true", "false")) {
+      withTable("s", "t") {
+        sql("CREATE TABLE s (id INT, b INT, c INT)")
+        sql("INSERT INTO s VALUES (1, 1, 1)")
 
-      sql("CREATE TABLE t (id INT, b INT, c INT)")
-      sql("INSERT INTO t VALUES (1, 1, 1)")
+        sql(
+          s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+        sql("INSERT INTO t VALUES (1, 1, 1)")
 
-      val mergeInto = Future {
-        for (_ <- 1 to 10) {
-          try {
-            sql("""
-                  |MERGE INTO t
-                  |USING s
-                  |ON t.id = s.id
-                  |WHEN MATCHED THEN
-                  |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
-                  |""".stripMargin)
-          } catch {
-            case a: Throwable =>
-              assert(
-                a.getMessage.contains("Conflicts during commits") || a.getMessage.contains(
-                  "Missing file"))
+        val mergeInto = Future {
+          for (_ <- 1 to 10) {
+            try {
+              sql("""
+                    |MERGE INTO t
+                    |USING s
+                    |ON t.id = s.id
+                    |WHEN MATCHED THEN
+                    |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                    |""".stripMargin)
+            } catch {
+              case a: Throwable =>
+                assert(
+                  a.getMessage.contains("Conflicts during commits") || a.getMessage.contains(
+                    "Missing file"))
+            }
+            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
           }
-          checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
         }
-      }
 
-      val compact = Future {
-        for (_ <- 1 to 10) {
-          try {
-            sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'id')")
-          } catch {
-            case a: Throwable => assert(a.getMessage.contains("Conflicts during commits"))
+        val compact = Future {
+          for (_ <- 1 to 10) {
+            try {
+              sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'id')")
+            } catch {
+              case a: Throwable => assert(a.getMessage.contains("Conflicts during commits"))
+            }
+            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
           }
-          checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
         }
-      }
 
-      Await.result(mergeInto, 60.seconds)
-      Await.result(compact, 60.seconds)
+        Await.result(mergeInto, 60.seconds)
+        Await.result(compact, 60.seconds)
+      }
+    }
+  }
+
+  test("Paimon MergeInto: concurrent two merge") {
+    for (dvEnabled <- Seq("true", "false")) {
+      withTable("s", "t") {
+        sql("CREATE TABLE s (id INT, b INT, c INT)")
+        sql(
+          "INSERT INTO s VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6), (7, 7, 7), (8, 8, 8), (9, 9, 9)")
+
+        sql(
+          s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+        sql(
+          "INSERT INTO t VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6), (7, 7, 7), (8, 8, 8), (9, 9, 9)")
+
+        def doMergeInto(): Unit = {
+          for (i <- 1 to 9) {
+            try {
+              sql(s"""
+                     |MERGE INTO t
+                     |USING (SELECT * FROM s WHERE id = $i)
+                     |ON t.id = s.id
+                     |WHEN MATCHED THEN
+                     |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                     |""".stripMargin)
+            } catch {
+              case a: Throwable =>
+                assert(
+                  a.getMessage.contains("Conflicts during commits") || a.getMessage.contains(
+                    "Missing file"))
+            }
+            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(9)))
+          }
+        }
+
+        val executor = Executors.newFixedThreadPool(2)
+        val runnable = new Runnable {
+          override def run(): Unit = doMergeInto()
+        }
+
+        val future1 = executor.submit(runnable)
+        val future2 = executor.submit(runnable)
+
+        future1.get()
+        future2.get()
+
+        executor.shutdown()
+      }
     }
   }
 }

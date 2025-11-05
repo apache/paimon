@@ -19,7 +19,6 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.FileStore;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.casting.DefaultValueRow;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -54,7 +53,6 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  */
 public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State<T>>> {
 
-    private final RowType rowType;
     private final FileStoreWrite<T> write;
     private final KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
     private final RecordExtractor<T> recordExtractor;
@@ -63,8 +61,9 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     private boolean batchCommitted = false;
     private BucketMode bucketMode;
+    private RowType writeType;
+    private int[] notNullFieldIndex;
 
-    private final int[] notNullFieldIndex;
     private final @Nullable DefaultValueRow defaultValueRow;
 
     public TableWriteImpl(
@@ -74,7 +73,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
             RecordExtractor<T> recordExtractor,
             @Nullable RowKindGenerator rowKindGenerator,
             @Nullable RowKindFilter rowKindFilter) {
-        this.rowType = rowType;
+        this.writeType = rowType;
         this.write = write;
         this.keyAndBucketExtractor = keyAndBucketExtractor;
         this.recordExtractor = recordExtractor;
@@ -115,6 +114,13 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Override
     public TableWriteImpl<T> withWriteType(RowType writeType) {
         write.withWriteType(writeType);
+        this.writeType = writeType;
+        List<String> notNullColumnNames =
+                writeType.getFields().stream()
+                        .filter(field -> !field.type().isNullable())
+                        .map(DataField::name)
+                        .collect(Collectors.toList());
+        this.notNullFieldIndex = writeType.getFieldIndices(notNullColumnNames);
         return this;
     }
 
@@ -189,7 +195,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private void checkNullability(InternalRow row) {
         for (int idx : notNullFieldIndex) {
             if (row.isNullAt(idx)) {
-                String columnName = rowType.getFields().get(idx).name();
+                String columnName = writeType.getFields().get(idx).name();
                 throw new RuntimeException(
                         String.format("Cannot write null to non-null column(%s)", columnName));
             }
@@ -277,7 +283,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         write.restore(state);
     }
 
-    @VisibleForTesting
     public FileStoreWrite<T> getWrite() {
         return write;
     }

@@ -23,6 +23,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
@@ -451,6 +452,26 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols);
+    }
+
+    @Override
+    public RoaringBitmap32 toFileSelection(List<Long> indices) {
+        RoaringBitmap32 selection = null;
+        if (indices != null) {
+            if (firstRowId() == null) {
+                throw new IllegalStateException(
+                        "firstRowId is null, can't convert to file selection");
+            }
+            selection = new RoaringBitmap32();
+            long start = firstRowId();
+            long end = start + rowCount();
+            for (long rowId : indices) {
+                if (rowId >= start && rowId < end) {
+                    selection.add((int) (rowId - start));
+                }
+            }
+        }
+        return selection;
     }
 
     @Override

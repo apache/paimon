@@ -21,6 +21,10 @@ package org.apache.paimon.format.csv;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.options.description.DescribedEnum;
+import org.apache.paimon.options.description.InlineElement;
+
+import static org.apache.paimon.options.description.TextElement.text;
 
 /** Options for csv format. */
 public class CsvOptions {
@@ -63,12 +67,21 @@ public class CsvOptions {
                     .defaultValue("")
                     .withDescription("The literal for null values in CSV format");
 
+    public static final ConfigOption<Mode> MODE =
+            ConfigOptions.key("csv.mode")
+                    .enumType(Mode.class)
+                    .defaultValue(Mode.PERMISSIVE)
+                    .withFallbackKeys("mode")
+                    .withDescription(
+                            "Allows a mode for dealing with corrupt records during reading.");
+
     private final String fieldDelimiter;
     private final String lineDelimiter;
     private final String nullLiteral;
     private final boolean includeHeader;
     private final String quoteCharacter;
     private final String escapeCharacter;
+    private final Mode mode;
 
     public CsvOptions(Options options) {
         this.fieldDelimiter = options.get(FIELD_DELIMITER);
@@ -77,6 +90,7 @@ public class CsvOptions {
         this.includeHeader = options.get(INCLUDE_HEADER);
         this.quoteCharacter = options.get(QUOTE_CHARACTER);
         this.escapeCharacter = options.get(ESCAPE_CHARACTER);
+        this.mode = options.get(MODE);
     }
 
     public String fieldDelimiter() {
@@ -101,5 +115,38 @@ public class CsvOptions {
 
     public String escapeCharacter() {
         return escapeCharacter;
+    }
+
+    public Mode mode() {
+        return mode;
+    }
+
+    /** Mode for dealing with corrupt records during reading. */
+    public enum Mode implements DescribedEnum {
+        PERMISSIVE("permissive", "Sets malformed fields to null."),
+        DROPMALFORMED("dropmalformed", "Ignores the whole corrupted records."),
+        FAILFAST("failfast", "Throws an exception when it meets corrupted records.");
+
+        private final String value;
+        private final String description;
+
+        Mode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        public String getValue() {
+            return value;
+        }
     }
 }

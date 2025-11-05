@@ -20,16 +20,23 @@ package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{SparkInternalRowWrapper, SparkUtils}
+import org.apache.paimon.spark.{PaimonAppendedChangelogFilesMetric, PaimonAppendedRecordsMetric, PaimonAppendedTableFilesMetric, PaimonBucketsWrittenMetric, PaimonCommitDurationMetric, PaimonNumWritersMetric, PaimonPartitionsWrittenMetric, SparkInternalRowWrapper, SparkUtils}
+import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.commands.SchemaHelper
+import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessage, CommitMessageSerializer}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageSerializer, TableWriteImpl}
 
 import org.apache.spark.internal.Logging
+import org.apache.spark.sql.PaimonSparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.distributions.Distribution
 import org.apache.spark.sql.connector.expressions.SortOrder
+import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.write._
+import org.apache.spark.sql.execution.SQLExecution
+import org.apache.spark.sql.execution.metric.SQLMetrics
+import org.apache.spark.sql.execution.ui.SQLPlanMetric
 import org.apache.spark.sql.types.StructType
 
 import java.io.{IOException, UncheckedIOException}
@@ -74,6 +81,20 @@ class PaimonV2Write(
   override def toBatch: BatchWrite =
     PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions)
 
+  override def supportedCustomMetrics(): Array[CustomMetric] = {
+    Array(
+      // write metrics
+      PaimonNumWritersMetric(),
+      // commit metrics
+      PaimonCommitDurationMetric(),
+      PaimonAppendedTableFilesMetric(),
+      PaimonAppendedRecordsMetric(),
+      PaimonAppendedChangelogFilesMetric(),
+      PaimonPartitionsWrittenMetric(),
+      PaimonBucketsWrittenMetric()
+    )
+  }
+
   override def toString: String = {
     val overwriteDynamicStr = if (overwriteDynamic) {
       ", overwriteDynamic=true"
@@ -87,6 +108,8 @@ class PaimonV2Write(
     }
     s"PaimonWrite(table=${table.fullName()}$overwriteDynamicStr$overwritePartitionsStr)"
   }
+
+  override def description(): String = toString
 }
 
 private case class PaimonBatchWrite(
@@ -97,20 +120,26 @@ private case class PaimonBatchWrite(
   extends BatchWrite
   with WriteHelper {
 
+  private val metricRegistry = SparkMetricRegistry()
+
   private val batchWriteBuilder = {
     val builder = table.newBatchWriteBuilder()
     overwritePartitions.foreach(partitions => builder.withOverwrite(partitions.asJava))
     builder
   }
 
-  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
-    WriterFactory(writeSchema, dataSchema, batchWriteBuilder)
+  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
+    val fullCompactionDeltaCommits: Option[Int] =
+      Option.apply(coreOptions.fullCompactionDeltaCommits())
+    WriterFactory(writeSchema, dataSchema, batchWriteBuilder, fullCompactionDeltaCommits)
+  }
 
   override def useCommitCoordinator(): Boolean = false
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
     logInfo(s"Committing to table ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
+    batchTableCommit.withMetricRegistry(metricRegistry)
 
     val commitMessages = messages
       .collect {
@@ -128,34 +157,65 @@ private case class PaimonBatchWrite(
     } finally {
       batchTableCommit.close()
     }
+    postDriverMetrics()
     postCommit(commitMessages)
   }
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {
     // TODO clean uncommitted files
   }
+
+  // Spark support v2 write driver metrics since 4.0, see https://github.com/apache/spark/pull/48573
+  // To ensure compatibility with 3.x, manually post driver metrics here instead of using Spark's API.
+  private def postDriverMetrics(): Unit = {
+    val spark = PaimonSparkSession.active
+    // todo: find a more suitable way to get metrics.
+    val commitMetrics = metricRegistry.buildSparkCommitMetrics()
+    val executionId = spark.sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
+    val executionMetrics = Compatibility.getExecutionMetrics(spark, executionId.toLong)
+    val metricUpdates = executionMetrics.flatMap {
+      m =>
+        commitMetrics.find(x => m.metricType.toLowerCase.contains(x.name.toLowerCase)) match {
+          case Some(customTaskMetric) => Some((m.accumulatorId, customTaskMetric.value()))
+          case None => None
+        }
+    }
+    SQLMetrics.postDriverMetricsUpdatedByValue(spark.sparkContext, executionId, metricUpdates)
+  }
 }
 
 private case class WriterFactory(
     writeSchema: StructType,
     dataSchema: StructType,
-    batchWriteBuilder: BatchWriteBuilder)
+    batchWriteBuilder: BatchWriteBuilder,
+    fullCompactionDeltaCommits: Option[Int])
   extends DataWriterFactory {
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
-    val batchTableWrite = batchWriteBuilder.newWrite()
-    new PaimonDataWriter(batchTableWrite, writeSchema, dataSchema)
+    PaimonDataWriter(batchWriteBuilder, writeSchema, dataSchema, fullCompactionDeltaCommits)
   }
 }
 
-private class PaimonDataWriter(
-    batchTableWrite: BatchTableWrite,
+private case class PaimonDataWriter(
+    writeBuilder: BatchWriteBuilder,
     writeSchema: StructType,
-    dataSchema: StructType)
-  extends DataWriter[InternalRow] {
+    dataSchema: StructType,
+    fullCompactionDeltaCommits: Option[Int],
+    batchId: Long = -1)
+  extends DataWriter[InternalRow]
+  with DataWriteHelper {
 
   private val ioManager = SparkUtils.createIOManager()
-  batchTableWrite.withIOManager(ioManager)
+
+  private val metricRegistry = SparkMetricRegistry()
+
+  val write: TableWriteImpl[InternalRow] = {
+    writeBuilder
+      .newWrite()
+      .withIOManager(ioManager)
+      .withMetricRegistry(metricRegistry)
+      .asInstanceOf[TableWriteImpl[InternalRow]]
+  }
 
   private val rowConverter: InternalRow => SparkInternalRowWrapper = {
     val numFields = writeSchema.fields.length
@@ -164,12 +224,13 @@ private class PaimonDataWriter(
   }
 
   override def write(record: InternalRow): Unit = {
-    batchTableWrite.write(rowConverter.apply(record))
+    postWrite(write.writeAndReturn(rowConverter.apply(record)))
   }
 
   override def commit(): WriterCommitMessage = {
     try {
-      val commitMessages = batchTableWrite.prepareCommit().asScala.toSeq
+      preFinish()
+      val commitMessages = write.prepareCommit().asScala.toSeq
       TaskCommit(commitMessages)
     } finally {
       close()
@@ -180,11 +241,15 @@ private class PaimonDataWriter(
 
   override def close(): Unit = {
     try {
-      batchTableWrite.close()
+      write.close()
       ioManager.close()
     } catch {
       case e: Exception => throw new RuntimeException(e)
     }
+  }
+
+  override def currentMetricsValues(): Array[CustomTaskMetric] = {
+    metricRegistry.buildSparkWriteMetrics()
   }
 }
 

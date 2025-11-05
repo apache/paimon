@@ -15,18 +15,17 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from typing import Iterator, List, Optional, Any
+from typing import Iterator, List, Optional
 
 import pandas
 import pyarrow
 
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
-from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.read.push_down_utils import extract_predicate_to_list
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.split_read import (MergeFileSplitRead, RawFileSplitRead,
-                                      SplitRead)
+                                      SplitRead, DataEvolutionSplitRead)
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
 
@@ -39,7 +38,6 @@ class TableRead:
 
         self.table: FileStoreTable = table
         self.predicate = predicate
-        self.push_down_predicate = self._push_down_predicate()
         self.read_type = read_type
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
@@ -59,10 +57,35 @@ class TableRead:
         batch_iterator = self._arrow_batch_generator(splits, schema)
         return pyarrow.ipc.RecordBatchReader.from_batches(schema, batch_iterator)
 
+    @staticmethod
+    def _try_to_pad_batch_by_schema(batch: pyarrow.RecordBatch, target_schema):
+        if batch.schema.names == target_schema.names:
+            return batch
+
+        columns = []
+        num_rows = batch.num_rows
+
+        for field in target_schema:
+            if field.name in batch.column_names:
+                col = batch.column(field.name)
+            else:
+                col = pyarrow.nulls(num_rows, type=field.type)
+            columns.append(col)
+
+        return pyarrow.RecordBatch.from_arrays(columns, schema=target_schema)
+
     def to_arrow(self, splits: List[Split]) -> Optional[pyarrow.Table]:
         batch_reader = self.to_arrow_batch_reader(splits)
-        arrow_table = batch_reader.read_all()
-        return arrow_table
+
+        schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+        table_list = []
+        for batch in iter(batch_reader.read_next_batch, None):
+            table_list.append(self._try_to_pad_batch_by_schema(batch, schema))
+
+        if not table_list:
+            return pyarrow.Table.from_arrays([pyarrow.array([], type=field.type) for field in schema], schema=schema)
+        else:
+            return pyarrow.Table.from_batches(table_list)
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema) -> Iterator[pyarrow.RecordBatch]:
         chunk_size = 65536
@@ -108,27 +131,18 @@ class TableRead:
 
         return ray.data.from_arrow(self.to_arrow(splits))
 
-    def _push_down_predicate(self) -> Any:
-        if self.predicate is None:
-            return None
-        elif self.table.is_primary_key_table:
-            result = []
-            extract_predicate_to_list(result, self.predicate, self.table.primary_keys)
-            if result:
-                # the field index is unused for arrow field
-                pk_predicates = (PredicateBuilder(self.table.fields).and_predicates(result)).to_arrow()
-                return pk_predicates
-            else:
-                return None
-        else:
-            return self.predicate.to_arrow()
-
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
             return MergeFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,
-                push_down_predicate=self.push_down_predicate,
+                read_type=self.read_type,
+                split=split
+            )
+        elif self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true':
+            return DataEvolutionSplitRead(
+                table=self.table,
+                predicate=self.predicate,
                 read_type=self.read_type,
                 split=split
             )
@@ -136,7 +150,6 @@ class TableRead:
             return RawFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,
-                push_down_predicate=self.push_down_predicate,
                 read_type=self.read_type,
                 split=split
             )

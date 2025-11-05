@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
 import logging
 import os
 import subprocess
@@ -26,8 +25,13 @@ from urllib.parse import splitport, urlparse
 import pyarrow
 from packaging.version import parse
 from pyarrow._fs import FileSystem
-
 from pypaimon.common.config import OssOptions, S3Options
+from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
+from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.row_kind import RowKind
+from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 class FileIO:
@@ -35,6 +39,7 @@ class FileIO:
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
         scheme, netloc, _ = self.parse_location(path)
+        self.uri_reader_factory = UriReaderFactory(catalog_options)
         if scheme in {"oss"}:
             self.filesystem = self._initialize_oss_fs(path)
         elif scheme in {"s3", "s3a", "s3n"}:
@@ -364,3 +369,57 @@ class FileIO:
 
         with self.new_output_stream(path) as output_stream:
             fastavro.writer(output_stream, avro_schema, records, **kwargs)
+
+    def write_blob(self, path: Path, data: pyarrow.Table, blob_as_descriptor: bool, **kwargs):
+        try:
+            # Validate input constraints
+            if data.num_columns != 1:
+                raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
+            # Check for null values
+            column = data.column(0)
+            if column.null_count > 0:
+                raise RuntimeError("Blob format does not support null values")
+            # Convert PyArrow schema to Paimon DataFields
+            # For blob files, we expect exactly one blob column
+            field = data.schema[0]
+            if pyarrow.types.is_large_binary(field.type):
+                fields = [DataField(0, field.name, AtomicType("BLOB"))]
+            else:
+                # Convert other types as needed
+                paimon_type = PyarrowFieldParser.to_paimon_type(field.type, field.nullable)
+                fields = [DataField(0, field.name, paimon_type)]
+            # Convert PyArrow Table to records
+            records_dict = data.to_pydict()
+            num_rows = data.num_rows
+            field_name = fields[0].name
+            with self.new_output_stream(path) as output_stream:
+                writer = BlobFormatWriter(output_stream)
+                # Write each row
+                for i in range(num_rows):
+                    col_data = records_dict[field_name][i]
+                    # Convert to appropriate type based on field type
+                    if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
+                        if blob_as_descriptor:
+                            blob_descriptor = BlobDescriptor.deserialize(col_data)
+                            uri_reader = self.uri_reader_factory.create(blob_descriptor.uri)
+                            blob_data = Blob.from_descriptor(uri_reader, blob_descriptor)
+                        elif isinstance(col_data, bytes):
+                            blob_data = BlobData(col_data)
+                        else:
+                            # Convert to bytes if needed
+                            if hasattr(col_data, 'as_py'):
+                                col_data = col_data.as_py()
+                            if isinstance(col_data, str):
+                                col_data = col_data.encode('utf-8')
+                            blob_data = BlobData(col_data)
+                        row_values = [blob_data]
+                    else:
+                        row_values = [col_data]
+                    # Create GenericRow and write
+                    row = GenericRow(row_values, fields, RowKind.INSERT)
+                    writer.add_element(row)
+                writer.close()
+
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write blob file {path}: {e}") from e

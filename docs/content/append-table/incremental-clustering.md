@@ -78,7 +78,7 @@ To enable Incremental Clustering, the following configuration needs to be set fo
       <td><h5>clustering.strategy</h5></td>
       <td>'zorder' or 'hilbert' or 'order'</td>
       <td style="word-wrap: break-word;">No</td>
-      <td>Boolean</td>
+      <td>String</td>
       <td>The ordering algorithm used for clustering. If not set, It'll decided from the number of clustering columns. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
     </tr>
     </tbody>
@@ -95,11 +95,14 @@ clustering and small-file merging must be performed exclusively via Incremental 
 ## Run Incremental Clustering
 {{< hint info >}}
 
-Currently, only support running Incremental Clustering in spark, support for flink will be added in the near future.
+only support running Incremental Clustering in batch mode.
 
 {{< /hint >}}
 
-To run a Incremental Clustering job, follow these instructions.
+To run a Incremental Clustering job, follow these instructions. 
+
+You don’t need to specify any clustering-related parameters when running Incremental Clustering,
+these options are already defined as table options. If you need to change clustering settings, please update the corresponding table options.
 
 {{< tabs "incremental-clustering" >}}
 
@@ -117,11 +120,86 @@ CALL sys.compact(table => 'T')
 -- run incremental clustering with full mode, this will recluster all data
 CALL sys.compact(table => 'T', compact_strategy => 'full')
 ```
-You don’t need to specify any clustering-related parameters when running Incremental Clustering, 
-these are already defined as table options. If you need to change clustering settings, please update the corresponding table options.
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
+
+Run the following command to submit a incremental clustering job for the table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    compact \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    [--compact_strategy <minor / full>] \
+    [--table_conf <table_conf>] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+```
+
+Example: run incremental clustering
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    compact \
+    --warehouse s3:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --table_conf sink.parallelism=2 \
+    --compact_strategy minor \
+    --catalog_conf s3.endpoint=https://****.com \
+    --catalog_conf s3.access-key=***** \
+    --catalog_conf s3.secret-key=*****
+```
+* `--compact_strategy` Determines how to pick files to be cluster, the default is `minor`.
+    * `full` : All files will be selected for clustered.
+    * `minor` : Pick the set of files that need to be clustered based on specified conditions.
+
+Note: write parallelism is set by `sink.parallelism`, if too big, may generate a large number of small files.
+
+You can use `-D execution.runtime-mode=batch` or `-yD execution.runtime-mode=batch` (for the ON-YARN scenario) to use batch mode.
 {{< /tab >}}
 
 {{< /tabs >}}
+
+## Auto-Clustering For Historical Partition
+While performing incremental clustering on recently active partitions, Paimon can automatically detect historical and 
+inactive partitions and evaluate whether their data layout has reached an optimal state. 
+For those historical partitions that have not yet achieved optimal layout, Paimon will also perform full clustering on them 
+during the same operation, thereby improving their query performance.
+
+To enable auto-clustering for historical partitions, the following configuration needs to be set for the table:
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 20%">Option</th>
+      <th class="text-left" style="width: 10%">Value</th>
+      <th class="text-left" style="width: 5%">Required</th>
+      <th class="text-left" style="width: 10%">Type</th>
+      <th class="text-left" style="width: 55%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>clustering.history-partition.idle-to-full-sort</h5></td>
+      <td>3d</td>
+      <td style="word-wrap: break-word;">Yes</td>
+      <td>Duration</td>
+      <td>The duration after which a partition without new updates is considered a historical partition. Default is null.</td>
+    </tr>
+    <tr>
+      <td><h5>clustering.history-partition.limit</h5></td>
+      <td>5</td>
+      <td style="word-wrap: break-word;">Yes</td>
+      <td>Integer</td>
+      <td>The limit of history partition number for automatically performing full clustering. Default value is 5.</td>
+    </tr>
+    </tbody>
+
+</table>
+
 
 ## Implement
 To balance write amplification and sorting effectiveness, Paimon leverages the LSM Tree notion of levels to stratify data files 

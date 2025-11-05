@@ -117,9 +117,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
 
     @Test
     public void testSyncTable() throws Exception {
-        String flinkVersion = System.getProperty("test.flink.main.version");
-        boolean useCoordinator =
-                flinkVersion.compareTo("1.15") > 0 && ThreadLocalRandom.current().nextBoolean();
+        boolean useCoordinator = ThreadLocalRandom.current().nextBoolean();
 
         runAction(
                 ACTION_SYNC_TABLE,

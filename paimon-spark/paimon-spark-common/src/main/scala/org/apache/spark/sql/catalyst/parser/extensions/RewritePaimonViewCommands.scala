@@ -66,8 +66,14 @@ case class RewritePaimonViewCommands(spark: SparkSession)
         output)
   }
 
+  private def isTempView(nameParts: Seq[String]): Boolean = {
+    catalogManager.v1SessionCatalog.isTempView(nameParts)
+  }
+
   private object ResolvedIdent {
     def unapply(unresolved: Any): Option[ResolvedIdentifier] = unresolved match {
+      case UnresolvedIdentifier(nameParts, true) if isTempView(nameParts) =>
+        None
       case UnresolvedIdentifier(CatalogAndIdentifier(viewCatalog: SupportView, ident), _) =>
         Some(ResolvedIdentifier(viewCatalog, ident))
       case _ =>

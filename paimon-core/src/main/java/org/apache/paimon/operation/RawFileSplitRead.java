@@ -84,6 +84,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
     @Nullable private Integer limit;
+    @Nullable private List<Long> indices;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -138,6 +139,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Override
     public SplitRead<InternalRow> withLimit(@Nullable Integer limit) {
         this.limit = limit;
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withRowIds(@Nullable List<Long> indices) {
+        this.indices = indices;
         return this;
     }
 
@@ -250,6 +257,14 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         RoaringBitmap32 selection = null;
         if (fileIndexResult instanceof BitmapIndexResult) {
             selection = ((BitmapIndexResult) fileIndexResult).get();
+        }
+        if (indices != null) {
+            RoaringBitmap32 selectionRowIds = file.toFileSelection(indices);
+            if (selection == null) {
+                selection = selectionRowIds;
+            } else {
+                selection.and(selectionRowIds);
+            }
         }
 
         FormatReaderContext formatReaderContext =

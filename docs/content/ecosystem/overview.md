@@ -30,7 +30,7 @@ under the License.
 
 |                                     Engine                                      |    Version    |  Batch Read | Batch Write |  Create Table |  Alter Table  | Streaming Write  |  Streaming Read  | Batch Overwrite | DELETE & UPDATE | MERGE INTO | Time Travel |
 |:-------------------------------------------------------------------------------:|:-------------:|:-----------:|:-----------:|:-------------:|:-------------:|:----------------:|:----------------:|:---------------:|:---------------:|:----------:|:-----------:|
-|                                      Flink                                      |  1.15 - 1.20  |     ✅      |      ✅      |      ✅       |  ✅(1.17+)   |        ✅        |       ✅        |        ✅        |    ✅(1.17+)     |     ❌      |      ✅      |
+|                                      Flink                                      |  1.16 - 1.20  |     ✅      |      ✅      |      ✅       |  ✅(1.17+)   |        ✅        |       ✅        |        ✅        |    ✅(1.17+)     |     ❌      |      ✅      |
 |                                      Spark                                      |   3.2 - 4.0   |     ✅      |      ✅      |      ✅       |      ✅      |      ✅(3.3+)    |    ✅(3.3+)     |        ✅        |        ✅        |     ✅      |   ✅(3.3+)   |
 |                                      Hive                                       |   2.1 - 3.1   |     ✅      |      ✅      |      ✅       |      ❌      |        ❌        |       ❌        |        ❌        |        ❌        |     ❌      |      ✅      |
 |                                      Trino                                      |   420 - 440   |     ✅      |   ✅(427+)   |   ✅(427+)    |   ✅(427+)   |        ❌        |       ❌        |        ❌        |        ❌        |     ❌      |      ✅      |
@@ -58,7 +58,7 @@ implemented, but you must accept the mechanism of mini-batch.
 
 Spark Batch is the most widely used batch computing engine.
 
-Recommended version is Spark 3.5.6.
+Recommended version is Spark 3.5.7.
 
 ### Flink Batch
 

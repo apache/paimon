@@ -30,7 +30,7 @@ import java.util.Objects;
 /**
  * Iceberg's ref metadata.
  *
- * <p>See <a href="https://iceberg.apache.org/spec/#refs">Iceberg spec</a>.
+ * <p>See <a href="https://iceberg.apache.org/spec/#snapshot-references">Iceberg spec</a>.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class IcebergRef {

@@ -71,7 +71,7 @@ public class RollingFileWriterTest {
                         () ->
                                 new RowDataFileWriter(
                                         LocalFileIO.create(),
-                                        RowDataRollingFileWriter.createFileWriterContext(
+                                        RollingFileWriter.createFileWriterContext(
                                                 fileFormat,
                                                 SCHEMA,
                                                 SimpleColStatsCollector.createFullStatsFactories(

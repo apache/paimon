@@ -170,6 +170,10 @@ public class IndexFileHandler {
         return result;
     }
 
+    public Path indexManifestFilePath(String indexManifest) {
+        return indexManifestFile.indexManifestFilePath(indexManifest);
+    }
+
     public Path filePath(IndexManifestEntry entry) {
         return pathFactories.get(entry.partition(), entry.bucket()).toPath(entry.indexFile());
     }

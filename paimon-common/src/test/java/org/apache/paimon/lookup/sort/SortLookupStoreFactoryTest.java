@@ -22,7 +22,6 @@ import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.lookup.LookupStoreFactory.Context;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
@@ -98,9 +97,9 @@ public class SortLookupStoreFactoryTest {
             byte[] bytes = toBytes(i);
             writer.put(bytes, bytes);
         }
-        Context context = writer.close();
+        writer.close();
 
-        SortLookupStoreReader reader = factory.createReader(file, context);
+        SortLookupStoreReader reader = factory.createReader(file);
         for (int i = 0; i < QUERY_COUNT; i++) {
             int query = rnd.nextInt(VALUE_COUNT);
             byte[] bytes = toBytes(query);
@@ -122,9 +121,9 @@ public class SortLookupStoreFactoryTest {
 
         SortLookupStoreWriter writer =
                 factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
-        Context context = writer.close();
+        writer.close();
 
-        SortLookupStoreReader reader = factory.createReader(file, context);
+        SortLookupStoreReader reader = factory.createReader(file);
         byte[] bytes = toBytes(rnd.nextInt(VALUE_COUNT));
         assertThat(reader.lookup(bytes)).isNull();
         reader.close();
@@ -149,9 +148,9 @@ public class SortLookupStoreFactoryTest {
             byte[] bytes = toBytes(keySerializer, row, i);
             writer.put(bytes, toBytes(i));
         }
-        Context context = writer.close();
+        writer.close();
 
-        SortLookupStoreReader reader = factory.createReader(file, context);
+        SortLookupStoreReader reader = factory.createReader(file);
         for (int i = 0; i < QUERY_COUNT; i++) {
             int query = rnd.nextInt(VALUE_COUNT);
             byte[] bytes = toBytes(keySerializer, row, query);

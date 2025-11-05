@@ -21,7 +21,9 @@ package org.apache.paimon.append;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.ChannelWithMeta;
@@ -38,9 +40,15 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -62,6 +70,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
@@ -395,6 +404,69 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
+    public void testNoSpillWhenMeetBlobType() throws Exception {
+        // Create a schema with BLOB type
+        RowType blobSchema =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {new IntType(), new VarCharType(), new BlobType()},
+                                new String[] {"id", "name", "data"})
+                        .build();
+
+        AppendOnlyFileStoreTable table =
+                (AppendOnlyFileStoreTable)
+                        FileStoreTableFactory.create(
+                                LocalFileIO.create(),
+                                pathFactory.newPath(),
+                                TableSchema.create(
+                                        0,
+                                        new Schema(
+                                                blobSchema.getFields(),
+                                                Collections.singletonList("id"),
+                                                Collections.emptyList(),
+                                                new HashMap<String, String>() {
+                                                    {
+                                                        put(
+                                                                CoreOptions.DATA_EVOLUTION_ENABLED
+                                                                        .key(),
+                                                                "true");
+                                                        put(
+                                                                CoreOptions.ROW_TRACKING_ENABLED
+                                                                        .key(),
+                                                                "true");
+                                                    }
+                                                },
+                                                "")));
+        BaseAppendFileStoreWrite writer = table.store().newWrite("test");
+        writer.withIOManager(IOManager.create(tempDir.toString()));
+        writer.withMemoryPoolFactory(
+                new MemoryPoolFactory(new HeapMemorySegmentPool(16384L, 1024)));
+
+        char[] largeString = new char[990];
+        Arrays.fill(largeString, 'a');
+        byte[] largeBlobData = new byte[1024];
+        Arrays.fill(largeBlobData, (byte) 'b');
+
+        BinaryRow binaryRow = new BinaryRow(1);
+        BinaryRowWriter binaryRowWriter = new BinaryRowWriter(binaryRow);
+        for (int j = 0; j < 100; j++) {
+            binaryRowWriter.reset();
+            binaryRowWriter.writeInt(0, j);
+            binaryRowWriter.complete();
+            writer.write(
+                    binaryRow, 0, createBlobRow(j, String.valueOf(largeString), largeBlobData));
+        }
+
+        binaryRowWriter.reset();
+        binaryRowWriter.writeInt(0, 1000);
+        binaryRowWriter.complete();
+        AppendOnlyWriter appendOnlyWriter = (AppendOnlyWriter) writer.createWriter(binaryRow, 0);
+        RowBuffer buffer = appendOnlyWriter.getWriteBuffer();
+        assertThat(buffer).isNull();
+        writer.close();
+    }
+
+    @Test
     public void testNoBuffer() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
 
@@ -621,6 +693,7 @@ public class AppendOnlyWriterTest {
                         SCHEMA_ID,
                         fileFormat,
                         targetFileSize,
+                        targetFileSize,
                         AppendOnlyWriterTest.SCHEMA,
                         null,
                         getMaxSequenceNumber(toCompact),
@@ -685,5 +758,9 @@ public class AppendOnlyWriterTest {
                 null,
                 null,
                 null);
+    }
+
+    private InternalRow createBlobRow(int id, String name, byte[] blobData) {
+        return GenericRow.of(id, BinaryString.fromString(name), new BlobData(blobData));
     }
 }

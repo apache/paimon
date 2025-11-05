@@ -50,7 +50,9 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -85,6 +87,10 @@ import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -104,12 +110,84 @@ import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for {@link AppendOnlyFileStoreTable}. */
 public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
 
     @Test
-    public void testMultipleWriters() throws Exception {
+    public void testDiscardDuplicateFiles() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> options.set(CoreOptions.COMMIT_DISCARD_DUPLICATE_FILES, true));
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        List<CommitMessage> commitMessages;
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            write.write(rowData(1, 10, 100L));
+            commitMessages = write.prepareCommit();
+        }
+        Runnable doCommit =
+                () -> {
+                    try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                        commit.commit(commitMessages);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                };
+
+        doCommit.run();
+        doCommit.run();
+        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+        assertThat(splits.size()).isEqualTo(1);
+        assertThat(splits.get(0).convertToRawFiles()).map(List::size).get().isEqualTo(1);
+    }
+
+    @Test
+    public void testDiscardDuplicateFilesMultiThread() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> options.set(CoreOptions.COMMIT_DISCARD_DUPLICATE_FILES, true));
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        List<List<CommitMessage>> messages = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            try (BatchTableWrite write = writeBuilder.newWrite()) {
+                write.write(rowData(1, 10, 100L));
+                messages.add(write.prepareCommit());
+            }
+        }
+        Runnable doCommit =
+                () -> {
+                    ThreadLocalRandom rnd = ThreadLocalRandom.current();
+                    for (int i = 0; i < 10; i++) {
+                        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                            commit.commit(messages.get(rnd.nextInt(messages.size())));
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                };
+
+        Runnable asserter =
+                () -> {
+                    List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+                    assertThat(splits.size()).isEqualTo(1);
+                    assertTrue(splits.get(0).convertToRawFiles().get().size() <= 10);
+                };
+
+        // test multiple threads
+        ExecutorService pool = Executors.newCachedThreadPool();
+        List<Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            futures.add(pool.submit(doCommit));
+        }
+        for (Future<?> future : futures) {
+            future.get();
+        }
+        asserter.run();
+    }
+
+    @Test
+    public void testDynamicBucketNoSelector() throws Exception {
         assertThat(
                         createFileStoreTable(options -> options.set("bucket", "-1"))
                                 .newBatchWriteBuilder()

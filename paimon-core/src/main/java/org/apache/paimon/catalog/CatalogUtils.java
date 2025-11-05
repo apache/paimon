@@ -25,6 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -215,7 +216,8 @@ public class CatalogUtils {
             TableMetadata.Loader metadataLoader,
             @Nullable CatalogLockFactory lockFactory,
             @Nullable CatalogLockContext lockContext,
-            @Nullable CatalogContext catalogContext)
+            @Nullable CatalogContext catalogContext,
+            boolean isRestCatalog)
             throws Catalog.TableNotExistException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
             return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), catalog);
@@ -256,9 +258,9 @@ public class CatalogUtils {
                 new CatalogEnvironment(
                         tableIdentifier,
                         metadata.uuid(),
-                        catalog.catalogLoader(),
-                        lockFactory,
-                        lockContext,
+                        isRestCatalog && metadata.isExternal() ? null : catalog.catalogLoader(),
+                        isRestCatalog ? null : lockFactory,
+                        isRestCatalog ? null : lockContext,
                         catalogContext,
                         catalog.supportsVersionManagement());
         Path path = new Path(schema.options().get(PATH.key()));
@@ -322,6 +324,8 @@ public class CatalogUtils {
                         snapshot = optional.get();
                     }
                 } catch (Catalog.TableNotExistException ignored) {
+                } catch (NotImplementedException ignored) {
+                    // does not support supportsVersionManagement for external paimon table
                 }
             }
             tableAndSnapshots.add(Pair.of(table, snapshot));

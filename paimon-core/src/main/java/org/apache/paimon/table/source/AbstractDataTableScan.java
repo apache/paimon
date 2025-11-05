@@ -69,6 +69,8 @@ import java.util.Optional;
 import java.util.TimeZone;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
+import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.CHANGELOG;
+import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.DELTA;
 import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.DIFF;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -166,6 +168,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public AbstractDataTableScan dropStats() {
         snapshotReader.dropStats();
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withRowIds(List<Long> indices) {
+        snapshotReader.withRowIds(indices);
         return this;
     }
 
@@ -338,8 +346,18 @@ abstract class AbstractDataTableScan implements DataTableScan {
             Optional<Tag> endTag = tagManager.get(incrementalBetween.getRight());
 
             if (startTag.isPresent() && endTag.isPresent()) {
-                return IncrementalDiffStartingScanner.betweenTags(
-                        startTag.get(), endTag.get(), snapshotManager, incrementalBetween);
+                if (options.incrementalBetweenTagToSnapshot()) {
+                    CoreOptions.IncrementalBetweenScanMode scanMode =
+                            options.incrementalBetweenScanMode();
+                    return IncrementalDeltaStartingScanner.betweenSnapshotIds(
+                            startTag.get().id(),
+                            endTag.get().id(),
+                            snapshotManager,
+                            toSnapshotScanMode(scanMode));
+                } else {
+                    return IncrementalDiffStartingScanner.betweenTags(
+                            startTag.get(), endTag.get(), snapshotManager, incrementalBetween);
+                }
             } else {
                 long startId, endId;
                 try {

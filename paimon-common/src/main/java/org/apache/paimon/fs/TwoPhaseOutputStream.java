@@ -19,6 +19,7 @@
 package org.apache.paimon.fs;
 
 import java.io.IOException;
+import java.io.Serializable;
 
 /** TwoPhaseOutputStream provides a way to write to a file and get a committer that can commit. */
 public abstract class TwoPhaseOutputStream extends PositionOutputStream {
@@ -35,20 +36,24 @@ public abstract class TwoPhaseOutputStream extends PositionOutputStream {
     public abstract Committer closeForCommit() throws IOException;
 
     /** A committer interface that can commit or discard the written data. */
-    public interface Committer {
+    public interface Committer extends Serializable {
 
         /**
          * Commits the written data, making it visible.
          *
          * @throws IOException if an I/O error occurs during commit
          */
-        void commit() throws IOException;
+        void commit(FileIO fileIO) throws IOException;
 
         /**
          * Discards the written data, cleaning up any temporary files or resources.
          *
          * @throws IOException if an I/O error occurs during discard
          */
-        void discard() throws IOException;
+        void discard(FileIO fileIO) throws IOException;
+
+        Path targetFilePath();
+
+        void clean(FileIO fileIO) throws IOException;
     }
 }

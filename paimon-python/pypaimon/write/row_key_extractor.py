@@ -101,7 +101,7 @@ class UnawareBucketRowKeyExtractor(RowKeyExtractor):
 
     def __init__(self, table_schema: TableSchema):
         super().__init__(table_schema)
-        num_buckets = table_schema.options.get(CoreOptions.BUCKET, -1)
+        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -1))
 
         if num_buckets != -1:
             raise ValueError(f"Unaware bucket mode requires bucket = -1, got {num_buckets}")
@@ -118,7 +118,7 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
 
     def __init__(self, table_schema: 'TableSchema'):
         super().__init__(table_schema)
-        num_buckets = table_schema.options.get(CoreOptions.BUCKET, -1)
+        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -1))
 
         if num_buckets != -1:
             raise ValueError(

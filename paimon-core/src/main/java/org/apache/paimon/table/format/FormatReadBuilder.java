@@ -151,7 +151,7 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public TableRead newRead() {
-        return new FormatTableRead(readType(), this, filter, limit);
+        return new FormatTableRead(readType(), table.rowType(), this, filter, limit);
     }
 
     protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
@@ -218,6 +218,11 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
         throw new UnsupportedOperationException("Format Table does not support withShard.");
+    }
+
+    @Override
+    public ReadBuilder withRowIds(List<Long> indices) {
+        throw new UnsupportedOperationException("Format Table does not support withRowIds.");
     }
 
     @Override

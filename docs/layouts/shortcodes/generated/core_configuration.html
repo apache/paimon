@@ -51,6 +51,24 @@ under the License.
             <td>Whether to create underlying storage when reading and writing the table.</td>
         </tr>
         <tr>
+            <td><h5>blob-as-descriptor</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Write blob field using blob descriptor rather than blob bytes.</td>
+        </tr>
+        <tr>
+            <td><h5>blob-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the blob field.</td>
+        </tr>
+        <tr>
+            <td><h5>blob.target-file-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Target size of a blob file. Default is value of TARGET_FILE_SIZE.</td>
+        </tr>
+        <tr>
             <td><h5>bucket</h5></td>
             <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>
@@ -147,6 +165,18 @@ under the License.
             <td>Specifies the column name(s) used for comparison during range partitioning, in the format 'columnName1,columnName2'. If not set or set to an empty string, it indicates that the range partitioning feature is not enabled. This option will be effective only for append table without primary keys and batch execution mode.</td>
         </tr>
         <tr>
+            <td><h5>clustering.history-partition.idle-to-full-sort</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The duration after which a partition without new updates is considered a historical partition. Historical partitions will be automatically fully clustered during the cluster operation.</td>
+        </tr>
+        <tr>
+            <td><h5>clustering.history-partition.limit</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>The limit of history partition number for automatically performing full clustering.</td>
+        </tr>
+        <tr>
             <td><h5>clustering.incremental</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -169,6 +199,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>A list of commit callback classes to be called after a successful commit. Class names are connected with comma (example: com.test.CallbackA,com.sample.CallbackB).</td>
+        </tr>
+        <tr>
+            <td><h5>commit.discard-duplicate-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether discard duplicate files in commit.</td>
         </tr>
         <tr>
             <td><h5>commit.force-compact</h5></td>
@@ -514,7 +550,7 @@ under the License.
         </tr>
         <tr>
             <td><h5>format-table.implementation</h5></td>
-            <td style="word-wrap: break-word;">engine</td>
+            <td style="word-wrap: break-word;">paimon</td>
             <td><p>Enum</p></td>
             <td>Format table uses paimon or engine.<br /><br />Possible values:<ul><li>"paimon": Paimon format table implementation.</li><li>"engine": Engine format table implementation.</li></ul></td>
         </tr>
@@ -528,7 +564,7 @@ under the License.
             <td><h5>full-compaction.delta-commits</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
-            <td>Full compaction will be constantly triggered after delta commits.</td>
+            <td>For streaming write, full compaction will be constantly triggered after delta commits. For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.</td>
         </tr>
         <tr>
             <td><h5>ignore-delete</h5></td>
@@ -553,6 +589,12 @@ under the License.
             <td style="word-wrap: break-word;">auto</td>
             <td><p>Enum</p></td>
             <td>Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot (inclusive). <br /><br />Possible values:<ul><li>"auto": Scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files.</li><li>"delta": Scan newly changed files between snapshots.</li><li>"changelog": Scan changelog files between snapshots.</li><li>"diff": Get diff by comparing data of end snapshot with data of start snapshot.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>incremental-between-tag-to-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to read incremental changes between the snapshot corresponding to the tag.</td>
         </tr>
         <tr>
             <td><h5>incremental-between-timestamp</h5></td>
@@ -650,12 +692,6 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">0.75</td>
             <td>Float</td>
             <td>The index load factor for lookup.</td>
-        </tr>
-        <tr>
-            <td><h5>lookup.local-file-type</h5></td>
-            <td style="word-wrap: break-word;">sort</td>
-            <td><p>Enum</p></td>
-            <td>The local file type for lookup.<br /><br />Possible values:<ul><li>"sort": Construct a sorted file for lookup.</li><li>"hash": Construct a hash file for lookup.</li></ul></td>
         </tr>
         <tr>
             <td><h5>lookup.merge-buffer-size</h5></td>
@@ -898,6 +934,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>You can specify a pattern to get a timestamp from partitions. The formatter pattern is defined by 'partition.timestamp-formatter'.<ul><li>By default, read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:00:00'.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>postpone.batch-write-fixed-bucket</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to write the data into fixed bucket for batch writing a postpone bucket table.</td>
         </tr>
         <tr>
             <td><h5>primary-key</h5></td>

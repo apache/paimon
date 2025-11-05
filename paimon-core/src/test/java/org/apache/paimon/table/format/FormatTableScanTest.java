@@ -161,7 +161,7 @@ public class FormatTableScanTest {
                         partitionType,
                         enablePartitionValueOnly);
 
-        // Should optimize to specific partition path for first key
+        // Should not be optimized because of greater than
         assertThat(result.getLeft()).isEqualTo(tableLocation);
         assertThat(result.getRight()).isEqualTo(2);
 
@@ -202,6 +202,7 @@ public class FormatTableScanTest {
                         partitionType,
                         enablePartitionValueOnly);
         String partitionPath = enablePartitionValueOnly ? "2023/12" : "year=2023/month=12";
+
         // Should optimize to specific partition path
         assertThat(result.getLeft().toString()).isEqualTo(tableLocation + partitionPath);
         assertThat(result.getRight()).isEqualTo(0);
@@ -249,6 +250,82 @@ public class FormatTableScanTest {
         // test searchPartSpecAndPaths
         LocalFileIO fileIO = LocalFileIO.create();
         partitionPath = enablePartitionValueOnly ? "2023/12" : "year=2023/month=12";
+        fileIO.mkdirs(new Path(tableLocation, partitionPath));
+        List<Pair<LinkedHashMap<String, String>, Path>> searched =
+                searchPartSpecAndPaths(
+                        fileIO,
+                        result.getLeft(),
+                        result.getRight(),
+                        partitionKeys,
+                        enablePartitionValueOnly);
+        LinkedHashMap<String, String> expectPartitionSpec =
+                new LinkedHashMap<>(partitionKeys.size());
+        expectPartitionSpec.put("year", "2023");
+        expectPartitionSpec.put("month", "12");
+        assertThat(searched.get(0).getLeft()).isEqualTo(expectPartitionSpec);
+        assertThat(searched.size()).isEqualTo(1);
+    }
+
+    @TestTemplate
+    void testNoOptimizationWithSecondEquality() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        // Create equality predicate for only the second partition key
+        PredicateBuilder builder = new PredicateBuilder(partitionType);
+        Predicate predicate =
+                PredicateBuilder.and(builder.greaterOrEqual(0, 2023), builder.equal(1, 12));
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromPredicate(partitionType, predicate);
+
+        Pair<Path, Integer> result =
+                FormatTableScan.computeScanPathAndLevel(
+                        tableLocation,
+                        partitionKeys,
+                        partitionFilter,
+                        partitionType,
+                        enablePartitionValueOnly);
+
+        // Should not optimize with second equality filter
+        assertThat(result.getLeft()).isEqualTo(tableLocation);
+        assertThat(result.getRight()).isEqualTo(2);
+
+        // test searchPartSpecAndPaths
+        LocalFileIO fileIO = LocalFileIO.create();
+        String partitionPath = enablePartitionValueOnly ? "2023/12" : "year=2023/month=12";
+        fileIO.mkdirs(new Path(tableLocation, partitionPath));
+        List<Pair<LinkedHashMap<String, String>, Path>> searched =
+                searchPartSpecAndPaths(
+                        fileIO,
+                        result.getLeft(),
+                        result.getRight(),
+                        partitionKeys,
+                        enablePartitionValueOnly);
+        LinkedHashMap<String, String> expectPartitionSpec =
+                new LinkedHashMap<>(partitionKeys.size());
+        expectPartitionSpec.put("year", "2023");
+        expectPartitionSpec.put("month", "12");
+        assertThat(searched.get(0).getLeft()).isEqualTo(expectPartitionSpec);
+        assertThat(searched.size()).isEqualTo(1);
+    }
+
+    @TestTemplate
+    void testSkipIllegalPath() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        PartitionPredicate partitionFilter = PartitionPredicate.fromPredicate(partitionType, null);
+        Pair<Path, Integer> result =
+                FormatTableScan.computeScanPathAndLevel(
+                        tableLocation,
+                        partitionKeys,
+                        partitionFilter,
+                        partitionType,
+                        enablePartitionValueOnly);
+
+        LocalFileIO fileIO = LocalFileIO.create();
+        String illegalPath =
+                enablePartitionValueOnly
+                        ? "_unknown-year/unknown-month"
+                        : "unknown-year/unknown-month";
+        fileIO.mkdirs(new Path(tableLocation, illegalPath));
+        String partitionPath = enablePartitionValueOnly ? "2023/12" : "year=2023/month=12";
         fileIO.mkdirs(new Path(tableLocation, partitionPath));
         List<Pair<LinkedHashMap<String, String>, Path>> searched =
                 searchPartSpecAndPaths(

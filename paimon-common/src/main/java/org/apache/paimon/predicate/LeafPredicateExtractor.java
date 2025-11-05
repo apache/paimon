@@ -41,4 +41,9 @@ public class LeafPredicateExtractor implements PredicateVisitor<Map<String, Leaf
         }
         return Collections.emptyMap();
     }
+
+    @Override
+    public Map<String, LeafPredicate> visit(TransformPredicate predicate) {
+        throw new UnsupportedOperationException();
+    }
 }

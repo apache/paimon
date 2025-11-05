@@ -101,8 +101,13 @@ class PredicateBuilder:
         """Create a between predicate."""
         return self._build_predicate('between', field, [included_lower_bound, included_upper_bound])
 
-    def and_predicates(self, predicates: List[Predicate]) -> Predicate:
+    @staticmethod
+    def and_predicates(predicates: List[Predicate]) -> Optional[Predicate]:
         """Create an AND predicate from multiple predicates."""
+        if len(predicates) == 0:
+            return None
+        if len(predicates) == 1:
+            return predicates[0]
         return Predicate(
             method='and',
             index=None,
@@ -110,8 +115,13 @@ class PredicateBuilder:
             literals=predicates
         )
 
-    def or_predicates(self, predicates: List[Predicate]) -> Predicate:
+    @staticmethod
+    def or_predicates(predicates: List[Predicate]) -> Optional[Predicate]:
         """Create an OR predicate from multiple predicates."""
+        if len(predicates) == 0:
+            return None
+        if len(predicates) == 1:
+            return predicates[0]
         return Predicate(
             method='or',
             index=None,

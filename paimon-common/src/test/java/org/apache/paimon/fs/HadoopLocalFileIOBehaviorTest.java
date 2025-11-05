@@ -38,8 +38,8 @@ class HadoopLocalFileIOBehaviorTest extends FileIOBehaviorTestBase {
     protected FileIO getFileSystem() throws Exception {
         org.apache.hadoop.fs.FileSystem fs = new RawLocalFileSystem();
         fs.initialize(URI.create("file:///"), new Configuration());
-        HadoopFileIO fileIO = new HadoopFileIO();
-        fileIO.setFileSystem(getBasePath(), fs);
+        HadoopFileIO fileIO = new HadoopFileIO(getBasePath());
+        fileIO.setFileSystem(fs);
         return fileIO;
     }
 

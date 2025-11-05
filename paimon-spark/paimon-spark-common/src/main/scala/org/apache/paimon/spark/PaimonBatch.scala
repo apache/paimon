@@ -29,6 +29,7 @@ import java.util.Objects
 case class PaimonBatch(
     inputPartitions: Seq[PaimonInputPartition],
     readBuilder: ReadBuilder,
+    blobAsDescriptor: Boolean,
     metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
   extends Batch {
 
@@ -36,6 +37,6 @@ case class PaimonBatch(
     inputPartitions.map(_.asInstanceOf[InputPartition]).toArray
 
   override def createReaderFactory(): PartitionReaderFactory =
-    PaimonPartitionReaderFactory(readBuilder, metadataColumns)
+    PaimonPartitionReaderFactory(readBuilder, metadataColumns, blobAsDescriptor)
 
 }

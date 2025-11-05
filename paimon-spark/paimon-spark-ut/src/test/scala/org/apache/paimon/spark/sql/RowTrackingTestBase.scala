@@ -74,6 +74,11 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(1, 1, 0, 1), Row(3, 3, 2, 1))
       )
+      sql("DELETE FROM t WHERE _ROW_ID = 2")
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 1, 0, 1))
+      )
     }
   }
 
@@ -91,6 +96,12 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(1, 1, 0, 1), Row(2, 22, 1, 2), Row(3, 3, 2, 1))
+      )
+
+      sql("UPDATE t SET data = 222 WHERE _ROW_ID = 1")
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 1, 0, 1), Row(2, 222, 1, 3), Row(3, 3, 2, 1))
       )
     }
   }
@@ -326,6 +337,21 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
           sql("UPDATE t SET b = 22")
         }.getMessage
           .contains("Update operation is not supported when data evolution is enabled yet."))
+    }
+  }
+
+  test("Data Evolution: compact table throws exception") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      for (i <- 1 to 6) {
+        sql(s"INSERT INTO t VALUES ($i, $i)")
+      }
+      assert(
+        intercept[RuntimeException] {
+          sql("CALL sys.compact(table => 't')")
+        }.getMessage
+          .contains("Compact operation is not supported when data evolution is enabled yet."))
     }
   }
 

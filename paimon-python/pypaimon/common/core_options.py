@@ -33,16 +33,26 @@ class CoreOptions(str, Enum):
     BUCKET = "bucket"
     BUCKET_KEY = "bucket-key"
     WAREHOUSE = "warehouse"
+    SCAN_MANIFEST_PARALLELISM = "scan.manifest.parallelism"
     # File format options
     FILE_FORMAT = "file.format"
     FILE_FORMAT_ORC = "orc"
     FILE_FORMAT_AVRO = "avro"
     FILE_FORMAT_PARQUET = "parquet"
+    FILE_FORMAT_BLOB = "blob"
     FILE_COMPRESSION = "file.compression"
     FILE_COMPRESSION_PER_LEVEL = "file.compression.per.level"
     FILE_FORMAT_PER_LEVEL = "file.format.per.level"
     FILE_BLOCK_SIZE = "file.block-size"
+    FILE_BLOB_AS_DESCRIPTOR = "blob-as-descriptor"
     # Scan options
     SCAN_FALLBACK_BRANCH = "scan.fallback-branch"
+    INCREMENTAL_BETWEEN_TIMESTAMP = "incremental-between-timestamp"
     # Commit options
     COMMIT_USER_PREFIX = "commit.user-prefix"
+    ROW_TRACKING_ENABLED = "row-tracking.enabled"
+    DATA_EVOLUTION_ENABLED = "data-evolution.enabled"
+
+    @staticmethod
+    def get_blob_as_descriptor(options: dict) -> bool:
+        return options.get(CoreOptions.FILE_BLOB_AS_DESCRIPTOR, "false").lower() == 'true'

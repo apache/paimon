@@ -73,10 +73,8 @@ class AtomicType(DataType):
         super().__init__(nullable)
         self.type = type
 
-    def to_dict(self) -> str:
-        if not self.nullable:
-            return self.type + " NOT NULL"
-        return self.type
+    def to_dict(self) -> Dict[str, Any]:
+        return {"type": self.type if self.nullable else self.type + " NOT NULL"}
 
     @classmethod
     def from_dict(cls, data: str) -> "AtomicType":
@@ -247,6 +245,7 @@ class Keyword(Enum):
     BINARY = "BINARY"
     VARBINARY = "VARBINARY"
     BYTES = "BYTES"
+    BLOB = "BLOB"
     DECIMAL = "DECIMAL"
     NUMERIC = "NUMERIC"
     DEC = "DEC"
@@ -407,6 +406,8 @@ class PyarrowFieldParser:
                 return pyarrow.string()
             elif type_name == 'BYTES' or type_name.startswith('VARBINARY'):
                 return pyarrow.binary()
+            elif type_name == 'BLOB':
+                return pyarrow.large_binary()
             elif type_name.startswith('BINARY'):
                 if type_name == 'BINARY':
                     return pyarrow.binary(1)
@@ -506,6 +507,8 @@ class PyarrowFieldParser:
             type_name = f'BINARY({pa_type.byte_width})'
         elif types.is_binary(pa_type):
             type_name = 'BYTES'
+        elif types.is_large_binary(pa_type):
+            type_name = 'BLOB'
         elif types.is_decimal(pa_type):
             type_name = f'DECIMAL({pa_type.precision}, {pa_type.scale})'
         elif types.is_timestamp(pa_type) and pa_type.tz is None:
@@ -543,6 +546,7 @@ class PyarrowFieldParser:
 
     @staticmethod
     def to_paimon_schema(pa_schema: pyarrow.Schema) -> List[DataField]:
+        # Convert PyArrow schema to Paimon fields
         fields = []
         for i, pa_field in enumerate(pa_schema):
             pa_field: pyarrow.Field

@@ -29,6 +29,7 @@ import org.apache.paimon.utils.IOFunction;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Read operation which provides {@link RecordReader} creation.
@@ -50,6 +51,10 @@ public interface SplitRead<T> {
     }
 
     default SplitRead<T> withLimit(@Nullable Integer limit) {
+        return this;
+    }
+
+    default SplitRead<T> withRowIds(@Nullable List<Long> indices) {
         return this;
     }
 
@@ -80,6 +85,12 @@ public interface SplitRead<T> {
             @Override
             public SplitRead<R> withFilter(@Nullable Predicate predicate) {
                 read.withFilter(predicate);
+                return this;
+            }
+
+            @Override
+            public SplitRead<R> withRowIds(@Nullable List<Long> indices) {
+                read.withRowIds(indices);
                 return this;
             }
 

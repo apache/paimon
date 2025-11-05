@@ -74,7 +74,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private final ConcurrentMap<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
-    private final TableSchema schema;
+    protected final TableSchema schema;
 
     private Snapshot specifiedSnapshot = null;
     private boolean onlyReadRealBuckets = false;
@@ -197,6 +197,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public FileStoreScan withLevelMinMaxFilter(BiFilter<Integer, Integer> minMaxFilter) {
+        manifestsReader.withLevelMinMaxFilter(minMaxFilter);
+        return this;
+    }
+
+    @Override
     public FileStoreScan enableValueFilter() {
         return this;
     }
@@ -231,6 +237,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return this;
     }
 
+    @Override
+    public FileStoreScan withRowIds(List<Long> indices) {
+        // do nothing by default
+        return this;
+    }
+
     @Nullable
     @Override
     public Integer parallelism() {
@@ -254,6 +266,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         while (iterator.hasNext()) {
             files.add(iterator.next());
         }
+
+        files = postFilter(files);
 
         if (wholeBucketFilterEnabled()) {
             // We group files by bucket here, and filter them by the whole bucket filter.
@@ -421,6 +435,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     /** Note: Keep this thread-safe. */
     protected abstract boolean filterByStats(ManifestEntry entry);
+
+    protected abstract List<ManifestEntry> postFilter(List<ManifestEntry> entries);
 
     protected boolean wholeBucketFilterEnabled() {
         return false;

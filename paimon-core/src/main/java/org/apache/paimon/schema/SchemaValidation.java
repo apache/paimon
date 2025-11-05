@@ -60,7 +60,6 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.DEFAULT_AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
-import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
@@ -563,8 +562,7 @@ public class SchemaValidation {
                         "Cannot define 'bucket-key' with bucket = -1, please remove the 'bucket-key' setting or specify a bucket number.");
             }
 
-            if (schema.primaryKeys().isEmpty()
-                    && options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null) {
+            if (schema.primaryKeys().isEmpty() && options.fullCompactionDeltaCommits() != null) {
                 throw new RuntimeException(
                         "AppendOnlyTable of unaware or dynamic bucket does not support 'full-compaction.delta-commits'");
             }
@@ -659,6 +657,9 @@ public class SchemaValidation {
             checkArgument(
                     BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldCount() == 1,
                     "Table with BLOB type column only support one BLOB column.");
+            checkArgument(
+                    schema.fields().size() > 1,
+                    "Table with BLOB type column must have other normal columns.");
         }
     }
 
@@ -672,6 +673,9 @@ public class SchemaValidation {
                     schema.primaryKeys().isEmpty(),
                     "Cannot define %s for incremental clustering table.",
                     PRIMARY_KEY.key());
+            checkArgument(
+                    !options.deletionVectorsEnabled(),
+                    "Cannot enable deletion vectors mode for incremental clustering table.");
         }
     }
 }

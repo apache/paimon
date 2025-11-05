@@ -78,7 +78,7 @@ public class SparkCatalogWithHiveTest {
                                     .stream()
                                     .map(s -> s.get(0))
                                     .map(Object::toString)
-                                    .filter(s -> s.contains("OrcScan"))
+                                    .filter(s -> s.contains("PaimonFormatTableScan"))
                                     .count())
                     .isGreaterThan(0);
 
@@ -89,10 +89,11 @@ public class SparkCatalogWithHiveTest {
             // test csv table
 
             spark.sql(
-                    "CREATE TABLE IF NOT EXISTS table_csv (a INT, bb INT, c STRING) USING csv OPTIONS ('csv.field-delimiter' ',')");
+                    "CREATE TABLE IF NOT EXISTS table_csv (a INT, bb INT, c STRING) USING csv OPTIONS ('csv.field-delimiter' ',') "
+                            + "TBLPROPERTIES ('file.compression'='none')");
             spark.sql("INSERT INTO table_csv VALUES (1, 1, '1'), (2, 2, '2')").collect();
-            assertThat(spark.sql("DESCRIBE FORMATTED table_csv").collectAsList().toString())
-                    .contains("sep=,");
+            String r = spark.sql("DESCRIBE FORMATTED table_csv").collectAsList().toString();
+            assertThat(r).contains("sep=,");
             assertThat(
                             spark.sql("SELECT * FROM table_csv").collectAsList().stream()
                                     .map(Row::toString)
@@ -101,7 +102,9 @@ public class SparkCatalogWithHiveTest {
 
             // test json table
 
-            spark.sql("CREATE TABLE IF NOT EXISTS table_json (a INT, bb INT, c STRING) USING json");
+            spark.sql(
+                    "CREATE TABLE IF NOT EXISTS table_json (a INT, bb INT, c STRING) USING json "
+                            + "TBLPROPERTIES ('file.compression'='none')");
             spark.sql("INSERT INTO table_json VALUES(1, 1, '1'), (2, 2, '2')");
             assertThat(
                             spark.sql("SELECT * FROM table_json").collectAsList().stream()

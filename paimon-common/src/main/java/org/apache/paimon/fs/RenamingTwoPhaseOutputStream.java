@@ -29,8 +29,8 @@ import java.util.UUID;
  */
 @Public
 public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
+    private static final String TEMP_DIR_NAME = "_temporary";
 
-    private final FileIO fileIO;
     private final Path targetPath;
     private final Path tempPath;
     private final PositionOutputStream tempOutputStream;
@@ -40,7 +40,6 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
         if (!overwrite && fileIO.exists(targetPath)) {
             throw new IOException("File " + targetPath + " already exists.");
         }
-        this.fileIO = fileIO;
         this.targetPath = targetPath;
         this.tempPath = generateTempPath(targetPath);
 
@@ -81,7 +80,7 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
     @Override
     public Committer closeForCommit() throws IOException {
         close();
-        return new TempFileCommitter(fileIO, tempPath, targetPath);
+        return new TempFileCommitter(tempPath, targetPath);
     }
 
     /**
@@ -89,57 +88,55 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
      * directory as the target with a unique suffix.
      */
     private Path generateTempPath(Path targetPath) {
-        String tempFileName = ".tmp." + UUID.randomUUID();
+        String tempFileName = TEMP_DIR_NAME + "/.tmp." + UUID.randomUUID();
         return new Path(targetPath.getParent(), tempFileName);
     }
 
     /** Committer implementation that renames temporary file to target path. */
     private static class TempFileCommitter implements Committer {
 
-        private final FileIO fileIO;
+        private static final long serialVersionUID = 1L;
+
         private final Path tempPath;
         private final Path targetPath;
-        private boolean committed = false;
-        private boolean discarded = false;
 
-        public TempFileCommitter(FileIO fileIO, Path tempPath, Path targetPath) {
-            this.fileIO = fileIO;
+        private TempFileCommitter(Path tempPath, Path targetPath) {
             this.tempPath = tempPath;
             this.targetPath = targetPath;
         }
 
         @Override
-        public void commit() throws IOException {
-            if (committed || discarded) {
-                throw new IOException("Committer has already been used");
+        public void commit(FileIO fileIO) throws IOException {
+            Path parentDir = targetPath.getParent();
+            if (parentDir != null && !fileIO.exists(parentDir)) {
+                fileIO.mkdirs(parentDir);
             }
-
-            try {
-                Path parentDir = targetPath.getParent();
-                if (parentDir != null && !fileIO.exists(parentDir)) {
-                    fileIO.mkdirs(parentDir);
-                }
-
-                if (!fileIO.rename(tempPath, targetPath)) {
-                    throw new IOException("Failed to rename " + tempPath + " to " + targetPath);
-                }
-
-                committed = true;
-
-            } catch (IOException e) {
-                // Clean up temp file on failure
+            if (!fileIO.rename(tempPath, targetPath)) {
+                throw new IOException("Failed to rename " + tempPath + " to " + targetPath);
+            }
+            if (fileIO.exists(tempPath)) {
                 fileIO.deleteQuietly(tempPath);
-                throw new IOException(
-                        "Failed to commit temporary file " + tempPath + " to " + targetPath, e);
             }
         }
 
         @Override
-        public void discard() {
-            if (!committed && !discarded) {
-                fileIO.deleteQuietly(tempPath);
-                discarded = true;
+        public void discard(FileIO fileIO) throws IOException {
+            if (fileIO.exists(targetPath)) {
+                fileIO.deleteQuietly(targetPath);
             }
+            if (fileIO.exists(tempPath)) {
+                fileIO.deleteQuietly(tempPath);
+            }
+        }
+
+        @Override
+        public Path targetFilePath() {
+            return targetPath;
+        }
+
+        @Override
+        public void clean(FileIO fileIO) {
+            fileIO.deleteDirectoryQuietly(tempPath.getParent());
         }
     }
 }

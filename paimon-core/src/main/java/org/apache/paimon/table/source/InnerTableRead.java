@@ -72,4 +72,8 @@ public interface InnerTableRead extends TableRead {
     default InnerTableRead withMetricRegistry(MetricRegistry registry) {
         return this;
     }
+
+    default InnerTableRead withRowIds(List<Long> indices) {
+        return this;
+    }
 }

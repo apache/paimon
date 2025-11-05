@@ -18,9 +18,11 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -35,6 +37,8 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.UriReader;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.paimon.shims.SparkShimLoader;
@@ -57,15 +61,24 @@ public class SparkRow implements InternalRow, Serializable {
     private final RowType type;
     private final Row row;
     private final RowKind rowKind;
+    private final boolean blobAsDescriptor;
+    private final UriReaderFactory uriReaderFactory;
 
     public SparkRow(RowType type, Row row) {
-        this(type, row, RowKind.INSERT);
+        this(type, row, RowKind.INSERT, false, null);
     }
 
-    public SparkRow(RowType type, Row row, RowKind rowkind) {
+    public SparkRow(
+            RowType type,
+            Row row,
+            RowKind rowkind,
+            boolean blobAsDescriptor,
+            CatalogContext catalogContext) {
         this.type = type;
         this.row = row;
         this.rowKind = rowkind;
+        this.blobAsDescriptor = blobAsDescriptor;
+        this.uriReaderFactory = new UriReaderFactory(catalogContext);
     }
 
     @Override
@@ -154,7 +167,13 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public Blob getBlob(int i) {
-        return new BlobData(row.getAs(i));
+        if (blobAsDescriptor) {
+            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(row.getAs(i));
+            UriReader uriReader = uriReaderFactory.create(blobDescriptor.uri());
+            return Blob.fromDescriptor(uriReader, blobDescriptor);
+        } else {
+            return new BlobData(row.getAs(i));
+        }
     }
 
     @Override

@@ -343,6 +343,19 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: sort compact with partition filter") {
+    withTable("t") {
+      sql("CREATE TABLE t (a INT, pt INT) PARTITIONED BY (pt)")
+      sql("INSERT INTO t VALUES (1, 1)")
+      sql("INSERT INTO t VALUES (2, 1)")
+      sql(
+        "CALL sys.compact(table => 't', order_strategy => 'order', where => 'pt = 1', order_by => 'a')")
+      val table = loadTable("t")
+      assert(table.latestSnapshot().get().commitKind.equals(CommitKind.OVERWRITE))
+      checkAnswer(sql("SELECT * FROM t ORDER BY a"), Seq(Row(1, 1), Row(2, 1)))
+    }
+  }
+
   test("Paimon Procedure: compact for pk") {
     failAfter(streamingTimeout) {
       withTempDir {

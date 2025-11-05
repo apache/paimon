@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
@@ -104,7 +105,17 @@ public class SystemTableSource extends FlinkTableSource {
         } else {
             source =
                     new StaticFileStoreSource(
-                            readBuilder, limit, splitBatchSize, splitAssignMode, null, rowData);
+                            readBuilder,
+                            limit,
+                            splitBatchSize,
+                            splitAssignMode,
+                            null,
+                            rowData,
+                            Boolean.parseBoolean(
+                                    table.options()
+                                            .getOrDefault(
+                                                    CoreOptions.BLOB_AS_DESCRIPTOR.key(),
+                                                    "false")));
         }
         return new PaimonDataStreamScanProvider(
                 source.getBoundedness() == Boundedness.BOUNDED,

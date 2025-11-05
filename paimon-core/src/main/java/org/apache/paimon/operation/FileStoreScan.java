@@ -75,6 +75,8 @@ public interface FileStoreScan {
 
     FileStoreScan withLevelFilter(Filter<Integer> levelFilter);
 
+    FileStoreScan withLevelMinMaxFilter(BiFilter<Integer, Integer> minMaxFilter);
+
     FileStoreScan enableValueFilter();
 
     FileStoreScan withManifestEntryFilter(Filter<ManifestEntry> filter);
@@ -86,6 +88,8 @@ public interface FileStoreScan {
     FileStoreScan dropStats();
 
     FileStoreScan keepStats();
+
+    FileStoreScan withRowIds(List<Long> indices);
 
     @Nullable
     Integer parallelism();

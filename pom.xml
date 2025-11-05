@@ -110,7 +110,7 @@ under the License.
         <testcontainers.version>1.19.1</testcontainers.version>
         <iceberg.version>1.6.1</iceberg.version>
         <hudi.version>0.15.0</hudi.version>
-        <parquet.version>1.15.1</parquet.version>
+        <parquet.version>1.15.2</parquet.version>
         <orc.version>1.9.2</orc.version>
         <protobuf-java.version>3.19.6</protobuf-java.version>
         <roaringbitmap.version>1.2.1</roaringbitmap.version>
@@ -127,7 +127,7 @@ under the License.
 
         <!-- spark profile properties-->
         <paimon-sparkx-common>paimon-spark3-common_${scala.binary.version}</paimon-sparkx-common>
-        <paimon-spark-common.spark.version>3.5.6</paimon-spark-common.spark.version>
+        <paimon-spark-common.spark.version>3.5.7</paimon-spark-common.spark.version>
         <test.spark.main.version>3.3</test.spark.main.version>
         <test.spark.version>3.3.0</test.spark.version>
 
@@ -401,7 +401,7 @@ under the License.
             <properties>
                 <scala.binary.version>2.12</scala.binary.version>
                 <scala.version>${scala212.version}</scala.version>
-                <paimon-spark-common.spark.version>3.5.6</paimon-spark-common.spark.version>
+                <paimon-spark-common.spark.version>3.5.7</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark3-common_${scala.binary.version}</paimon-sparkx-common>
                 <!-- todo: support the latest spark in paimon e2e test2 -->
                 <test.spark.main.version>3.3</test.spark.main.version>
@@ -448,7 +448,6 @@ under the License.
                 <test.flink.version>1.20.1</test.flink.version>
             </properties>
             <modules>
-                <module>paimon-flink/paimon-flink-1.15</module>
                 <module>paimon-flink/paimon-flink-1.16</module>
                 <module>paimon-flink/paimon-flink-1.17</module>
                 <module>paimon-flink/paimon-flink-1.18</module>

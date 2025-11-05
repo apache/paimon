@@ -60,6 +60,10 @@ public interface InnerTableScan extends TableScan {
         return this;
     }
 
+    default InnerTableScan withRowIds(List<Long> indices) {
+        return this;
+    }
+
     default InnerTableScan withBucket(int bucket) {
         return this;
     }

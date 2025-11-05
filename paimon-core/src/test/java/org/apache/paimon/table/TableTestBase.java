@@ -230,6 +230,18 @@ public abstract class TableTestBase {
         return messages;
     }
 
+    protected void writeDataDefault(Iterable<InternalRow> rows) throws Exception {
+        Table table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+
+        BatchTableWrite batchTableWrite = builder.newWrite();
+        BatchTableCommit commit = builder.newCommit();
+        for (InternalRow row : rows) {
+            batchTableWrite.write(row);
+        }
+        commit.commit(batchTableWrite.prepareCommit());
+    }
+
     public FileStoreTable getTableDefault() throws Exception {
         return getTable(identifier());
     }

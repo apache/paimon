@@ -33,6 +33,7 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
@@ -52,6 +53,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
     @Nullable private final Long firstRowId;
     private final long maxSequenceNumber;
     private final Map<String, Integer> systemFields;
+    @Nullable private final RoaringBitmap32 selection;
 
     public DataFileRecordReader(
             RowType tableRowType,
@@ -79,6 +81,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         this.firstRowId = firstRowId;
         this.maxSequenceNumber = maxSequenceNumber;
         this.systemFields = systemFields;
+        this.selection = context.selection();
     }
 
     @Nullable
@@ -142,6 +145,10 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         if (castMapping != null) {
             final CastedRow castedRow = CastedRow.from(castMapping);
             iterator = iterator.transform(castedRow::replaceRow);
+        }
+
+        if (selection != null) {
+            iterator = iterator.selection(selection);
         }
 
         return iterator;
