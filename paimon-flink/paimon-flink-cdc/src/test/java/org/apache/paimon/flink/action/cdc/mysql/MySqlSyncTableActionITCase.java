@@ -1291,10 +1291,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .withComputedColumnArgs("pt=substring(_date,5)")
                         .withTableConfig(tableConfig)
                         .build();
-        runActionWithDefaultEnv(action2);
+        jobClient = runActionWithDefaultEnv(action2);
 
         FileStoreTable table = getFileStoreTable();
         assertThat(table.options()).containsAllEntriesOf(tableConfig);
+        jobClient.cancel().get(1, TimeUnit.MINUTES);
     }
 
     @Test
