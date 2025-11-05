@@ -46,7 +46,7 @@ import scala.collection.Searching.{search, Found, InsertionPoint}
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
-/** Command for Merge Into for Data Evolution paimom table. */
+/** Command for Merge Into for Data Evolution paimon table. */
 case class MergeIntoPaimonDataEvolutionTable(
     v2Table: SparkTable,
     targetTable: LogicalPlan,

@@ -1054,7 +1054,7 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testWriteWritePostponeBucketThenWriteFixedBucket() throws Exception {
+    public void testWritePostponeBucketThenWriteFixedBucket() throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv =
                 tableEnvironmentBuilder()

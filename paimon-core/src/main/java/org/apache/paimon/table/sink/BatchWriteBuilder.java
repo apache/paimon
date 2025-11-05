@@ -20,6 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.table.Table;
 
 import javax.annotation.Nullable;
 
@@ -71,4 +72,8 @@ public interface BatchWriteBuilder extends WriteBuilder {
     /** Create a {@link TableCommit} to commit {@link CommitMessage}s. */
     @Override
     BatchTableCommit newCommit();
+
+    default BatchWriteBuilder copyWithNewTable(Table newTable) {
+        throw new UnsupportedOperationException();
+    }
 }
