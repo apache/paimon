@@ -18,7 +18,7 @@
 
 from typing import List, Optional
 
-from pypaimon.snapshot.snapshot import COMMIT_IDENTIFIER
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import FileStoreCommit
 
@@ -41,7 +41,7 @@ class TableCommit:
         self.file_store_commit = FileStoreCommit(snapshot_commit, table, commit_user)
         self.batch_committed = False
 
-    def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = COMMIT_IDENTIFIER):
+    def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
         self._check_committed()
 
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
@@ -78,10 +78,10 @@ class TableCommit:
 
 class BatchTableCommit(TableCommit):
     def commit(self, commit_messages: List[CommitMessage]):
-        self._commit(commit_messages, COMMIT_IDENTIFIER)
+        self._commit(commit_messages, BATCH_COMMIT_IDENTIFIER)
 
 
 class StreamTableCommit(TableCommit):
 
-    def commit(self, commit_messages: List[CommitMessage], commit_identifier: int = COMMIT_IDENTIFIER):
+    def commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
         self._commit(commit_messages, commit_identifier)

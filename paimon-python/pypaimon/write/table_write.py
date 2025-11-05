@@ -21,7 +21,7 @@ from typing import List
 import pyarrow as pa
 
 from pypaimon.schema.data_types import PyarrowFieldParser
-from pypaimon.snapshot.snapshot import COMMIT_IDENTIFIER
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 
@@ -87,10 +87,10 @@ class BatchTableWrite(TableWrite):
         if self.batch_committed:
             raise RuntimeError("BatchTableWrite only supports one-time committing.")
         self.batch_committed = True
-        return self.file_store_write.prepare_commit(COMMIT_IDENTIFIER)
+        return self.file_store_write.prepare_commit(BATCH_COMMIT_IDENTIFIER)
 
 
 class StreamTableWrite(TableWrite):
 
-    def prepare_commit(self, commit_identifier: int = COMMIT_IDENTIFIER) -> List[CommitMessage]:
+    def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
         return self.file_store_write.prepare_commit(commit_identifier)

@@ -21,7 +21,7 @@ from typing import Dict, Optional
 
 from pypaimon.common.json_util import json_field
 
-COMMIT_IDENTIFIER = 0x7fffffffffffffff
+BATCH_COMMIT_IDENTIFIER = 0x7fffffffffffffff
 
 
 @dataclass
