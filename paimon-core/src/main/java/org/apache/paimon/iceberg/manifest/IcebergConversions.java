@@ -159,6 +159,9 @@ public class IcebergConversions {
                 Preconditions.checkArgument(
                         timestampPrecision >= 3 && timestampPrecision <= 6,
                         "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 6.");
+                if (timestampPrecision == 3) {
+                    return Timestamp.fromEpochMillis(timestampLong);
+                }
                 return Timestamp.fromMicros(timestampLong);
             default:
                 throw new UnsupportedOperationException("Cannot deserialize type: " + type);
