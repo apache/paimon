@@ -589,14 +589,14 @@ class PaimonMetadataApplierTest {
                                 "created_time",
                                 org.apache.flink.cdc.common.types.DataTypes.TIMESTAMP(),
                                 null,
-                                FlinkCDCToPaimonTypeConverter.INVALID_OR_MISSING_DATATIME)));
+                                FlinkCDCToPaimonTypeConverter.INVALID_OR_MISSING_DATETIME)));
         addedColumns.add(
                 AddColumnEvent.last(
                         Column.physicalColumn(
                                 "updated_time",
                                 org.apache.flink.cdc.common.types.DataTypes.TIMESTAMP_LTZ(),
                                 null,
-                                FlinkCDCToPaimonTypeConverter.INVALID_OR_MISSING_DATATIME)));
+                                FlinkCDCToPaimonTypeConverter.INVALID_OR_MISSING_DATETIME)));
 
         AddColumnEvent addColumnEvent =
                 new AddColumnEvent(TableId.parse(tableId.identifier()), addedColumns);

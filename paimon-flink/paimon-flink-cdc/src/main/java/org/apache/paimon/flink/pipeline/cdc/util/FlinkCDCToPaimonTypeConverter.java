@@ -32,7 +32,7 @@ public class FlinkCDCToPaimonTypeConverter {
 
     public static final String DEFAULT_DATETIME = "1970-01-01 00:00:00";
 
-    public static final String INVALID_OR_MISSING_DATATIME = "0000-00-00 00:00:00";
+    public static final String INVALID_OR_MISSING_DATETIME = "0000-00-00 00:00:00";
 
     /** Convert Flink CDC schema to Paimon schema. */
     public static Schema convertFlinkCDCSchemaToPaimonSchema(
@@ -73,7 +73,7 @@ public class FlinkCDCToPaimonTypeConverter {
                 || dataType instanceof TimestampType
                 || dataType instanceof ZonedTimestampType) {
 
-            if (INVALID_OR_MISSING_DATATIME.equals(defaultValue)) {
+            if (INVALID_OR_MISSING_DATETIME.equals(defaultValue)) {
                 return DEFAULT_DATETIME;
             }
         }
