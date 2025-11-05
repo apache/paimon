@@ -1484,8 +1484,9 @@ class DataBlobWriterTest(unittest.TestCase):
 
         # Verify blob files were created
         file_names = [f.file_name for f in commit_messages[0].new_files]
-        self.assertGreater(len([f for f in file_names if f.endswith('.blob')]), 0,
-                          "Should have at least one blob file")
+        self.assertGreater(
+            len([f for f in file_names if f.endswith('.blob')]), 0,
+            "Should have at least one blob file")
 
         # Read using to_iterator
         iterator = table.new_read_builder().new_read().to_iterator(
@@ -1512,9 +1513,10 @@ class DataBlobWriterTest(unittest.TestCase):
             self.assertEqual(blob_bytes, expected['blob'], f"Row {row_id}: blob data should match")
             self.assertEqual(len(blob_bytes), len(expected['blob']), f"Row {row_id}: blob size should match")
 
-            self.assertIn(row.get_row_kind(),
-                         [RowKind.INSERT, RowKind.UPDATE_BEFORE, RowKind.UPDATE_AFTER, RowKind.DELETE],
-                         f"Row {row_id}: RowKind should be valid")
+            self.assertIn(
+                row.get_row_kind(),
+                [RowKind.INSERT, RowKind.UPDATE_BEFORE, RowKind.UPDATE_AFTER, RowKind.DELETE],
+                f"Row {row_id}: RowKind should be valid")
 
 
 if __name__ == '__main__':
