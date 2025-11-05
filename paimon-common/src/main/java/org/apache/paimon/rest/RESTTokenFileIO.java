@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
@@ -117,6 +118,11 @@ public class RESTTokenFileIO implements FileIO {
     public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
             throws IOException {
         return fileIO().newTwoPhaseOutputStream(path, overwrite);
+    }
+
+    @Override
+    public MultiPartUploadStore newMultiPartUploadStore(Path path) throws IOException {
+        return fileIO().newMultiPartUploadStore(path);
     }
 
     @Override

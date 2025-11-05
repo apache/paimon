@@ -91,7 +91,7 @@ public class FormatTableCommit implements BatchTableCommit {
             } else if (overwrite) {
                 Set<Path> partitionPaths = new HashSet<>();
                 for (TwoPhaseOutputStream.Committer c : committers) {
-                    partitionPaths.add(c.targetFilePath().getParent());
+                    partitionPaths.add(c.targetPath().getParent());
                 }
                 for (Path p : partitionPaths) {
                     deletePreviousDataFile(p);

@@ -114,6 +114,21 @@ public interface FileIO extends Serializable, Closeable {
     }
 
     /**
+     * Create a MultiPartUploadStore for multipart upload.
+     *
+     * @param path the file target path
+     * @return a MultiPartUploadStore
+     * @throws IOException Thrown, if the store could not be created because of an I/O.
+     * @throws UnsupportedOperationException if the filesystem does not support multipart upload
+     */
+    default MultiPartUploadStore newMultiPartUploadStore(Path path) throws IOException {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "The FileIO %s does not support multipart upload.",
+                        this.getClass().getName()));
+    }
+
+    /**
      * Return a file status object that represents the path.
      *
      * @param path The path we want information from

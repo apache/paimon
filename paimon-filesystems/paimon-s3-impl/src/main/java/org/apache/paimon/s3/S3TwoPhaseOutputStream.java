@@ -26,7 +26,6 @@ import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
 import com.amazonaws.services.s3.model.PartETag;
 
 import java.io.IOException;
-import java.util.List;
 
 /** S3 implementation of TwoPhaseOutputStream using multipart upload. */
 public class S3TwoPhaseOutputStream
@@ -41,12 +40,7 @@ public class S3TwoPhaseOutputStream
     }
 
     @Override
-    public Committer committer(
-            String uploadId,
-            List<PartETag> uploadedParts,
-            String objectName,
-            long position,
-            Path targetPath) {
+    public Committer committer() {
         return new S3MultiPartUploadCommitter(
                 uploadId, uploadedParts, objectName, position, targetPath);
     }

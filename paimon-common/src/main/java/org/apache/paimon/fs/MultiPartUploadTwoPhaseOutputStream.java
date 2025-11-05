@@ -38,12 +38,14 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
 
     private final ByteArrayOutputStream buffer;
     private final MultiPartUploadStore<T, C> multiPartUploadStore;
-    private final List<T> uploadedParts;
-    private final String objectName;
-    private final Path targetPath;
 
-    private String uploadId;
-    private long position;
+    protected final String objectName;
+    protected final Path targetPath;
+    protected final String uploadId;
+
+    protected List<T> uploadedParts;
+    protected long position;
+
     private boolean closed = false;
     private Committer committer;
 
@@ -68,8 +70,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         return 10 << 20;
     }
 
-    public abstract Committer committer(
-            String uploadId, List<T> uploadedParts, String objectName, long position, Path path);
+    public abstract Committer committer();
 
     @Override
     public long getPos() throws IOException {
@@ -146,7 +147,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             uploadPart();
         }
 
-        return committer(uploadId, uploadedParts, objectName, position, targetPath);
+        return committer();
     }
 
     private void uploadPart() throws IOException {

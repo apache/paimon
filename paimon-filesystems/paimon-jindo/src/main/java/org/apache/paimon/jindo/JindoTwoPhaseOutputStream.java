@@ -25,7 +25,6 @@ import org.apache.paimon.fs.Path;
 import com.aliyun.jindodata.api.spec.protos.JdoObjectPart;
 
 import java.io.IOException;
-import java.util.List;
 
 /** Jindo implementation of TwoPhaseOutputStream using multipart upload. */
 public class JindoTwoPhaseOutputStream
@@ -40,12 +39,7 @@ public class JindoTwoPhaseOutputStream
     }
 
     @Override
-    public Committer committer(
-            String uploadId,
-            List<JdoObjectPart> uploadedParts,
-            String objectName,
-            long position,
-            Path targetPath) {
+    public Committer committer() {
         return new JindoMultiPartUploadCommitter(
                 uploadId, uploadedParts, objectName, position, targetPath);
     }

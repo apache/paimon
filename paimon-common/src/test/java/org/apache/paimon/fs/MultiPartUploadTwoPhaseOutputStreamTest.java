@@ -68,7 +68,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
 
         TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
         assertThat(store.getUploadedParts()).hasSize(3);
-        assertThat(committer.targetFilePath().toString()).isEqualTo(store.getStartedObjectName());
+        assertThat(committer.targetPath().toString()).isEqualTo(store.getStartedObjectName());
 
         committer.commit(fileIO);
 
@@ -270,12 +270,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         }
 
         @Override
-        public Committer committer(
-                String uploadId,
-                List<TestPart> uploadedParts,
-                String objectName,
-                long position,
-                Path targetPath) {
+        public Committer committer() {
             return new TestCommitter(store, uploadId, uploadedParts, objectName, position);
         }
     }
@@ -323,7 +318,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         }
 
         @Override
-        public Path targetFilePath() {
+        public Path targetPath() {
             return new Path(objectName);
         }
 

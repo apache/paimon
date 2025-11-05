@@ -18,8 +18,6 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.rest.RESTTokenFileIO;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,7 +36,7 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     private final String objectName;
     private final List<T> uploadedParts;
     private final long byteLength;
-    private final Path targetFilePath;
+    private final Path targetPath;
 
     public BaseMultiPartUploadCommitter(
             String uploadId,
@@ -50,21 +48,14 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
         this.objectName = objectName;
         this.uploadedParts = new ArrayList<>(uploadedParts);
         this.byteLength = byteLength;
-        this.targetFilePath = targetPath;
+        this.targetPath = targetPath;
     }
-
-    protected abstract MultiPartUploadStore<T, C> multiPartUploadStore(
-            FileIO fileIO, Path targetPath) throws IOException;
 
     @Override
     public void commit(FileIO fileIO) throws IOException {
         try {
-            if (fileIO instanceof RESTTokenFileIO) {
-                RESTTokenFileIO restTokenFileIO = (RESTTokenFileIO) fileIO;
-                fileIO = restTokenFileIO.fileIO();
-            }
             MultiPartUploadStore<T, C> multiPartUploadStore =
-                    multiPartUploadStore(fileIO, targetFilePath());
+                    fileIO.newMultiPartUploadStore(targetPath());
             multiPartUploadStore.completeMultipartUpload(
                     objectName, uploadId, uploadedParts, byteLength);
         } catch (Exception e) {
@@ -75,12 +66,8 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     @Override
     public void discard(FileIO fileIO) throws IOException {
         try {
-            if (fileIO instanceof RESTTokenFileIO) {
-                RESTTokenFileIO restTokenFileIO = (RESTTokenFileIO) fileIO;
-                fileIO = restTokenFileIO.fileIO();
-            }
             MultiPartUploadStore<T, C> multiPartUploadStore =
-                    multiPartUploadStore(fileIO, targetFilePath());
+                    fileIO.newMultiPartUploadStore(targetPath());
             multiPartUploadStore.abortMultipartUpload(objectName, uploadId);
         } catch (Exception e) {
             LOG.warn("Failed to discard multipart upload with ID: {}", uploadId, e);
@@ -88,8 +75,8 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     }
 
     @Override
-    public Path targetFilePath() {
-        return this.targetFilePath;
+    public Path targetPath() {
+        return this.targetPath;
     }
 
     @Override

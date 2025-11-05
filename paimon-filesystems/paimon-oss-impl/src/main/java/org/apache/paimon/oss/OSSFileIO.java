@@ -20,6 +20,7 @@ package org.apache.paimon.oss;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
@@ -125,6 +126,13 @@ public class OSSFileIO extends HadoopCompliantFileIO {
                 new OSSMultiPartUpload((org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs),
                 hadoopPath,
                 path);
+    }
+
+    @Override
+    public MultiPartUploadStore newMultiPartUploadStore(Path path) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        FileSystem fs = getFileSystem(hadoopPath);
+        return new OSSMultiPartUpload((org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs);
     }
 
     public Options hadoopOptions() {

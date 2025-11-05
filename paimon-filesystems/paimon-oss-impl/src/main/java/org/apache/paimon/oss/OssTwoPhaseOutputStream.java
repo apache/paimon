@@ -26,7 +26,6 @@ import com.aliyun.oss.model.CompleteMultipartUploadResult;
 import com.aliyun.oss.model.PartETag;
 
 import java.io.IOException;
-import java.util.List;
 
 /** OSS implementation of TwoPhaseOutputStream using multipart upload. */
 public class OssTwoPhaseOutputStream
@@ -41,12 +40,7 @@ public class OssTwoPhaseOutputStream
     }
 
     @Override
-    public Committer committer(
-            String uploadId,
-            List<PartETag> uploadedParts,
-            String objectName,
-            long position,
-            Path targetPath) {
+    public Committer committer() {
         return new OSSMultiPartUploadCommitter(
                 uploadId, uploadedParts, objectName, position, targetPath);
     }
