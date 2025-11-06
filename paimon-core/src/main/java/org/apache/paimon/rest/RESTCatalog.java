@@ -50,6 +50,7 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
@@ -73,6 +74,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -452,7 +454,8 @@ public class RESTCatalog implements Catalog {
                 String fileCompression = getFormatTableFileCompression(schema.options());
                 schema.options().put(FORMAT_TABLE_FILE_COMPRESSION.key(), fileCompression);
             }
-            api.createTable(identifier, schema);
+            Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
+            api.createTable(identifier, newSchema);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
@@ -1006,5 +1009,31 @@ public class RESTCatalog implements Catalog {
                 }
             }
         }
+    }
+
+    private Schema inferSchemaIfExternalPaimonTable(Schema schema) throws Exception {
+        TableType tableType = Options.fromMap(schema.options()).get(TYPE);
+        String externalLocation = schema.options().get(PATH.key());
+
+        if (TableType.TABLE.equals(tableType) && Objects.nonNull(externalLocation)) {
+            Path externalPath = new Path(externalLocation);
+            SchemaManager schemaManager =
+                    new SchemaManager(fileIOFromOptions(externalPath), externalPath);
+            Optional<TableSchema> latest = schemaManager.latest();
+            if (latest.isPresent()) {
+                // Note we just validate schema here, will not create a new table
+                schemaManager.createTable(schema, true);
+                Schema existsSchema = latest.get().toSchema();
+                // use `owner` and `path` from the user provide schema
+                if (Objects.nonNull(schema.options().get(Catalog.OWNER_PROP))) {
+                    existsSchema
+                            .options()
+                            .put(Catalog.OWNER_PROP, schema.options().get(Catalog.OWNER_PROP));
+                }
+                existsSchema.options().put(PATH.key(), schema.options().get(PATH.key()));
+                return existsSchema;
+            }
+        }
+        return schema;
     }
 }

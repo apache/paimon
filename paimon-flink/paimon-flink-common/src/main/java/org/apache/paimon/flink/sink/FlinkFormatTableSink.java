@@ -24,6 +24,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
 
@@ -31,12 +32,14 @@ import java.util.HashMap;
 import java.util.Map;
 
 /** Table sink for format tables. */
-public class FlinkFormatTableSink implements DynamicTableSink, SupportsPartitioning {
+public class FlinkFormatTableSink
+        implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning {
 
     private final ObjectIdentifier tableIdentifier;
     private final FormatTable table;
     private final DynamicTableFactory.Context context;
     private Map<String, String> staticPartitions = new HashMap<>();
+    protected boolean overwrite = false;
 
     public FlinkFormatTableSink(
             ObjectIdentifier tableIdentifier,
@@ -55,13 +58,16 @@ public class FlinkFormatTableSink implements DynamicTableSink, SupportsPartition
     @Override
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
         return new PaimonDataStreamSinkProvider(
-                (dataStream) -> new FlinkFormatTableDataStreamSink(table).sinkFrom(dataStream));
+                (dataStream) ->
+                        new FlinkFormatTableDataStreamSink(table, overwrite, staticPartitions)
+                                .sinkFrom(dataStream));
     }
 
     @Override
     public DynamicTableSink copy() {
         FlinkFormatTableSink copied = new FlinkFormatTableSink(tableIdentifier, table, context);
         copied.staticPartitions = new HashMap<>(staticPartitions);
+        copied.overwrite = overwrite;
         return copied;
     }
 
@@ -80,5 +86,10 @@ public class FlinkFormatTableSink implements DynamicTableSink, SupportsPartition
                                         partitionKey, partition.get(partitionKey));
                             }
                         });
+    }
+
+    @Override
+    public void applyOverwrite(boolean overwrite) {
+        this.overwrite = overwrite;
     }
 }

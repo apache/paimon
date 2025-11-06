@@ -31,14 +31,13 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 
 /** Base class for text-based format writers that provides common functionality. */
-public abstract class BaseTextFileWriter implements FormatWriter {
+public abstract class TextFileWriter implements FormatWriter {
 
     protected final PositionOutputStream outputStream;
     protected final BufferedWriter writer;
     protected final RowType rowType;
 
-    protected BaseTextFileWriter(
-            PositionOutputStream outputStream, RowType rowType, String compression)
+    protected TextFileWriter(PositionOutputStream outputStream, RowType rowType, String compression)
             throws IOException {
         this.outputStream = outputStream;
         OutputStream compressedStream =

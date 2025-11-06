@@ -164,6 +164,43 @@ You can use `-D execution.runtime-mode=batch` or `-yD execution.runtime-mode=bat
 
 {{< /tabs >}}
 
+## Auto-Clustering For Historical Partition
+While performing incremental clustering on recently active partitions, Paimon can automatically detect historical and 
+inactive partitions and evaluate whether their data layout has reached an optimal state. 
+For those historical partitions that have not yet achieved optimal layout, Paimon will also perform full clustering on them 
+during the same operation, thereby improving their query performance.
+
+To enable auto-clustering for historical partitions, the following configuration needs to be set for the table:
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 20%">Option</th>
+      <th class="text-left" style="width: 10%">Value</th>
+      <th class="text-left" style="width: 5%">Required</th>
+      <th class="text-left" style="width: 10%">Type</th>
+      <th class="text-left" style="width: 55%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>clustering.history-partition.idle-to-full-sort</h5></td>
+      <td>3d</td>
+      <td style="word-wrap: break-word;">Yes</td>
+      <td>Duration</td>
+      <td>The duration after which a partition without new updates is considered a historical partition. Default is null.</td>
+    </tr>
+    <tr>
+      <td><h5>clustering.history-partition.limit</h5></td>
+      <td>5</td>
+      <td style="word-wrap: break-word;">Yes</td>
+      <td>Integer</td>
+      <td>The limit of history partition number for automatically performing full clustering. Default value is 5.</td>
+    </tr>
+    </tbody>
+
+</table>
+
+
 ## Implement
 To balance write amplification and sorting effectiveness, Paimon leverages the LSM Tree notion of levels to stratify data files 
 and uses the Universal Compaction strategy to select files for clustering.

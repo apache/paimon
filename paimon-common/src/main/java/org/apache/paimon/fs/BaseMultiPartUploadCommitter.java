@@ -83,4 +83,7 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     public Path targetFilePath() {
         return new Path(objectName);
     }
+
+    @Override
+    public void clean(FileIO fileIO) throws IOException {}
 }

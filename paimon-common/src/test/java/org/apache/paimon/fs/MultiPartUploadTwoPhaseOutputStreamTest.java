@@ -322,6 +322,9 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         public Path targetFilePath() {
             return new Path(objectName);
         }
+
+        @Override
+        public void clean(FileIO fileIO) throws IOException {}
     }
 
     private static final class TestPart {

@@ -123,7 +123,9 @@ public abstract class FlinkTableSinkBase
             FormatTable formatTable = (FormatTable) table;
             return new PaimonDataStreamSinkProvider(
                     (dataStream) ->
-                            new FlinkFormatTableDataStreamSink(formatTable).sinkFrom(dataStream));
+                            new FlinkFormatTableDataStreamSink(
+                                            formatTable, overwrite, staticPartitions)
+                                    .sinkFrom(dataStream));
         }
         LogSinkProvider logSinkProvider = null;
         if (logStoreTableFactory != null) {

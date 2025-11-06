@@ -421,3 +421,59 @@ class AOSimpleTest(RESTBaseTest):
                                          session_token="TOKEN",
                                          region="cn-hangzhou",
                                          endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])
+
+    def test_multi_prepare_commit_ao(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_append_only_parquet', schema, False)
+        table = self.rest_catalog.get_table('default.test_append_only_parquet')
+        write_builder = table.new_stream_write_builder()
+
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        # write 1
+        data1 = {
+            'user_id': [1, 2, 3, 4],
+            'item_id': [1001, 1002, 1003, 1004],
+            'behavior': ['a', 'b', 'c', None],
+            'dt': ['p1', 'p1', 'p2', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_write.prepare_commit(0)
+        # write 2
+        data2 = {
+            'user_id': [5, 6, 7, 8],
+            'item_id': [1005, 1006, 1007, 1008],
+            'behavior': ['e', 'f', 'g', 'h'],
+            'dt': ['p2', 'p1', 'p2', 'p2'],
+        }
+        pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_write.prepare_commit(1)
+        # write 3
+        data3 = {
+            'user_id': [9, 10],
+            'item_id': [1009, 1010],
+            'behavior': ['i', 'j'],
+            'dt': ['p2', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data3, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        cm = table_write.prepare_commit(2)
+        # commit
+        table_commit.commit(cm, 2)
+        table_write.close()
+        table_commit.close()
+        self.assertEqual(2, table_write.file_store_write.commit_identifier)
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
+        expected = pa.Table.from_pydict({
+            'user_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010],
+            'behavior': ['a', 'b', 'c', None, 'e', 'f', 'g', 'h', 'i', 'j'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p2', 'p2', 'p1']
+        }, schema=self.pa_schema)
+        self.assertEqual(expected, actual)

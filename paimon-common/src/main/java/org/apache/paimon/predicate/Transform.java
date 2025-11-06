@@ -32,4 +32,6 @@ public interface Transform extends Serializable {
     DataType outputType();
 
     Object transform(InternalRow row);
+
+    Transform copyWithNewInputs(List<Object> inputs);
 }

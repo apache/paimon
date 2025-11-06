@@ -19,7 +19,6 @@
 package org.apache.paimon.mergetree;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
@@ -49,7 +48,7 @@ public class LookupFile {
     private static final Logger LOG = LoggerFactory.getLogger(LookupFile.class);
 
     private final File localFile;
-    private final DataFileMeta remoteFile;
+    private final int level;
     private final LookupStoreReader reader;
     private final Runnable callback;
 
@@ -57,12 +56,15 @@ public class LookupFile {
     private long hitCount;
     private boolean isClosed = false;
 
-    public LookupFile(
-            File localFile, DataFileMeta remoteFile, LookupStoreReader reader, Runnable callback) {
+    public LookupFile(File localFile, int level, LookupStoreReader reader, Runnable callback) {
         this.localFile = localFile;
-        this.remoteFile = remoteFile;
+        this.level = level;
         this.reader = reader;
         this.callback = callback;
+    }
+
+    public File localFile() {
+        return localFile;
     }
 
     @Nullable
@@ -76,8 +78,8 @@ public class LookupFile {
         return res;
     }
 
-    public DataFileMeta remoteFile() {
-        return remoteFile;
+    public int level() {
+        return level;
     }
 
     public boolean isClosed() {

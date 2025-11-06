@@ -24,7 +24,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
@@ -43,7 +42,6 @@ import java.util.stream.Collectors;
 /** {@link TableWrite} implementation for format table. */
 public class FormatTableWrite implements BatchTableWrite {
 
-    private FileIO fileIO;
     private RowType rowType;
     private final FormatTableFileWriter write;
     private final FormatTableRowPartitionKeyExtractor partitionKeyExtractor;
@@ -57,7 +55,6 @@ public class FormatTableWrite implements BatchTableWrite {
             CoreOptions options,
             RowType partitionType,
             List<String> partitionKeys) {
-        this.fileIO = fileIO;
         this.rowType = rowType;
         this.write = new FormatTableFileWriter(fileIO, rowType, options, partitionType);
         this.partitionKeyExtractor =
@@ -102,31 +99,6 @@ public class FormatTableWrite implements BatchTableWrite {
         return write.prepareCommit();
     }
 
-    public void commit(List<CommitMessage> commitMessages) throws Exception {
-        applyCommitterAction(commitMessages, TwoPhaseOutputStream.Committer::commit);
-    }
-
-    public void discard(List<CommitMessage> commitMessages) throws Exception {
-        applyCommitterAction(commitMessages, TwoPhaseOutputStream.Committer::discard);
-    }
-
-    private interface CommitterAction {
-        void apply(TwoPhaseOutputStream.Committer committer, FileIO fileIO) throws Exception;
-    }
-
-    private void applyCommitterAction(List<CommitMessage> commitMessages, CommitterAction action)
-            throws Exception {
-        for (CommitMessage commitMessage : commitMessages) {
-            if (commitMessage instanceof TwoPhaseCommitMessage) {
-                TwoPhaseCommitMessage twoPhaseCommitMessage = (TwoPhaseCommitMessage) commitMessage;
-                action.apply(twoPhaseCommitMessage.getCommitter(), this.fileIO);
-            } else {
-                throw new RuntimeException(
-                        "Unsupported commit message type: " + commitMessage.getClass().getName());
-            }
-        }
-    }
-
     @Override
     public void close() throws Exception {
         write.close();
@@ -143,7 +115,7 @@ public class FormatTableWrite implements BatchTableWrite {
     }
 
     @Override
-    public TableWrite withIOManager(IOManager ioManager) {
+    public BatchTableWrite withIOManager(IOManager ioManager) {
         return this;
     }
 

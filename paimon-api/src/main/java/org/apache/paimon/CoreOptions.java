@@ -1121,12 +1121,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Define partition by table options, cannot define partition on DDL and table options at the same time.");
 
-    public static final ConfigOption<LookupLocalFileType> LOOKUP_LOCAL_FILE_TYPE =
-            key("lookup.local-file-type")
-                    .enumType(LookupLocalFileType.class)
-                    .defaultValue(LookupLocalFileType.SORT)
-                    .withDescription("The local file type for lookup.");
-
     public static final ConfigOption<Float> LOOKUP_HASH_LOAD_FACTOR =
             key("lookup.hash-load-factor")
                     .floatType()
@@ -1182,6 +1176,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(0.05)
                     .withDescription(
                             "Define the default false positive probability for lookup cache bloom filters.");
+
+    public static final ConfigOption<Boolean> LOOKUP_REMOTE_FILE_ENABLED =
+            key("lookup.remote-file.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to enable the remote file for lookup.");
 
     public static final ConfigOption<Integer> READ_BATCH_SIZE =
             key("read.batch-size")
@@ -1970,8 +1970,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "The duration after which a partition without new updates is considered a historical partition. "
-                                    + "Historical partitions will be automatically fully clustered during the cluster operation."
-                                    + "This option takes effects when 'clustering.history-partition.auto.enabled' is true.");
+                                    + "Historical partitions will be automatically fully clustered during the cluster operation.");
 
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
@@ -2483,12 +2482,12 @@ public class CoreOptions implements Serializable {
         return (int) options.get(CACHE_PAGE_SIZE).getBytes();
     }
 
-    public LookupLocalFileType lookupLocalFileType() {
-        return options.get(LOOKUP_LOCAL_FILE_TYPE);
-    }
-
     public MemorySize lookupCacheMaxMemory() {
         return options.get(LOOKUP_CACHE_MAX_MEMORY_SIZE);
+    }
+
+    public boolean lookupRemoteFileEnabled() {
+        return options.get(LOOKUP_REMOTE_FILE_ENABLED);
     }
 
     public double lookupCacheHighPrioPoolRatio() {
@@ -3818,32 +3817,6 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         ExternalPathStrategy(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
-
-    /** Specifies the local file type for lookup. */
-    public enum LookupLocalFileType implements DescribedEnum {
-        SORT("sort", "Construct a sorted file for lookup."),
-
-        HASH("hash", "Construct a hash file for lookup.");
-
-        private final String value;
-
-        private final String description;
-
-        LookupLocalFileType(String value, String description) {
             this.value = value;
             this.description = description;
         }

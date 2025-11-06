@@ -55,23 +55,27 @@ import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 /** Provide lookup by key. */
 public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
+    public static final String CURRENT_VERSION = "v1";
+    public static final String REMOTE_LOOKUP_FILE_SUFFIX = ".lookup";
+
     private final Levels levels;
     private final Comparator<InternalRow> keyComparator;
     private final RowCompactedSerializer keySerializer;
-    private final ValueProcessor<T> valueProcessor;
+    private final PersistProcessor<T> persistProcessor;
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
     private final Function<String, File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
     private final Function<Long, BloomFilter.Builder> bfGenerator;
-
     private final Cache<String, LookupFile> lookupFileCache;
     private final Set<String> ownCachedFiles;
+
+    @Nullable private RemoteFileDownloader remoteFileDownloader;
 
     public LookupLevels(
             Levels levels,
             Comparator<InternalRow> keyComparator,
             RowType keyType,
-            ValueProcessor<T> valueProcessor,
+            PersistProcessor<T> persistProcessor,
             IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory,
             Function<String, File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
@@ -80,7 +84,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         this.levels = levels;
         this.keyComparator = keyComparator;
         this.keySerializer = new RowCompactedSerializer(keyType);
-        this.valueProcessor = valueProcessor;
+        this.persistProcessor = persistProcessor;
         this.fileReaderFactory = fileReaderFactory;
         this.localFileFactory = localFileFactory;
         this.lookupStoreFactory = lookupStoreFactory;
@@ -88,6 +92,10 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         this.lookupFileCache = lookupFileCache;
         this.ownCachedFiles = new HashSet<>();
         levels.addDropFileCallback(this);
+    }
+
+    public void setRemoteFileDownloader(@Nullable RemoteFileDownloader remoteFileDownloader) {
+        this.remoteFileDownloader = remoteFileDownloader;
     }
 
     public Levels getLevels() {
@@ -140,34 +148,51 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             valueBytes = lookupFile.get(keyBytes);
         } finally {
             if (newCreatedLookupFile) {
-                lookupFileCache.put(file.fileName(), lookupFile);
+                addLocalFile(file, lookupFile);
             }
         }
         if (valueBytes == null) {
             return null;
         }
 
-        return valueProcessor.readFromDisk(
-                key, lookupFile.remoteFile().level(), valueBytes, file.fileName());
+        return persistProcessor.readFromDisk(key, lookupFile.level(), valueBytes, file.fileName());
     }
 
-    private LookupFile createLookupFile(DataFileMeta file) throws IOException {
+    public LookupFile createLookupFile(DataFileMeta file) throws IOException {
         File localFile = localFileFactory.apply(file.fileName());
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
         }
-        LookupStoreWriter kvWriter =
-                lookupStoreFactory.createWriter(localFile, bfGenerator.apply(file.rowCount()));
-        LookupStoreFactory.Context context;
-        try (RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
+
+        if (remoteFileDownloader == null || !remoteFileDownloader.tryToDownload(file, localFile)) {
+            createSstFileFromDataFile(file, localFile);
+        }
+
+        ownCachedFiles.add(file.fileName());
+        return new LookupFile(
+                localFile,
+                file.level(),
+                lookupStoreFactory.createReader(localFile),
+                () -> ownCachedFiles.remove(file.fileName()));
+    }
+
+    public void addLocalFile(DataFileMeta file, LookupFile lookupFile) {
+        lookupFileCache.put(file.fileName(), lookupFile);
+    }
+
+    private void createSstFileFromDataFile(DataFileMeta file, File localFile) throws IOException {
+        try (LookupStoreWriter kvWriter =
+                        lookupStoreFactory.createWriter(
+                                localFile, bfGenerator.apply(file.rowCount()));
+                RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             KeyValue kv;
-            if (valueProcessor.withPosition()) {
+            if (persistProcessor.withPosition()) {
                 FileRecordIterator<KeyValue> batch;
                 while ((batch = (FileRecordIterator<KeyValue>) reader.readBatch()) != null) {
                     while ((kv = batch.next()) != null) {
                         byte[] keyBytes = keySerializer.serializeToBytes(kv.key());
                         byte[] valueBytes =
-                                valueProcessor.persistToDisk(kv, batch.returnedPosition());
+                                persistProcessor.persistToDisk(kv, batch.returnedPosition());
                         kvWriter.put(keyBytes, valueBytes);
                     }
                     batch.releaseBatch();
@@ -177,7 +202,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 while ((batch = reader.readBatch()) != null) {
                     while ((kv = batch.next()) != null) {
                         byte[] keyBytes = keySerializer.serializeToBytes(kv.key());
-                        byte[] valueBytes = valueProcessor.persistToDisk(kv);
+                        byte[] valueBytes = persistProcessor.persistToDisk(kv);
                         kvWriter.put(keyBytes, valueBytes);
                     }
                     batch.releaseBatch();
@@ -186,16 +211,16 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         } catch (IOException e) {
             FileIOUtils.deleteFileOrDirectory(localFile);
             throw e;
-        } finally {
-            context = kvWriter.close();
         }
+    }
 
-        ownCachedFiles.add(file.fileName());
-        return new LookupFile(
-                localFile,
-                file,
-                lookupStoreFactory.createReader(localFile, context),
-                () -> ownCachedFiles.remove(file.fileName()));
+    public String remoteSstName(String dataFileName) {
+        return dataFileName
+                + "."
+                + persistProcessor.identifier()
+                + "."
+                + CURRENT_VERSION
+                + REMOTE_LOOKUP_FILE_SUFFIX;
     }
 
     @Override
@@ -207,7 +232,9 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     }
 
     /** Processor to process value. */
-    public interface ValueProcessor<T> {
+    public interface PersistProcessor<T> {
+
+        String identifier();
 
         boolean withPosition();
 
@@ -220,13 +247,18 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         T readFromDisk(InternalRow key, int level, byte[] valueBytes, String fileName);
     }
 
-    /** A {@link ValueProcessor} to return {@link KeyValue}. */
-    public static class KeyValueProcessor implements ValueProcessor<KeyValue> {
+    /** A {@link PersistProcessor} to return {@link KeyValue}. */
+    public static class PersistValueProcessor implements PersistProcessor<KeyValue> {
 
         private final RowCompactedSerializer valueSerializer;
 
-        public KeyValueProcessor(RowType valueType) {
+        public PersistValueProcessor(RowType valueType) {
             this.valueSerializer = new RowCompactedSerializer(valueType);
+        }
+
+        @Override
+        public String identifier() {
+            return "value";
         }
 
         @Override
@@ -254,10 +286,15 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         }
     }
 
-    /** A {@link ValueProcessor} to return {@link Boolean} only. */
-    public static class ContainsValueProcessor implements ValueProcessor<Boolean> {
+    /** A {@link PersistProcessor} to return {@link Boolean} only. */
+    public static class PersistEmptyProcessor implements PersistProcessor<Boolean> {
 
         private static final byte[] EMPTY_BYTES = new byte[0];
+
+        @Override
+        public String identifier() {
+            return "empty";
+        }
 
         @Override
         public boolean withPosition() {
@@ -275,14 +312,20 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         }
     }
 
-    /** A {@link ValueProcessor} to return {@link PositionedKeyValue}. */
-    public static class PositionedKeyValueProcessor implements ValueProcessor<PositionedKeyValue> {
+    /** A {@link PersistProcessor} to return {@link PositionedKeyValue}. */
+    public static class PersistPositionProcessor implements PersistProcessor<PositionedKeyValue> {
+
         private final boolean persistValue;
         private final RowCompactedSerializer valueSerializer;
 
-        public PositionedKeyValueProcessor(RowType valueType, boolean persistValue) {
+        public PersistPositionProcessor(RowType valueType, boolean persistValue) {
             this.persistValue = persistValue;
             this.valueSerializer = persistValue ? new RowCompactedSerializer(valueType) : null;
+        }
+
+        @Override
+        public String identifier() {
+            return persistValue ? "position-and-value" : "position";
         }
 
         @Override
@@ -335,6 +378,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
     /** {@link KeyValue} with file name and row position for DeletionVector. */
     public static class PositionedKeyValue {
+
         private final @Nullable KeyValue keyValue;
         private final String fileName;
         private final long rowPosition;
@@ -357,5 +401,11 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         public KeyValue keyValue() {
             return keyValue;
         }
+    }
+
+    /** Downloader to try to download remote lookup file to local. */
+    public interface RemoteFileDownloader {
+
+        boolean tryToDownload(DataFileMeta dataFile, File localFile);
     }
 }

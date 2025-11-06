@@ -100,8 +100,8 @@ CREATE [TEMPORARY] FUNCTION <mydb>.simple_udf
 AS 'com.example.SimpleUdf' 
 USING JAR '/tmp/SimpleUdf.jar' [, JAR '/tmp/SimpleUdfR.jar'];
 
--- Create or Replace Function
-CREATE OR REPLACE FUNCTION <mydb>.simple_udf 
+-- Create or Replace Temporary Function (Temporary function should not specify database name)
+CREATE OR REPLACE [TEMPORARY] FUNCTION <mydb>.simple_udf 
 AS 'com.example.SimpleUdf'
 USING JAR '/tmp/SimpleUdf.jar';
        
