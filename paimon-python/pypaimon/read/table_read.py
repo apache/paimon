@@ -126,10 +126,24 @@ class TableRead:
         con.register(table_name, self.to_arrow(splits))
         return con
 
-    def to_ray(self, splits: List[Split]) -> "ray.data.dataset.Dataset":
+    def to_ray(self, splits: List[Split], use_distributed_read: bool = True) -> "ray.data.dataset.Dataset":
+        """Convert Paimon table data to Ray Dataset."""
         import ray
 
-        return ray.data.from_arrow(self.to_arrow(splits))
+        if not splits:
+            schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+            empty_table = pyarrow.Table.from_arrays(
+                [pyarrow.array([], type=field.type) for field in schema],
+                schema=schema
+            )
+            return ray.data.from_arrow(empty_table)
+
+        if use_distributed_read:
+            from pypaimon.read.ray_datasource import PaimonDatasource
+            datasource = PaimonDatasource(self, splits)
+            return ray.data.read_datasource(datasource)
+        else:
+            return ray.data.from_arrow(self.to_arrow(splits))
 
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
