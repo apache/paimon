@@ -27,7 +27,6 @@ import org.apache.flink.cdc.common.types.DataType;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -120,8 +119,7 @@ public class SchemaChangeProvider {
      * @param newColumnName The new name for the column.
      * @return A SchemaChange object representing the renaming of a column.
      */
-    public static List<SchemaChange> rename(
-            String oldColumnName, String newColumnName, Map<String, String> options) {
+    public static List<SchemaChange> rename(String oldColumnName, String newColumnName) {
         List<SchemaChange> result = new ArrayList<>();
         result.add(SchemaChange.renameColumn(oldColumnName, newColumnName));
         return result;

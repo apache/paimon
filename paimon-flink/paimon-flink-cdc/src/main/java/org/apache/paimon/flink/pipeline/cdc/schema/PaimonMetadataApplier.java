@@ -325,8 +325,7 @@ public class PaimonMetadataApplier implements MetadataApplier {
                     .forEach(
                             (oldName, newName) ->
                                     tableChangeList.addAll(
-                                            SchemaChangeProvider.rename(
-                                                    oldName, newName, options)));
+                                            SchemaChangeProvider.rename(oldName, newName)));
             catalog.alterTable(tableIdToIdentifier(event), tableChangeList, true);
         } catch (Catalog.TableNotExistException
                 | Catalog.ColumnAlreadyExistException
