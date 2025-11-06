@@ -73,8 +73,10 @@ class AtomicType(DataType):
         super().__init__(nullable)
         self.type = type
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {"type": self.type if self.nullable else self.type + " NOT NULL"}
+    def to_dict(self) -> str:
+        if not self.nullable:
+            return self.type + " NOT NULL"
+        return self.type
 
     @classmethod
     def from_dict(cls, data: str) -> "AtomicType":
