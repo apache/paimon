@@ -446,7 +446,7 @@ public class RESTCatalog implements Catalog {
         try {
             checkNotBranch(identifier, "createTable");
             checkNotSystemTable(identifier, "createTable");
-            validateCreateTable(schema);
+            validateCreateTable(schema, dataTokenEnabled);
             createExternalTablePathIfNotExist(schema);
             Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
             api.createTable(identifier, newSchema);
