@@ -604,7 +604,7 @@ public abstract class CatalogTestBase {
             assertEquals(fileCompression, format2Compression.getValue());
         }
         // table has option file.compression
-        String expectFileCompression = "none";
+        String expectFileCompression = "gzip";
         schemaBuilder.option("file.format", "csv");
         schemaBuilder.option("file.compression", expectFileCompression);
         Identifier identifier = Identifier.create(dbName, "partition_table_file_compression_a");

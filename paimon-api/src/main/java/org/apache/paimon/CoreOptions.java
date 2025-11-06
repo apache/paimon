@@ -2302,12 +2302,11 @@ public class CoreOptions implements Serializable {
     }
 
     public String formatTableFileImplementation() {
-        if (options.containsKey(FILE_COMPRESSION.key())) {
-            return options.get(FILE_COMPRESSION);
-        } else if (options.containsKey(FORMAT_TABLE_FILE_COMPRESSION.key())) {
+        if (options.containsKey(FORMAT_TABLE_FILE_COMPRESSION.key())
+                || options.containsKey(FILE_COMPRESSION.key())) {
             return options.get(FORMAT_TABLE_FILE_COMPRESSION);
         } else {
-            return fileCompression();
+            return FILE_COMPRESSION.defaultValue();
         }
     }
 
