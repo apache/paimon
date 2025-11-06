@@ -55,7 +55,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     private FormatWriter writer;
     private PositionOutputStream out;
 
-    @Nullable protected Long outputBytes;
+    @Nullable private Long outputBytes;
     private long recordCount;
     protected boolean closed;
 
