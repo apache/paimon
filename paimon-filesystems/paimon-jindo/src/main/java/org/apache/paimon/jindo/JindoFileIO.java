@@ -29,6 +29,7 @@ import org.apache.paimon.utils.Pair;
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.dls.JindoDlsFileSystem;
 import com.aliyun.jindodata.oss.JindoOssFileSystem;
+import com.aliyun.jindodata.oss.auth.CustomCredentialsProvider;
 import com.aliyun.jindodata.oss.auth.SimpleCredentialsProvider;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -64,6 +65,9 @@ public class JindoFileIO extends HadoopCompliantFileIO {
     private static final String OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
+    private static final String OSS_CREDENTIALS_PROVIDER = "fs.oss.credentials.provider";
+    private static final String OSS_PROVIDER_URL = "aliyun.oss.provider.url";
+    private static final String OSS_ENDPOINT = "fs.oss.endpoint";
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
@@ -99,7 +103,6 @@ public class JindoFileIO extends HadoopCompliantFileIO {
 
         // Misalignment can greatly affect performance, so the maximum buffer is set here
         hadoopOptions.set("fs.oss.read.position.buffer.size", "8388608");
-        hadoopOptions.set("fs.oss.credentials.provider", SimpleCredentialsProvider.NAME);
 
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {
@@ -117,6 +120,24 @@ public class JindoFileIO extends HadoopCompliantFileIO {
                             hadoopOptions.get(key));
                 }
             }
+        }
+        // as in rest catalog use could define ak for table so we need first use ak.
+        if (hadoopOptions.containsKey(OSS_ACCESS_KEY_ID)
+                && hadoopOptions.containsKey(OSS_ACCESS_KEY_SECRET)) {
+            LOG.info("Using Ak for OSS.");
+            hadoopOptions.set(OSS_CREDENTIALS_PROVIDER, SimpleCredentialsProvider.NAME);
+            hadoopOptions.set(OSS_ENDPOINT, context.options().get(OSS_ENDPOINT));
+        } else if (context.options().containsKey(OSS_CREDENTIALS_PROVIDER)
+                && CustomCredentialsProvider.NAME.equals(
+                        context.options().get(OSS_CREDENTIALS_PROVIDER))
+                && context.options().containsKey(OSS_PROVIDER_URL)) {
+            LOG.info("Using CustomCredentialsProvider for OSS.");
+            hadoopOptions.set(OSS_CREDENTIALS_PROVIDER, CustomCredentialsProvider.NAME);
+            hadoopOptions.set(OSS_PROVIDER_URL, context.options().get(OSS_PROVIDER_URL));
+            hadoopOptions.set(OSS_ENDPOINT, context.options().get(OSS_ENDPOINT));
+        } else {
+            throw new IllegalArgumentException(
+                    "fs.oss.accessKeyId and fs.oss.accessKeySecret must be set or fs.oss.credentials.provider and aliyun.oss.provider.url.");
         }
     }
 
