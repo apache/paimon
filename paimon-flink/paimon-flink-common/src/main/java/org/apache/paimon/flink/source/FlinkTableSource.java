@@ -209,7 +209,7 @@ public abstract class FlinkTableSource
                 && options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
             if (isUnbounded()) {
                 // In unaware bucket or dynamic bucket mode, we can't infer parallelism.
-                if (options.get(CoreOptions.BUCKET) == -1) {
+                if (options.get(CoreOptions.BUCKET) < 0) {
                     return null;
                 } else {
                     parallelism = Math.max(1, options.get(CoreOptions.BUCKET));
