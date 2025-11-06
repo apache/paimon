@@ -32,6 +32,7 @@ import org.apache.paimon.utils.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.function.Function;
@@ -189,6 +190,13 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
                 outputBytes = out.getPos();
                 out.close();
                 out = null;
+            } else {
+                try {
+                    outputBytes = fileIO.getFileSize(path);
+                } catch (FileNotFoundException e) {
+                    LOG.warn("File " + path + " does not exist after close", e);
+                    outputBytes = 0;
+                }
             }
         } catch (IOException e) {
             LOG.warn("Exception occurs when closing file {}. Cleaning up.", path, e);
