@@ -1177,6 +1177,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Define the default false positive probability for lookup cache bloom filters.");
 
+    public static final ConfigOption<Boolean> LOOKUP_REMOTE_FILE_ENABLED =
+            key("lookup.remote-file.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to enable the remote file for lookup.");
+
     public static final ConfigOption<Integer> READ_BATCH_SIZE =
             key("read.batch-size")
                     .intType()
@@ -2461,6 +2467,10 @@ public class CoreOptions implements Serializable {
 
     public MemorySize lookupCacheMaxMemory() {
         return options.get(LOOKUP_CACHE_MAX_MEMORY_SIZE);
+    }
+
+    public boolean lookupRemoteFileEnabled() {
+        return options.get(LOOKUP_REMOTE_FILE_ENABLED);
     }
 
     public double lookupCacheHighPrioPoolRatio() {
