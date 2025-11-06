@@ -27,6 +27,8 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
     private static final String OLDER_THAN = "older_than";
     private static final String DRY_RUN = "dry_run";
     private static final String PARALLELISM = "parallelism";
+    private static final String BATCH_TABLE_PROCESSING = "batch_table_processing";
+    private static final String BATCH_SIZE = "batch_size";
 
     @Override
     public String identifier() {
@@ -50,6 +52,15 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
             action.dryRun();
         }
 
+        if (params.has(BATCH_TABLE_PROCESSING)
+                && Boolean.parseBoolean(params.get(BATCH_TABLE_PROCESSING))) {
+            action.batchTableProcessing(true);
+        }
+
+        if (params.has(BATCH_SIZE)) {
+            action.batchSize(Integer.parseInt(params.get(BATCH_SIZE)));
+        }
+
         return Optional.of(action);
     }
 
@@ -66,7 +77,9 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
                         + "--database <database_name> \\\n"
                         + "--table <table_name> \\\n"
                         + "[--older_than <timestamp>] \\\n"
-                        + "[--dry_run <false/true>]");
+                        + "[--dry_run <false/true>] \\\n"
+                        + "[--batch_table_processing <false/true>] \\\n"
+                        + "[--batch_size <size>]");
 
         System.out.println();
         System.out.println(
@@ -80,6 +93,12 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
 
         System.out.println(
                 "If the table is null or *, all orphan files in all tables under the db will be cleaned up.");
+        System.out.println();
+
+        System.out.println(
+                "When '--batch_table_processing true', tables will be processed in batches to reduce DataStream construction time. "
+                        + "Default is false. When enabled, '--batch_size' controls how many tables are processed in each batch. "
+                        + "Default batch size is 1000.");
         System.out.println();
     }
 }

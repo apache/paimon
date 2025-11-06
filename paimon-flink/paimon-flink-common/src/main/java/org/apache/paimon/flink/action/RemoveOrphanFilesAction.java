@@ -18,11 +18,13 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.flink.orphan.BatchFlinkOrphanFilesClean;
+import org.apache.paimon.flink.orphan.FlinkOrphanFilesClean;
+
 import javax.annotation.Nullable;
 
 import java.util.Map;
 
-import static org.apache.paimon.flink.orphan.FlinkOrphanFilesClean.executeDatabaseOrphanFiles;
 import static org.apache.paimon.operation.OrphanFilesClean.olderThanMillis;
 
 /** Action to remove the orphan data files and metadata files. */
@@ -34,6 +36,8 @@ public class RemoveOrphanFilesAction extends ActionBase {
 
     private String olderThan = null;
     private boolean dryRun = false;
+    private boolean batchTableProcessing = false;
+    private int batchSize = 1000;
 
     public RemoveOrphanFilesAction(
             String databaseName,
@@ -54,15 +58,35 @@ public class RemoveOrphanFilesAction extends ActionBase {
         this.dryRun = true;
     }
 
+    public void batchTableProcessing(boolean batchTableProcessing) {
+        this.batchTableProcessing = batchTableProcessing;
+    }
+
+    public void batchSize(int batchSize) {
+        this.batchSize = batchSize;
+    }
+
     @Override
     public void run() throws Exception {
-        executeDatabaseOrphanFiles(
-                env,
-                catalog,
-                olderThanMillis(olderThan),
-                dryRun,
-                parallelism == null ? null : Integer.parseInt(parallelism),
-                databaseName,
-                tableName);
+        if (batchTableProcessing) {
+            BatchFlinkOrphanFilesClean.executeDatabaseOrphanFiles(
+                    env,
+                    catalog,
+                    olderThanMillis(olderThan),
+                    dryRun,
+                    parallelism == null ? null : Integer.parseInt(parallelism),
+                    databaseName,
+                    tableName,
+                    batchSize);
+        } else {
+            FlinkOrphanFilesClean.executeDatabaseOrphanFiles(
+                    env,
+                    catalog,
+                    olderThanMillis(olderThan),
+                    dryRun,
+                    parallelism == null ? null : Integer.parseInt(parallelism),
+                    databaseName,
+                    tableName);
+        }
     }
 }

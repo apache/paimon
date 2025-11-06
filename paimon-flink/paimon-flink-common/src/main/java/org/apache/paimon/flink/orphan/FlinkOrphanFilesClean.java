@@ -48,6 +48,7 @@ import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.streaming.api.operators.InputSelection;
+import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.Collector;
@@ -89,8 +90,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         this.parallelism = parallelism;
     }
 
-    @Nullable
-    public DataStream<CleanOrphanFilesResult> doOrphanClean(StreamExecutionEnvironment env) {
+    protected void configureFlinkEnvironment(StreamExecutionEnvironment env) {
         Configuration flinkConf = new Configuration();
         flinkConf.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH);
         flinkConf.set(ExecutionOptions.SORT_INPUTS, false);
@@ -101,6 +101,11 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         // Flink 1.17 introduced this config, use string to keep compatibility
         flinkConf.setString("execution.batch.adaptive.auto-parallelism.enabled", "false");
         env.configure(flinkConf);
+    }
+
+    @Nullable
+    public DataStream<CleanOrphanFilesResult> doOrphanClean(StreamExecutionEnvironment env) {
+        configureFlinkEnvironment(env);
         LOG.info("Starting orphan files clean for table {}", table.name());
         long start = System.currentTimeMillis();
         List<String> branches = validBranches();
@@ -119,16 +124,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             String branch,
                                             ProcessFunction<String, Tuple2<Long, Long>>.Context ctx,
                                             Collector<Tuple2<Long, Long>> out) {
-                                        AtomicLong deletedFilesCount = new AtomicLong(0);
-                                        AtomicLong deletedFilesLenInBytes = new AtomicLong(0);
-                                        cleanBranchSnapshotDir(
-                                                branch,
-                                                path -> deletedFilesCount.incrementAndGet(),
-                                                deletedFilesLenInBytes::addAndGet);
-                                        out.collect(
-                                                new Tuple2<>(
-                                                        deletedFilesCount.get(),
-                                                        deletedFilesLenInBytes.get()));
+                                        processForBranchSnapshotDirDeleted(branch, out);
                                     }
                                 })
                         .keyBy(tuple -> 1)
@@ -205,35 +201,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
                                     @Override
                                     public void endInput() throws IOException {
-                                        Map<String, ManifestFile> branchManifests = new HashMap<>();
-                                        for (Tuple2<String, String> tuple2 : manifests) {
-                                            ManifestFile manifestFile =
-                                                    branchManifests.computeIfAbsent(
-                                                            tuple2.f0,
-                                                            key ->
-                                                                    table.switchToBranch(key)
-                                                                            .store()
-                                                                            .manifestFileFactory()
-                                                                            .create());
-                                            retryReadingFiles(
-                                                            () ->
-                                                                    manifestFile
-                                                                            .readWithIOException(
-                                                                                    tuple2.f1),
-                                                            Collections.<ManifestEntry>emptyList())
-                                                    .forEach(
-                                                            f -> {
-                                                                List<String> files =
-                                                                        new ArrayList<>();
-                                                                files.add(f.fileName());
-                                                                files.addAll(f.file().extraFiles());
-                                                                files.forEach(
-                                                                        file ->
-                                                                                output.collect(
-                                                                                        new StreamRecord<>(
-                                                                                                file)));
-                                                            });
-                                        }
+                                        endInputForUsedFiles(manifests, output);
                                     }
                                 });
 
@@ -279,26 +247,13 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
                                     @Override
                                     public void endInput(int inputId) {
-                                        switch (inputId) {
-                                            case 1:
-                                                checkState(!buildEnd, "Should not build ended.");
-                                                LOG.info("Finish build phase.");
-                                                buildEnd = true;
-                                                break;
-                                            case 2:
-                                                checkState(buildEnd, "Should build ended.");
-                                                LOG.info("Finish probe phase.");
-                                                LOG.info(
-                                                        "Clean files count : {}",
-                                                        emittedFilesCount);
-                                                LOG.info("Clean files size : {}", emittedFilesLen);
-                                                output.collect(
-                                                        new StreamRecord<>(
-                                                                new CleanOrphanFilesResult(
-                                                                        emittedFilesCount,
-                                                                        emittedFilesLen)));
-                                                break;
-                                        }
+                                        buildEnd =
+                                                endInputForDeleted(
+                                                        inputId,
+                                                        buildEnd,
+                                                        emittedFilesCount,
+                                                        emittedFilesLen,
+                                                        output);
                                     }
 
                                     @Override
@@ -326,7 +281,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         return deleted;
     }
 
-    private void listPaimonFilesForTable(Collector<Tuple2<String, Long>> out) {
+    protected void listPaimonFilesForTable(Collector<Tuple2<String, Long>> out) {
         FileStorePathFactory pathFactory = table.store().pathFactory();
         List<String> dirs =
                 listPaimonFileDirs(
@@ -434,7 +389,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         return sum(result);
     }
 
-    private static CleanOrphanFilesResult sum(DataStream<CleanOrphanFilesResult> deleted) {
+    protected static CleanOrphanFilesResult sum(DataStream<CleanOrphanFilesResult> deleted) {
         long deletedFilesCount = 0;
         long deletedFilesLenInBytes = 0;
         if (deleted != null) {
@@ -453,5 +408,91 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
             }
         }
         return new CleanOrphanFilesResult(deletedFilesCount, deletedFilesLenInBytes);
+    }
+
+    protected FileStoreTable getTable() {
+        return this.table;
+    }
+
+    @Override
+    protected List<String> validBranches() {
+        return super.validBranches();
+    }
+
+    @Override
+    protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {
+        return super.safelyGetAllSnapshots(branch);
+    }
+
+    @Override
+    protected void collectWithoutDataFile(
+            String branch,
+            Snapshot snapshot,
+            Consumer<String> usedFileConsumer,
+            Consumer<String> manifestConsumer)
+            throws IOException {
+        super.collectWithoutDataFile(branch, snapshot, usedFileConsumer, manifestConsumer);
+    }
+
+    protected void processForBranchSnapshotDirDeleted(
+            String branch, Collector<Tuple2<Long, Long>> out) {
+        AtomicLong deletedFilesCount = new AtomicLong(0);
+        AtomicLong deletedFilesLenInBytes = new AtomicLong(0);
+        cleanBranchSnapshotDir(
+                branch,
+                path -> deletedFilesCount.incrementAndGet(),
+                deletedFilesLenInBytes::addAndGet);
+        out.collect(new Tuple2<>(deletedFilesCount.get(), deletedFilesLenInBytes.get()));
+    }
+
+    protected void endInputForUsedFiles(
+            Set<Tuple2<String, String>> manifests, Output<StreamRecord<String>> output)
+            throws IOException {
+        Map<String, ManifestFile> branchManifests = new HashMap<>();
+        for (Tuple2<String, String> tuple2 : manifests) {
+            ManifestFile manifestFile =
+                    branchManifests.computeIfAbsent(
+                            tuple2.f0,
+                            key ->
+                                    table.switchToBranch(key)
+                                            .store()
+                                            .manifestFileFactory()
+                                            .create());
+            retryReadingFiles(
+                            () -> manifestFile.readWithIOException(tuple2.f1),
+                            Collections.<ManifestEntry>emptyList())
+                    .forEach(
+                            f -> {
+                                List<String> files = new ArrayList<>();
+                                files.add(f.fileName());
+                                files.addAll(f.file().extraFiles());
+                                files.forEach(file -> output.collect(new StreamRecord<>(file)));
+                            });
+        }
+    }
+
+    protected static boolean endInputForDeleted(
+            int inputId,
+            boolean buildEnd,
+            long emittedFilesCount,
+            long emittedFilesLen,
+            Output<StreamRecord<CleanOrphanFilesResult>> output) {
+        switch (inputId) {
+            case 1:
+                checkState(!buildEnd, "Should not build ended.");
+                LOG.info("Finish build phase.");
+                buildEnd = true;
+                break;
+            case 2:
+                checkState(buildEnd, "Should build ended.");
+                LOG.info("Finish probe phase.");
+                LOG.info("Clean files count : {}", emittedFilesCount);
+                LOG.info("Clean files size : {}", emittedFilesLen);
+                output.collect(
+                        new StreamRecord<>(
+                                new CleanOrphanFilesResult(emittedFilesCount, emittedFilesLen)));
+                break;
+        }
+        return buildEnd;
     }
 }
