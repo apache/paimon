@@ -18,7 +18,10 @@
 
 package org.apache.paimon.flink.pipeline.cdc.util;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.InternalRowUtils;
 
@@ -117,10 +120,37 @@ public class DataConvertTest {
                     LocalZonedTimestampData.fromEpochMillis(500, 5),
                     LocalZonedTimestampData.fromEpochMillis(600, 6),
                 };
-        testConvertBackAndForth(
-                fullTypesSchema,
-                testData,
-                "[pk_string, true, [1, 2, 3], [4, 5, 6], [7, 8, 9], 1, 2, 3, 4, 5.1, 6.2, 7.123, test1, test2, test3, 1000, 200, 300, 1970-01-01T00:00:00.100000001, 1970-01-01T00:00:00.200000002, 1970-01-01T00:00:00.300000003, 1970-01-01T00:00:00.400000004, 1970-01-01T00:00:00.300000003, 1970-01-01T00:00:00.400000004, 1970-01-01T00:00:00.500000005, 1970-01-01T00:00:00.600000006]");
+
+        Object[] expectedPaimonData = {
+            BinaryString.fromString("pk_string"),
+            true,
+            new byte[] {1, 2, 3},
+            new byte[] {4, 5, 6},
+            new byte[] {7, 8, 9},
+            (byte) 1,
+            (short) 2,
+            3,
+            4L,
+            5.1f,
+            6.2,
+            Decimal.fromBigDecimal(new BigDecimal("7.123"), 6, 3),
+            BinaryString.fromString("test1"),
+            BinaryString.fromString("test2"),
+            BinaryString.fromString("test3"),
+            1000,
+            200,
+            300,
+            Timestamp.fromEpochMillis(100, 1),
+            Timestamp.fromEpochMillis(200, 2),
+            Timestamp.fromEpochMillis(300, 3),
+            Timestamp.fromEpochMillis(400, 4),
+            Timestamp.fromEpochMillis(300, 3),
+            Timestamp.fromEpochMillis(400, 4),
+            Timestamp.fromEpochMillis(500, 5),
+            Timestamp.fromEpochMillis(600, 6),
+        };
+
+        testConvertBackAndForth(fullTypesSchema, testData, expectedPaimonData);
 
         Object[] allNullTestData =
                 new Object[] {
@@ -151,13 +181,41 @@ public class DataConvertTest {
                     null,
                     null
                 };
-        testConvertBackAndForth(
-                fullTypesSchema,
-                allNullTestData,
-                "[pk_string, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]");
+
+        Object[] expectedAllNullPaimonData =
+                new Object[] {
+                    BinaryString.fromString("pk_string"),
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                };
+        testConvertBackAndForth(fullTypesSchema, allNullTestData, expectedAllNullPaimonData);
     }
 
-    private void testConvertBackAndForth(Schema cdcSchema, Object[] fields, String expected) {
+    private void testConvertBackAndForth(
+            Schema cdcSchema, Object[] fields, Object[] expectedInternalRows) {
         int arity = fields.length;
         TableId tableId = TableId.tableId("testDatabase", "testTable");
         BinaryRecordDataGenerator recordDataGenerator =
@@ -181,12 +239,11 @@ public class DataConvertTest {
         InternalRow.FieldGetter[] internalRowFieldGetters =
                 InternalRowUtils.createFieldGetters(paimonSchema.rowType().getFieldTypes());
 
-        List<String> internalRowRepresentation = new ArrayList<>();
+        List<Object> internalRowRepresentation = new ArrayList<>();
         for (InternalRow.FieldGetter internalRowFieldGetter : internalRowFieldGetters) {
-            internalRowRepresentation.add(
-                    stringify(internalRowFieldGetter.getFieldOrNull(paimonRow)));
+            internalRowRepresentation.add(internalRowFieldGetter.getFieldOrNull(paimonRow));
         }
-        Assertions.assertThat(internalRowRepresentation).hasToString(expected);
+        Assertions.assertThat(internalRowRepresentation).containsExactly(expectedInternalRows);
 
         // Step 3: Convert it back
         List<InternalRow.FieldGetter> paimonFieldGetters =
