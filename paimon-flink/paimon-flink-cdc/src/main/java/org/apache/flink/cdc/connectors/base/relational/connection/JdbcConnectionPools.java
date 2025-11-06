@@ -30,9 +30,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Copied from Flink CDC 3.5.0: {@code
- * org/apache/flink/cdc/connectors/base/relational/connection/JdbcConnectionPools.java}. Modified
- * method {@link JdbcConnectionPools#clear()} at line 92 ~ 94.
+ * Copied from <a
+ * href="https://github.com/apache/flink-cdc/blob/release-3.5.0/flink-cdc-connect/flink-cdc-source-connectors/flink-cdc-base/src/main/java/org/apache/flink/cdc/connectors/base/relational/connection/JdbcConnectionPools.java">Flink
+ * CDC 3.5.0 resemblance</a>. Modified method {@link JdbcConnectionPools#clear()} at line 92 ~ 94.
  */
 public class JdbcConnectionPools implements ConnectionPools<HikariDataSource, JdbcSourceConfig> {
 
