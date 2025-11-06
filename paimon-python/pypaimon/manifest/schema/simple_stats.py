@@ -41,20 +41,34 @@ class SimpleStats:
         return cls._empty_stats
 
 
-SIMPLE_STATS_SCHEMA = {
+SIMPLE_STATS_FIELDS = [
+    {"name": "_MIN_VALUES", "type": "bytes"},
+    {"name": "_MAX_VALUES", "type": "bytes"},
+    {"name": "_NULL_COUNTS",
+     "type": [
+         "null",
+         {
+             "type": "array",
+             "items": ["null", "long"]
+         }
+     ],
+     "default": None},
+]
+
+KEY_STATS_SCHEMA = {
     "type": "record",
-    "name": "SimpleStats",
-    "fields": [
-        {"name": "_MIN_VALUES", "type": "bytes"},
-        {"name": "_MAX_VALUES", "type": "bytes"},
-        {"name": "_NULL_COUNTS",
-         "type": [
-             "null",
-             {
-                 "type": "array",
-                 "items": ["null", "long"]
-             }
-         ],
-         "default": None},
-    ]
+    "name": "record_KEY_STATS",
+    "fields": SIMPLE_STATS_FIELDS
+}
+
+VALUE_STATS_SCHEMA = {
+    "type": "record",
+    "name": "record_VALUE_STATS",
+    "fields": SIMPLE_STATS_FIELDS
+}
+
+PARTITION_STATS_SCHEMA = {
+    "type": "record",
+    "name": "record_PARTITION_STATS",
+    "fields": SIMPLE_STATS_FIELDS
 }
