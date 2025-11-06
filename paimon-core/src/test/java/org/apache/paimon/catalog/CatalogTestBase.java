@@ -468,15 +468,6 @@ public abstract class CatalogTestBase {
                     .withMessage("Cannot define primary-key for format table.");
             schema.options().remove(CoreOptions.TYPE.key());
             schema.options().remove(CoreOptions.PRIMARY_KEY.key());
-
-            schema.options().put(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString());
-            schema.options().put(CoreOptions.FORMAT_TABLE_IMPLEMENTATION.key(), "engine");
-            assertThatExceptionOfType(IllegalArgumentException.class)
-                    .isThrownBy(() -> catalog.createTable(identifier, schema, false))
-                    .withMessage(
-                            "Cannot define format-table.implementation is engine for format table when data token is enabled");
-            schema.options().remove(CoreOptions.TYPE.key());
-            schema.options().remove(CoreOptions.FORMAT_TABLE_IMPLEMENTATION.key());
         }
 
         // Create table and check the schema

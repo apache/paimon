@@ -162,8 +162,9 @@ public class CatalogUtils {
                         options.get(PATH) == null
                                 && options.get(FORMAT_TABLE_IMPLEMENTATION)
                                         != CoreOptions.FormatTableImplementation.ENGINE,
-                        "Cannot define %s is engine for format table when data token is enabled.",
-                        FORMAT_TABLE_IMPLEMENTATION.key());
+                        "Cannot define %s is engine for format table when data token is enabled and not define %s.",
+                        FORMAT_TABLE_IMPLEMENTATION.key(),
+                        PATH.key());
             }
         }
         for (DataField field : schema.fields()) {
