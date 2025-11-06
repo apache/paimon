@@ -20,7 +20,6 @@ package org.apache.paimon.s3;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
@@ -84,13 +83,6 @@ public class S3FileIO extends HadoopCompliantFileIO {
         }
         return new S3TwoPhaseOutputStream(
                 new S3MultiPartUpload(fs, fs.getConf()), hadoopPath, path);
-    }
-
-    @Override
-    public MultiPartUploadStore newMultiPartUploadStore(Path path) throws IOException {
-        org.apache.hadoop.fs.Path hadoopPath = path(path);
-        S3AFileSystem fs = (S3AFileSystem) getFileSystem(hadoopPath);
-        return new S3MultiPartUpload(fs, fs.getConf());
     }
 
     // add additional config entries from the IO config to the Hadoop config

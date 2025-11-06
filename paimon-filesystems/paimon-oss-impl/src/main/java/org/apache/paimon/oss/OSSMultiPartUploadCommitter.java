@@ -19,11 +19,15 @@
 package org.apache.paimon.oss;
 
 import org.apache.paimon.fs.BaseMultiPartUploadCommitter;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.Path;
 
 import com.aliyun.oss.model.CompleteMultipartUploadResult;
 import com.aliyun.oss.model.PartETag;
+import org.apache.hadoop.fs.FileSystem;
 
+import java.io.IOException;
 import java.util.List;
 
 /** OSS implementation of MultiPartUploadCommitter. */
@@ -36,5 +40,14 @@ public class OSSMultiPartUploadCommitter
             long position,
             Path path) {
         super(uploadId, uploadedParts, objectName, position, path);
+    }
+
+    @Override
+    protected MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore(
+            FileIO fileIO, Path targetPath) throws IOException {
+        OSSFileIO ossFileIO = (OSSFileIO) fileIO;
+        org.apache.hadoop.fs.Path hadoopPath = ossFileIO.path(targetPath);
+        FileSystem fs = ossFileIO.getFileSystem(hadoopPath);
+        return new OSSMultiPartUpload((org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs);
     }
 }

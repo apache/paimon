@@ -19,11 +19,15 @@
 package org.apache.paimon.s3;
 
 import org.apache.paimon.fs.BaseMultiPartUploadCommitter;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.Path;
 
 import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
 import com.amazonaws.services.s3.model.PartETag;
+import org.apache.hadoop.fs.s3a.S3AFileSystem;
 
+import java.io.IOException;
 import java.util.List;
 
 /** S3 implementation of MultiPartUploadCommitter. */
@@ -36,5 +40,14 @@ public class S3MultiPartUploadCommitter
             long position,
             Path targetPath) {
         super(uploadId, uploadedParts, objectName, position, targetPath);
+    }
+
+    @Override
+    protected MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore(
+            FileIO fileIO, Path targetPath) throws IOException {
+        S3FileIO s3FileIO = (S3FileIO) fileIO;
+        org.apache.hadoop.fs.Path hadoopPath = s3FileIO.path(targetPath);
+        S3AFileSystem fs = (S3AFileSystem) s3FileIO.getFileSystem(hadoopPath);
+        return new S3MultiPartUpload(fs, fs.getConf());
     }
 }

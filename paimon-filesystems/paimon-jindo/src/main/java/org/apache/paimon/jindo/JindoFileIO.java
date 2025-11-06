@@ -20,7 +20,6 @@ package org.apache.paimon.jindo;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
@@ -136,14 +135,6 @@ public class JindoFileIO extends HadoopCompliantFileIO {
         JindoHadoopSystem fs = pair.getKey();
         return new JindoTwoPhaseOutputStream(
                 new JindoMultiPartUpload(fs, hadoopPath), hadoopPath, path);
-    }
-
-    @Override
-    public MultiPartUploadStore newMultiPartUploadStore(Path path) throws IOException {
-        org.apache.hadoop.fs.Path hadoopPath = path(path);
-        Pair<JindoHadoopSystem, String> pair = getFileSystemPair(hadoopPath);
-        JindoHadoopSystem fs = pair.getKey();
-        return new JindoMultiPartUpload(fs, hadoopPath);
     }
 
     @Override
