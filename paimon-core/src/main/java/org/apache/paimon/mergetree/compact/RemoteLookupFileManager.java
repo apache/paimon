@@ -59,9 +59,14 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
     }
 
     public DataFileMeta genRemoteLookupFile(DataFileMeta file) throws IOException {
-        LookupFile lookupFile = lookupLevels.createLookupFile(file);
         String remoteSstName = lookupLevels.remoteSstName(file.fileName());
+        if (file.extraFiles().contains(remoteSstName)) {
+            // ignore existed
+            return file;
+        }
+
         Path sstFile = remoteSstPath(file, remoteSstName);
+        LookupFile lookupFile = lookupLevels.createLookupFile(file);
         try (FileInputStream is = new FileInputStream(lookupFile.localFile());
                 PositionOutputStream os = fileIO.newOutputStream(sstFile, false)) {
             IOUtils.copy(is, os);
