@@ -17,14 +17,15 @@
 ################################################################################
 
 import uuid
+from abc import ABC
 from typing import Optional
 
 from pypaimon.common.core_options import CoreOptions
-from pypaimon.write.batch_table_commit import BatchTableCommit
-from pypaimon.write.batch_table_write import BatchTableWrite
+from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit, TableCommit
+from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite, TableWrite
 
 
-class BatchWriteBuilder:
+class WriteBuilder(ABC):
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -36,6 +37,21 @@ class BatchWriteBuilder:
         self.static_partition = static_partition if static_partition is not None else {}
         return self
 
+    def new_write(self) -> TableWrite:
+        """Returns a table write."""
+
+    def new_commit(self) -> TableCommit:
+        """Returns a table commit."""
+
+    def _create_commit_user(self):
+        if CoreOptions.COMMIT_USER_PREFIX in self.table.options:
+            return f"{self.table.options.get(CoreOptions.COMMIT_USER_PREFIX)}_{uuid.uuid4()}"
+        else:
+            return str(uuid.uuid4())
+
+
+class BatchWriteBuilder(WriteBuilder):
+
     def new_write(self) -> BatchTableWrite:
         return BatchTableWrite(self.table)
 
@@ -43,8 +59,11 @@ class BatchWriteBuilder:
         commit = BatchTableCommit(self.table, self.commit_user, self.static_partition)
         return commit
 
-    def _create_commit_user(self):
-        if CoreOptions.COMMIT_USER_PREFIX in self.table.options:
-            return f"{self.table.options.get(CoreOptions.COMMIT_USER_PREFIX)}_{uuid.uuid4()}"
-        else:
-            return str(uuid.uuid4())
+
+class StreamWriteBuilder(WriteBuilder):
+    def new_write(self) -> StreamTableWrite:
+        return StreamTableWrite(self.table)
+
+    def new_commit(self) -> StreamTableCommit:
+        commit = StreamTableCommit(self.table, self.commit_user, self.static_partition)
+        return commit

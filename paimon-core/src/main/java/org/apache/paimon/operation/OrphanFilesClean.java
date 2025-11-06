@@ -108,7 +108,6 @@ public abstract class OrphanFilesClean implements Serializable {
 
     protected List<String> validBranches() {
         List<String> branches = table.branchManager().branches();
-        branches.add(DEFAULT_MAIN_BRANCH);
 
         List<String> abnormalBranches = new ArrayList<>();
         for (String branch : branches) {
@@ -124,6 +123,7 @@ public abstract class OrphanFilesClean implements Serializable {
                                     + "Please check these branches manually.",
                             abnormalBranches));
         }
+        branches.add(DEFAULT_MAIN_BRANCH);
         return branches;
     }
 

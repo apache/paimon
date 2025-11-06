@@ -675,3 +675,135 @@ class ReaderBasicTest(unittest.TestCase):
                 max_values)
 
         self.assertEqual(read_entry.file.value_stats.null_counts, null_counts)
+
+    def test_split_target_size(self):
+        """Test source.split.target-size configuration effect on split generation."""
+        from pypaimon.common.core_options import CoreOptions
+
+        pa_schema = pa.schema([
+            ('f0', pa.int64()),
+            ('f1', pa.string())
+        ])
+
+        # Test with small target_split_size (512B) - should generate more splits
+        schema_small = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={CoreOptions.SOURCE_SPLIT_TARGET_SIZE: '512b'}
+        )
+        self.catalog.create_table('default.test_split_target_size_small', schema_small, False)
+        table_small = self.catalog.get_table('default.test_split_target_size_small')
+
+        for i in range(10):
+            write_builder = table_small.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'f0': list(range(i * 100, (i + 1) * 100)),
+                'f1': [f'value_{j}' for j in range(i * 100, (i + 1) * 100)]
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        read_builder = table_small.new_read_builder()
+        splits_small = read_builder.new_scan().plan().splits()
+
+        schema_default = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table('default.test_split_target_size_default', schema_default, False)
+        table_default = self.catalog.get_table('default.test_split_target_size_default')
+
+        for i in range(10):
+            write_builder = table_default.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'f0': list(range(i * 100, (i + 1) * 100)),
+                'f1': [f'value_{j}' for j in range(i * 100, (i + 1) * 100)]
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Generate splits with default target_split_size
+        read_builder = table_default.new_read_builder()
+        splits_default = read_builder.new_scan().plan().splits()
+
+        self.assertGreater(
+            len(splits_small), len(splits_default),
+            f"Small target_split_size should generate more splits. "
+            f"Got {len(splits_small)} splits with 512B vs "
+            f"{len(splits_default)} splits with default")
+
+    def test_split_open_file_cost(self):
+        """Test source.split.open-file-cost configuration effect on split generation."""
+        from pypaimon.common.core_options import CoreOptions
+
+        pa_schema = pa.schema([
+            ('f0', pa.int64()),
+            ('f1', pa.string())
+        ])
+
+        # Test with large open_file_cost (64MB) - should generate more splits
+        schema_large_cost = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                CoreOptions.SOURCE_SPLIT_TARGET_SIZE: '128mb',
+                CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST: '64mb'
+            }
+        )
+        self.catalog.create_table('default.test_split_open_file_cost_large', schema_large_cost, False)
+        table_large_cost = self.catalog.get_table('default.test_split_open_file_cost_large')
+
+        # Write multiple batches to create multiple files
+        # Write 10 batches, each with 100 rows
+        for i in range(10):
+            write_builder = table_large_cost.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'f0': list(range(i * 100, (i + 1) * 100)),
+                'f1': [f'value_{j}' for j in range(i * 100, (i + 1) * 100)]
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Generate splits with large open_file_cost
+        read_builder = table_large_cost.new_read_builder()
+        splits_large_cost = read_builder.new_scan().plan().splits()
+
+        # Test with default open_file_cost (4MB) - should generate fewer splits
+        schema_default = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={CoreOptions.SOURCE_SPLIT_TARGET_SIZE: '128mb'}
+        )
+        self.catalog.create_table('default.test_split_open_file_cost_default', schema_default, False)
+        table_default = self.catalog.get_table('default.test_split_open_file_cost_default')
+
+        # Write same amount of data
+        for i in range(10):
+            write_builder = table_default.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'f0': list(range(i * 100, (i + 1) * 100)),
+                'f1': [f'value_{j}' for j in range(i * 100, (i + 1) * 100)]
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Generate splits with default open_file_cost
+        read_builder = table_default.new_read_builder()
+        splits_default = read_builder.new_scan().plan().splits()
+
+        # With default open_file_cost (4MB), more files can be packed into each split
+        self.assertGreater(
+            len(splits_large_cost), len(splits_default),
+            f"Large open_file_cost should generate more splits. "
+            f"Got {len(splits_large_cost)} splits with 64MB cost vs "
+            f"{len(splits_default)} splits with default")

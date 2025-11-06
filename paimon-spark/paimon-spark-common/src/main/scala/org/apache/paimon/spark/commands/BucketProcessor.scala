@@ -18,10 +18,14 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.bucket.BucketFunction
+import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{GlobalIndexAssigner, KeyPartOrRow}
 import org.apache.paimon.data.{BinaryRow, GenericRow, InternalRow => PaimonInternalRow, JoinedRow}
 import org.apache.paimon.disk.IOManager
-import org.apache.paimon.index.{HashBucketAssigner, PartitionIndex}
+import org.apache.paimon.index.HashBucketAssigner
+import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.{DataConverter, SparkRow}
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.util.EncoderUtils
@@ -75,6 +79,41 @@ case class CommonBucketProcessor(
     def getBucketId(row: PaimonInternalRow): Int = {
       rowKeyExtractor.setRecord(row)
       rowKeyExtractor.bucket()
+    }
+
+    new Iterator[Row] {
+      override def hasNext: Boolean = rowIterator.hasNext
+
+      override def next(): Row = {
+        val row = rowIterator.next
+        val sparkInternalRow = encoderGroup.rowToInternal(row)
+        sparkInternalRow.setInt(bucketColIndex, getBucketId(new SparkRow(rowType, row)))
+        encoderGroup.internalToRow(sparkInternalRow)
+      }
+    }
+  }
+}
+
+case class PostponeFixBucketProcessor(
+    table: FileStoreTable,
+    bucketColIndex: Int,
+    encoderGroup: EncoderSerDeGroup,
+    postponePartitionBucketComputer: BinaryRow => Integer)
+  extends BucketProcessor[Row] {
+
+  def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
+    val rowType = table.rowType()
+    val bucketFunction =
+      BucketFunction.create(new CoreOptions(table.options), table.schema.logicalBucketKeyType)
+    val schema: TableSchema = table.schema
+    val partitionKeyExtractor = new RowPartitionKeyExtractor(schema)
+    val bucketKeyProjection =
+      CodeGenUtils.newProjection(schema.logicalRowType, schema.projection(schema.bucketKeys))
+
+    def getBucketId(row: PaimonInternalRow): Int = {
+      val partition = partitionKeyExtractor.partition(row)
+      val numBuckets = postponePartitionBucketComputer.apply(partition)
+      bucketFunction.bucket(bucketKeyProjection.apply(row), numBuckets)
     }
 
     new Iterator[Row] {
