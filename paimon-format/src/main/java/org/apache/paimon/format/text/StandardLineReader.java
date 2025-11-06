@@ -32,6 +32,7 @@ public class StandardLineReader implements TextLineReader {
     public StandardLineReader(InputStream inputStream) {
         this.bufferedReader =
                 new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
+        ;
     }
 
     @Override
