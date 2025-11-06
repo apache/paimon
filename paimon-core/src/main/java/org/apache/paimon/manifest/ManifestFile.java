@@ -216,7 +216,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         public ManifestFileMeta result() throws IOException {
             return new ManifestFileMeta(
                     path.getName(),
-                    outputBytes,
+                    outputBytes(),
                     numAddedFiles,
                     numDeletedFiles,
                     partitionStatsSerializer.toBinaryAllMode(partitionStatsCollector.extract()),
