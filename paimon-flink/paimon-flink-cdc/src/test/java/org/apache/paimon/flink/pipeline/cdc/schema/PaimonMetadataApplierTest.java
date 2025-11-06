@@ -108,14 +108,14 @@ class PaimonMetadataApplierTest {
                                 .primaryKey("col1")
                                 .build());
         metadataApplier.applySchemaChange(createTableEvent);
-        RowType tableSchema =
+        RowType rowType =
                 new RowType(
                         Arrays.asList(
                                 new DataField(0, "col1", DataTypes.STRING().notNull()),
                                 new DataField(1, "col2", DataTypes.INT())));
         Assertions.assertThat(
                         catalog.getTable(Identifier.fromString(tableId.identifier())).rowType())
-                .isEqualTo(tableSchema);
+                .isEqualTo(rowType);
         List<AddColumnEvent.ColumnWithPosition> addedColumns = new ArrayList<>();
         addedColumns.add(
                 new AddColumnEvent.ColumnWithPosition(
@@ -126,7 +126,7 @@ class PaimonMetadataApplierTest {
                                 "col3DefValue")));
         AddColumnEvent addColumnEvent = new AddColumnEvent(tableId, addedColumns);
         metadataApplier.applySchemaChange(addColumnEvent);
-        tableSchema =
+        rowType =
                 new RowType(
                         Arrays.asList(
                                 new DataField(0, "col1", DataTypes.STRING().notNull()),
@@ -135,14 +135,14 @@ class PaimonMetadataApplierTest {
                                         2, "col3", DataTypes.STRING(), null, "col3DefValue")));
         Assertions.assertThat(
                         catalog.getTable(Identifier.fromString(tableId.identifier())).rowType())
-                .isEqualTo(tableSchema);
+                .isEqualTo(rowType);
 
         Map<String, String> nameMapping = new HashMap<>();
         nameMapping.put("col2", "newcol2");
         nameMapping.put("col3", "newcol3");
         RenameColumnEvent renameColumnEvent = new RenameColumnEvent(tableId, nameMapping);
         metadataApplier.applySchemaChange(renameColumnEvent);
-        tableSchema =
+        rowType =
                 new RowType(
                         Arrays.asList(
                                 new DataField(0, "col1", DataTypes.STRING().notNull()),
@@ -151,14 +151,14 @@ class PaimonMetadataApplierTest {
                                         2, "newcol3", DataTypes.STRING(), null, "col3DefValue")));
         Assertions.assertThat(
                         catalog.getTable(Identifier.fromString(tableId.identifier())).rowType())
-                .isEqualTo(tableSchema);
+                .isEqualTo(rowType);
 
         Map<String, DataType> typeMapping = new HashMap<>();
         typeMapping.put("newcol2", org.apache.flink.cdc.common.types.DataTypes.STRING());
         AlterColumnTypeEvent alterColumnTypeEvent =
                 new AlterColumnTypeEvent(TableId.parse(tableId.identifier()), typeMapping);
         metadataApplier.applySchemaChange(alterColumnTypeEvent);
-        tableSchema =
+        rowType =
                 new RowType(
                         Arrays.asList(
                                 new DataField(0, "col1", DataTypes.STRING().notNull()),
@@ -167,13 +167,13 @@ class PaimonMetadataApplierTest {
                                         2, "newcol3", DataTypes.STRING(), null, "col3DefValue")));
         Assertions.assertThat(
                         catalog.getTable(Identifier.fromString(tableId.identifier())).rowType())
-                .isEqualTo(tableSchema);
+                .isEqualTo(rowType);
 
         DropColumnEvent dropColumnEvent =
                 new DropColumnEvent(tableId, Collections.singletonList("newcol2"));
         metadataApplier.applySchemaChange(dropColumnEvent);
         // id of DataField should keep the same as before dropping column
-        tableSchema =
+        rowType =
                 new RowType(
                         Arrays.asList(
                                 new DataField(0, "col1", DataTypes.STRING().notNull()),
@@ -181,7 +181,7 @@ class PaimonMetadataApplierTest {
                                         2, "newcol3", DataTypes.STRING(), null, "col3DefValue")));
         Assertions.assertThat(
                         catalog.getTable(Identifier.fromString(tableId.identifier())).rowType())
-                .isEqualTo(tableSchema);
+                .isEqualTo(rowType);
 
         // Create table with partition column.
         tableId = TableId.tableId(databaseName, "table_with_partition");
@@ -202,14 +202,14 @@ class PaimonMetadataApplierTest {
                                 .partitionKey("dt")
                                 .build());
         metadataApplier.applySchemaChange(createTableEvent);
-        tableSchema =
+        rowType =
                 new RowType(
                         Arrays.asList(
                                 new DataField(0, "col1", DataTypes.STRING().notNull()),
                                 new DataField(1, "col2", DataTypes.INT()),
                                 new DataField(2, "dt", DataTypes.INT().notNull())));
         Table tableWithPartition = catalog.getTable(Identifier.fromString(tableId.identifier()));
-        Assertions.assertThat(tableWithPartition.rowType()).isEqualTo(tableSchema);
+        Assertions.assertThat(tableWithPartition.rowType()).isEqualTo(rowType);
         Assertions.assertThat(tableWithPartition.primaryKeys())
                 .isEqualTo(Arrays.asList("col1", "dt"));
         // Create table with upper case.
@@ -229,14 +229,14 @@ class PaimonMetadataApplierTest {
                                 .primaryKey("COL1")
                                 .build());
         anotherMetadataApplier.applySchemaChange(createTableEvent);
-        tableSchema =
+        rowType =
                 new RowType(
                         Arrays.asList(
                                 new DataField(0, "COL1", DataTypes.STRING().notNull()),
                                 new DataField(1, "col2", DataTypes.INT())));
         Assertions.assertThat(
                         catalog.getTable(Identifier.fromString(tableId.identifier())).rowType())
-                .isEqualTo(tableSchema);
+                .isEqualTo(rowType);
     }
 
     @Test
@@ -394,7 +394,7 @@ class PaimonMetadataApplierTest {
                                 .primaryKey("col1")
                                 .build());
         metadataApplier.applySchemaChange(createTableEvent);
-        RowType tableSchema =
+        RowType rowType =
                 new RowType(
                         Arrays.asList(
                                 new DataField(0, "col1", DataTypes.STRING().notNull()),
@@ -427,7 +427,7 @@ class PaimonMetadataApplierTest {
                                         DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))));
         Assertions.assertThat(
                         catalog.getTable(Identifier.fromString(tableId.identifier())).rowType())
-                .isEqualTo(tableSchema);
+                .isEqualTo(rowType);
     }
 
     @Test
