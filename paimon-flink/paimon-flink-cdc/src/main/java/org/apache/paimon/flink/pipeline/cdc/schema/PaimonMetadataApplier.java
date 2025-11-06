@@ -20,6 +20,7 @@ package org.apache.paimon.flink.pipeline.cdc.schema;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.options.Options;
@@ -44,6 +45,7 @@ import org.apache.flink.cdc.common.schema.Schema;
 import org.apache.flink.cdc.common.sink.MetadataApplier;
 import org.apache.flink.cdc.common.types.utils.DataTypeUtils;
 import org.apache.flink.shaded.guava31.com.google.common.collect.Sets;
+import org.apache.flink.table.factories.FactoryUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -116,7 +118,19 @@ public class PaimonMetadataApplier implements MetadataApplier {
     public void applySchemaChange(SchemaChangeEvent schemaChangeEvent)
             throws SchemaEvolveException {
         if (catalog == null) {
-            catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+            FlinkCatalogFactory flinkCatalogFactory =
+                    FactoryUtil.discoverFactory(
+                            FlinkCatalogFactory.class.getClassLoader(),
+                            FlinkCatalogFactory.class,
+                            FlinkCatalogFactory.IDENTIFIER);
+            FlinkCatalog flinkCatalog =
+                    flinkCatalogFactory.createCatalog(
+                            new FactoryUtil.DefaultCatalogContext(
+                                    "flink-catalog",
+                                    catalogOptions.toMap(),
+                                    null,
+                                    FlinkCatalog.class.getClassLoader()));
+            catalog = flinkCatalog.catalog();
         }
         SchemaChangeEventVisitor.visit(
                 schemaChangeEvent,
