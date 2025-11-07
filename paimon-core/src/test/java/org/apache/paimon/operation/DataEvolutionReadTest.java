@@ -336,6 +336,10 @@ public class DataEvolutionReadTest {
         blobBunch.add(blobEntry1);
         blobBunch.add(blobEntry2);
         assertThat(blobBunch.files).containsExactlyInAnyOrder(blobEntry2);
+
+        BlobBunch finalBlobBunch2 = blobBunch;
+        DataFileMeta blobEntry3 = createBlobFile("blob2", 250, 100, 2);
+        assertThatCode(() -> finalBlobBunch2.add(blobEntry3)).doesNotThrowAnyException();
     }
 
     /** Creates a normal (non-blob) file for testing. */
