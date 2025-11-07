@@ -251,6 +251,11 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                                             + " not found in cleanerMap");
                                         }
                                         String branch = branchTableInfo.getBranch();
+                                        FileStoreTable tableToUse = cleaner.getTable();
+                                        FileStoreTable branchTable =
+                                                tableToUse.switchToBranch(branch);
+                                        FileStorePathFactory pathFactory =
+                                                branchTable.store().pathFactory();
                                         Consumer<String> manifestConsumer =
                                                 manifest -> {
                                                     // Output format: branch:tableIdentifier as
@@ -261,8 +266,20 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                                                     manifest);
                                                     ctx.output(manifestOutputTag, tuple2);
                                                 };
+                                        // Convert relative paths to absolute paths in batch mode
+                                        Consumer<String> usedFileConsumer =
+                                                fileName -> {
+                                                    // Convert relative path to absolute path
+                                                    Path absolutePath =
+                                                            convertToAbsolutePath(
+                                                                    pathFactory, fileName);
+                                                    out.collect(absolutePath.toUri().toString());
+                                                };
                                         cleaner.collectWithoutDataFile(
-                                                branch, snapshot, out::collect, manifestConsumer);
+                                                branch,
+                                                snapshot,
+                                                usedFileConsumer,
+                                                manifestConsumer);
                                     }
                                 });
 
@@ -469,6 +486,36 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                             new StreamRecord<>(extraFilePath.toUri().toString()));
                                 }
                             });
+        }
+    }
+
+    /**
+     * Convert relative file path to absolute path based on file type (manifest, index, statistics,
+     * etc.).
+     */
+    private Path convertToAbsolutePath(FileStorePathFactory pathFactory, String fileName) {
+        // Determine file type based on file name prefix
+        if (fileName.startsWith(FileStorePathFactory.MANIFEST_LIST_PREFIX)) {
+            return pathFactory.toManifestListPath(fileName);
+        } else if (fileName.startsWith(FileStorePathFactory.MANIFEST_PREFIX)) {
+            return pathFactory.toManifestFilePath(fileName);
+        } else if (fileName.startsWith(FileStorePathFactory.INDEX_MANIFEST_PREFIX)) {
+            return pathFactory.toManifestFilePath(fileName);
+        } else if (fileName.startsWith(FileStorePathFactory.INDEX_PREFIX)) {
+            return new Path(pathFactory.indexPath(), fileName);
+        } else if (fileName.startsWith(FileStorePathFactory.STATISTICS_PREFIX)) {
+            return new Path(pathFactory.statisticsPath(), fileName);
+        } else {
+            // For snapshot files (snapshot-xxx format) and other files
+            // Snapshot files are stored in snapshot/ directory
+            if (fileName.startsWith("snapshot-")) {
+                return new Path(new Path(pathFactory.root(), "snapshot"), fileName);
+            }
+            // This is a fallback, should not happen in normal cases
+            LOG.warn(
+                    "Unknown file type for fileName: {}, assuming it's in root directory",
+                    fileName);
+            return new Path(pathFactory.root(), fileName);
         }
     }
 

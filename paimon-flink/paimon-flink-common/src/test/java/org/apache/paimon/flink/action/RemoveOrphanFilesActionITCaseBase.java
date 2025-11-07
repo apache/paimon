@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
@@ -395,9 +396,40 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     @org.junit.jupiter.api.Test
     public void testBatchTableProcessing() throws Exception {
         // Create multiple tables to test batch processing
-        createTableAndWriteData("batchTable1");
-        createTableAndWriteData("batchTable2");
-        createTableAndWriteData("batchTable3");
+        FileStoreTable table1 = createTableAndWriteData("batchTable1");
+        FileStoreTable table2 = createTableAndWriteData("batchTable2");
+        FileStoreTable table3 = createTableAndWriteData("batchTable3");
+
+        // Collect manifest files before cleaning to verify they are not deleted
+        FileIO fileIO1 = table1.fileIO();
+        FileIO fileIO2 = table2.fileIO();
+        FileIO fileIO3 = table3.fileIO();
+        Path manifestPath1 = new Path(table1.location(), "manifest");
+        Path manifestPath2 = new Path(table2.location(), "manifest");
+        Path manifestPath3 = new Path(table3.location(), "manifest");
+
+        // List manifest files before cleaning
+        List<String> manifestFilesBefore1 = new ArrayList<>();
+        List<String> manifestFilesBefore2 = new ArrayList<>();
+        List<String> manifestFilesBefore3 = new ArrayList<>();
+        if (fileIO1.exists(manifestPath1)) {
+            FileStatus[] statuses1 = fileIO1.listStatus(manifestPath1);
+            for (FileStatus status : statuses1) {
+                manifestFilesBefore1.add(status.getPath().getName());
+            }
+        }
+        if (fileIO2.exists(manifestPath2)) {
+            FileStatus[] statuses2 = fileIO2.listStatus(manifestPath2);
+            for (FileStatus status : statuses2) {
+                manifestFilesBefore2.add(status.getPath().getName());
+            }
+        }
+        if (fileIO3.exists(manifestPath3)) {
+            FileStatus[] statuses3 = fileIO3.listStatus(manifestPath3);
+            for (FileStatus status : statuses3) {
+                manifestFilesBefore3.add(status.getPath().getName());
+            }
+        }
 
         // Test batch processing via command line arguments
         List<String> args =
@@ -411,7 +443,9 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                                 "--table",
                                 "*",
                                 "--batch_table_processing",
-                                "true"));
+                                "true",
+                                "--dry_run",
+                                "false"));
 
         RemoveOrphanFilesAction action1 = createAction(RemoveOrphanFilesAction.class, args);
         assertThatCode(action1::run).doesNotThrowAnyException();
@@ -431,6 +465,67 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         args.add("2");
         RemoveOrphanFilesAction action4 = createAction(RemoveOrphanFilesAction.class, args);
         assertThatCode(action4::run).doesNotThrowAnyException();
+
+        // Verify that manifest files are NOT deleted (critical check!)
+        List<String> manifestFilesAfter1 = new ArrayList<>();
+        List<String> manifestFilesAfter2 = new ArrayList<>();
+        List<String> manifestFilesAfter3 = new ArrayList<>();
+        if (fileIO1.exists(manifestPath1)) {
+            FileStatus[] statuses1 = fileIO1.listStatus(manifestPath1);
+            for (FileStatus status : statuses1) {
+                manifestFilesAfter1.add(status.getPath().getName());
+            }
+        }
+        if (fileIO2.exists(manifestPath2)) {
+            FileStatus[] statuses2 = fileIO2.listStatus(manifestPath2);
+            for (FileStatus status : statuses2) {
+                manifestFilesAfter2.add(status.getPath().getName());
+            }
+        }
+        if (fileIO3.exists(manifestPath3)) {
+            FileStatus[] statuses3 = fileIO3.listStatus(manifestPath3);
+            for (FileStatus status : statuses3) {
+                manifestFilesAfter3.add(status.getPath().getName());
+            }
+        }
+
+        // Verify manifest files still exist
+        assertThat(manifestFilesAfter1)
+                .as("Manifest files in batchTable1 should not be deleted")
+                .containsExactlyInAnyOrderElementsOf(manifestFilesBefore1);
+        assertThat(manifestFilesAfter2)
+                .as("Manifest files in batchTable2 should not be deleted")
+                .containsExactlyInAnyOrderElementsOf(manifestFilesBefore2);
+        assertThat(manifestFilesAfter3)
+                .as("Manifest files in batchTable3 should not be deleted")
+                .containsExactlyInAnyOrderElementsOf(manifestFilesBefore3);
+
+        // Verify orphan files are deleted
+        Path orphanFile1Table1 = getOrphanFilePath(table1, ORPHAN_FILE_1);
+        Path orphanFile2Table1 = getOrphanFilePath(table1, ORPHAN_FILE_2);
+        Path orphanFile1Table2 = getOrphanFilePath(table2, ORPHAN_FILE_1);
+        Path orphanFile2Table2 = getOrphanFilePath(table2, ORPHAN_FILE_2);
+        Path orphanFile1Table3 = getOrphanFilePath(table3, ORPHAN_FILE_1);
+        Path orphanFile2Table3 = getOrphanFilePath(table3, ORPHAN_FILE_2);
+
+        assertThat(fileIO1.exists(orphanFile1Table1))
+                .as("Orphan file 1 in batchTable1 should be deleted")
+                .isFalse();
+        assertThat(fileIO1.exists(orphanFile2Table1))
+                .as("Orphan file 2 in batchTable1 should be deleted")
+                .isFalse();
+        assertThat(fileIO2.exists(orphanFile1Table2))
+                .as("Orphan file 1 in batchTable2 should be deleted")
+                .isFalse();
+        assertThat(fileIO2.exists(orphanFile2Table2))
+                .as("Orphan file 2 in batchTable2 should be deleted")
+                .isFalse();
+        assertThat(fileIO3.exists(orphanFile1Table3))
+                .as("Orphan file 1 in batchTable3 should be deleted")
+                .isFalse();
+        assertThat(fileIO3.exists(orphanFile2Table3))
+                .as("Orphan file 2 in batchTable3 should be deleted")
+                .isFalse();
 
         // Verify that batch mode produces the same results as non-batch mode
         String olderThan =

@@ -55,6 +55,9 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
         if (params.has(BATCH_TABLE_PROCESSING)
                 && Boolean.parseBoolean(params.get(BATCH_TABLE_PROCESSING))) {
             action.batchTableProcessing(true);
+            if (!params.has(DRY_RUN)) {
+                action.dryRun();
+            }
         }
 
         if (params.has(BATCH_SIZE)) {
