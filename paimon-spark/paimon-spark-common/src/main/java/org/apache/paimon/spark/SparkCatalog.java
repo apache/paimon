@@ -125,12 +125,12 @@ public class SparkCatalog extends SparkBaseCatalog
         this.catalogName = name;
         Map<String, String> confMap = sparkSession.sessionState().conf().settings();
         Map<String, String> newOptions = new HashMap<>(options);
-        for (Map.Entry<String, String> entry : confMap.entrySet()) {
-            if (entry.getKey().startsWith("spark.hadoop.fs.oss")) {
-                newOptions.put(entry.getKey().replace("spark.hadoop.", ""), entry.getValue());
-            } else if ("spark.hadoop.aliyun.oss.provider.url".equals(entry.getKey())) {
-                newOptions.put("aliyun.oss.provider.url", entry.getValue());
-            }
+        if (confMap.containsKey("spark.hadoop.aliyun.oss.provider.url")) {
+            newOptions.put(
+                    "aliyun.oss.provider.url", confMap.get("spark.hadoop.aliyun.oss.provider.url"));
+        }
+        if (confMap.containsKey("spark.hadoop.fs.oss.endpoint")) {
+            newOptions.put("fs.oss.endpoint", confMap.get("spark.hadoop.fs.oss.endpoint"));
         }
         CatalogContext catalogContext =
                 CatalogContext.create(

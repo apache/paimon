@@ -126,15 +126,10 @@ public class JindoFileIO extends HadoopCompliantFileIO {
                 && hadoopOptions.containsKey(OSS_ACCESS_KEY_SECRET)) {
             LOG.info("Using Ak for OSS.");
             hadoopOptions.set(OSS_CREDENTIALS_PROVIDER, SimpleCredentialsProvider.NAME);
-            hadoopOptions.set(OSS_ENDPOINT, context.options().get(OSS_ENDPOINT));
-        } else if (context.options().containsKey(OSS_CREDENTIALS_PROVIDER)
-                && CustomCredentialsProvider.NAME.equals(
-                        context.options().get(OSS_CREDENTIALS_PROVIDER))
-                && context.options().containsKey(OSS_PROVIDER_URL)) {
+        } else if (context.options().containsKey(OSS_PROVIDER_URL)) {
             LOG.info("Using CustomCredentialsProvider for OSS.");
             hadoopOptions.set(OSS_CREDENTIALS_PROVIDER, CustomCredentialsProvider.NAME);
             hadoopOptions.set(OSS_PROVIDER_URL, context.options().get(OSS_PROVIDER_URL));
-            hadoopOptions.set(OSS_ENDPOINT, context.options().get(OSS_ENDPOINT));
         } else {
             throw new IllegalArgumentException(
                     "fs.oss.accessKeyId and fs.oss.accessKeySecret must be set or fs.oss.credentials.provider and aliyun.oss.provider.url.");
