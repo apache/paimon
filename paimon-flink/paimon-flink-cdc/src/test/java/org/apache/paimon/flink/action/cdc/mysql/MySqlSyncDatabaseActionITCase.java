@@ -33,7 +33,7 @@ import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
 import org.apache.flink.streaming.api.graph.StreamGraph;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -63,9 +63,9 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @TempDir java.nio.file.Path tempDir;
 
-    @BeforeAll
-    public static void startContainers() {
-        MYSQL_CONTAINER.withSetupSQL("mysql/sync_database_setup.sql");
+    @BeforeEach
+    public void startContainers() {
+        mysqlContainer.withSetupSQL("mysql/sync_database_setup.sql");
         start();
     }
 
@@ -1238,7 +1238,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         JobClient jobClient = runActionWithDefaultEnv(action1);
 
         waitingTables("t1");
-        jobClient.cancel();
+        jobClient.cancel().get();
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");

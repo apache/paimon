@@ -36,7 +36,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -68,9 +68,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     private static final String DATABASE_NAME = "paimon_sync_table";
 
-    @BeforeAll
-    public static void startContainers() {
-        MYSQL_CONTAINER.withSetupSQL("mysql/sync_table_setup.sql");
+    @BeforeEach
+    public void startContainers() {
+        mysqlContainer.withSetupSQL("mysql/sync_table_setup.sql");
         start();
     }
 
@@ -1271,7 +1271,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                     "INSERT INTO test_options_change VALUES (2, '2023-03-23', null, null)");
         }
         waitingTables(tableName);
-        jobClient.cancel();
+        jobClient.cancel().get();
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");
