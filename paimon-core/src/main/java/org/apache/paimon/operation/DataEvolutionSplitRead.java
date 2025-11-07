@@ -466,7 +466,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 if (rowIdPushDown) {
                     if (firstRowId < expectedNextFirstRowId) {
                         if (file.maxSequenceNumber() > latestMaxSequenceNumber) {
-                            files.remove(files.size() - 1);
+                            DataFileMeta lastFile = files.remove(files.size() - 1);
+                            rowCount -= lastFile.rowCount();
                         } else {
                             return;
                         }
