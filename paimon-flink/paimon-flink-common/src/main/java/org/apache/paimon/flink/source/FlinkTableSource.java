@@ -211,6 +211,8 @@ public abstract class FlinkTableSource
                 // In unaware bucket or dynamic bucket mode, we can't infer parallelism.
                 if (options.get(CoreOptions.BUCKET) == -1) {
                     return null;
+                } else if (options.get(CoreOptions.BUCKET) == -2){
+                    parallelism = Math.max(1, options.get(FlinkConnectorOptions.POSTPONE_DEFAULT_BUCKET_NUM));
                 } else {
                     parallelism = Math.max(1, options.get(CoreOptions.BUCKET));
                 }
