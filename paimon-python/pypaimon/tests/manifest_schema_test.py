@@ -73,7 +73,7 @@ class ManifestSchemaTest(unittest.TestCase):
                          ["null", {"type": "long", "logicalType": "timestamp-millis"}])
         self.assertEqual(field_map["_DELETE_ROW_COUNT"]["type"], ["null", "long"])
         self.assertEqual(field_map["_EMBEDDED_FILE_INDEX"]["type"], ["null", "bytes"])
-        self.assertEqual(field_map["_FILE_SOURCE"]["type"], ["null", "string"])
+        self.assertEqual(field_map["_FILE_SOURCE"]["type"], ["null", "int"])
         self.assertEqual(field_map["_VALUE_STATS_COLS"]["type"], ["null", {"type": "array", "items": "string"}])
         self.assertEqual(field_map["_EXTERNAL_PATH"]["type"], ["null", "string"])
         self.assertEqual(field_map["_FIRST_ROW_ID"]["type"], ["null", "long"])
