@@ -202,6 +202,9 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     }
 
     protected long outputBytes() throws IOException {
-        return outputBytes == null ? fileIO.getFileSize(path) : outputBytes;
+        if (outputBytes == null) {
+            outputBytes = fileIO.getFileSize(path);
+        }
+        return outputBytes;
     }
 }
