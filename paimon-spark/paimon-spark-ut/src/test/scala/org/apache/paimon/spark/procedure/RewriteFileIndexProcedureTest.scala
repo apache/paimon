@@ -41,7 +41,6 @@ class RewriteFileIndexProcedureTest extends PaimonSparkTestBase {
         sql("""CALL sys.rewrite_file_index(table => "t", where => "dt='2025-08-17'")"""),
         Row(1, 1)
       )
-      val a = 1
     }
   }
 }

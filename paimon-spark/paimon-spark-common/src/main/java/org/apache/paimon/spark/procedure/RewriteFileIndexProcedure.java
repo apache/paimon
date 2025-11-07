@@ -114,6 +114,7 @@ public class RewriteFileIndexProcedure extends BaseProcedure {
                                     .withPartitionFilter(partitionPredicate)
                                     .plan()
                                     .files();
+
                     if (manifestEntries.isEmpty()) {
                         LOG.info("No files to rewrite.");
                         return new InternalRow[] {newInternalRow(0, 0)};
@@ -137,7 +138,7 @@ public class RewriteFileIndexProcedure extends BaseProcedure {
                     JavaRDD<byte[]> commitMessageJavaRDD =
                             javaSparkContext
                                     .parallelize(serEntries, readParallelism)
-                                    .mapPartitions(new manifestEntryProcesser(table));
+                                    .mapPartitions(new ManifestEntryProcesser(table));
 
                     Set<BinaryRow> writtenPartitions = new HashSet<>();
                     int writtenIndexes = 0;
@@ -167,12 +168,12 @@ public class RewriteFileIndexProcedure extends BaseProcedure {
     }
 
     /** Process manifest entries. */
-    public static class manifestEntryProcesser
+    public static class ManifestEntryProcesser
             implements FlatMapFunction<Iterator<byte[]>, byte[]> {
 
         private final FileStoreTable table;
 
-        public manifestEntryProcesser(FileStoreTable table) {
+        public ManifestEntryProcesser(FileStoreTable table) {
             this.table = table;
         }
 

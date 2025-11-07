@@ -48,10 +48,14 @@ public class SparkProcedureUtils {
             RowType partitionType,
             SparkSession sparkSession,
             DataSourceV2Relation relation) {
-        List<String> partitionKeys = partitionType.getFieldNames();
         if (StringUtils.isNullOrWhitespaceOnly(where)) {
             return null;
         }
+
+        List<String> partitionKeys = partitionType.getFieldNames();
+        checkArgument(
+                !partitionKeys.isEmpty(),
+                "Table should be a partitioned table when using partition predicate.");
 
         Expression condition = ExpressionUtils.resolveFilter(sparkSession, relation, where);
         checkArgument(
