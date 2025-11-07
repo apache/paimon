@@ -36,26 +36,26 @@ class ManifestSchemaTest(unittest.TestCase):
         self.assertEqual(DATA_FILE_META_SCHEMA["type"], "record")
         self.assertEqual(DATA_FILE_META_SCHEMA["name"], "DataFileMeta")
         self.assertIn("fields", DATA_FILE_META_SCHEMA)
-        
+
         fields = DATA_FILE_META_SCHEMA["fields"]
         self.assertIsInstance(fields, list)
-        
+
         # Create a mapping of field names to field definitions for easier testing
         field_map = {field["name"]: field for field in fields}
-        
+
         # Check that all expected fields are present
         expected_fields = [
             "_FILE_NAME", "_FILE_SIZE", "_ROW_COUNT", "_MIN_KEY", "_MAX_KEY",
-            "_KEY_STATS", "_VALUE_STATS", "_MIN_SEQUENCE_NUMBER", 
+            "_KEY_STATS", "_VALUE_STATS", "_MIN_SEQUENCE_NUMBER",
             "_MAX_SEQUENCE_NUMBER", "_SCHEMA_ID", "_LEVEL", "_EXTRA_FILES",
             "_CREATION_TIME", "_DELETE_ROW_COUNT", "_EMBEDDED_FILE_INDEX",
             "_FILE_SOURCE", "_VALUE_STATS_COLS", "_EXTERNAL_PATH",
             "_FIRST_ROW_ID", "_WRITE_COLS"
         ]
-        
+
         for field_name in expected_fields:
             self.assertIn(field_name, field_map, f"Field {field_name} is missing")
-            
+
         # Check specific field types
         self.assertEqual(field_map["_FILE_NAME"]["type"], "string")
         self.assertEqual(field_map["_FILE_SIZE"]["type"], "long")
@@ -69,7 +69,8 @@ class ManifestSchemaTest(unittest.TestCase):
         self.assertEqual(field_map["_SCHEMA_ID"]["type"], "long")
         self.assertEqual(field_map["_LEVEL"]["type"], "int")
         self.assertEqual(field_map["_EXTRA_FILES"]["type"], {"type": "array", "items": "string"})
-        self.assertEqual(field_map["_CREATION_TIME"]["type"], ["null", {"type": "long", "logicalType": "timestamp-millis"}])
+        self.assertEqual(field_map["_CREATION_TIME"]["type"],
+                         ["null", {"type": "long", "logicalType": "timestamp-millis"}])
         self.assertEqual(field_map["_DELETE_ROW_COUNT"]["type"], ["null", "long"])
         self.assertEqual(field_map["_EMBEDDED_FILE_INDEX"]["type"], ["null", "bytes"])
         self.assertEqual(field_map["_FILE_SOURCE"]["type"], ["null", "string"])
@@ -84,22 +85,22 @@ class ManifestSchemaTest(unittest.TestCase):
         self.assertEqual(MANIFEST_FILE_META_SCHEMA["type"], "record")
         self.assertEqual(MANIFEST_FILE_META_SCHEMA["name"], "ManifestFileMeta")
         self.assertIn("fields", MANIFEST_FILE_META_SCHEMA)
-        
+
         fields = MANIFEST_FILE_META_SCHEMA["fields"]
         self.assertIsInstance(fields, list)
-        
+
         # Create a mapping of field names to field definitions for easier testing
         field_map = {field["name"]: field for field in fields}
-        
+
         # Check that all expected fields are present
         expected_fields = [
             "_VERSION", "_FILE_NAME", "_FILE_SIZE", "_NUM_ADDED_FILES",
             "_NUM_DELETED_FILES", "_PARTITION_STATS", "_SCHEMA_ID"
         ]
-        
+
         for field_name in expected_fields:
             self.assertIn(field_name, field_map, f"Field {field_name} is missing")
-            
+
         # Check specific field types
         self.assertEqual(field_map["_VERSION"]["type"], "int")
         self.assertEqual(field_map["_FILE_NAME"]["type"], "string")
@@ -113,15 +114,15 @@ class ManifestSchemaTest(unittest.TestCase):
         """Test that schema references are correctly used."""
         data_file_fields = {field["name"]: field for field in DATA_FILE_META_SCHEMA["fields"]}
         manifest_file_fields = {field["name"]: field for field in MANIFEST_FILE_META_SCHEMA["fields"]}
-        
+
         # Check that _KEY_STATS references KEY_STATS_SCHEMA
         key_stats_field = data_file_fields["_KEY_STATS"]
         self.assertEqual(key_stats_field["type"], KEY_STATS_SCHEMA)
-        
+
         # Check that _VALUE_STATS references VALUE_STATS_SCHEMA
         value_stats_field = data_file_fields["_VALUE_STATS"]
         self.assertEqual(value_stats_field["type"], VALUE_STATS_SCHEMA)
-        
+
         # Check that _PARTITION_STATS references PARTITION_STATS_SCHEMA
         partition_stats_field = manifest_file_fields["_PARTITION_STATS"]
         self.assertEqual(partition_stats_field["type"], PARTITION_STATS_SCHEMA)
@@ -132,7 +133,7 @@ class ManifestSchemaTest(unittest.TestCase):
         self.assertEqual(KEY_STATS_SCHEMA["type"], "record")
         self.assertEqual(VALUE_STATS_SCHEMA["type"], "record")
         self.assertEqual(PARTITION_STATS_SCHEMA["type"], "record")
-        
+
         # Verify that all stats schemas have different names
         names = [
             KEY_STATS_SCHEMA["name"],
