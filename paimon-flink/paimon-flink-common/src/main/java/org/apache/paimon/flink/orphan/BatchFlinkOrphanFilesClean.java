@@ -77,18 +77,6 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
     protected Map<String, T> cleanerMap;
 
     public BatchFlinkOrphanFilesClean(
-            T cleaner, long olderThanMillis, boolean dryRun, @Nullable Integer parallelism) {
-        super(cleaner.getTable(), olderThanMillis, dryRun, parallelism);
-        this.cleanerMap = new HashMap<>();
-        FileStoreTable table = cleaner.getTable();
-        Identifier id = table.catalogEnvironment().identifier();
-        if (id != null) {
-            this.cleanerMap.put(id.getFullName(), cleaner);
-        }
-        this.cleaners = Collections.singletonList(cleaner);
-    }
-
-    public BatchFlinkOrphanFilesClean(
             String databaseName,
             List<T> cleaners,
             long olderThanMillis,
@@ -119,17 +107,8 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                     BranchTableInfo branchTableInfo,
                                     ProcessFunction<BranchTableInfo, Tuple2<Long, Long>>.Context
                                             ctx,
-                                    Collector<Tuple2<Long, Long>> out)
-                                    throws Exception {
-                                // Directly get cleaner from outer class's cleanerMap
-                                String tableKey = branchTableInfo.getIdentifier().getFullName();
-                                T cleaner = cleanerMap.get(tableKey);
-                                if (cleaner == null) {
-                                    throw new RuntimeException(
-                                            "Cleaner for table "
-                                                    + tableKey
-                                                    + " not found in cleanerMap");
-                                }
+                                    Collector<Tuple2<Long, Long>> out) {
+                                T cleaner = getCleanerForTable(branchTableInfo);
                                 cleaner.processForBranchSnapshotDirDeleted(
                                         branchTableInfo.getBranch(), out);
                             }
@@ -163,8 +142,6 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
             if (catalogContext != null) {
                 catalogOptions.putAll(catalogContext.options().toMap());
             }
-            // Use instance method validBranches() from cleaner
-            // Since validBranches() is protected, we need to call it through the cleaner instance
             List<String> branches = cleaner.validBranches();
             branches.forEach(
                     branch ->
@@ -176,7 +153,8 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                             catalogOptions)));
         }
         LOG.info(
-                "End orphan files validBranches: spend [{}] ms",
+                "End orphan files validBranches for {} tables: spend [{}] ms",
+                cleaners.size(),
                 System.currentTimeMillis() - start);
 
         // snapshot and changelog files are the root of everything, so they are handled specially
@@ -204,16 +182,7 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                                     ctx,
                                             Collector<Tuple2<BranchTableInfo, String>> out)
                                             throws Exception {
-                                        // Directly get cleaner from outer class's cleanerMap
-                                        String tableKey =
-                                                branchTableInfo.getIdentifier().getFullName();
-                                        T cleaner = cleanerMap.get(tableKey);
-                                        if (cleaner == null) {
-                                            throw new RuntimeException(
-                                                    "Cleaner for table "
-                                                            + tableKey
-                                                            + " not found in cleanerMap");
-                                        }
+                                        T cleaner = getCleanerForTable(branchTableInfo);
                                         for (Snapshot snapshot :
                                                 cleaner.safelyGetAllSnapshots(
                                                         branchTableInfo.getBranch())) {
@@ -237,17 +206,10 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                             throws Exception {
                                         BranchTableInfo branchTableInfo = branchAndSnapshot.f0;
                                         Snapshot snapshot = Snapshot.fromJson(branchAndSnapshot.f1);
-                                        // Directly get cleaner from outer class's cleanerMap
+                                        T cleaner = getCleanerForTable(branchTableInfo);
+                                        String branch = branchTableInfo.getBranch();
                                         String tableKey =
                                                 branchTableInfo.getIdentifier().getFullName();
-                                        T cleaner = cleanerMap.get(tableKey);
-                                        if (cleaner == null) {
-                                            throw new RuntimeException(
-                                                    "Cleaner for table "
-                                                            + tableKey
-                                                            + " not found in cleanerMap");
-                                        }
-                                        String branch = branchTableInfo.getBranch();
                                         Consumer<String> manifestConsumer =
                                                 manifest -> {
                                                     Tuple2<String, String> tuple2 =
@@ -261,12 +223,8 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                                             manifest);
                                                     ctx.output(manifestOutputTag, tuple2);
                                                 };
-                                        Consumer<String> usedFileConsumer = out::collect;
                                         cleaner.collectWithoutDataFile(
-                                                branch,
-                                                snapshot,
-                                                usedFileConsumer,
-                                                manifestConsumer);
+                                                branch, snapshot, out::collect, manifestConsumer);
                                     }
                                 });
 
@@ -513,10 +471,15 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
         Map<String, ManifestFile> branchManifests = new HashMap<>();
         for (Tuple2<String, String> tuple2 : manifests) {
             String branch = tuple2.f0;
-            FileStoreTable branchTable = tableToUse.switchToBranch(branch);
             ManifestFile manifestFile =
                     branchManifests.computeIfAbsent(
-                            branch, key -> branchTable.store().manifestFileFactory().create());
+                            branch,
+                            key ->
+                                    tableToUse
+                                            .switchToBranch(key)
+                                            .store()
+                                            .manifestFileFactory()
+                                            .create());
             retryReadingFiles(
                             () -> manifestFile.readWithIOException(tuple2.f1),
                             Collections.<ManifestEntry>emptyList())
@@ -708,14 +671,22 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                 "Only FileStoreTable supports remove-orphan-files action. The table type is '%s'.",
                 table.getClass().getName());
 
-        FlinkOrphanFilesClean cleaner =
-                new FlinkOrphanFilesClean(
-                        (FileStoreTable) table, olderThanMillis, dryRun, parallelism);
         DataStream<CleanOrphanFilesResult> clean =
-                new BatchFlinkOrphanFilesClean<>(cleaner, olderThanMillis, dryRun, parallelism)
+                new FlinkOrphanFilesClean(
+                                (FileStoreTable) table, olderThanMillis, dryRun, parallelism)
                         .doOrphanClean(env);
         if (clean != null) {
             orphanFilesCleans.add(clean);
         }
+    }
+
+    private T getCleanerForTable(BranchTableInfo branchTableInfo) {
+        String tableKey = branchTableInfo.getIdentifier().getFullName();
+        T cleaner = cleanerMap.get(tableKey);
+        if (cleaner == null) {
+            throw new RuntimeException(
+                    "Cleaner for table " + tableKey + " not found in cleanerMap");
+        }
+        return cleaner;
     }
 }

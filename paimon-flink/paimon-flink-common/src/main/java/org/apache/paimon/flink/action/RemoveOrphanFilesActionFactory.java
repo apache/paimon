@@ -97,15 +97,15 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
 
         System.out.println(
                 "When '--batch_table_processing true', multiple tables will be processed within a single DataStream "
-                        + "during job graph construction, instead of creating one DataStream per table. "
+                        + "during job graph construction, instead of creating one dataStream per table. "
                         + "This significantly reduces job graph construction time, when processing "
                         + "thousands of tables (jobs may fail to start within timeout limits). "
-                        + "It also reduces JobGraph complexity and avoids StackOverflow or resource allocation failures during job running. "
+                        + "It also reduces JobGraph complexity and avoids stack over flow issue and resource allocation failures during job running. "
                         + "Default is false.");
         System.out.println();
         System.out.println(
                 "When '--batch_table_processing' is enabled, '--batch_size' controls how many tables are processed "
-                        + "in each batch. Default batch size is 1000.");
+                        + "in each basic dataStream. Default batch size is 1000.");
         System.out.println();
     }
 }

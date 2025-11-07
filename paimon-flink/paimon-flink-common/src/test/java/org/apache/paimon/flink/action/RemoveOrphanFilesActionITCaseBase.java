@@ -32,6 +32,8 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -96,6 +98,22 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
     private Path getOrphanFilePath(FileStoreTable table, String orphanFile) {
         return new Path(table.location(), orphanFile);
+    }
+
+    private List<String> readTableData(FileStoreTable table) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        List<String> result =
+                getResult(
+                        readBuilder.newRead(),
+                        plan == null ? Collections.emptyList() : plan.splits(),
+                        rowType);
+        return result;
     }
 
     @ParameterizedTest
@@ -394,8 +412,6 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
     @org.junit.jupiter.api.Test
     public void testBatchTableProcessing() throws Exception {
-        // Create multiple tables to test batch processing
-        // createTableAndWriteData already creates orphan files for each table
         long fileCreationTime = System.currentTimeMillis();
         FileStoreTable table1 = createTableAndWriteData("batchTable1");
         FileStoreTable table2 = createTableAndWriteData("batchTable2");
@@ -500,6 +516,121 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                     .as("Orphan file should be deleted by batch mode (same as non-batch mode)")
                     .isFalse();
         }
+
+        // Verify that normal data in tables can still be read after batch mode deletion
+        List<String> table1Data = readTableData(table1);
+        assertThat(table1Data)
+                .as("Table1 should still contain normal data after batch mode deletion")
+                .containsExactly("+I[1, Hi]");
+
+        List<String> table2Data = readTableData(table2);
+        assertThat(table2Data)
+                .as("Table2 should still contain normal data after batch mode deletion")
+                .containsExactly("+I[1, Hi]");
+
+        List<String> table3Data = readTableData(table3);
+        assertThat(table3Data)
+                .as("Table3 should still contain normal data after batch mode deletion")
+                .containsExactly("+I[1, Hi]");
+    }
+
+    @org.junit.jupiter.api.Test
+    public void testBatchTableProcessingWithBranch() throws Exception {
+        long fileCreationTime = System.currentTimeMillis();
+
+        // Create table with multiple branches to test bug: same table, multiple branches
+        // This will trigger the bug in computeIfAbsent if branchTable is used instead of key
+        FileStoreTable table = createTableAndWriteData("batchBranchTable");
+
+        // Create first branch and write data
+        table.createBranch("br1");
+        FileStoreTable branchTable1 = createBranchTable(table, "br1");
+        writeToBranch(branchTable1, GenericRow.of(2L, BinaryString.fromString("Hello"), 20));
+
+        // Create second branch and write data
+        table.createBranch("br2");
+        FileStoreTable branchTable2 = createBranchTable(table, "br2");
+        writeToBranch(branchTable2, GenericRow.of(3L, BinaryString.fromString("World"), 30));
+
+        // Create orphan files in both branch snapshot directories
+        // This is key: same table, multiple branches - will trigger bug in
+        // endInputForUsedFilesForBatch
+        Path orphanFileBr1 =
+                new Path(table.location(), "branch/branch-br1/snapshot/orphan_file_br1");
+        Path orphanFileBr2 =
+                new Path(table.location(), "branch/branch-br2/snapshot/orphan_file_br2");
+        branchTable1.fileIO().writeFile(orphanFileBr1, "x", true);
+        branchTable2.fileIO().writeFile(orphanFileBr2, "y", true);
+
+        Thread.sleep(5000);
+        long olderThanMillis = Math.max(fileCreationTime + 1000, System.currentTimeMillis() - 1000);
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(olderThanMillis), 3);
+
+        // Test batch mode with multiple branches in same table
+        List<String> args =
+                Arrays.asList(
+                        "remove_orphan_files",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        "*",
+                        "--batch_table_processing",
+                        "true",
+                        "--dry_run",
+                        "false",
+                        "--older_than",
+                        olderThan);
+        RemoveOrphanFilesAction action = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action::run).doesNotThrowAnyException();
+
+        // Verify orphan files are deleted
+        assertThat(branchTable1.fileIO().exists(orphanFileBr1)).isFalse();
+        assertThat(branchTable2.fileIO().exists(orphanFileBr2)).isFalse();
+
+        // Verify normal data can still be read
+        assertThat(readTableData(table)).containsExactly("+I[1, Hi]");
+        RowType branchRowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING(), DataTypes.INT()},
+                        new String[] {"k", "v", "v2"});
+        assertThat(readBranchData(branchTable1, branchRowType)).containsExactly("+I[2, Hello, 20]");
+        assertThat(readBranchData(branchTable2, branchRowType)).containsExactly("+I[3, World, 30]");
+    }
+
+    private FileStoreTable createBranchTable(FileStoreTable table, String branchName)
+            throws Exception {
+        SchemaManager schemaManager =
+                new SchemaManager(table.fileIO(), table.location(), branchName);
+        TableSchema branchSchema =
+                schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.INT()));
+        Options branchOptions = new Options(branchSchema.options());
+        branchOptions.set(CoreOptions.BRANCH, branchName);
+        branchSchema = branchSchema.copy(branchOptions.toMap());
+        return FileStoreTableFactory.create(table.fileIO(), table.location(), branchSchema);
+    }
+
+    private void writeToBranch(FileStoreTable branchTable, GenericRow data) throws Exception {
+        String commitUser = UUID.randomUUID().toString();
+        StreamTableWrite write = branchTable.newWrite(commitUser);
+        StreamTableCommit commit = branchTable.newCommit(commitUser);
+        write.write(data);
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+    }
+
+    private List<String> readBranchData(FileStoreTable branchTable, RowType rowType)
+            throws Exception {
+        ReadBuilder readBuilder = branchTable.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        return getResult(
+                readBuilder.newRead(),
+                plan == null ? Collections.emptyList() : plan.splits(),
+                rowType);
     }
 
     protected boolean supportNamedArgument() {
