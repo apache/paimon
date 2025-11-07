@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from pypaimon.manifest.schema.simple_stats import (SIMPLE_STATS_SCHEMA,
+from pypaimon.manifest.schema.simple_stats import (KEY_STATS_SCHEMA, VALUE_STATS_SCHEMA,
                                                    SimpleStats)
 from pypaimon.table.row.generic_row import GenericRow
 
@@ -149,8 +149,8 @@ DATA_FILE_META_SCHEMA = {
         {"name": "_ROW_COUNT", "type": "long"},
         {"name": "_MIN_KEY", "type": "bytes"},
         {"name": "_MAX_KEY", "type": "bytes"},
-        {"name": "_KEY_STATS", "type": SIMPLE_STATS_SCHEMA},
-        {"name": "_VALUE_STATS", "type": "SimpleStats"},
+        {"name": "_KEY_STATS", "type": KEY_STATS_SCHEMA},
+        {"name": "_VALUE_STATS", "type": VALUE_STATS_SCHEMA},
         {"name": "_MIN_SEQUENCE_NUMBER", "type": "long"},
         {"name": "_MAX_SEQUENCE_NUMBER", "type": "long"},
         {"name": "_SCHEMA_ID", "type": "long"},
