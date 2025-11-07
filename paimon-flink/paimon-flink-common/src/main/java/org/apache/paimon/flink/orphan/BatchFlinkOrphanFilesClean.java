@@ -25,10 +25,13 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.BoundedTwoInputOperator;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.operation.CleanOrphanFilesResult;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
@@ -40,6 +43,7 @@ import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.streaming.api.operators.InputSelection;
+import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
@@ -282,6 +286,9 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
 
                                     @Override
                                     public void endInput() throws IOException {
+                                        // Group manifests by tableIdentifier
+                                        Map<String, Set<Tuple2<String, String>>> manifestsByTable =
+                                                new HashMap<>();
                                         for (Tuple2<String, String> tuple2 : manifests) {
                                             // Parse branch:tableIdentifier from tuple2.f0
                                             String[] parts = tuple2.f0.split(":", 2);
@@ -289,28 +296,43 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                             String tableIdentifier =
                                                     parts.length > 1 ? parts[1] : null;
 
+                                            if (tableIdentifier == null) {
+                                                throw new RuntimeException(
+                                                        "Invalid manifest format: "
+                                                                + tuple2.f0
+                                                                + ". Expected format: branch:tableIdentifier");
+                                            }
+
+                                            manifestsByTable
+                                                    .computeIfAbsent(
+                                                            tableIdentifier, k -> new HashSet<>())
+                                                    .add(new Tuple2<>(branch, tuple2.f1));
+                                        }
+
+                                        // Process manifests for each table
+                                        for (Map.Entry<String, Set<Tuple2<String, String>>> entry :
+                                                manifestsByTable.entrySet()) {
+                                            String tableIdentifier = entry.getKey();
+                                            Set<Tuple2<String, String>> tableManifests =
+                                                    entry.getValue();
+
                                             try {
-                                                // Directly get cleaner from outer class's
-                                                // cleanerMap
-                                                T cleanerToUse =
-                                                        tableIdentifier != null
-                                                                ? BatchFlinkOrphanFilesClean.this
-                                                                        .cleanerMap.get(
-                                                                        tableIdentifier)
-                                                                : null;
+                                                T cleanerToUse = cleanerMap.get(tableIdentifier);
                                                 if (cleanerToUse == null) {
                                                     throw new RuntimeException(
                                                             "Cleaner for table "
                                                                     + tableIdentifier
                                                                     + " not found in cleanerMap");
                                                 }
-                                                cleanerToUse.endInputForUsedFiles(
-                                                        manifests, output);
+                                                // In batch mode, convert relative paths to absolute
+                                                // paths
+                                                // to avoid conflicts when multiple tables have
+                                                // files with the same name
+                                                endInputForUsedFilesForBatch(
+                                                        cleanerToUse, tableManifests, output);
                                             } catch (Exception e) {
                                                 throw new IOException(
-                                                        "Failed to process manifest for branch: "
-                                                                + branch
-                                                                + ", table: "
+                                                        "Failed to process manifests for table: "
                                                                 + tableIdentifier,
                                                         e);
                                             }
@@ -353,8 +375,7 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
         DataStream<CleanOrphanFilesResult> deleted =
                 usedFiles
                         .keyBy(f -> f)
-                        .connect(
-                                candidates.keyBy(pathAndSize -> new Path(pathAndSize.f0).getName()))
+                        .connect(candidates.keyBy(pathAndSize -> pathAndSize.f0))
                         .transform(
                                 "files_join",
                                 TypeInformation.of(CleanOrphanFilesResult.class),
@@ -396,10 +417,12 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                         checkState(buildEnd, "Should build ended.");
                                         Tuple2<String, Long> fileInfo = element.getValue();
                                         String value = fileInfo.f0;
-                                        Path path = new Path(value);
-                                        if (!used.contains(path.getName())) {
+                                        // Use full path for comparison to avoid conflicts when
+                                        // multiple tables have files with the same name
+                                        if (!used.contains(value)) {
                                             emittedFilesCount++;
                                             emittedFilesLen += fileInfo.f1;
+                                            Path path = new Path(value);
                                             cleanFile(path);
                                             LOG.info("Dry clean: {}", path);
                                         }
@@ -408,6 +431,45 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
         deleted = deleted.union(branchSnapshotDirDeleted);
 
         return deleted;
+    }
+
+    /**
+     * Convert relative paths from manifest entries to absolute paths to avoid conflicts when
+     * multiple tables have files with the same name in batch mode.
+     */
+    private void endInputForUsedFilesForBatch(
+            T cleaner, Set<Tuple2<String, String>> manifests, Output<StreamRecord<String>> output)
+            throws IOException {
+        FileStoreTable tableToUse = cleaner.getTable();
+        Map<String, ManifestFile> branchManifests = new HashMap<>();
+        for (Tuple2<String, String> tuple2 : manifests) {
+            String branch = tuple2.f0;
+            FileStoreTable branchTable = tableToUse.switchToBranch(branch);
+            ManifestFile manifestFile =
+                    branchManifests.computeIfAbsent(
+                            branch, key -> branchTable.store().manifestFileFactory().create());
+            FileStorePathFactory pathFactory = branchTable.store().pathFactory();
+            retryReadingFiles(
+                            () -> manifestFile.readWithIOException(tuple2.f1),
+                            Collections.<ManifestEntry>emptyList())
+                    .forEach(
+                            f -> {
+                                // Convert relative path to absolute path
+                                Path absolutePath =
+                                        pathFactory
+                                                .createDataFilePathFactory(
+                                                        f.partition(), f.bucket())
+                                                .toPath(f);
+                                output.collect(new StreamRecord<>(absolutePath.toUri().toString()));
+                                // Handle extra files
+                                for (String extraFile : f.file().extraFiles()) {
+                                    Path extraFilePath =
+                                            new Path(absolutePath.getParent(), extraFile);
+                                    output.collect(
+                                            new StreamRecord<>(extraFilePath.toUri().toString()));
+                                }
+                            });
+        }
     }
 
     public static CleanOrphanFilesResult executeDatabaseOrphanFiles(

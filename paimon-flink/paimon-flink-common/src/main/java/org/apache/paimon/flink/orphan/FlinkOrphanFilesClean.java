@@ -198,7 +198,35 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
                                     @Override
                                     public void endInput() throws IOException {
-                                        endInputForUsedFiles(manifests, output);
+                                        Map<String, ManifestFile> branchManifests = new HashMap<>();
+                                        for (Tuple2<String, String> tuple2 : manifests) {
+                                            ManifestFile manifestFile =
+                                                    branchManifests.computeIfAbsent(
+                                                            tuple2.f0,
+                                                            key ->
+                                                                    table.switchToBranch(key)
+                                                                            .store()
+                                                                            .manifestFileFactory()
+                                                                            .create());
+                                            retryReadingFiles(
+                                                            () ->
+                                                                    manifestFile
+                                                                            .readWithIOException(
+                                                                                    tuple2.f1),
+                                                            Collections.<ManifestEntry>emptyList())
+                                                    .forEach(
+                                                            f -> {
+                                                                List<String> files =
+                                                                        new ArrayList<>();
+                                                                files.add(f.fileName());
+                                                                files.addAll(f.file().extraFiles());
+                                                                files.forEach(
+                                                                        file ->
+                                                                                output.collect(
+                                                                                        new StreamRecord<>(
+                                                                                                file)));
+                                                            });
+                                        }
                                     }
                                 });
 
@@ -421,32 +449,6 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                 path -> deletedFilesCount.incrementAndGet(),
                 deletedFilesLenInBytes::addAndGet);
         out.collect(new Tuple2<>(deletedFilesCount.get(), deletedFilesLenInBytes.get()));
-    }
-
-    protected void endInputForUsedFiles(
-            Set<Tuple2<String, String>> manifests, Output<StreamRecord<String>> output)
-            throws IOException {
-        Map<String, ManifestFile> branchManifests = new HashMap<>();
-        for (Tuple2<String, String> tuple2 : manifests) {
-            ManifestFile manifestFile =
-                    branchManifests.computeIfAbsent(
-                            tuple2.f0,
-                            key ->
-                                    table.switchToBranch(key)
-                                            .store()
-                                            .manifestFileFactory()
-                                            .create());
-            retryReadingFiles(
-                            () -> manifestFile.readWithIOException(tuple2.f1),
-                            Collections.<ManifestEntry>emptyList())
-                    .forEach(
-                            f -> {
-                                List<String> files = new ArrayList<>();
-                                files.add(f.fileName());
-                                files.addAll(f.file().extraFiles());
-                                files.forEach(file -> output.collect(new StreamRecord<>(file)));
-                            });
-        }
     }
 
     protected static boolean endInputForDeleted(
