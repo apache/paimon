@@ -1215,8 +1215,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             inputData.addData((3, 0, null), (3, 1, null), (3, 2, null), (3, 3, null))
             stream.processAllAvailable()
 
-            // delete (0,0) and (0,3)
+            // delete (0,0), which is in level-5 file
             spark.sql("DELETE FROM T WHERE a=0 and b=0;").collect()
+            // delete (0,3), which is in level-0 file
             spark.sql("DELETE FROM T WHERE a=0 and b=3;").collect()
 
             val result3 = new util.ArrayList[Row]()
@@ -1230,19 +1231,19 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result3)
 
-            // second cluster, the outputLevel should be 4
+            // second cluster, the outputLevel should be 4. dv index for level-0 will be updated
+            // and dv index for level-5 will be retained
             checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
             // second cluster result, level-5 and level-4 are individually ordered
             val result4 = new util.ArrayList[Row]()
             result4.addAll(result2.subList(1, result2.size()))
-            //            result4.add(Row(0, 3, null))
             result4.add(Row(1, 3, null))
             result4.add(Row(3, 0, null))
             result4.add(Row(3, 1, null))
             result4.add(Row(2, 3, null))
             result4.add(Row(3, 2, null))
             result4.add(Row(3, 3, null))
-            //            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result4)
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result4)
 
             clusteredTable = loadTable("T")
             checkSnapshot(clusteredTable)
@@ -1250,7 +1251,20 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             Assertions.assertThat(dataSplits.size()).isEqualTo(1)
             Assertions.assertThat(dataSplits.get(0).dataFiles().size()).isEqualTo(2)
             Assertions.assertThat(dataSplits.get(0).dataFiles().get(0).level()).isEqualTo(5)
+            Assertions.assertThat(dataSplits.get(0).deletionFiles().get().get(0)).isNotNull
             Assertions.assertThat(dataSplits.get(0).dataFiles().get(1).level()).isEqualTo(4)
+            Assertions.assertThat(dataSplits.get(0).deletionFiles().get().get(1)).isNull()
+
+            // full cluster
+            checkAnswer(
+              spark.sql("CALL paimon.sys.compact(table => 'T', compact_strategy => 'full')"),
+              Row(true) :: Nil)
+            clusteredTable = loadTable("T")
+            checkSnapshot(clusteredTable)
+            dataSplits = clusteredTable.newSnapshotReader().read().dataSplits()
+            Assertions.assertThat(dataSplits.size()).isEqualTo(1)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().size()).isEqualTo(1)
+            Assertions.assertThat(dataSplits.get(0).deletionFiles().get().get(0)).isNull()
 
           } finally {
             stream.stop()

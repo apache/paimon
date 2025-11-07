@@ -37,7 +37,7 @@ public class RemoveClusterBeforeFilesOperator extends BoundedOneInputOperator<Sp
 
     private static final long serialVersionUID = 1L;
 
-    private final transient List<CommitMessage> partitionDvIndexCommitMessages;
+    private final List<CommitMessage> partitionDvIndexCommitMessages;
 
     public RemoveClusterBeforeFilesOperator(List<CommitMessage> partitionDvIndexCommitMessages) {
         this.partitionDvIndexCommitMessages = partitionDvIndexCommitMessages;
