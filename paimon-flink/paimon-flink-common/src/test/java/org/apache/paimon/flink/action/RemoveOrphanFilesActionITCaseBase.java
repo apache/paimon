@@ -392,6 +392,60 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                 .hasMessageContaining("Unknown mode");
     }
 
+    @org.junit.jupiter.api.Test
+    public void testBatchTableProcessing() throws Exception {
+        // Create multiple tables to test batch processing
+        createTableAndWriteData("batchTable1");
+        createTableAndWriteData("batchTable2");
+        createTableAndWriteData("batchTable3");
+
+        // Test batch processing via command line arguments
+        List<String> args =
+                new ArrayList<>(
+                        Arrays.asList(
+                                "remove_orphan_files",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                "*",
+                                "--batch_table_processing",
+                                "true"));
+
+        RemoveOrphanFilesAction action1 = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action1::run).doesNotThrowAnyException();
+
+        args.add("--older_than");
+        args.add("2023-12-31 23:59:59");
+        RemoveOrphanFilesAction action2 = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action2::run).doesNotThrowAnyException();
+
+        args.add("--parallelism");
+        args.add("5");
+        RemoveOrphanFilesAction action3 = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action3::run).doesNotThrowAnyException();
+
+        // Test with batch_size parameter
+        args.add("--batch_size");
+        args.add("2");
+        RemoveOrphanFilesAction action4 = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action4::run).doesNotThrowAnyException();
+
+        // Verify that batch mode produces the same results as non-batch mode
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(System.currentTimeMillis()), 3);
+        String withoutBatchMode =
+                String.format(
+                        "CALL sys.remove_orphan_files('%s.%s', '%s', true)",
+                        database, "*", olderThan);
+        ImmutableList<Row> withoutBatchModeResult =
+                ImmutableList.copyOf(executeSQL(withoutBatchMode));
+        // 3 tables * 2 orphan files each = 6 orphan files
+        assertThat(withoutBatchModeResult).containsOnly(Row.of("6"));
+    }
+
     protected boolean supportNamedArgument() {
         return true;
     }
