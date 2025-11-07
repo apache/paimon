@@ -914,8 +914,6 @@ public class HiveCatalog extends AbstractCatalog {
         List<String> primaryKeys = schema.primaryKeys();
         Map<String, String> options = schema.options();
         int highestFieldId = RowType.currentHighestFieldId(fields);
-        String fileCompression = CoreOptions.fromMap(schema.options()).formatTableFileCompression();
-        options.put(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION.key(), fileCompression);
         TableSchema newSchema =
                 new TableSchema(
                         0,

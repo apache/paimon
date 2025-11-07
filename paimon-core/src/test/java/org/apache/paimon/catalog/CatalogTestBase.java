@@ -598,9 +598,9 @@ public abstract class CatalogTestBase {
             schemaBuilder.option("file.format", format2Compression.getKey());
             catalog.createTable(identifier, schemaBuilder.build(), true);
             String fileCompression =
-                    catalog.getTable(identifier)
-                            .options()
-                            .get(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION.key());
+                    new CoreOptions(catalog.getTable(identifier).options())
+                            .formatTableFileCompression();
+
             assertEquals(fileCompression, format2Compression.getValue());
         }
         // table has option file.compression
@@ -610,9 +610,8 @@ public abstract class CatalogTestBase {
         Identifier identifier = Identifier.create(dbName, "partition_table_file_compression_a");
         catalog.createTable(identifier, schemaBuilder.build(), true);
         String fileCompression =
-                catalog.getTable(identifier)
-                        .options()
-                        .get(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION.key());
+                new CoreOptions(catalog.getTable(identifier).options())
+                        .formatTableFileCompression();
         assertEquals(fileCompression, expectFileCompression);
 
         // table has option format-table.file.compression
@@ -620,9 +619,8 @@ public abstract class CatalogTestBase {
         identifier = Identifier.create(dbName, "partition_table_file_compression_b");
         catalog.createTable(identifier, schemaBuilder.build(), true);
         fileCompression =
-                catalog.getTable(identifier)
-                        .options()
-                        .get(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION.key());
+                new CoreOptions(catalog.getTable(identifier).options())
+                        .formatTableFileCompression();
         assertEquals(fileCompression, expectFileCompression);
     }
 

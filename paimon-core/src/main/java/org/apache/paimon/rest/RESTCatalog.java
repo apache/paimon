@@ -80,7 +80,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BRANCH;
-import static org.apache.paimon.CoreOptions.FORMAT_TABLE_FILE_COMPRESSION;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
@@ -449,11 +448,6 @@ public class RESTCatalog implements Catalog {
             checkNotSystemTable(identifier, "createTable");
             validateCreateTable(schema);
             createExternalTablePathIfNotExist(schema);
-            if (Options.fromMap(schema.options()).get(TYPE) == TableType.FORMAT_TABLE) {
-                String fileCompression =
-                        CoreOptions.fromMap(schema.options()).formatTableFileCompression();
-                schema.options().put(FORMAT_TABLE_FILE_COMPRESSION.key(), fileCompression);
-            }
             Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
             api.createTable(identifier, newSchema);
         } catch (AlreadyExistsException e) {
