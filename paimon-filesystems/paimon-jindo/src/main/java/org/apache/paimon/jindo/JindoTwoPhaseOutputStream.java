@@ -20,11 +20,11 @@ package org.apache.paimon.jindo;
 
 import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
+import org.apache.paimon.fs.Path;
 
 import com.aliyun.jindodata.api.spec.protos.JdoObjectPart;
 
 import java.io.IOException;
-import java.util.List;
 
 /** Jindo implementation of TwoPhaseOutputStream using multipart upload. */
 public class JindoTwoPhaseOutputStream
@@ -32,14 +32,15 @@ public class JindoTwoPhaseOutputStream
 
     public JindoTwoPhaseOutputStream(
             MultiPartUploadStore<JdoObjectPart, String> multiPartUploadStore,
-            org.apache.hadoop.fs.Path hadoopPath)
+            org.apache.hadoop.fs.Path hadoopPath,
+            Path targetPath)
             throws IOException {
-        super(multiPartUploadStore, hadoopPath);
+        super(multiPartUploadStore, hadoopPath, targetPath);
     }
 
     @Override
-    public Committer committer(
-            String uploadId, List<JdoObjectPart> uploadedParts, String objectName, long position) {
-        return new JindoMultiPartUploadCommitter(uploadId, uploadedParts, objectName, position);
+    public Committer committer() {
+        return new JindoMultiPartUploadCommitter(
+                uploadId, uploadedParts, objectName, position, targetPath);
     }
 }

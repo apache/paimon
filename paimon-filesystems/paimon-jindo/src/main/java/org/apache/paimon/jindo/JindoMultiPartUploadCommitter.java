@@ -34,8 +34,12 @@ import java.util.List;
 public class JindoMultiPartUploadCommitter
         extends BaseMultiPartUploadCommitter<JdoObjectPart, String> {
     public JindoMultiPartUploadCommitter(
-            String uploadId, List<JdoObjectPart> uploadedParts, String objectName, long position) {
-        super(uploadId, uploadedParts, objectName, position);
+            String uploadId,
+            List<JdoObjectPart> uploadedParts,
+            String objectName,
+            long position,
+            Path targetPath) {
+        super(uploadId, uploadedParts, objectName, position, targetPath);
     }
 
     @Override

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.fs;
 
+import org.apache.paimon.rest.RESTTokenFileIO;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,13 +38,19 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     private final String objectName;
     private final List<T> uploadedParts;
     private final long byteLength;
+    private final Path targetPath;
 
     public BaseMultiPartUploadCommitter(
-            String uploadId, List<T> uploadedParts, String objectName, long byteLength) {
+            String uploadId,
+            List<T> uploadedParts,
+            String objectName,
+            long byteLength,
+            Path targetPath) {
         this.uploadId = uploadId;
         this.objectName = objectName;
         this.uploadedParts = new ArrayList<>(uploadedParts);
         this.byteLength = byteLength;
+        this.targetPath = targetPath;
     }
 
     protected abstract MultiPartUploadStore<T, C> multiPartUploadStore(
@@ -51,14 +59,9 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     @Override
     public void commit(FileIO fileIO) throws IOException {
         try {
-            MultiPartUploadStore<T, C> multiPartUploadStore =
-                    multiPartUploadStore(fileIO, targetFilePath());
+            MultiPartUploadStore<T, C> multiPartUploadStore = multiPartUploadStore(fileIO);
             multiPartUploadStore.completeMultipartUpload(
                     objectName, uploadId, uploadedParts, byteLength);
-            LOG.info(
-                    "Successfully committed multipart upload with ID: {} for objectName: {}",
-                    uploadId,
-                    objectName);
         } catch (Exception e) {
             throw new IOException("Failed to commit multipart upload with ID: " + uploadId, e);
         }
@@ -67,23 +70,26 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     @Override
     public void discard(FileIO fileIO) throws IOException {
         try {
-            MultiPartUploadStore<T, C> multiPartUploadStore =
-                    multiPartUploadStore(fileIO, targetFilePath());
+            MultiPartUploadStore<T, C> multiPartUploadStore = multiPartUploadStore(fileIO);
             multiPartUploadStore.abortMultipartUpload(objectName, uploadId);
-            LOG.info(
-                    "Successfully discarded multipart upload with ID: {} for objectName: {}",
-                    uploadId,
-                    objectName);
         } catch (Exception e) {
             LOG.warn("Failed to discard multipart upload with ID: {}", uploadId, e);
         }
     }
 
     @Override
-    public Path targetFilePath() {
-        return new Path(objectName);
+    public Path targetPath() {
+        return this.targetPath;
     }
 
     @Override
     public void clean(FileIO fileIO) throws IOException {}
+
+    private MultiPartUploadStore<T, C> multiPartUploadStore(FileIO fileIO) throws IOException {
+        if (fileIO instanceof RESTTokenFileIO) {
+            RESTTokenFileIO restTokenFileIO = (RESTTokenFileIO) fileIO;
+            fileIO = restTokenFileIO.fileIO();
+        }
+        return multiPartUploadStore(fileIO, targetPath());
+    }
 }
