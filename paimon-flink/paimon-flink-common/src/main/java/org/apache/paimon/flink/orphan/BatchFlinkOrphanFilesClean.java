@@ -31,7 +31,6 @@ import org.apache.paimon.operation.CleanOrphanFilesResult;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
@@ -241,9 +240,7 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                         // Directly get cleaner from outer class's cleanerMap
                                         String tableKey =
                                                 branchTableInfo.getIdentifier().getFullName();
-                                        T cleaner =
-                                                BatchFlinkOrphanFilesClean.this.cleanerMap.get(
-                                                        tableKey);
+                                        T cleaner = cleanerMap.get(tableKey);
                                         if (cleaner == null) {
                                             throw new RuntimeException(
                                                     "Cleaner for table "
@@ -251,30 +248,20 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                                             + " not found in cleanerMap");
                                         }
                                         String branch = branchTableInfo.getBranch();
-                                        FileStoreTable tableToUse = cleaner.getTable();
-                                        FileStoreTable branchTable =
-                                                tableToUse.switchToBranch(branch);
-                                        FileStorePathFactory pathFactory =
-                                                branchTable.store().pathFactory();
                                         Consumer<String> manifestConsumer =
                                                 manifest -> {
-                                                    // Output format: branch:tableIdentifier as
-                                                    // first string
                                                     Tuple2<String, String> tuple2 =
                                                             new Tuple2<>(
                                                                     branch + ":" + tableKey,
                                                                     manifest);
+                                                    LOG.info(
+                                                            "[BATCH_ORPHAN_CLEAN] Outputting manifest to side output: branch={}, tableKey={}, manifest={}",
+                                                            branch,
+                                                            tableKey,
+                                                            manifest);
                                                     ctx.output(manifestOutputTag, tuple2);
                                                 };
-                                        // Convert relative paths to absolute paths in batch mode
-                                        Consumer<String> usedFileConsumer =
-                                                fileName -> {
-                                                    // Convert relative path to absolute path
-                                                    Path absolutePath =
-                                                            convertToAbsolutePath(
-                                                                    pathFactory, fileName);
-                                                    out.collect(absolutePath.toUri().toString());
-                                                };
+                                        Consumer<String> usedFileConsumer = out::collect;
                                         cleaner.collectWithoutDataFile(
                                                 branch,
                                                 snapshot,
@@ -299,10 +286,18 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                     public void processElement(
                                             StreamRecord<Tuple2<String, String>> element) {
                                         manifests.add(element.getValue());
+                                        LOG.info(
+                                                "[BATCH_ORPHAN_CLEAN] Added manifest to set: {}, current size: {}",
+                                                element.getValue(),
+                                                manifests.size());
                                     }
 
                                     @Override
                                     public void endInput() throws IOException {
+                                        LOG.info(
+                                                "[BATCH_ORPHAN_CLEAN] endInput() called, manifests.size()={}",
+                                                manifests.size());
+
                                         // Group manifests by tableIdentifier
                                         Map<String, Set<Tuple2<String, String>>> manifestsByTable =
                                                 new HashMap<>();
@@ -314,17 +309,30 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                                     parts.length > 1 ? parts[1] : null;
 
                                             if (tableIdentifier == null) {
+                                                LOG.error(
+                                                        "[BATCH_ORPHAN_CLEAN] Invalid manifest format: {}, expected format: branch:tableIdentifier",
+                                                        tuple2.f0);
                                                 throw new RuntimeException(
                                                         "Invalid manifest format: "
                                                                 + tuple2.f0
                                                                 + ". Expected format: branch:tableIdentifier");
                                             }
 
+                                            LOG.info(
+                                                    "[BATCH_ORPHAN_CLEAN] Parsed manifest: branch={}, tableIdentifier={}, manifestFile={}",
+                                                    branch,
+                                                    tableIdentifier,
+                                                    tuple2.f1);
+
                                             manifestsByTable
                                                     .computeIfAbsent(
                                                             tableIdentifier, k -> new HashSet<>())
                                                     .add(new Tuple2<>(branch, tuple2.f1));
                                         }
+
+                                        LOG.info(
+                                                "[BATCH_ORPHAN_CLEAN] Grouped manifests by table, manifestsByTable.size()={}",
+                                                manifestsByTable.size());
 
                                         // Process manifests for each table
                                         for (Map.Entry<String, Set<Tuple2<String, String>>> entry :
@@ -333,27 +341,43 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                             Set<Tuple2<String, String>> tableManifests =
                                                     entry.getValue();
 
+                                            LOG.info(
+                                                    "[BATCH_ORPHAN_CLEAN] Processing table: {}, manifests count: {}",
+                                                    tableIdentifier,
+                                                    tableManifests.size());
+
                                             try {
                                                 T cleanerToUse = cleanerMap.get(tableIdentifier);
                                                 if (cleanerToUse == null) {
+                                                    LOG.error(
+                                                            "[BATCH_ORPHAN_CLEAN] Cleaner for table {} not found in cleanerMap",
+                                                            tableIdentifier);
                                                     throw new RuntimeException(
                                                             "Cleaner for table "
                                                                     + tableIdentifier
                                                                     + " not found in cleanerMap");
                                                 }
-                                                // In batch mode, convert relative paths to absolute
-                                                // paths
-                                                // to avoid conflicts when multiple tables have
-                                                // files with the same name
+                                                LOG.info(
+                                                        "[BATCH_ORPHAN_CLEAN] Calling endInputForUsedFilesForBatch for table: {}",
+                                                        tableIdentifier);
                                                 endInputForUsedFilesForBatch(
                                                         cleanerToUse, tableManifests, output);
+                                                LOG.info(
+                                                        "[BATCH_ORPHAN_CLEAN] Finished endInputForUsedFilesForBatch for table: {}",
+                                                        tableIdentifier);
                                             } catch (Exception e) {
+                                                LOG.error(
+                                                        "[BATCH_ORPHAN_CLEAN] Failed to process manifests for table: {}",
+                                                        tableIdentifier,
+                                                        e);
                                                 throw new IOException(
                                                         "Failed to process manifests for table: "
                                                                 + tableIdentifier,
                                                         e);
                                             }
                                         }
+
+                                        LOG.info("[BATCH_ORPHAN_CLEAN] endInput() finished");
                                     }
                                 });
 
@@ -414,6 +438,39 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
 
                                     @Override
                                     public void endInput(int inputId) {
+                                        if (inputId == 1) {
+                                            long manifestFileCount =
+                                                    used.stream()
+                                                            .filter(
+                                                                    fileName ->
+                                                                            fileName.contains(
+                                                                                            "manifest")
+                                                                                    || fileName
+                                                                                            .contains(
+                                                                                                    "index")
+                                                                                    || fileName
+                                                                                            .contains(
+                                                                                                    "statistics"))
+                                                            .count();
+                                            long dataFileCount = used.size() - manifestFileCount;
+                                            if (dataFileCount == 0 && !used.isEmpty()) {
+                                                LOG.warn(
+                                                        "[BATCH_ORPHAN_CLEAN] WARNING: used set contains {} files but no data files. "
+                                                                + "This may indicate that manifest files are missing. "
+                                                                + "Skipping data file deletion to avoid misdeletion.",
+                                                        used.size());
+                                            } else if (used.isEmpty()) {
+                                                LOG.warn(
+                                                        "[BATCH_ORPHAN_CLEAN] WARNING: used set is empty. "
+                                                                + "This may indicate that manifest files are missing. "
+                                                                + "Skipping data file deletion to avoid misdeletion.");
+                                            } else {
+                                                LOG.info(
+                                                        "[BATCH_ORPHAN_CLEAN] used set contains {} files, including {} data files",
+                                                        used.size(),
+                                                        dataFileCount);
+                                            }
+                                        }
                                         buildEnd =
                                                 endInputForDeleted(
                                                         inputId,
@@ -450,10 +507,6 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
         return deleted;
     }
 
-    /**
-     * Convert relative paths from manifest entries to absolute paths to avoid conflicts when
-     * multiple tables have files with the same name in batch mode.
-     */
     private void endInputForUsedFilesForBatch(
             T cleaner, Set<Tuple2<String, String>> manifests, Output<StreamRecord<String>> output)
             throws IOException {
@@ -465,57 +518,29 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
             ManifestFile manifestFile =
                     branchManifests.computeIfAbsent(
                             branch, key -> branchTable.store().manifestFileFactory().create());
-            FileStorePathFactory pathFactory = branchTable.store().pathFactory();
             retryReadingFiles(
                             () -> manifestFile.readWithIOException(tuple2.f1),
                             Collections.<ManifestEntry>emptyList())
                     .forEach(
                             f -> {
-                                // Convert relative path to absolute path
-                                Path absolutePath =
-                                        pathFactory
-                                                .createDataFilePathFactory(
-                                                        f.partition(), f.bucket())
-                                                .toPath(f);
-                                output.collect(new StreamRecord<>(absolutePath.toUri().toString()));
+                                // Use file name for comparison, same as FlinkOrphanFilesClean
+                                String fileName = f.fileName();
+                                LOG.info(
+                                        "[BATCH_ORPHAN_CLEAN] From manifest: branch={}, manifestFile={}, fileName={}",
+                                        branch,
+                                        tuple2.f1,
+                                        fileName);
+                                output.collect(new StreamRecord<>(fileName));
                                 // Handle extra files
                                 for (String extraFile : f.file().extraFiles()) {
-                                    Path extraFilePath =
-                                            new Path(absolutePath.getParent(), extraFile);
-                                    output.collect(
-                                            new StreamRecord<>(extraFilePath.toUri().toString()));
+                                    LOG.info(
+                                            "[BATCH_ORPHAN_CLEAN] From manifest extra file: branch={}, manifestFile={}, extraFile={}",
+                                            branch,
+                                            tuple2.f1,
+                                            extraFile);
+                                    output.collect(new StreamRecord<>(extraFile));
                                 }
                             });
-        }
-    }
-
-    /**
-     * Convert relative file path to absolute path based on file type (manifest, index, statistics,
-     * etc.).
-     */
-    private Path convertToAbsolutePath(FileStorePathFactory pathFactory, String fileName) {
-        // Determine file type based on file name prefix
-        if (fileName.startsWith(FileStorePathFactory.MANIFEST_LIST_PREFIX)) {
-            return pathFactory.toManifestListPath(fileName);
-        } else if (fileName.startsWith(FileStorePathFactory.MANIFEST_PREFIX)) {
-            return pathFactory.toManifestFilePath(fileName);
-        } else if (fileName.startsWith(FileStorePathFactory.INDEX_MANIFEST_PREFIX)) {
-            return pathFactory.toManifestFilePath(fileName);
-        } else if (fileName.startsWith(FileStorePathFactory.INDEX_PREFIX)) {
-            return new Path(pathFactory.indexPath(), fileName);
-        } else if (fileName.startsWith(FileStorePathFactory.STATISTICS_PREFIX)) {
-            return new Path(pathFactory.statisticsPath(), fileName);
-        } else {
-            // For snapshot files (snapshot-xxx format) and other files
-            // Snapshot files are stored in snapshot/ directory
-            if (fileName.startsWith("snapshot-")) {
-                return new Path(new Path(pathFactory.root(), "snapshot"), fileName);
-            }
-            // This is a fallback, should not happen in normal cases
-            LOG.warn(
-                    "Unknown file type for fileName: {}, assuming it's in root directory",
-                    fileName);
-            return new Path(pathFactory.root(), fileName);
         }
     }
 
