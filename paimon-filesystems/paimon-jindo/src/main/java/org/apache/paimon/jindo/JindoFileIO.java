@@ -149,7 +149,8 @@ public class JindoFileIO extends HadoopCompliantFileIO {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         Pair<JindoHadoopSystem, String> pair = getFileSystemPair(hadoopPath);
         JindoHadoopSystem fs = pair.getKey();
-        return new JindoTwoPhaseOutputStream(new JindoMultiPartUpload(fs, hadoopPath), hadoopPath);
+        return new JindoTwoPhaseOutputStream(
+                new JindoMultiPartUpload(fs, hadoopPath), hadoopPath, path);
     }
 
     @Override

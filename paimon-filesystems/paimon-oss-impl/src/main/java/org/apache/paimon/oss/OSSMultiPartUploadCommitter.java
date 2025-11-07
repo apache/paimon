@@ -34,8 +34,12 @@ import java.util.List;
 public class OSSMultiPartUploadCommitter
         extends BaseMultiPartUploadCommitter<PartETag, CompleteMultipartUploadResult> {
     public OSSMultiPartUploadCommitter(
-            String uploadId, List<PartETag> uploadedParts, String objectName, long position) {
-        super(uploadId, uploadedParts, objectName, position);
+            String uploadId,
+            List<PartETag> uploadedParts,
+            String objectName,
+            long position,
+            Path path) {
+        super(uploadId, uploadedParts, objectName, position, path);
     }
 
     @Override

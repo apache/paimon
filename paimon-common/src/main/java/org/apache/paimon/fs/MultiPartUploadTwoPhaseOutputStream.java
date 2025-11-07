@@ -37,22 +37,28 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             LoggerFactory.getLogger(MultiPartUploadTwoPhaseOutputStream.class);
 
     private final ByteArrayOutputStream buffer;
-    private final List<T> uploadedParts;
     private final MultiPartUploadStore<T, C> multiPartUploadStore;
-    private final String objectName;
 
-    private String uploadId;
-    private long position;
+    protected final String objectName;
+    protected final Path targetPath;
+    protected final String uploadId;
+
+    protected List<T> uploadedParts;
+    protected long position;
+
     private boolean closed = false;
     private Committer committer;
 
     public MultiPartUploadTwoPhaseOutputStream(
-            MultiPartUploadStore<T, C> multiPartUploadStore, org.apache.hadoop.fs.Path hadoopPath)
+            MultiPartUploadStore<T, C> multiPartUploadStore,
+            org.apache.hadoop.fs.Path hadoopPath,
+            Path path)
             throws IOException {
         this.multiPartUploadStore = multiPartUploadStore;
         this.buffer = new ByteArrayOutputStream();
         this.uploadedParts = new ArrayList<>();
         this.objectName = multiPartUploadStore.pathToObject(hadoopPath);
+        this.targetPath = path;
         this.uploadId = multiPartUploadStore.startMultiPartUpload(objectName);
         this.position = 0;
     }
@@ -64,8 +70,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         return 10 << 20;
     }
 
-    public abstract Committer committer(
-            String uploadId, List<T> uploadedParts, String objectName, long position);
+    public abstract Committer committer();
 
     @Override
     public long getPos() throws IOException {
@@ -142,7 +147,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             uploadPart();
         }
 
-        return committer(uploadId, uploadedParts, objectName, position);
+        return committer();
     }
 
     private void uploadPart() throws IOException {
