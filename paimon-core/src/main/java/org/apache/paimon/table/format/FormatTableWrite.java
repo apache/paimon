@@ -115,7 +115,7 @@ public class FormatTableWrite implements BatchTableWrite {
     }
 
     @Override
-    public TableWrite withIOManager(IOManager ioManager) {
+    public BatchTableWrite withIOManager(IOManager ioManager) {
         return this;
     }
 

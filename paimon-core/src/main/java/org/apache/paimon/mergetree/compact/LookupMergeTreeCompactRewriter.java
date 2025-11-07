@@ -38,6 +38,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -59,6 +60,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     @Nullable private final BucketedDvMaintainer dvMaintainer;
     private final IntFunction<String> level2FileFormat;
 
+    @Nullable private final RemoteLookupFileManager<T> remoteLookupFileManager;
+
     public LookupMergeTreeCompactRewriter(
             int maxLevel,
             MergeEngine mergeEngine,
@@ -72,7 +75,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
             MergeFunctionWrapperFactory<T> wrapperFactory,
             boolean produceChangelog,
             @Nullable BucketedDvMaintainer dvMaintainer,
-            CoreOptions options) {
+            CoreOptions options,
+            @Nullable RemoteLookupFileManager<T> remoteLookupFileManager) {
         super(
                 maxLevel,
                 mergeEngine,
@@ -91,6 +95,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         String fileFormat = options.fileFormatString();
         Map<Integer, String> fileFormatPerLevel = options.fileFormatPerLevel();
         this.level2FileFormat = level -> fileFormatPerLevel.getOrDefault(level, fileFormat);
+        this.remoteLookupFileManager = remoteLookupFileManager;
     }
 
     @Override
@@ -98,6 +103,23 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         if (dvMaintainer != null) {
             files.forEach(file -> dvMaintainer.removeDeletionVectorOf(file.fileName()));
         }
+    }
+
+    @Override
+    protected List<DataFileMeta> notifyRewriteCompactAfter(List<DataFileMeta> files) {
+        if (remoteLookupFileManager == null) {
+            return files;
+        }
+
+        List<DataFileMeta> result = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            try {
+                result.add(remoteLookupFileManager.genRemoteLookupFile(file));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return result;
     }
 
     @Override

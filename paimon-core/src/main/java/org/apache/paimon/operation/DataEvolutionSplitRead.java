@@ -374,6 +374,14 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     @VisibleForTesting
     public static List<FieldBunch> splitFieldBunches(
             List<DataFileMeta> needMergeFiles, Function<DataFileMeta, Integer> blobFileToFieldId) {
+        return splitFieldBunches(needMergeFiles, blobFileToFieldId, false);
+    }
+
+    @VisibleForTesting
+    public static List<FieldBunch> splitFieldBunches(
+            List<DataFileMeta> needMergeFiles,
+            Function<DataFileMeta, Integer> blobFileToFieldId,
+            boolean rowIdPushDown) {
         List<FieldBunch> fieldsFiles = new ArrayList<>();
         Map<Integer, BlobBunch> blobBunchMap = new HashMap<>();
         long rowCount = -1;
@@ -382,7 +390,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 int fieldId = blobFileToFieldId.apply(file);
                 final long expectedRowCount = rowCount;
                 blobBunchMap
-                        .computeIfAbsent(fieldId, key -> new BlobBunch(expectedRowCount))
+                        .computeIfAbsent(
+                                fieldId, key -> new BlobBunch(expectedRowCount, rowIdPushDown))
                         .add(file);
             } else {
                 // Normal file, just add it to the current merge split
@@ -426,16 +435,18 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         final List<DataFileMeta> files;
         final long expectedRowCount;
+        final boolean rowIdPushDown;
 
         long latestFistRowId = -1;
         long expectedNextFirstRowId = -1;
         long latestMaxSequenceNumber = -1;
         long rowCount;
 
-        BlobBunch(long expectedRowCount) {
+        BlobBunch(long expectedRowCount, boolean rowIdPushDown) {
             this.files = new ArrayList<>();
             this.rowCount = 0;
             this.expectedRowCount = expectedRowCount;
+            this.rowIdPushDown = rowIdPushDown;
         }
 
         void add(DataFileMeta file) {
@@ -452,24 +463,37 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
             if (!files.isEmpty()) {
                 long firstRowId = file.firstRowId();
-                if (firstRowId < expectedNextFirstRowId) {
-                    checkArgument(
-                            file.maxSequenceNumber() < latestMaxSequenceNumber,
-                            "Blob file with overlapping row id should have decreasing sequence number.");
-                    return;
-                } else if (firstRowId > expectedNextFirstRowId) {
-                    throw new IllegalArgumentException(
-                            "Blob file first row id should be continuous, expect "
-                                    + expectedNextFirstRowId
-                                    + " but got "
-                                    + firstRowId);
+                if (rowIdPushDown) {
+                    if (firstRowId < expectedNextFirstRowId) {
+                        if (file.maxSequenceNumber() > latestMaxSequenceNumber) {
+                            DataFileMeta lastFile = files.remove(files.size() - 1);
+                            rowCount -= lastFile.rowCount();
+                        } else {
+                            return;
+                        }
+                    }
+                } else {
+                    if (firstRowId < expectedNextFirstRowId) {
+                        checkArgument(
+                                file.maxSequenceNumber() < latestMaxSequenceNumber,
+                                "Blob file with overlapping row id should have decreasing sequence number.");
+                        return;
+                    } else if (firstRowId > expectedNextFirstRowId) {
+                        throw new IllegalArgumentException(
+                                "Blob file first row id should be continuous, expect "
+                                        + expectedNextFirstRowId
+                                        + " but got "
+                                        + firstRowId);
+                    }
                 }
-                checkArgument(
-                        file.schemaId() == files.get(0).schemaId(),
-                        "All files in a blob bunch should have the same schema id.");
-                checkArgument(
-                        file.writeCols().equals(files.get(0).writeCols()),
-                        "All files in a blob bunch should have the same write columns.");
+                if (!files.isEmpty()) {
+                    checkArgument(
+                            file.schemaId() == files.get(0).schemaId(),
+                            "All files in a blob bunch should have the same schema id.");
+                    checkArgument(
+                            file.writeCols().equals(files.get(0).writeCols()),
+                            "All files in a blob bunch should have the same write columns.");
+                }
             }
             files.add(file);
             rowCount += file.rowCount();

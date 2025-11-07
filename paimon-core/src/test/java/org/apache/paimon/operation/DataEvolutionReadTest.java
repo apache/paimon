@@ -35,6 +35,7 @@ import java.util.List;
 
 import static org.apache.paimon.operation.DataEvolutionSplitRead.splitFieldBunches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link BlobBunch}. */
@@ -44,7 +45,7 @@ public class DataEvolutionReadTest {
 
     @BeforeEach
     public void setUp() {
-        blobBunch = new BlobBunch(Long.MAX_VALUE);
+        blobBunch = new BlobBunch(Long.MAX_VALUE, false);
     }
 
     @Test
@@ -317,6 +318,28 @@ public class DataEvolutionReadTest {
                 null,
                 firstRowId,
                 writeCols);
+    }
+
+    @Test
+    public void testRowIdPushDown() {
+        BlobBunch blobBunch = new BlobBunch(Long.MAX_VALUE, true);
+        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
+        DataFileMeta blobEntry2 = createBlobFile("blob2", 200, 300, 1);
+        blobBunch.add(blobEntry1);
+        BlobBunch finalBlobBunch = blobBunch;
+        DataFileMeta finalBlobEntry = blobEntry2;
+        assertThatCode(() -> finalBlobBunch.add(finalBlobEntry)).doesNotThrowAnyException();
+
+        blobBunch = new BlobBunch(Long.MAX_VALUE, true);
+        blobEntry1 = createBlobFile("blob1", 0, 100, 1);
+        blobEntry2 = createBlobFile("blob2", 50, 200, 2);
+        blobBunch.add(blobEntry1);
+        blobBunch.add(blobEntry2);
+        assertThat(blobBunch.files).containsExactlyInAnyOrder(blobEntry2);
+
+        BlobBunch finalBlobBunch2 = blobBunch;
+        DataFileMeta blobEntry3 = createBlobFile("blob2", 250, 100, 2);
+        assertThatCode(() -> finalBlobBunch2.add(blobEntry3)).doesNotThrowAnyException();
     }
 
     /** Creates a normal (non-blob) file for testing. */

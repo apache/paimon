@@ -273,7 +273,7 @@ public class LookupLevelsTest {
                 levels,
                 comparator,
                 keyType,
-                new LookupLevels.KeyValueProcessor(rowType),
+                new LookupLevels.PersistValueProcessor(rowType),
                 file -> createReaderFactory().createRecordReader(file),
                 file -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new SortLookupStoreFactory(
