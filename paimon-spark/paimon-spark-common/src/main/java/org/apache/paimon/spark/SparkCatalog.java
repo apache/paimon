@@ -123,18 +123,9 @@ public class SparkCatalog extends SparkBaseCatalog
         checkRequiredConfigurations();
         SparkSession sparkSession = PaimonSparkSession$.MODULE$.active();
         this.catalogName = name;
-        Map<String, String> confMap = sparkSession.sessionState().conf().settings();
-        Map<String, String> newOptions = new HashMap<>(options);
-        if (confMap.containsKey("spark.hadoop.aliyun.oss.provider.url")) {
-            newOptions.put(
-                    "aliyun.oss.provider.url", confMap.get("spark.hadoop.aliyun.oss.provider.url"));
-        }
-        if (confMap.containsKey("spark.hadoop.fs.oss.endpoint")) {
-            newOptions.put("fs.oss.endpoint", confMap.get("spark.hadoop.fs.oss.endpoint"));
-        }
         CatalogContext catalogContext =
                 CatalogContext.create(
-                        Options.fromMap(newOptions), sparkSession.sessionState().newHadoopConf());
+                        Options.fromMap(options), sparkSession.sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());

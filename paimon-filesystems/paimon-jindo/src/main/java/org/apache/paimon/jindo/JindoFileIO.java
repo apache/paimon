@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.hadoop.SerializableConfiguration;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
@@ -29,7 +30,6 @@ import org.apache.paimon.utils.Pair;
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.dls.JindoDlsFileSystem;
 import com.aliyun.jindodata.oss.JindoOssFileSystem;
-import com.aliyun.jindodata.oss.auth.CustomCredentialsProvider;
 import com.aliyun.jindodata.oss.auth.SimpleCredentialsProvider;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -65,9 +65,6 @@ public class JindoFileIO extends HadoopCompliantFileIO {
     private static final String OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
-    private static final String OSS_CREDENTIALS_PROVIDER = "fs.oss.credentials.provider";
-    private static final String OSS_PROVIDER_URL = "aliyun.oss.provider.url";
-    private static final String OSS_ENDPOINT = "fs.oss.endpoint";
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
@@ -87,6 +84,7 @@ public class JindoFileIO extends HadoopCompliantFileIO {
 
     private Options hadoopOptions;
     private boolean allowCache = true;
+    protected SerializableConfiguration hadoopConf;
 
     @Override
     public boolean isObjectStore() {
@@ -124,15 +122,11 @@ public class JindoFileIO extends HadoopCompliantFileIO {
         // as in rest catalog use could define ak for table so we need first use ak.
         if (hadoopOptions.containsKey(OSS_ACCESS_KEY_ID)
                 && hadoopOptions.containsKey(OSS_ACCESS_KEY_SECRET)) {
-            LOG.info("Using Ak for OSS.");
-            hadoopOptions.set(OSS_CREDENTIALS_PROVIDER, SimpleCredentialsProvider.NAME);
-        } else if (context.options().containsKey(OSS_PROVIDER_URL)) {
-            LOG.info("Using CustomCredentialsProvider for OSS.");
-            hadoopOptions.set(OSS_CREDENTIALS_PROVIDER, CustomCredentialsProvider.NAME);
-            hadoopOptions.set(OSS_PROVIDER_URL, context.options().get(OSS_PROVIDER_URL));
+            LOG.info("Using Ak init Jindo.");
+            hadoopOptions.set("fs.oss.credentials.provider", SimpleCredentialsProvider.NAME);
         } else {
-            throw new IllegalArgumentException(
-                    "fs.oss.accessKeyId and fs.oss.accessKeySecret must be set or fs.oss.credentials.provider and aliyun.oss.provider.url.");
+            LOG.info("Using hadoop conf init Jindo.");
+            this.hadoopConf = new SerializableConfiguration(context.hadoopConf());
         }
     }
 
@@ -183,7 +177,11 @@ public class JindoFileIO extends HadoopCompliantFileIO {
                     }
 
                     try {
-                        fs.initialize(fsUri, hadoopConf);
+                        if (this.hadoopConf != null && this.hadoopConf.get() != null) {
+                            fs.initialize(fsUri, this.hadoopConf.get());
+                        } else {
+                            fs.initialize(fsUri, hadoopConf);
+                        }
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
