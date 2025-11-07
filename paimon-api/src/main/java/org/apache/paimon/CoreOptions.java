@@ -229,6 +229,8 @@ public class CoreOptions implements Serializable {
     public static final String FILE_FORMAT_ORC = "orc";
     public static final String FILE_FORMAT_AVRO = "avro";
     public static final String FILE_FORMAT_PARQUET = "parquet";
+    public static final String FILE_FORMAT_CSV = "csv";
+    public static final String FILE_FORMAT_JSON = "json";
 
     public static final ConfigOption<String> FILE_FORMAT =
             key("file.format")
@@ -2301,12 +2303,26 @@ public class CoreOptions implements Serializable {
         return options.get(FILE_COMPRESSION);
     }
 
-    public String formatTableFileImplementation() {
-        if (options.containsKey(FORMAT_TABLE_FILE_COMPRESSION.key())
-                || options.containsKey(FILE_COMPRESSION.key())) {
-            return options.get(FORMAT_TABLE_FILE_COMPRESSION);
+    public String formatTableFileCompression() {
+        if (options.containsKey(FILE_COMPRESSION.key())) {
+            return options.get(FILE_COMPRESSION.key());
+        } else if (options.containsKey(FORMAT_TABLE_FILE_COMPRESSION.key())) {
+            return options.get(FORMAT_TABLE_FILE_COMPRESSION.key());
         } else {
-            return FILE_COMPRESSION.defaultValue();
+            String format = formatType();
+            switch (format) {
+                case FILE_FORMAT_PARQUET:
+                    return "snappy";
+                case FILE_FORMAT_AVRO:
+                case FILE_FORMAT_ORC:
+                    return "zstd";
+                case FILE_FORMAT_CSV:
+                case FILE_FORMAT_JSON:
+                    return "none";
+                default:
+                    throw new UnsupportedOperationException(
+                            String.format("Unsupported format: %s", format));
+            }
         }
     }
 

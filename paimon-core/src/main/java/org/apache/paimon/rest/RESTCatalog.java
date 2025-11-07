@@ -86,7 +86,6 @@ import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
-import static org.apache.paimon.catalog.CatalogUtils.getFormatTableFileCompression;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
@@ -451,7 +450,8 @@ public class RESTCatalog implements Catalog {
             validateCreateTable(schema);
             createExternalTablePathIfNotExist(schema);
             if (Options.fromMap(schema.options()).get(TYPE) == TableType.FORMAT_TABLE) {
-                String fileCompression = getFormatTableFileCompression(schema.options());
+                String fileCompression =
+                        CoreOptions.fromMap(schema.options()).formatTableFileCompression();
                 schema.options().put(FORMAT_TABLE_FILE_COMPRESSION.key(), fileCompression);
             }
             Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
