@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
-import org.apache.paimon.hadoop.SerializableConfiguration;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
@@ -84,7 +83,6 @@ public class JindoFileIO extends HadoopCompliantFileIO {
 
     private Options hadoopOptions;
     private boolean allowCache = true;
-    protected SerializableConfiguration hadoopConf;
 
     @Override
     public boolean isObjectStore() {
@@ -95,13 +93,6 @@ public class JindoFileIO extends HadoopCompliantFileIO {
     public void configure(CatalogContext context) {
         allowCache = context.options().get(FILE_IO_ALLOW_CACHE);
         hadoopOptions = new Options();
-        // https://github.com/aliyun/alibabacloud-jindodata/blob/master/docs/user/4.x/4.6.x/4.6.1/oss/hadoop/jindosdk_ide_hadoop.md
-        hadoopOptions.set("fs.oss.impl", "com.aliyun.jindodata.oss.JindoOssFileSystem");
-        hadoopOptions.set("fs.AbstractFileSystem.oss.impl", "com.aliyun.jindodata.oss.OSS");
-
-        // Misalignment can greatly affect performance, so the maximum buffer is set here
-        hadoopOptions.set("fs.oss.read.position.buffer.size", "8388608");
-
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {
             for (String prefix : CONFIG_PREFIXES) {
@@ -123,10 +114,18 @@ public class JindoFileIO extends HadoopCompliantFileIO {
         if (hadoopOptions.containsKey(OSS_ACCESS_KEY_ID)
                 && hadoopOptions.containsKey(OSS_ACCESS_KEY_SECRET)) {
             LOG.info("Using Ak init Jindo.");
+            // https://github.com/aliyun/alibabacloud-jindodata/blob/master/docs/user/4.x/4.6.x/4.6.1/oss/hadoop/jindosdk_ide_hadoop.md
+            hadoopOptions.set("fs.oss.impl", "com.aliyun.jindodata.oss.JindoOssFileSystem");
+            hadoopOptions.set("fs.AbstractFileSystem.oss.impl", "com.aliyun.jindodata.oss.OSS");
+
+            // Misalignment can greatly affect performance, so the maximum buffer is set here
+            hadoopOptions.set("fs.oss.read.position.buffer.size", "8388608");
             hadoopOptions.set("fs.oss.credentials.provider", SimpleCredentialsProvider.NAME);
         } else {
             LOG.info("Using hadoop conf init Jindo.");
-            this.hadoopConf = new SerializableConfiguration(context.hadoopConf());
+            context.hadoopConf()
+                    .iterator()
+                    .forEachRemaining(entry -> hadoopOptions.set(entry.getKey(), entry.getValue()));
         }
     }
 
@@ -177,11 +176,7 @@ public class JindoFileIO extends HadoopCompliantFileIO {
                     }
 
                     try {
-                        if (this.hadoopConf != null && this.hadoopConf.get() != null) {
-                            fs.initialize(fsUri, this.hadoopConf.get());
-                        } else {
-                            fs.initialize(fsUri, hadoopConf);
-                        }
+                        fs.initialize(fsUri, hadoopConf);
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
