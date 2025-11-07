@@ -46,6 +46,7 @@ import org.apache.paimon.spark.procedure.RenameTagProcedure;
 import org.apache.paimon.spark.procedure.RepairProcedure;
 import org.apache.paimon.spark.procedure.ReplaceTagProcedure;
 import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
+import org.apache.paimon.spark.procedure.RewriteFileIndexProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
 import org.apache.paimon.spark.procedure.RollbackToTimestampProcedure;
 import org.apache.paimon.spark.procedure.RollbackToWatermarkProcedure;
@@ -109,6 +110,7 @@ public class SparkProcedures {
         procedureBuilders.put("drop_function", DropFunctionProcedure::builder);
         procedureBuilders.put(
                 "trigger_tag_automatic_creation", TriggerTagAutomaticCreationProcedure::builder);
+        procedureBuilders.put("rewrite_file_index", RewriteFileIndexProcedure::builder);
         return procedureBuilders.build();
     }
 }

@@ -451,5 +451,17 @@ This section introduce all available spark procedures about paimon.
          CALL sys.drop_function(`function` => 'function_identifier')<br/>
       </td>
    </tr>
+   <tr>
+      <td>rewrite_file_index</td>
+      <td>
+         To rewrite the file index for the table. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>where: partition predicate. Left empty for all partitions.</li>
+      </td>
+      <td>
+         CALL sys.rewrite_file_index(table => "t")<br/>
+         CALL sys.rewrite_file_index(table => "t", where => "day = '2025-08-17'")<br/>
+      </td>
+   </tr>
    </tbody>
 </table>
