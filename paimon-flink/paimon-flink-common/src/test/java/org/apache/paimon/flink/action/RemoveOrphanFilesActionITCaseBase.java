@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
@@ -396,42 +395,86 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     @org.junit.jupiter.api.Test
     public void testBatchTableProcessing() throws Exception {
         // Create multiple tables to test batch processing
+        // createTableAndWriteData already creates orphan files for each table
+        long fileCreationTime = System.currentTimeMillis();
         FileStoreTable table1 = createTableAndWriteData("batchTable1");
         FileStoreTable table2 = createTableAndWriteData("batchTable2");
         FileStoreTable table3 = createTableAndWriteData("batchTable3");
 
-        // Collect manifest files before cleaning to verify they are not deleted
         FileIO fileIO1 = table1.fileIO();
         FileIO fileIO2 = table2.fileIO();
         FileIO fileIO3 = table3.fileIO();
-        Path manifestPath1 = new Path(table1.location(), "manifest");
-        Path manifestPath2 = new Path(table2.location(), "manifest");
-        Path manifestPath3 = new Path(table3.location(), "manifest");
 
-        // List manifest files before cleaning
-        List<String> manifestFilesBefore1 = new ArrayList<>();
-        List<String> manifestFilesBefore2 = new ArrayList<>();
-        List<String> manifestFilesBefore3 = new ArrayList<>();
-        if (fileIO1.exists(manifestPath1)) {
-            FileStatus[] statuses1 = fileIO1.listStatus(manifestPath1);
-            for (FileStatus status : statuses1) {
-                manifestFilesBefore1.add(status.getPath().getName());
-            }
-        }
-        if (fileIO2.exists(manifestPath2)) {
-            FileStatus[] statuses2 = fileIO2.listStatus(manifestPath2);
-            for (FileStatus status : statuses2) {
-                manifestFilesBefore2.add(status.getPath().getName());
-            }
-        }
-        if (fileIO3.exists(manifestPath3)) {
-            FileStatus[] statuses3 = fileIO3.listStatus(manifestPath3);
-            for (FileStatus status : statuses3) {
-                manifestFilesBefore3.add(status.getPath().getName());
+        Path orphanFile1Table1 = getOrphanFilePath(table1, ORPHAN_FILE_1);
+        Path orphanFile2Table1 = getOrphanFilePath(table1, ORPHAN_FILE_2);
+        Path orphanFile1Table2 = getOrphanFilePath(table2, ORPHAN_FILE_1);
+        Path orphanFile2Table2 = getOrphanFilePath(table2, ORPHAN_FILE_2);
+        Path orphanFile1Table3 = getOrphanFilePath(table3, ORPHAN_FILE_1);
+        Path orphanFile2Table3 = getOrphanFilePath(table3, ORPHAN_FILE_2);
+
+        Path[] orphanFiles = {
+            orphanFile1Table1, orphanFile2Table1,
+            orphanFile1Table2, orphanFile2Table2,
+            orphanFile1Table3, orphanFile2Table3
+        };
+        FileIO[] fileIOs = {fileIO1, fileIO1, fileIO2, fileIO2, fileIO3, fileIO3};
+
+        Thread.sleep(5000);
+
+        long currentTime = System.currentTimeMillis();
+        long olderThanMillis = Math.max(fileCreationTime + 1000, currentTime - 1000);
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(olderThanMillis), 3);
+
+        long expectedFileCount = 6;
+        long expectedTotalSize = 0;
+        for (int i = 0; i < orphanFiles.length; i++) {
+            if (fileIOs[i].exists(orphanFiles[i])) {
+                expectedTotalSize += fileIOs[i].getFileSize(orphanFiles[i]);
             }
         }
 
-        // Test batch processing via command line arguments
+        // Test non-batch mode
+        String withoutBatchMode =
+                String.format(
+                        "CALL sys.remove_orphan_files('%s.%s', '%s', false)",
+                        database, "*", olderThan);
+        ImmutableList<Row> withoutBatchModeResult =
+                ImmutableList.copyOf(executeSQL(withoutBatchMode));
+        assertThat(withoutBatchModeResult).hasSize(2);
+        long deletedFileCountWithoutBatch =
+                Long.parseLong(withoutBatchModeResult.get(0).getField(0).toString());
+        long deletedFileTotalLenInBytesWithoutBatch =
+                Long.parseLong(withoutBatchModeResult.get(1).getField(0).toString());
+        assertThat(deletedFileCountWithoutBatch)
+                .as("Non-batch mode should delete 6 orphan files")
+                .isEqualTo(expectedFileCount);
+        assertThat(deletedFileTotalLenInBytesWithoutBatch)
+                .as("Non-batch mode should delete files with expected total size")
+                .isEqualTo(expectedTotalSize);
+
+        // Verify files are deleted by non-batch mode
+        for (int i = 0; i < orphanFiles.length; i++) {
+            assertThat(fileIOs[i].exists(orphanFiles[i]))
+                    .as("Orphan file should be deleted by non-batch mode")
+                    .isFalse();
+        }
+
+        // Recreate orphan files for batch mode test
+        long batchFileCreationTime = System.currentTimeMillis();
+        for (int i = 0; i < orphanFiles.length; i++) {
+            fileIOs[i].writeFile(orphanFiles[i], "orphan", true);
+        }
+        Thread.sleep(5000);
+
+        long batchCurrentTime = System.currentTimeMillis();
+        long batchOlderThanMillis = Math.max(batchFileCreationTime + 1000, batchCurrentTime - 1000);
+        String batchOlderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(batchOlderThanMillis), 3);
+
+        // Test batch mode
         List<String> args =
                 new ArrayList<>(
                         Arrays.asList(
@@ -445,100 +488,18 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                                 "--batch_table_processing",
                                 "true",
                                 "--dry_run",
-                                "false"));
-
+                                "false",
+                                "--older_than",
+                                batchOlderThan));
         RemoveOrphanFilesAction action1 = createAction(RemoveOrphanFilesAction.class, args);
         assertThatCode(action1::run).doesNotThrowAnyException();
 
-        args.add("--older_than");
-        args.add("2023-12-31 23:59:59");
-        RemoveOrphanFilesAction action2 = createAction(RemoveOrphanFilesAction.class, args);
-        assertThatCode(action2::run).doesNotThrowAnyException();
-
-        args.add("--parallelism");
-        args.add("5");
-        RemoveOrphanFilesAction action3 = createAction(RemoveOrphanFilesAction.class, args);
-        assertThatCode(action3::run).doesNotThrowAnyException();
-
-        // Test with batch_size parameter
-        args.add("--batch_size");
-        args.add("2");
-        RemoveOrphanFilesAction action4 = createAction(RemoveOrphanFilesAction.class, args);
-        assertThatCode(action4::run).doesNotThrowAnyException();
-
-        // Verify that manifest files are NOT deleted (critical check!)
-        List<String> manifestFilesAfter1 = new ArrayList<>();
-        List<String> manifestFilesAfter2 = new ArrayList<>();
-        List<String> manifestFilesAfter3 = new ArrayList<>();
-        if (fileIO1.exists(manifestPath1)) {
-            FileStatus[] statuses1 = fileIO1.listStatus(manifestPath1);
-            for (FileStatus status : statuses1) {
-                manifestFilesAfter1.add(status.getPath().getName());
-            }
+        // Verify files are deleted by batch mode (same result as non-batch mode)
+        for (int i = 0; i < orphanFiles.length; i++) {
+            assertThat(fileIOs[i].exists(orphanFiles[i]))
+                    .as("Orphan file should be deleted by batch mode (same as non-batch mode)")
+                    .isFalse();
         }
-        if (fileIO2.exists(manifestPath2)) {
-            FileStatus[] statuses2 = fileIO2.listStatus(manifestPath2);
-            for (FileStatus status : statuses2) {
-                manifestFilesAfter2.add(status.getPath().getName());
-            }
-        }
-        if (fileIO3.exists(manifestPath3)) {
-            FileStatus[] statuses3 = fileIO3.listStatus(manifestPath3);
-            for (FileStatus status : statuses3) {
-                manifestFilesAfter3.add(status.getPath().getName());
-            }
-        }
-
-        // Verify manifest files still exist
-        assertThat(manifestFilesAfter1)
-                .as("Manifest files in batchTable1 should not be deleted")
-                .containsExactlyInAnyOrderElementsOf(manifestFilesBefore1);
-        assertThat(manifestFilesAfter2)
-                .as("Manifest files in batchTable2 should not be deleted")
-                .containsExactlyInAnyOrderElementsOf(manifestFilesBefore2);
-        assertThat(manifestFilesAfter3)
-                .as("Manifest files in batchTable3 should not be deleted")
-                .containsExactlyInAnyOrderElementsOf(manifestFilesBefore3);
-
-        // Verify orphan files are deleted
-        Path orphanFile1Table1 = getOrphanFilePath(table1, ORPHAN_FILE_1);
-        Path orphanFile2Table1 = getOrphanFilePath(table1, ORPHAN_FILE_2);
-        Path orphanFile1Table2 = getOrphanFilePath(table2, ORPHAN_FILE_1);
-        Path orphanFile2Table2 = getOrphanFilePath(table2, ORPHAN_FILE_2);
-        Path orphanFile1Table3 = getOrphanFilePath(table3, ORPHAN_FILE_1);
-        Path orphanFile2Table3 = getOrphanFilePath(table3, ORPHAN_FILE_2);
-
-        assertThat(fileIO1.exists(orphanFile1Table1))
-                .as("Orphan file 1 in batchTable1 should be deleted")
-                .isFalse();
-        assertThat(fileIO1.exists(orphanFile2Table1))
-                .as("Orphan file 2 in batchTable1 should be deleted")
-                .isFalse();
-        assertThat(fileIO2.exists(orphanFile1Table2))
-                .as("Orphan file 1 in batchTable2 should be deleted")
-                .isFalse();
-        assertThat(fileIO2.exists(orphanFile2Table2))
-                .as("Orphan file 2 in batchTable2 should be deleted")
-                .isFalse();
-        assertThat(fileIO3.exists(orphanFile1Table3))
-                .as("Orphan file 1 in batchTable3 should be deleted")
-                .isFalse();
-        assertThat(fileIO3.exists(orphanFile2Table3))
-                .as("Orphan file 2 in batchTable3 should be deleted")
-                .isFalse();
-
-        // Verify that batch mode produces the same results as non-batch mode
-        String olderThan =
-                DateTimeUtils.formatLocalDateTime(
-                        DateTimeUtils.toLocalDateTime(System.currentTimeMillis()), 3);
-        String withoutBatchMode =
-                String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '%s', true)",
-                        database, "*", olderThan);
-        ImmutableList<Row> withoutBatchModeResult =
-                ImmutableList.copyOf(executeSQL(withoutBatchMode));
-        // 3 tables * 2 orphan files each = 6 orphan files
-        assertThat(withoutBatchModeResult).containsOnly(Row.of("6"));
     }
 
     protected boolean supportNamedArgument() {

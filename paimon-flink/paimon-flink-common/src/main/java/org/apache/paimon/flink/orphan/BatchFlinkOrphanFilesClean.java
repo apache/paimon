@@ -416,7 +416,8 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
         DataStream<CleanOrphanFilesResult> deleted =
                 usedFiles
                         .keyBy(f -> f)
-                        .connect(candidates.keyBy(pathAndSize -> pathAndSize.f0))
+                        .connect(
+                                candidates.keyBy(pathAndSize -> new Path(pathAndSize.f0).getName()))
                         .transform(
                                 "files_join",
                                 TypeInformation.of(CleanOrphanFilesResult.class),
@@ -491,12 +492,10 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                         checkState(buildEnd, "Should build ended.");
                                         Tuple2<String, Long> fileInfo = element.getValue();
                                         String value = fileInfo.f0;
-                                        // Use full path for comparison to avoid conflicts when
-                                        // multiple tables have files with the same name
-                                        if (!used.contains(value)) {
+                                        Path path = new Path(value);
+                                        if (!used.contains(path.getName())) {
                                             emittedFilesCount++;
                                             emittedFilesLen += fileInfo.f1;
-                                            Path path = new Path(value);
                                             cleanFile(path);
                                             LOG.info("Dry clean: {}", path);
                                         }
