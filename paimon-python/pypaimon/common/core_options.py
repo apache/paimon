@@ -47,6 +47,8 @@ class CoreOptions(str, Enum):
     FILE_FORMAT_PER_LEVEL = "file.format.per.level"
     FILE_BLOCK_SIZE = "file.block-size"
     FILE_BLOB_AS_DESCRIPTOR = "blob-as-descriptor"
+    TARGET_FILE_SIZE = "target-file-size"
+    BLOB_TARGET_FILE_SIZE = "blob.target-file-size"
     # Scan options
     SCAN_FALLBACK_BRANCH = "scan.fallback-branch"
     INCREMENTAL_BETWEEN_TIMESTAMP = "incremental-between-timestamp"
@@ -76,3 +78,19 @@ class CoreOptions(str, Enum):
             cost_str = options[CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST]
             return MemorySize.parse(cost_str).get_bytes()
         return MemorySize.of_mebi_bytes(4).get_bytes()
+
+    @staticmethod
+    def get_target_file_size(options: dict, has_primary_key: bool = False) -> int:
+        """Get target file size from options, default to 128MB for primary key table, 256MB for append-only table."""
+        if CoreOptions.TARGET_FILE_SIZE in options:
+            size_str = options[CoreOptions.TARGET_FILE_SIZE]
+            return MemorySize.parse(size_str).get_bytes()
+        return MemorySize.of_mebi_bytes(128 if has_primary_key else 256).get_bytes()
+
+    @staticmethod
+    def get_blob_target_file_size(options: dict) -> int:
+        """Get blob target file size from options, default to target-file-size (256MB for append-only table)."""
+        if CoreOptions.BLOB_TARGET_FILE_SIZE in options:
+            size_str = options[CoreOptions.BLOB_TARGET_FILE_SIZE]
+            return MemorySize.parse(size_str).get_bytes()
+        return CoreOptions.get_target_file_size(options, has_primary_key=False)

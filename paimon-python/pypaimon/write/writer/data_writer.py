@@ -47,7 +47,7 @@ class DataWriter(ABC):
         self.trimmed_primary_keys = self.table.trimmed_primary_keys
 
         options = self.table.options
-        self.target_file_size = 256 * 1024 * 1024
+        self.target_file_size = CoreOptions.get_target_file_size(options, self.table.is_primary_key_table)
         self.file_format = options.get(CoreOptions.FILE_FORMAT,
                                        CoreOptions.FILE_FORMAT_PARQUET
                                        if self.bucket != BucketMode.POSTPONE_BUCKET.value
