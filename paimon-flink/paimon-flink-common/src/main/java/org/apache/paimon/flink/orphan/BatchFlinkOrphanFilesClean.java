@@ -20,7 +20,6 @@ package org.apache.paimon.flink.orphan;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
@@ -476,8 +475,7 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
         do {
             pageCount++;
             PagedList<Table> pagedTables =
-                    catalog.listTableDetailsPaged(
-                            databaseName, null, pageToken, null, TableType.TABLE.toString());
+                    catalog.listTableDetailsPaged(databaseName, null, pageToken, null, null);
             LOG.info(
                     "[BATCH_ORPHAN_CLEAN] Page {} START: received {} tables from catalog, current batchCleaners.size() = {}, total collected = {}",
                     pageCount,
