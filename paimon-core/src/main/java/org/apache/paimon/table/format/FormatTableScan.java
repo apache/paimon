@@ -59,10 +59,9 @@ import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 /** {@link TableScan} for {@link FormatTable}. */
 public class FormatTableScan implements InnerTableScan {
 
-    private static final long SPLIT_SIZE = 128L << 20;
-
     private final FormatTable table;
     private final CoreOptions coreOptions;
+    private final long splitMaxByteSize;
     @Nullable private PartitionPredicate partitionFilter;
     @Nullable private final Integer limit;
 
@@ -72,6 +71,7 @@ public class FormatTableScan implements InnerTableScan {
             @Nullable Integer limit) {
         this.table = table;
         this.coreOptions = new CoreOptions(table.options());
+        this.splitMaxByteSize = coreOptions.formatTableSplitMaxSize();
         this.partitionFilter = partitionFilter;
         this.limit = limit;
     }
@@ -242,7 +242,8 @@ public class FormatTableScan implements InnerTableScan {
         FileStatus[] files = fileIO.listFiles(path, true);
         for (FileStatus file : files) {
             if (isDataFileName(file.getPath().getName())) {
-                List<FormatDataSplit> fileSplits = splitLargeFile(file, SPLIT_SIZE, partition);
+                List<FormatDataSplit> fileSplits =
+                        splitLargeFile(file, splitMaxByteSize, partition);
                 splits.addAll(fileSplits);
             }
         }
