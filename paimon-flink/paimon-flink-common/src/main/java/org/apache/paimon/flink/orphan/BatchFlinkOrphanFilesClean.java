@@ -33,7 +33,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -340,36 +339,23 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                 });
 
         usedFiles = usedFiles.union(usedManifestFiles);
-        // Parallelize table processing by passing table identifiers to flatMap
-        List<String> tableIdentifiers = new ArrayList<>();
-        for (T cleaner : cleaners) {
-            FileStoreTable table = cleaner.getTable();
-            Identifier id = table.catalogEnvironment().identifier();
-            if (id != null) {
-                tableIdentifiers.add(id.getFullName());
-            }
-        }
         DataStream<Tuple2<String, Long>> candidates =
-                env.fromCollection(tableIdentifiers)
-                        .flatMap(
-                                new FlatMapFunction<String, Tuple2<String, Long>>() {
+                env.fromCollection(Collections.singletonList(1), TypeInformation.of(Integer.class))
+                        .process(
+                                new ProcessFunction<Integer, Tuple2<String, Long>>() {
                                     @Override
-                                    public void flatMap(
-                                            String tableIdentifier,
-                                            Collector<Tuple2<String, Long>> out)
-                                            throws Exception {
-                                        T cleaner =
-                                                BatchFlinkOrphanFilesClean.this.cleanerMap.get(
-                                                        tableIdentifier);
-                                        if (cleaner == null) {
-                                            LOG.warn(
-                                                    "Table {} not found in cleanerMap, skip it",
-                                                    tableIdentifier);
-                                            return;
+                                    public void processElement(
+                                            Integer i,
+                                            ProcessFunction<Integer, Tuple2<String, Long>>.Context
+                                                    ctx,
+                                            Collector<Tuple2<String, Long>> out) {
+                                        // Process all tables sequentially in a single thread
+                                        for (T cleaner : BatchFlinkOrphanFilesClean.this.cleaners) {
+                                            cleaner.listPaimonFilesForTable(out);
                                         }
-                                        cleaner.listPaimonFilesForTable(out);
                                     }
-                                });
+                                })
+                        .setParallelism(1);
 
         DataStream<CleanOrphanFilesResult> deleted =
                 usedFiles
@@ -397,39 +383,6 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
 
                                     @Override
                                     public void endInput(int inputId) {
-                                        if (inputId == 1) {
-                                            long manifestFileCount =
-                                                    used.stream()
-                                                            .filter(
-                                                                    fileName ->
-                                                                            fileName.contains(
-                                                                                            "manifest")
-                                                                                    || fileName
-                                                                                            .contains(
-                                                                                                    "index")
-                                                                                    || fileName
-                                                                                            .contains(
-                                                                                                    "statistics"))
-                                                            .count();
-                                            long dataFileCount = used.size() - manifestFileCount;
-                                            if (dataFileCount == 0 && !used.isEmpty()) {
-                                                LOG.warn(
-                                                        "[BATCH_ORPHAN_CLEAN] WARNING: used set contains {} files but no data files. "
-                                                                + "This may indicate that manifest files are missing. "
-                                                                + "Skipping data file deletion to avoid misdeletion.",
-                                                        used.size());
-                                            } else if (used.isEmpty()) {
-                                                LOG.warn(
-                                                        "[BATCH_ORPHAN_CLEAN] WARNING: used set is empty. "
-                                                                + "This may indicate that manifest files are missing. "
-                                                                + "Skipping data file deletion to avoid misdeletion.");
-                                            } else {
-                                                LOG.info(
-                                                        "[BATCH_ORPHAN_CLEAN] used set contains {} files, including {} data files",
-                                                        used.size(),
-                                                        dataFileCount);
-                                            }
-                                        }
                                         buildEnd =
                                                 endInputForDeleted(
                                                         inputId,
@@ -442,6 +395,10 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                     @Override
                                     public void processElement1(StreamRecord<String> element) {
                                         used.add(element.getValue());
+                                        LOG.info(
+                                                "[BATCH_ORPHAN_CLEAN] Added to used set: fileName={}, usedSetSize={}",
+                                                element.getValue(),
+                                                used.size());
                                     }
 
                                     @Override
