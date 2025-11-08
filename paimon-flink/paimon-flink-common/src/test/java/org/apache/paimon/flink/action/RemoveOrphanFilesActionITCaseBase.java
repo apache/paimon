@@ -109,11 +109,56 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         ReadBuilder readBuilder = table.newReadBuilder();
         TableScan.Plan plan = readBuilder.newScan().plan();
         List<String> result =
-                getResult(
+                getResultLocal(
                         readBuilder.newRead(),
                         plan == null ? Collections.emptyList() : plan.splits(),
                         rowType);
         return result;
+    }
+
+    private List<String> getResultLocal(
+            org.apache.paimon.table.source.TableRead read,
+            List<org.apache.paimon.table.source.Split> splits,
+            RowType rowType)
+            throws Exception {
+        try (org.apache.paimon.reader.RecordReader<org.apache.paimon.data.InternalRow>
+                recordReader = read.createReader(splits)) {
+            List<String> result = new ArrayList<>();
+            recordReader.forEachRemaining(
+                    row -> result.add(internalRowToStringLocal(row, rowType)));
+            return result;
+        }
+    }
+
+    /**
+     * Stringify the given {@link InternalRow}. This is a simplified version that handles basic
+     * types. For complex types (Array, Map, Row), it falls back to toString().
+     *
+     * <p>This method is implemented locally to avoid dependency on paimon-common's test-jar, which
+     * may not be available in CI environments.
+     */
+    private String internalRowToStringLocal(org.apache.paimon.data.InternalRow row, RowType type) {
+        StringBuilder build = new StringBuilder();
+        build.append(row.getRowKind().shortString()).append("[");
+        for (int i = 0; i < type.getFieldCount(); i++) {
+            if (i != 0) {
+                build.append(", ");
+            }
+            if (row.isNullAt(i)) {
+                build.append("NULL");
+            } else {
+                org.apache.paimon.data.InternalRow.FieldGetter fieldGetter =
+                        org.apache.paimon.data.InternalRow.createFieldGetter(type.getTypeAt(i), i);
+                Object field = fieldGetter.getFieldOrNull(row);
+                if (field != null) {
+                    build.append(field);
+                } else {
+                    build.append("NULL");
+                }
+            }
+        }
+        build.append("]");
+        return build.toString();
     }
 
     @ParameterizedTest
@@ -601,38 +646,6 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         assertThat(readBranchData(branchTable2, branchRowType)).containsExactly("+I[3, World, 30]");
     }
 
-    private FileStoreTable createBranchTable(FileStoreTable table, String branchName)
-            throws Exception {
-        SchemaManager schemaManager =
-                new SchemaManager(table.fileIO(), table.location(), branchName);
-        TableSchema branchSchema =
-                schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.INT()));
-        Options branchOptions = new Options(branchSchema.options());
-        branchOptions.set(CoreOptions.BRANCH, branchName);
-        branchSchema = branchSchema.copy(branchOptions.toMap());
-        return FileStoreTableFactory.create(table.fileIO(), table.location(), branchSchema);
-    }
-
-    private void writeToBranch(FileStoreTable branchTable, GenericRow data) throws Exception {
-        String commitUser = UUID.randomUUID().toString();
-        StreamTableWrite write = branchTable.newWrite(commitUser);
-        StreamTableCommit commit = branchTable.newCommit(commitUser);
-        write.write(data);
-        commit.commit(1, write.prepareCommit(false, 1));
-        write.close();
-        commit.close();
-    }
-
-    private List<String> readBranchData(FileStoreTable branchTable, RowType rowType)
-            throws Exception {
-        ReadBuilder readBuilder = branchTable.newReadBuilder();
-        TableScan.Plan plan = readBuilder.newScan().plan();
-        return getResult(
-                readBuilder.newRead(),
-                plan == null ? Collections.emptyList() : plan.splits(),
-                rowType);
-    }
-
     @org.junit.jupiter.api.Test
     public void testCleanOrphanManifestListFiles() throws Exception {
         // Create table and write data to generate snapshots
@@ -700,6 +713,38 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         assertThat(tableData)
                 .as("Table should still contain normal data after manifest-list cleanup")
                 .containsExactly("+I[1, Hi]");
+    }
+
+    private FileStoreTable createBranchTable(FileStoreTable table, String branchName)
+            throws Exception {
+        SchemaManager schemaManager =
+                new SchemaManager(table.fileIO(), table.location(), branchName);
+        TableSchema branchSchema =
+                schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.INT()));
+        Options branchOptions = new Options(branchSchema.options());
+        branchOptions.set(CoreOptions.BRANCH, branchName);
+        branchSchema = branchSchema.copy(branchOptions.toMap());
+        return FileStoreTableFactory.create(table.fileIO(), table.location(), branchSchema);
+    }
+
+    private void writeToBranch(FileStoreTable branchTable, GenericRow data) throws Exception {
+        String commitUser = UUID.randomUUID().toString();
+        StreamTableWrite write = branchTable.newWrite(commitUser);
+        StreamTableCommit commit = branchTable.newCommit(commitUser);
+        write.write(data);
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+    }
+
+    private List<String> readBranchData(FileStoreTable branchTable, RowType rowType)
+            throws Exception {
+        ReadBuilder readBuilder = branchTable.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        return getResultLocal(
+                readBuilder.newRead(),
+                plan == null ? Collections.emptyList() : plan.splits(),
+                rowType);
     }
 
     protected boolean supportNamedArgument() {
