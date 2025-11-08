@@ -165,23 +165,23 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldListAggWithDefaultDelimiterAndDistinct() {
-        FieldListaggAgg fieldListaggAgg = new FieldListaggAggFactory()
-                .create(
-                        DataTypes.ARRAY(DataTypes.INT()),
-                        CoreOptions.fromMap(
-                                ImmutableMap.of("fields.fieldName.distinct", "true")),
-                        "fieldName");
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.INT()),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
 
-        BinaryString result = Stream
-                .of(
-                        BinaryString.fromString("user1"),
-                        BinaryString.fromString("user2"),
-                        BinaryString.fromString("user1"),
-                        BinaryString.fromString("user3")
-                )
-                .sequential()
-                .reduce((l, r) -> (BinaryString) fieldListaggAgg.agg(l, r))
-                .orElse(null);
+        BinaryString result =
+                Stream.of(
+                                BinaryString.fromString("user1"),
+                                BinaryString.fromString("user2"),
+                                BinaryString.fromString("user1"),
+                                BinaryString.fromString("user3"))
+                        .sequential()
+                        .reduce((l, r) -> (BinaryString) fieldListaggAgg.agg(l, r))
+                        .orElse(null);
 
         assertNotNull(result);
         assertEquals("user1,user2,user3", result.toString());

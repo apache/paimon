@@ -49,9 +49,7 @@ public class FieldListaggAgg extends FieldAggregator {
         BinaryString mergeFieldSD = (BinaryString) accumulator;
         BinaryString inFieldSD = (BinaryString) inputField;
 
-        if (distinct
-                && inFieldSD.getSizeInBytes() > 0
-                && mergeFieldSD.contains(inFieldSD)) {
+        if (distinct && inFieldSD.getSizeInBytes() > 0 && mergeFieldSD.contains(inFieldSD)) {
             return mergeFieldSD;
         }
 
