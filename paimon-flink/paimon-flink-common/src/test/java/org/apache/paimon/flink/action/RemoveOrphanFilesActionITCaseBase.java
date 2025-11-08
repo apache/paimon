@@ -633,6 +633,75 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                 rowType);
     }
 
+    @org.junit.jupiter.api.Test
+    public void testCleanOrphanManifestListFiles() throws Exception {
+        // Create table and write data to generate snapshots
+        FileStoreTable table = createTableAndWriteData("manifestListTable");
+        FileIO fileIO = table.fileIO();
+        Path location = table.location();
+        Path manifestPath = new Path(location, "manifest");
+
+        // Wait for files to be old enough
+        Thread.sleep(2000);
+
+        // Get current snapshot to find manifest-list files
+        org.apache.paimon.utils.SnapshotManager snapshotManager = table.snapshotManager();
+        org.apache.paimon.Snapshot currentSnapshot = snapshotManager.latestSnapshot();
+        assertThat(currentSnapshot).isNotNull();
+
+        // Verify that valid manifest-list files exist (referenced by snapshot)
+        String validManifestListName = null;
+        if (currentSnapshot.baseManifestList() != null) {
+            validManifestListName = new Path(currentSnapshot.baseManifestList()).getName();
+            Path validManifestListPath = new Path(manifestPath, validManifestListName);
+            assertThat(fileIO.exists(validManifestListPath))
+                    .as("Valid manifest-list file should exist")
+                    .isTrue();
+        }
+
+        // Create an orphan manifest-list file (not referenced by any snapshot)
+        String orphanManifestList = "manifest-list-orphan-" + System.currentTimeMillis();
+        Path orphanManifestListPath = new Path(manifestPath, orphanManifestList);
+        fileIO.writeFile(orphanManifestListPath, "orphan manifest-list content", true);
+
+        // Verify the orphan manifest-list file exists
+        assertThat(fileIO.exists(orphanManifestListPath)).isTrue();
+
+        // Calculate olderThan to ensure the orphan file is old enough
+        long fileCreationTime = System.currentTimeMillis();
+        Thread.sleep(1000);
+        long olderThanMillis = Math.max(fileCreationTime + 1000, System.currentTimeMillis() - 1000);
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(olderThanMillis), 3);
+
+        // Run orphan files clean
+        String cleanSQL =
+                String.format(
+                        "CALL sys.remove_orphan_files('%s.%s', '%s', false)",
+                        database, "manifestListTable", olderThan);
+        ImmutableList<Row> result = ImmutableList.copyOf(executeSQL(cleanSQL));
+
+        // Verify the orphan manifest-list file is deleted
+        assertThat(fileIO.exists(orphanManifestListPath))
+                .as("Orphan manifest-list file should be deleted")
+                .isFalse();
+
+        // Verify that valid manifest-list files (referenced by snapshots) are not deleted
+        if (validManifestListName != null) {
+            Path validManifestListPath = new Path(manifestPath, validManifestListName);
+            assertThat(fileIO.exists(validManifestListPath))
+                    .as("Valid manifest-list file referenced by snapshot should not be deleted")
+                    .isTrue();
+        }
+
+        // Verify normal data can still be read
+        List<String> tableData = readTableData(table);
+        assertThat(tableData)
+                .as("Table should still contain normal data after manifest-list cleanup")
+                .containsExactly("+I[1, Hi]");
+    }
+
     protected boolean supportNamedArgument() {
         return true;
     }
