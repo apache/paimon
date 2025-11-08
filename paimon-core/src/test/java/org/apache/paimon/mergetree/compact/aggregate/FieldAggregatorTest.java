@@ -168,7 +168,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                DataTypes.ARRAY(DataTypes.INT()),
+                                new VarCharType(),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of("fields.fieldName.distinct", "true")),
                                 "fieldName");
