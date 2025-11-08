@@ -101,6 +101,7 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
                         + "This significantly reduces job graph construction time, when processing "
                         + "thousands of tables (jobs may fail to start within timeout limits). "
                         + "It also reduces JobGraph complexity and avoids stack over flow issue and resource allocation failures during job running. "
+                        + "Note: Batch mode only applies when processing all tables (table is null or *) and catalog supports paginated listing. "
                         + "Default is false.");
         System.out.println();
         System.out.println(

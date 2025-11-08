@@ -68,7 +68,9 @@ public class RemoveOrphanFilesAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        if (batchTableProcessing && (tableName == null || "*".equals(tableName))) {
+        if (batchTableProcessing
+                && (tableName == null || "*".equals(tableName))
+                && catalog.supportsListObjectsPaged()) {
             BatchFlinkOrphanFilesClean.executeDatabaseOrphanFiles(
                     env,
                     catalog,
