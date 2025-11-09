@@ -43,7 +43,7 @@ public interface TextLineReader extends Closeable {
         } else {
             if (offset != 0 || length != null) {
                 throw new UnsupportedOperationException(
-                        "Compressed file cannot support offset and length.");
+                        "Custom line text file does not support offset and length.");
             }
             return new CustomLineReader(inputStream, delimiterBytes);
         }
