@@ -33,12 +33,11 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.spark.SparkUtils;
-import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionUtils;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
+import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -53,7 +52,6 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.ProcedureUtils;
@@ -67,10 +65,7 @@ import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
-import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
-import org.apache.spark.sql.catalyst.expressions.Expression;
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
@@ -102,6 +97,7 @@ import scala.collection.JavaConverters;
 import scala.collection.Seq;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.spark.utils.SparkProcedureUtils.readParallelism;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -189,10 +185,12 @@ public class CompactProcedure extends BaseProcedure {
         String finalWhere = partitions != null ? toWhere(partitions) : where;
         return modifyPaimonTable(
                 tableIdent,
-                table -> {
-                    checkArgument(table instanceof FileStoreTable);
+                t -> {
+                    checkArgument(t instanceof FileStoreTable);
+                    FileStoreTable table = (FileStoreTable) t;
+                    CoreOptions coreOptions = table.coreOptions();
                     checkArgument(
-                            !((FileStoreTable) table).coreOptions().dataEvolutionEnabled(),
+                            !coreOptions.dataEvolutionEnabled(),
                             "Compact operation is not supported when data evolution is enabled yet.");
                     checkArgument(
                             sortColumns.stream().noneMatch(table.partitionKeys()::contains),
@@ -200,25 +198,18 @@ public class CompactProcedure extends BaseProcedure {
                             sortColumns,
                             table.partitionKeys());
                     DataSourceV2Relation relation = createRelation(tableIdent);
-                    Expression condition = null;
-                    if (!StringUtils.isNullOrWhitespaceOnly(finalWhere)) {
-                        condition = ExpressionUtils.resolveFilter(spark(), relation, finalWhere);
-                        checkArgument(
-                                ExpressionUtils.isValidPredicate(
-                                        spark(),
-                                        condition,
-                                        table.partitionKeys().toArray(new String[0])),
-                                "Only partition predicate is supported, your predicate is %s, but partition keys are %s",
-                                condition,
-                                table.partitionKeys());
-                    }
-
+                    PartitionPredicate partitionPredicate =
+                            SparkProcedureUtils.convertToPartitionPredicate(
+                                    finalWhere,
+                                    table.schema().logicalPartitionType(),
+                                    spark(),
+                                    relation);
                     HashMap<String, String> dynamicOptions = new HashMap<>();
                     ProcedureUtils.putIfNotEmpty(
                             dynamicOptions, CoreOptions.WRITE_ONLY.key(), "false");
                     ProcedureUtils.putAllOptions(dynamicOptions, options);
                     table = table.copy(dynamicOptions);
-                    if (((FileStoreTable) table).coreOptions().clusteringIncrementalEnabled()
+                    if (coreOptions.clusteringIncrementalEnabled()
                             && (!OrderType.NONE.name().equals(sortType))) {
                         throw new IllegalArgumentException(
                                 "The table has enabled incremental clustering, do not support sort compact.");
@@ -227,12 +218,12 @@ public class CompactProcedure extends BaseProcedure {
                     InternalRow internalRow =
                             newInternalRow(
                                     execute(
-                                            (FileStoreTable) table,
+                                            table,
                                             compactStrategy,
                                             sortType,
                                             sortColumns,
                                             relation,
-                                            condition,
+                                            partitionPredicate,
                                             partitionIdleTime));
                     return new InternalRow[] {internalRow};
                 });
@@ -253,7 +244,7 @@ public class CompactProcedure extends BaseProcedure {
             String sortType,
             List<String> sortColumns,
             DataSourceV2Relation relation,
-            @Nullable Expression condition,
+            @Nullable PartitionPredicate partitionPredicate,
             @Nullable Duration partitionIdleTime) {
         BucketMode bucketMode = table.bucketMode();
         OrderType orderType = OrderType.of(sortType);
@@ -265,19 +256,6 @@ public class CompactProcedure extends BaseProcedure {
             compactStrategy = clusterIncrementalEnabled ? MINOR : FULL;
         }
         boolean fullCompact = compactStrategy.equalsIgnoreCase(FULL);
-        RowType partitionType = table.schema().logicalPartitionType();
-        Predicate partitionFilter =
-                condition == null
-                        ? null
-                        : ExpressionUtils.convertConditionToPaimonPredicate(
-                                        condition,
-                                        ((LogicalPlan) relation).output(),
-                                        partitionType,
-                                        false)
-                                .getOrElse(null);
-        PartitionPredicate partitionPredicate =
-                PartitionPredicate.fromPredicate(partitionType, partitionFilter);
-
         if (orderType.equals(OrderType.NONE)) {
             JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
             switch (bucketMode) {
@@ -306,7 +284,7 @@ public class CompactProcedure extends BaseProcedure {
             switch (bucketMode) {
                 case BUCKET_UNAWARE:
                     sortCompactUnAwareBucketTable(
-                            table, orderType, sortColumns, relation, partitionFilter);
+                            table, orderType, sortColumns, relation, partitionPredicate);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -525,10 +503,10 @@ public class CompactProcedure extends BaseProcedure {
             OrderType orderType,
             List<String> sortColumns,
             DataSourceV2Relation relation,
-            @Nullable Predicate partitionFilter) {
+            @Nullable PartitionPredicate partitionPredicate) {
         SnapshotReader snapshotReader = table.newSnapshotReader();
-        if (partitionFilter != null) {
-            snapshotReader.withPartitionFilter(partitionFilter);
+        if (partitionPredicate != null) {
+            snapshotReader.withPartitionFilter(partitionPredicate);
         }
         Map<BinaryRow, DataSplit[]> packedSplits = packForSort(snapshotReader.read().dataSplits());
         TableSorter sorter = TableSorter.getSorter(table, orderType, sortColumns);
@@ -655,22 +633,6 @@ public class CompactProcedure extends BaseProcedure {
                                 Collectors.collectingAndThen(
                                         Collectors.toList(),
                                         list -> list.toArray(new DataSplit[0]))));
-    }
-
-    private int readParallelism(List<?> groupedTasks, SparkSession spark) {
-        int sparkParallelism =
-                Math.max(
-                        spark.sparkContext().defaultParallelism(),
-                        spark.sessionState().conf().numShufflePartitions());
-        int readParallelism = Math.min(groupedTasks.size(), sparkParallelism);
-        if (sparkParallelism > readParallelism) {
-            LOG.warn(
-                    String.format(
-                            "Spark default parallelism (%s) is greater than bucket or task parallelism (%s),"
-                                    + "we use %s as the final read parallelism",
-                            sparkParallelism, readParallelism, readParallelism));
-        }
-        return readParallelism;
     }
 
     @VisibleForTesting
