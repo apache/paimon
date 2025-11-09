@@ -204,7 +204,7 @@ public class TextFileReaderTest {
         public TestTextFileReader(
                 FileIO fileIO, Path filePath, RowType rowType, String recordDelimiter)
                 throws IOException {
-            super(fileIO, filePath, rowType, recordDelimiter);
+            super(fileIO, filePath, rowType, recordDelimiter, 0, null);
         }
 
         @Nullable
