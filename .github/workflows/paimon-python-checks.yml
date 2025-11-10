@@ -80,6 +80,11 @@ jobs:
       - name: Verify Python version
         run: python --version
 
+      - name: Build Java
+        run: |
+          echo "Start compiling modules"
+          mvn -T 2C -B clean install -DskipTests
+
       - name: Install Python dependencies
         shell: bash
         run: |
