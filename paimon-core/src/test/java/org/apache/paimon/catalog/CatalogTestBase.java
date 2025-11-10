@@ -824,6 +824,58 @@ public abstract class CatalogTestBase {
         catalog.dropTable(pid, true);
     }
 
+    @Test
+    public void testFormatTableSplitRead() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        Pair[] format2Compressions = {
+                Pair.of("csv", HadoopCompressionType.NONE),
+                Pair.of("parquet", HadoopCompressionType.ZSTD),
+                Pair.of("json", HadoopCompressionType.NONE),
+                Pair.of("orc", HadoopCompressionType.ZSTD)
+        };
+        for (Pair<String, HadoopCompressionType> format2Compression : format2Compressions) {
+            String format = format2Compression.getKey();
+            String compression = format2Compression.getValue().value();
+            String dbName = format + "_split_db";
+            catalog.createDatabase(dbName, true);
+
+            Identifier id = Identifier.create(dbName, format +  "_split_table");
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("name", DataTypes.STRING())
+                            .column("score", DataTypes.DOUBLE())
+                            .options(getFormatTableOptions())
+                            .option("file.format", "csv")
+                            .option("source.split.target-size", "54 B")
+                            .option("file.compression", compression.toString())
+                            .build();
+            catalog.createTable(id, schema, true);
+            FormatTable table = (FormatTable) catalog.getTable(id);
+
+            // Write test data (create a file large enough to split)
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                 BatchTableCommit commit = writeBuilder.newCommit()) {
+                // Write multiple rows to create a larger file
+                for (int i = 1; i <= 100; i++) {
+                    write.write(
+                            GenericRow.of(
+                                    i,
+                                    BinaryString.fromString("User" + i),
+                                    85.5 + (i % 15)));
+                }
+                commit.commit(write.prepareCommit());
+            }
+
+            // Read all data to verify CSV split reading works
+            List<InternalRow> allRows = read(table, null, null, null, null);
+            assertThat(allRows).hasSize(100);
+        }
+    }
+
     private void writeAndCheckCommitFormatTable(
             FormatTable table, InternalRow[] datas, InternalRow dataWithDiffPartition)
             throws Exception {

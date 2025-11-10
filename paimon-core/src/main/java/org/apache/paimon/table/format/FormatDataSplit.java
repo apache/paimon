@@ -34,11 +34,11 @@ public class FormatDataSplit implements Split {
     private final Path filePath;
     private final long fileSize;
     private final long offset;
-    private final long length;
+    private final Long length;
     @Nullable private final BinaryRow partition;
 
     public FormatDataSplit(
-            Path filePath, long fileSize, long offset, long length, @Nullable BinaryRow partition) {
+            Path filePath, long fileSize, long offset, @Nullable Long length, @Nullable BinaryRow partition) {
         this.filePath = filePath;
         this.fileSize = fileSize;
         this.offset = offset;
@@ -47,7 +47,7 @@ public class FormatDataSplit implements Split {
     }
 
     public FormatDataSplit(Path filePath, long fileSize, @Nullable BinaryRow partition) {
-        this(filePath, fileSize, 0L, fileSize, partition);
+        this(filePath, fileSize, 0L, null, partition);
     }
 
     public Path filePath() {
@@ -66,7 +66,7 @@ public class FormatDataSplit implements Split {
         return offset;
     }
 
-    public long length() {
+    public Long length() {
         return length;
     }
 
@@ -90,7 +90,7 @@ public class FormatDataSplit implements Split {
         FormatDataSplit that = (FormatDataSplit) o;
         return offset == that.offset
                 && fileSize == that.fileSize
-                && length == that.length
+                && Objects.equals(length, that.length)
                 && Objects.equals(filePath, that.filePath)
                 && Objects.equals(partition, that.partition);
     }

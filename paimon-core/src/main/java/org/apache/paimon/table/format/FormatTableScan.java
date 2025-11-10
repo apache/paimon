@@ -242,24 +242,38 @@ public class FormatTableScan implements InnerTableScan {
         FileStatus[] files = fileIO.listFiles(path, true);
         for (FileStatus file : files) {
             if (isDataFileName(file.getPath().getName())) {
-                if (isSplittableFile(table.format(), file.getPath().getName())) {
-                    List<FormatDataSplit> fileSplits =
-                            splitLargeFile(file, coreOptions.splitTargetSize(), partition);
-                    splits.addAll(fileSplits);
-                } else {
-                    splits.add(new FormatDataSplit(file.getPath(), file.getLen(), partition));
-                }
+                List<FormatDataSplit> fileSplits =  tryToSplitLargeFile(table.format(), file, coreOptions.splitTargetSize(), partition);
+                splits.addAll(fileSplits);
             }
         }
         return splits;
     }
 
-    private boolean isSplittableFile(FormatTable.Format format, String fileName) {
-        return ((format == FormatTable.Format.CSV
-                                && !table.options().containsKey(CsvOptions.LINE_DELIMITER.key()))
-                        || (format == FormatTable.Format.JSON
-                                && !table.options().containsKey(JsonOptions.LINE_DELIMITER.key())))
-                && isTextFileUncompressed(fileName);
+    private List<FormatDataSplit> tryToSplitLargeFile(FormatTable.Format format, FileStatus file, long maxSplitBytes, BinaryRow partition) {
+        boolean isSplittableTable = ((format == FormatTable.Format.CSV
+                && !table.options().containsKey(CsvOptions.LINE_DELIMITER.key()))
+                || (format == FormatTable.Format.JSON
+                && !table.options().containsKey(JsonOptions.LINE_DELIMITER.key())))
+                && isTextFileUncompressed(file.getPath().getName());
+        List<FormatDataSplit> splits = new ArrayList<>();
+        if(isSplittableTable && file.getLen() > maxSplitBytes) {
+            long remainingBytes = file.getLen();
+            long currentStart = 0;
+
+            while (remainingBytes > 0) {
+                long splitSize = Math.min(maxSplitBytes, remainingBytes);
+
+                FormatDataSplit split =
+                        new FormatDataSplit(
+                                file.getPath(), file.getLen(), currentStart, splitSize, partition);
+                splits.add(split);
+                currentStart += splitSize;
+                remainingBytes -= splitSize;
+            }
+        } else {
+            splits.add(new FormatDataSplit(file.getPath(), file.getLen(), partition));
+        }
+        return splits;
     }
 
     private static boolean isTextFileUncompressed(String fileName) {
@@ -272,26 +286,6 @@ public class FormatTableScan implements InnerTableScan {
         }
         String lastExt = parts[parts.length - 1].toLowerCase();
         return "csv".equals(lastExt) || "json".equals(lastExt);
-    }
-
-    private List<FormatDataSplit> splitLargeFile(
-            FileStatus file, long maxSplitBytes, BinaryRow partition) {
-
-        List<FormatDataSplit> splits = new ArrayList<>();
-        long remainingBytes = file.getLen();
-        long currentStart = 0;
-
-        while (remainingBytes > 0) {
-            long splitSize = Math.min(maxSplitBytes, remainingBytes);
-
-            FormatDataSplit split =
-                    new FormatDataSplit(
-                            file.getPath(), file.getLen(), currentStart, splitSize, partition);
-            splits.add(split);
-            currentStart += splitSize;
-            remainingBytes -= splitSize;
-        }
-        return splits;
     }
 
     public static Map<String, String> extractLeadingEqualityPartitionSpecWhenOnlyAnd(

@@ -38,8 +38,7 @@ abstract class PaimonFormatTableBaseScan(
     pushDownLimit: Option[Int])
   extends ColumnPruningAndPushDown
   with SupportsReportStatistics
-  with ScanHelper
-  with Logging {
+  with ScanHelper {
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
   protected var inputSplits: Array[Split] = _
@@ -54,7 +53,6 @@ abstract class PaimonFormatTableBaseScan(
         .asScala
         .toArray
     }
-    logInfo(s"Scan FormatTable ${table.name()} with ${inputSplits.length} splits.")
     inputSplits
   }
 

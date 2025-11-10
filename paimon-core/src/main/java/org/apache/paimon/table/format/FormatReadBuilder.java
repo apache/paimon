@@ -175,7 +175,7 @@ public class FormatReadBuilder implements ReadBuilder {
                         table.partitionKeys(), readType().getFields(), table.partitionType());
         try {
             FileRecordReader<InternalRow> reader;
-            if (dataSplit.length() != dataSplit.fileSize()) {
+            if (dataSplit.length() != null) {
                 reader =
                         readerFactory.createReader(
                                 formatReaderContext, dataSplit.offset(), dataSplit.length());

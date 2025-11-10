@@ -758,7 +758,6 @@ public class FormatTableScanTest {
         FormatDataSplit split = (FormatDataSplit) splits.get(0);
         assertThat(split.filePath()).isEqualTo(parquetFile);
         assertThat(split.offset()).isEqualTo(0);
-        assertThat(split.length()).isEqualTo(300);
     }
 
     @TestTemplate
