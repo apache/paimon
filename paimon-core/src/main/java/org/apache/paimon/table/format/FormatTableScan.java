@@ -242,12 +242,21 @@ public class FormatTableScan implements InnerTableScan {
         FileStatus[] files = fileIO.listFiles(path, true);
         for (FileStatus file : files) {
             if (isDataFileName(file.getPath().getName())) {
-                List<FormatDataSplit> fileSplits =
-                        splitLargeFile(file, splitMaxByteSize, partition);
-                splits.addAll(fileSplits);
+                if (isSplittableFile(table.format(), file.getPath().getName())) {
+                    List<FormatDataSplit> fileSplits =
+                            splitLargeFile(file, splitMaxByteSize, partition);
+                    splits.addAll(fileSplits);
+                } else {
+                    splits.add(new FormatDataSplit(file.getPath(), 0, file.getLen(), partition));
+                }
             }
         }
         return splits;
+    }
+
+    private boolean isSplittableFile(FormatTable.Format format, String fileName) {
+        return (format == FormatTable.Format.CSV || format == FormatTable.Format.JSON)
+                && fileName.split("\\.").length <= 2;
     }
 
     private List<FormatDataSplit> splitLargeFile(
