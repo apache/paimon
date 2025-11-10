@@ -30,7 +30,6 @@ class JavaPyReadWriteTest(unittest.TestCase):
     def setUpClass(cls):
         cls.tempdir = os.path.abspath(".")
         cls.warehouse = os.path.join(cls.tempdir, 'warehouse')
-        print("test1", cls.warehouse)
         cls.catalog = CatalogFactory.create({
             'warehouse': cls.warehouse
         })
@@ -82,7 +81,6 @@ class JavaPyReadWriteTest(unittest.TestCase):
         )
 
     def test_read(self):
-        print(self.warehouse)
         table = self.catalog.get_table('default.mixed_test_tablej')
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
