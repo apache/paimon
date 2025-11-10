@@ -1,22 +1,6 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
-
 import unittest
+
+from pypaimon.manifest.schema import data_file_meta
 
 from pypaimon.manifest.schema.data_file_meta import DATA_FILE_META_SCHEMA
 from pypaimon.manifest.schema.manifest_file_meta import MANIFEST_FILE_META_SCHEMA
@@ -28,7 +12,14 @@ from pypaimon.manifest.schema.simple_stats import (
 
 
 class ManifestSchemaTest(unittest.TestCase):
-    """Test cases for the manifest schema definitions."""
+    def test_file_source_field_type_and_default(self):
+        schema = data_file_meta.DATA_FILE_META_SCHEMA
+        fields = schema.get("fields", [])
+        file_source_field = next((f for f in fields if f.get("name") == "_FILE_SOURCE"), None)
+
+        self.assertIsNotNone(file_source_field, "_FILE_SOURCE field not found in DATA_FILE_META_SCHEMA")
+        self.assertEqual(file_source_field.get("type"), ["null", "int"])
+        self.assertIsNone(file_source_field.get("default"))
 
     def test_data_file_meta_schema_structure(self):
         """Test that DATA_FILE_META_SCHEMA has the correct structure."""
@@ -73,7 +64,7 @@ class ManifestSchemaTest(unittest.TestCase):
                          ["null", {"type": "long", "logicalType": "timestamp-millis"}])
         self.assertEqual(field_map["_DELETE_ROW_COUNT"]["type"], ["null", "long"])
         self.assertEqual(field_map["_EMBEDDED_FILE_INDEX"]["type"], ["null", "bytes"])
-        self.assertEqual(field_map["_FILE_SOURCE"]["type"], ["null", "string"])
+        self.assertEqual(field_map["_FILE_SOURCE"]["type"], ["null", "int"])
         self.assertEqual(field_map["_VALUE_STATS_COLS"]["type"], ["null", {"type": "array", "items": "string"}])
         self.assertEqual(field_map["_EXTERNAL_PATH"]["type"], ["null", "string"])
         self.assertEqual(field_map["_FIRST_ROW_ID"]["type"], ["null", "long"])
@@ -141,7 +132,3 @@ class ManifestSchemaTest(unittest.TestCase):
             PARTITION_STATS_SCHEMA["name"]
         ]
         self.assertEqual(len(names), len(set(names)), "Schema names should be unique")
-
-
-if __name__ == "__main__":
-    unittest.main()
