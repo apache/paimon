@@ -36,6 +36,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class StandardLineReader implements TextLineReader {
 
     private final InputStream in;
+    private final long offset;
     private final byte[] buffer;
     private final @Nullable Long length;
     private final ByteArrayOutputStream lineBuilder;
@@ -48,6 +49,7 @@ public class StandardLineReader implements TextLineReader {
     public StandardLineReader(InputStream in, long offset, @Nullable Long length)
             throws IOException {
         this.in = in;
+        this.offset = offset;
         this.buffer = new byte[8192];
         this.length = length;
         this.lineBuilder = new ByteArrayOutputStream();
@@ -193,7 +195,7 @@ public class StandardLineReader implements TextLineReader {
             }
             int currentBufferSize = bufferEnd - bufferPosition;
             long currentPosition = ((SeekableInputStream) in).getPos() - currentBufferSize;
-            return currentPosition > length;
+            return currentPosition > length + offset;
         }
         return false;
     }
