@@ -134,12 +134,7 @@ public class IncrementalClusterManagerTest {
     }
 
     @Test
-    public void testUpgrade() throws Exception {
-        // Create a valid table for IncrementalClusterManager
-        Map<String, String> options = new HashMap<>();
-        FileStoreTable table = createTable(options, Collections.emptyList());
-        IncrementalClusterManager incrementalClusterManager = new IncrementalClusterManager(table);
-
+    public void testUpgrade() {
         // Create test files with different levels
         List<DataFileMeta> filesAfterCluster = new ArrayList<>();
         DataFileMeta file1 = createFile(100, 1, 0);

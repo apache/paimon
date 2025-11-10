@@ -27,6 +27,7 @@ import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.operator.ReadOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Pair;
@@ -46,6 +47,7 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Map;
 
 /** Source for Incremental Clustering. */
@@ -86,6 +88,7 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
             FileStoreTable table,
             Map<String, String> partitionSpec,
             DataSplit[] splits,
+            List<CommitMessage> partitionDvIndexCommitMessages,
             @Nullable Integer parallelism) {
         DataStream<Split> source =
                 env.fromSource(
@@ -117,7 +120,8 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
                         .transform(
                                 "Remove files to be clustered",
                                 new CommittableTypeInfo(),
-                                new RemoveClusterBeforeFilesOperator())
+                                new RemoveClusterBeforeFilesOperator(
+                                        partitionDvIndexCommitMessages))
                         .forceNonParallel());
     }
 }

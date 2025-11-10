@@ -23,6 +23,7 @@ import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.cluster.IncrementalClusterSplitSource;
 import org.apache.paimon.flink.cluster.RewriteIncrementalClusterCommittableOperator;
@@ -50,6 +51,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -69,6 +71,7 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -250,6 +253,12 @@ public class CompactAction extends TableActionBase {
                             + "Please set '--force_start_flink_job true' if you need forcibly start a flink job.");
             return false;
         }
+
+        Map<BinaryRow, AppendDeleteFileMaintainer> appendDvMaintainers =
+                table.coreOptions().deletionVectorsEnabled()
+                        ? IncrementalClusterManager.createAppendDvMaintainers(
+                                table, compactUnits.keySet(), incrementalClusterManager.snapshot())
+                        : Collections.emptyMap();
         Map<BinaryRow, DataSplit[]> partitionSplits =
                 compactUnits.entrySet().stream()
                         .collect(
@@ -259,7 +268,9 @@ public class CompactAction extends TableActionBase {
                                                 incrementalClusterManager
                                                         .toSplits(
                                                                 entry.getKey(),
-                                                                entry.getValue().files())
+                                                                entry.getValue().files(),
+                                                                appendDvMaintainers.get(
+                                                                        entry.getKey()))
                                                         .toArray(new DataSplit[0])));
 
         // 2. read，sort and write in partition
@@ -269,13 +280,22 @@ public class CompactAction extends TableActionBase {
             DataSplit[] splits = entry.getValue();
             LinkedHashMap<String, String> partitionSpec =
                     partitionComputer.generatePartValues(entry.getKey());
+
             // 2.1 generate source for current partition
+            List<CommitMessage> partitionDvIndexCommitMessages =
+                    appendDvMaintainers.get(entry.getKey()) == null
+                            ? Collections.emptyList()
+                            : IncrementalClusterManager.producePartitionDvIndexCommitMessages(
+                                    table,
+                                    Arrays.asList(splits),
+                                    appendDvMaintainers.get(entry.getKey()));
             Pair<DataStream<RowData>, DataStream<Committable>> sourcePair =
                     IncrementalClusterSplitSource.buildSource(
                             env,
                             table,
                             partitionSpec,
                             splits,
+                            partitionDvIndexCommitMessages,
                             options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
             // 2.2 cluster in partition
