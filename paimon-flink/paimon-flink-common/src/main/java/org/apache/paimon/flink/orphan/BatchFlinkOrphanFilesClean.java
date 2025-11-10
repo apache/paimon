@@ -51,6 +51,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -645,5 +646,37 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                     "Cleaner for table " + tableKey + " not found in cleanerMap");
         }
         return cleaner;
+    }
+
+    private static class BranchTableInfo implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        private final String branch;
+        private final String databaseName;
+        private final String tableName;
+        private final Map<String, String> catalogOptions;
+
+        public BranchTableInfo(
+                String branch,
+                String databaseName,
+                String tableName,
+                Map<String, String> catalogOptions) {
+            this.branch = branch;
+            this.databaseName = databaseName;
+            this.tableName = tableName;
+            this.catalogOptions = catalogOptions;
+        }
+
+        public String getBranch() {
+            return branch;
+        }
+
+        public Identifier getIdentifier() {
+            return new Identifier(databaseName, tableName);
+        }
+
+        public Map<String, String> getCatalogOptions() {
+            return catalogOptions;
+        }
     }
 }
