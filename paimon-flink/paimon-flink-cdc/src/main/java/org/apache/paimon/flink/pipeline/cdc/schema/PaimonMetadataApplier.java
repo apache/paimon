@@ -314,12 +314,6 @@ public class PaimonMetadataApplier implements MetadataApplier {
 
     private void applyRenameColumn(RenameColumnEvent event) throws SchemaEvolveException {
         try {
-            Map<String, String> options =
-                    catalog.getTable(
-                                    new Identifier(
-                                            event.tableId().getSchemaName(),
-                                            event.tableId().getTableName()))
-                            .options();
             List<SchemaChange> tableChangeList = new ArrayList<>();
             event.getNameMapping()
                     .forEach(

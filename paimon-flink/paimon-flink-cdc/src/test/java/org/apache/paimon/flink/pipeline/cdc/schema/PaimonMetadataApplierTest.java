@@ -88,7 +88,9 @@ class PaimonMetadataApplierTest {
         if (catalog != null) {
             catalog.close();
         }
-        metadataApplier.close();
+        if (metadataApplier != null) {
+            metadataApplier.close();
+        }
     }
 
     @Test
