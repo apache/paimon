@@ -40,15 +40,34 @@ class MockFileIO:
 
     def get_file_size(self, path: str) -> int:
         """Get file size."""
-        return self._file_io.get_file_size(Path(path))
+        return self._file_io.get_file_size(path)
 
-    def new_input_stream(self, path: Path):
+    def new_input_stream(self, path):
         """Create new input stream for reading."""
+        if not isinstance(path, (str, type(None))):
+            path = str(path)
         return self._file_io.new_input_stream(path)
 
 
 class BlobTest(unittest.TestCase):
     """Tests for Blob interface following org.apache.paimon.data.BlobTest."""
+
+    @staticmethod
+    def _to_url(path):
+        if isinstance(path, Path):
+            path_str = str(path)
+            is_absolute = os.path.isabs(path_str) or (len(path_str) >= 2 and path_str[1] == ':')
+            if is_absolute:
+                if path_str.startswith('/'):
+                    # Unix absolute path: file:///path (three slashes total)
+                    return f"file://{path_str}"
+                else:
+                    # Windows absolute path: file:///C:/path (three slashes)
+                    return f"file:///{path_str}"
+            else:
+                # Relative path: use file:// (two slashes)
+                return f"file://{path_str}"
+        return str(path) if path else path
 
     def setUp(self):
         """Set up test environment with temporary file."""
@@ -528,6 +547,34 @@ class BlobTest(unittest.TestCase):
 class BlobEndToEndTest(unittest.TestCase):
     """End-to-end tests for blob functionality with schema definition, file writing, and reading."""
 
+    @staticmethod
+    def _to_url(path):
+        """Convert Path to string for FileIO methods.
+        
+        For absolute paths (Unix /path or Windows C:/path), uses file:/// (three slashes)
+        to comply with RFC 8089 file URI specification.
+        For relative paths, uses file:// (two slashes).
+        """
+        if isinstance(path, Path):
+            path_str = str(path)
+            # Check if it's an absolute path
+            # Unix: starts with /, Windows: has drive letter (C:, D:, etc.)
+            is_absolute = os.path.isabs(path_str) or (len(path_str) >= 2 and path_str[1] == ':')
+            if is_absolute:
+                # Absolute path: use file:/// (three slashes per RFC 8089)
+                # For Unix paths starting with /, we get file:////path which is wrong
+                # So we need to handle it differently
+                if path_str.startswith('/'):
+                    # Unix absolute path: file:///path (three slashes total)
+                    return f"file://{path_str}"
+                else:
+                    # Windows absolute path: file:///C:/path (three slashes)
+                    return f"file:///{path_str}"
+            else:
+                # Relative path: use file:// (two slashes)
+                return f"file://{path_str}"
+        return str(path) if path else path
+
     def setUp(self):
         """Set up test environment."""
         self.temp_dir = tempfile.mkdtemp()
@@ -562,9 +609,11 @@ class BlobEndToEndTest(unittest.TestCase):
         blob_data = [test_data[blob_field_name].to_data()]
         schema = pa.schema([pa.field(blob_field_name, pa.large_binary())])
         table = pa.table([blob_data], schema=schema)
-        blob_files[blob_field_name] = Path(self.temp_dir) / (blob_field_name + ".blob")
-        file_io.write_blob(blob_files[blob_field_name], table, False)
-        self.assertTrue(file_io.exists(blob_files[blob_field_name]))
+        blob_file_path = Path(self.temp_dir) / (blob_field_name + ".blob")
+        blob_file_url = self._to_url(blob_file_path)
+        blob_files[blob_field_name] = blob_file_url
+        file_io.write_blob(blob_file_url, table, False)
+        self.assertTrue(file_io.exists(blob_file_url))
 
         # ========== Step 3: Read Data and Check Data ==========
         for field_name, file_path in blob_files.items():
@@ -597,7 +646,6 @@ class BlobEndToEndTest(unittest.TestCase):
         from pypaimon.common.file_io import FileIO
         from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
         from pypaimon.table.row.row_kind import RowKind
-        from pathlib import Path
 
         # Set up file I/O
         file_io = FileIO(self.temp_dir, {})
@@ -678,10 +726,11 @@ class BlobEndToEndTest(unittest.TestCase):
         ], schema=multi_column_schema)
 
         multi_column_file = Path(self.temp_dir) / "multi_column.blob"
+        multi_column_url = self._to_url(multi_column_file)
 
         # Should throw RuntimeError for multiple columns
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(multi_column_file, multi_column_table, False)
+            file_io.write_blob(multi_column_url, multi_column_table, False)
         self.assertIn("single column", str(context.exception))
 
         # Test that FileIO.write_blob rejects null values
@@ -689,10 +738,11 @@ class BlobEndToEndTest(unittest.TestCase):
         null_table = pa.table([[b"data", None]], schema=null_schema)
 
         null_file = Path(self.temp_dir) / "null_data.blob"
+        null_file_url = self._to_url(null_file)
 
         # Should throw RuntimeError for null values
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(null_file, null_table, False)
+            file_io.write_blob(null_file_url, null_table, False)
         self.assertIn("null values", str(context.exception))
 
         # ========== Test FormatBlobReader with complex type schema ==========
@@ -702,7 +752,8 @@ class BlobEndToEndTest(unittest.TestCase):
         valid_table = pa.table([valid_blob_data], schema=valid_schema)
 
         valid_blob_file = Path(self.temp_dir) / "valid_blob.blob"
-        file_io.write_blob(valid_blob_file, valid_table, False)
+        valid_blob_url = self._to_url(valid_blob_file)
+        file_io.write_blob(valid_blob_url, valid_table, False)
 
         # Try to read with complex type field definition - this should fail
         # because FormatBlobReader tries to create PyArrow schema with complex types
@@ -737,7 +788,6 @@ class BlobEndToEndTest(unittest.TestCase):
         from pypaimon.schema.data_types import DataField, AtomicType
         from pypaimon.common.file_io import FileIO
         from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
-        from pathlib import Path
 
         # Set up file I/O
         file_io = FileIO(self.temp_dir, {})
@@ -750,7 +800,8 @@ class BlobEndToEndTest(unittest.TestCase):
         valid_table = pa.table([valid_blob_data], schema=valid_schema)
 
         header_test_file = Path(self.temp_dir) / "header_test.blob"
-        file_io.write_blob(header_test_file, valid_table, False)
+        header_test_url = self._to_url(header_test_file)
+        file_io.write_blob(header_test_url, valid_table, False)
 
         # Read the file and corrupt the header (last 5 bytes: index_length + version)
         with open(header_test_file, 'rb') as f:
@@ -788,7 +839,8 @@ class BlobEndToEndTest(unittest.TestCase):
         large_table = pa.table([large_blob_data], schema=large_schema)
 
         full_blob_file = Path(self.temp_dir) / "full_blob.blob"
-        file_io.write_blob(full_blob_file, large_table, False)
+        full_blob_url = self._to_url(full_blob_file)
+        file_io.write_blob(full_blob_url, large_table, False)
 
         # Read the full file and truncate it in the middle
         with open(full_blob_file, 'rb') as f:
@@ -826,11 +878,12 @@ class BlobEndToEndTest(unittest.TestCase):
         zero_table = pa.table([zero_blob_data], schema=zero_schema)
 
         zero_blob_file = Path(self.temp_dir) / "zero_length.blob"
-        file_io.write_blob(zero_blob_file, zero_table, False)
+        zero_blob_url = self._to_url(zero_blob_file)
+        file_io.write_blob(zero_blob_url, zero_table, False)
 
         # Verify file was created
-        self.assertTrue(file_io.exists(zero_blob_file))
-        file_size = file_io.get_file_size(zero_blob_file)
+        self.assertTrue(file_io.exists(zero_blob_url))
+        file_size = file_io.get_file_size(zero_blob_url)
         self.assertGreater(file_size, 0)  # File should have headers even with empty blob
 
         # Read zero-length blob
@@ -868,10 +921,11 @@ class BlobEndToEndTest(unittest.TestCase):
         large_sim_table = pa.table([simulated_large_data], schema=large_sim_schema)
 
         large_sim_file = Path(self.temp_dir) / "large_simulation.blob"
-        file_io.write_blob(large_sim_file, large_sim_table, False)
+        large_sim_url = self._to_url(large_sim_file)
+        file_io.write_blob(large_sim_url, large_sim_table, False)
 
         # Verify large file was written
-        large_sim_size = file_io.get_file_size(large_sim_file)
+        large_sim_size = file_io.get_file_size(large_sim_url)
         self.assertGreater(large_sim_size, 10 * 1024 * 1024)  # Should be > 10MB
 
         # Read large blob in memory-safe manner
@@ -937,10 +991,11 @@ class BlobEndToEndTest(unittest.TestCase):
         ], schema=multi_field_schema)
 
         multi_field_file = Path(self.temp_dir) / "multi_field.blob"
+        multi_field_url = self._to_url(multi_field_file)
 
         # Should reject multi-field table
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(multi_field_file, multi_field_table, False)
+            file_io.write_blob(multi_field_url, multi_field_table, False)
         self.assertIn("single column", str(context.exception))
 
         # Test that blob format rejects non-binary field types
@@ -948,10 +1003,11 @@ class BlobEndToEndTest(unittest.TestCase):
         non_binary_table = pa.table([["not_binary_data"]], schema=non_binary_schema)
 
         non_binary_file = Path(self.temp_dir) / "non_binary.blob"
+        non_binary_url = self._to_url(non_binary_file)
 
         # Should reject non-binary field
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(non_binary_file, non_binary_table, False)
+            file_io.write_blob(non_binary_url, non_binary_table, False)
         # Should fail due to type conversion issues (non-binary field can't be converted to BLOB)
         self.assertTrue(
             "large_binary" in str(context.exception) or
@@ -965,10 +1021,11 @@ class BlobEndToEndTest(unittest.TestCase):
         null_table = pa.table([[b"data", None, b"more_data"]], schema=null_schema)
 
         null_file = Path(self.temp_dir) / "with_nulls.blob"
+        null_file_url = self._to_url(null_file)
 
         # Should reject null values
         with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(null_file, null_table, False)
+            file_io.write_blob(null_file_url, null_table, False)
         self.assertIn("null values", str(context.exception))
 
     def test_blob_end_to_end_with_descriptor(self):
@@ -1007,10 +1064,11 @@ class BlobEndToEndTest(unittest.TestCase):
 
         # Write the blob file with blob_as_descriptor=True
         blob_file_path = Path(self.temp_dir) / "descriptor_blob.blob"
-        file_io.write_blob(blob_file_path, table, blob_as_descriptor=True)
+        blob_file_url = self._to_url(blob_file_path)
+        file_io.write_blob(blob_file_url, table, blob_as_descriptor=True)
         # Verify the blob file was created
-        self.assertTrue(file_io.exists(blob_file_path))
-        file_size = file_io.get_file_size(blob_file_path)
+        self.assertTrue(file_io.exists(blob_file_url))
+        file_size = file_io.get_file_size(blob_file_url)
         self.assertGreater(file_size, 0)
 
         # ========== Step 3: Read data and check ==========
