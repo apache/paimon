@@ -242,21 +242,27 @@ public class FormatTableScan implements InnerTableScan {
         FileStatus[] files = fileIO.listFiles(path, true);
         for (FileStatus file : files) {
             if (isDataFileName(file.getPath().getName())) {
-                List<FormatDataSplit> fileSplits =  tryToSplitLargeFile(table.format(), file, coreOptions.splitTargetSize(), partition);
+                List<FormatDataSplit> fileSplits =
+                        tryToSplitLargeFile(
+                                table.format(), file, coreOptions.splitTargetSize(), partition);
                 splits.addAll(fileSplits);
             }
         }
         return splits;
     }
 
-    private List<FormatDataSplit> tryToSplitLargeFile(FormatTable.Format format, FileStatus file, long maxSplitBytes, BinaryRow partition) {
-        boolean isSplittableTable = ((format == FormatTable.Format.CSV
-                && !table.options().containsKey(CsvOptions.LINE_DELIMITER.key()))
-                || (format == FormatTable.Format.JSON
-                && !table.options().containsKey(JsonOptions.LINE_DELIMITER.key())))
-                && isTextFileUncompressed(file.getPath().getName());
+    private List<FormatDataSplit> tryToSplitLargeFile(
+            FormatTable.Format format, FileStatus file, long maxSplitBytes, BinaryRow partition) {
+        boolean isSplittableFile =
+                ((format == FormatTable.Format.CSV
+                                        && !table.options()
+                                                .containsKey(CsvOptions.LINE_DELIMITER.key()))
+                                || (format == FormatTable.Format.JSON
+                                        && !table.options()
+                                                .containsKey(JsonOptions.LINE_DELIMITER.key())))
+                        && isTextFileUncompressed(file.getPath().getName());
         List<FormatDataSplit> splits = new ArrayList<>();
-        if(isSplittableTable && file.getLen() > maxSplitBytes) {
+        if (isSplittableFile && file.getLen() > maxSplitBytes) {
             long remainingBytes = file.getLen();
             long currentStart = 0;
 

@@ -30,13 +30,17 @@ import scala.collection.JavaConverters._
 case class FormatTableStatistics[T <: PaimonFormatTableBaseScan](scan: T) extends Statistics {
 
   private lazy val fileTotalSize: Long =
-    scan.getOriginSplits.map(_.asInstanceOf[FormatDataSplit]).map(split => {
-      if(split.length() != null) {
-        split.length()
-      } else {
-        split.fileSize()
-      }
-    }).sum
+    scan.getOriginSplits
+      .map(_.asInstanceOf[FormatDataSplit])
+      .map(
+        split => {
+          if (split.length() != null) {
+            split.length()
+          } else {
+            split.fileSize()
+          }
+        })
+      .sum
 
   override def sizeInBytes(): OptionalLong = {
     val size = fileTotalSize /

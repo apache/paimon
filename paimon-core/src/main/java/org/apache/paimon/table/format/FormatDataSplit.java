@@ -34,11 +34,15 @@ public class FormatDataSplit implements Split {
     private final Path filePath;
     private final long fileSize;
     private final long offset;
-    private final Long length;
+    @Nullable private final Long length;
     @Nullable private final BinaryRow partition;
 
     public FormatDataSplit(
-            Path filePath, long fileSize, long offset, @Nullable Long length, @Nullable BinaryRow partition) {
+            Path filePath,
+            long fileSize,
+            long offset,
+            @Nullable Long length,
+            @Nullable BinaryRow partition) {
         this.filePath = filePath;
         this.fileSize = fileSize;
         this.offset = offset;
