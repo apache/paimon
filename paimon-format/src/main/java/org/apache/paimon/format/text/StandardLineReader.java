@@ -40,7 +40,6 @@ public class StandardLineReader implements TextLineReader {
     private final @Nullable Long length;
     private final ByteArrayOutputStream lineBuilder;
 
-    private boolean firstRecord = true;
     private int bufferStart;
     private int bufferEnd;
     private int bufferPosition;
@@ -78,7 +77,6 @@ public class StandardLineReader implements TextLineReader {
         }
         ((SeekableInputStream) in).seek(offset);
         skipFirstLine();
-        firstRecord = false;
     }
 
     @Nullable
@@ -94,20 +92,11 @@ public class StandardLineReader implements TextLineReader {
         if (bufferPosition >= bufferEnd) {
             fillBuffer();
         }
-        if (closed) {
-            // The first record in the split is always returned
-            if (firstRecord && bufferEnd > 0) {
-                firstRecord = false;
-                return "";
-            }
-            return null;
-        }
 
         while (!closed) {
             if (seekToStartOfLineTerminator()) {
                 copyToLineBuilder();
                 seekPastLineTerminator();
-                firstRecord = false;
                 return buildLine();
             }
 
@@ -115,7 +104,6 @@ public class StandardLineReader implements TextLineReader {
             copyToLineBuilder();
             fillBuffer();
         }
-        firstRecord = false;
         String line = buildLine();
         if (line.isEmpty()) {
             return null;
@@ -129,8 +117,6 @@ public class StandardLineReader implements TextLineReader {
                 close();
                 return;
             }
-
-            firstRecord = false;
 
             // fill buffer if necessary
             if (bufferPosition >= bufferEnd) {
