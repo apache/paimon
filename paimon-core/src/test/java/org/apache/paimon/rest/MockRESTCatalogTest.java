@@ -213,7 +213,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(() -> restCatalog.createTable(identifier, schema, false))
                 .withMessage(
-                        "Cannot define format-table.implementation is engine for format table when data token is enabled.");
+                        "Cannot define format-table.implementation is engine for format table when data token is enabled and not define path.");
         catalog.dropTable(identifier, true);
     }
 
