@@ -25,6 +25,7 @@ under the License.
 -->
 
 # Views
+
 A view is a logical table that encapsulates business logic and domain-specific semantics.
 While most compute engines support views natively, each engine stores view metadata in proprietary formats, creating interoperability challenges across different platforms.
 Paimon views abstracting engine-specific query dialects and establishing unified metadata standards.
@@ -104,4 +105,4 @@ CALL sys.alter_view_dialect('view_identifier', 'drop', 'spark');
 
 - [Spark SQL DDL – Views]({{< ref "spark/sql-ddl#view" >}})
 - [REST Catalog Overview]({{< ref "concepts/rest/overview" >}})
-- [REST Catalog View API]({{< ref "concepts/rest/rest-api/#tag/view" >}})
+- [REST Catalog View API]({{< ref "concepts/rest/rest-api" >}})
