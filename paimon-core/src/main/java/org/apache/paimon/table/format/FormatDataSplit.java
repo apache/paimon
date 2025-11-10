@@ -29,18 +29,26 @@ import java.util.Objects;
 /** {@link FormatDataSplit} for format table. */
 public class FormatDataSplit implements Split {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private final Path filePath;
+    private final long fileSize;
     private final long offset;
     private final long length;
     @Nullable private final BinaryRow partition;
 
-    public FormatDataSplit(Path filePath, long offset, long length, @Nullable BinaryRow partition) {
+    public FormatDataSplit(
+            Path filePath, long fileSize, long offset, long length, @Nullable BinaryRow partition) {
         this.filePath = filePath;
+        this.fileSize = fileSize;
         this.offset = offset;
         this.length = length;
         this.partition = partition;
+    }
+
+    public FormatDataSplit(
+            Path filePath, long fileSize, long offset, @Nullable BinaryRow partition) {
+        this(filePath, fileSize, offset, fileSize, partition);
     }
 
     public Path filePath() {
@@ -48,14 +56,18 @@ public class FormatDataSplit implements Split {
     }
 
     public Path dataPath() {
-        return filePath;
+        return this.filePath;
+    }
+
+    public long fileSize() {
+        return this.fileSize;
     }
 
     public long offset() {
         return offset;
     }
 
-    public long length() {
+    public Long length() {
         return length;
     }
 
@@ -78,6 +90,7 @@ public class FormatDataSplit implements Split {
         }
         FormatDataSplit that = (FormatDataSplit) o;
         return offset == that.offset
+                && fileSize == that.fileSize
                 && length == that.length
                 && Objects.equals(filePath, that.filePath)
                 && Objects.equals(partition, that.partition);
@@ -85,6 +98,6 @@ public class FormatDataSplit implements Split {
 
     @Override
     public int hashCode() {
-        return Objects.hash(filePath, offset, length, partition);
+        return Objects.hash(filePath, fileSize, offset, length, partition);
     }
 }

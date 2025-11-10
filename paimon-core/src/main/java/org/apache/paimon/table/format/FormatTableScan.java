@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.csv.CsvOptions;
+import org.apache.paimon.format.json.JsonOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -245,7 +247,7 @@ public class FormatTableScan implements InnerTableScan {
                             splitLargeFile(file, coreOptions.formatTableSplitMaxSize(), partition);
                     splits.addAll(fileSplits);
                 } else {
-                    splits.add(new FormatDataSplit(file.getPath(), 0, file.getLen(), partition));
+                    splits.add(new FormatDataSplit(file.getPath(), file.getLen(), 0, partition));
                 }
             }
         }
@@ -253,7 +255,10 @@ public class FormatTableScan implements InnerTableScan {
     }
 
     private boolean isSplittableFile(FormatTable.Format format, String fileName) {
-        return (format == FormatTable.Format.CSV || format == FormatTable.Format.JSON)
+        return ((format == FormatTable.Format.CSV
+                                && !table.options().containsKey(CsvOptions.LINE_DELIMITER.key()))
+                        || (format == FormatTable.Format.JSON
+                                && !table.options().containsKey(JsonOptions.LINE_DELIMITER.key())))
                 && isTextFileUncompressed(fileName);
     }
 
@@ -280,7 +285,8 @@ public class FormatTableScan implements InnerTableScan {
             long splitSize = Math.min(maxSplitBytes, remainingBytes);
 
             FormatDataSplit split =
-                    new FormatDataSplit(file.getPath(), currentStart, splitSize, partition);
+                    new FormatDataSplit(
+                            file.getPath(), file.getLen(), currentStart, splitSize, partition);
             splits.add(split);
             currentStart += splitSize;
             remainingBytes -= splitSize;

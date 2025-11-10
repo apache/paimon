@@ -22,6 +22,8 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.csv.CsvOptions;
+import org.apache.paimon.format.json.JsonOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -698,6 +700,37 @@ public class FormatTableScanTest {
             FormatTableScan scan = new FormatTableScan(formatTable, null, null);
             List<Split> splits = scan.plan().splits();
             assertThat(splits).hasSize(5);
+        }
+    }
+
+    @TestTemplate
+    public void testCreateSplitsWhenDefineLineDelimiter() throws IOException {
+        for (String format : Arrays.asList("csv", "json")) {
+            Path tableLocation = new Path(new Path(tmpPath.toUri()), format);
+            LocalFileIO fileIO = LocalFileIO.create();
+            Path file1 = new Path(tableLocation, "data1." + format);
+            Path file2 = new Path(tableLocation, "data2." + format);
+            Path file3 = new Path(tableLocation, "data3." + format);
+            writeTestFile(fileIO, file1, 80);
+            writeTestFile(fileIO, file2, 120);
+            writeTestFile(fileIO, file3, 200);
+
+            Map<String, String> options = new HashMap<>();
+            options.put(FORMAT_TABLE_SPLIT_MAX_BYTES.key(), "100b");
+            if ("csv".equals(format)) {
+                options.put(CsvOptions.LINE_DELIMITER.key(), "\001");
+            } else {
+                options.put(JsonOptions.LINE_DELIMITER.key(), "\001");
+            }
+
+            FormatTable formatTable =
+                    createFormatTableWithOptions(
+                            tableLocation,
+                            FormatTable.Format.valueOf(format.toUpperCase()),
+                            options);
+            FormatTableScan scan = new FormatTableScan(formatTable, null, null);
+            List<Split> splits = scan.plan().splits();
+            assertThat(splits).hasSize(3);
         }
     }
 

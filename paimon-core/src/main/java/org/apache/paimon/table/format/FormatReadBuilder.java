@@ -158,7 +158,7 @@ public class FormatReadBuilder implements ReadBuilder {
     protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
         Path filePath = dataSplit.dataPath();
         FormatReaderContext formatReaderContext =
-                new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
+                new FormatReaderContext(table.fileIO(), filePath, dataSplit.fileSize(), null);
         // Skip pushing down partition filters to reader.
         List<Predicate> readFilters =
                 excludePredicateWithFields(
@@ -175,8 +175,7 @@ public class FormatReadBuilder implements ReadBuilder {
                         table.partitionKeys(), readType().getFields(), table.partitionType());
         try {
             FileRecordReader<InternalRow> reader;
-            if (table.format() == FormatTable.Format.CSV
-                    || table.format() == FormatTable.Format.JSON) {
+            if (dataSplit.length() != dataSplit.fileSize()) {
                 reader =
                         readerFactory.createReader(
                                 formatReaderContext, dataSplit.offset(), dataSplit.length());
