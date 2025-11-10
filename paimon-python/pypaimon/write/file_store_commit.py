@@ -361,7 +361,7 @@ class FileStoreCommit:
         for entry in commit_entries:
             # Check if this is an append file that needs row ID assignment
             if (entry.kind == 0 and  # ADD kind
-                    entry.file.file_source == "APPEND" and  # APPEND file source
+                    entry.file.file_source == 0 and  # APPEND file source
                     entry.file.first_row_id is None):  # No existing first_row_id
 
                 if self._is_blob_file(entry.file.file_name):
