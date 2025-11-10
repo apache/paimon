@@ -163,7 +163,7 @@ DATA_FILE_META_SCHEMA = {
          "default": None},
         {"name": "_DELETE_ROW_COUNT", "type": ["null", "long"], "default": None},
         {"name": "_EMBEDDED_FILE_INDEX", "type": ["null", "bytes"], "default": None},
-        {"name": "_FILE_SOURCE", "type": ["null", "string"], "default": None},
+        {"name": "_FILE_SOURCE", "type": ["null", "int"], "default": None},
         {"name": "_VALUE_STATS_COLS",
          "type": ["null", {"type": "array", "items": "string"}],
          "default": None},
