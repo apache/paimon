@@ -43,6 +43,7 @@ import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.Pair;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,7 +57,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.CLUSTERING_INCREMENTAL;
@@ -67,6 +67,7 @@ public class IncrementalClusterManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(IncrementalClusterManager.class);
 
+    private final FileStoreTable table;
     private final InternalRowPartitionComputer partitionComputer;
     private final Snapshot snapshot;
     private final SnapshotReader snapshotReader;
@@ -85,6 +86,7 @@ public class IncrementalClusterManager {
         checkArgument(
                 table.bucketMode() == BucketMode.BUCKET_UNAWARE,
                 "only append unaware-bucket table support incremental clustering.");
+        this.table = table;
         CoreOptions options = table.coreOptions();
         checkArgument(
                 options.clusteringIncrementalEnabled(),
@@ -204,41 +206,82 @@ public class IncrementalClusterManager {
         return partitionLevels;
     }
 
-    public List<DataSplit> toSplits(
-            BinaryRow partition,
-            List<DataFileMeta> files,
-            @Nullable AppendDeleteFileMaintainer dvIndexFileMaintainer) {
-        List<DataSplit> splits = new ArrayList<>();
+    public Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> toSplitsAndRewriteDvFiles(
+            Map<BinaryRow, CompactUnit> compactUnits) {
+        Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> result = new HashMap<>();
+        boolean dvEnabled = table.coreOptions().deletionVectorsEnabled();
+        for (BinaryRow partition : compactUnits.keySet()) {
+            CompactUnit unit = compactUnits.get(partition);
+            AppendDeleteFileMaintainer dvMaintainer =
+                    dvEnabled
+                            ? BaseAppendDeleteFileMaintainer.forUnawareAppend(
+                                    table.store().newIndexFileHandler(), snapshot, partition)
+                            : null;
+            List<DataSplit> splits = new ArrayList<>();
 
-        DataSplit.Builder builder =
-                DataSplit.builder()
-                        .withPartition(partition)
-                        .withBucket(0)
-                        .withTotalBuckets(1)
-                        .isStreaming(false);
+            DataSplit.Builder builder =
+                    DataSplit.builder()
+                            .withPartition(partition)
+                            .withBucket(0)
+                            .withTotalBuckets(1)
+                            .isStreaming(false);
 
-        SplitGenerator splitGenerator = snapshotReader.splitGenerator();
-        List<SplitGenerator.SplitGroup> splitGroups = splitGenerator.splitForBatch(files);
+            SplitGenerator splitGenerator = snapshotReader.splitGenerator();
+            List<SplitGenerator.SplitGroup> splitGroups =
+                    splitGenerator.splitForBatch(unit.files());
 
-        for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
-            List<DataFileMeta> dataFiles = splitGroup.files;
-            String bucketPath = snapshotReader.pathFactory().bucketPath(partition, 0).toString();
-            builder.withDataFiles(dataFiles)
-                    .rawConvertible(splitGroup.rawConvertible)
-                    .withBucketPath(bucketPath);
+            for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
+                List<DataFileMeta> dataFiles = splitGroup.files;
 
-            if (dvIndexFileMaintainer != null) {
-                List<DeletionFile> dataDeletionFiles = new ArrayList<>();
-                for (DataFileMeta file : dataFiles) {
-                    dataDeletionFiles.add(dvIndexFileMaintainer.getDeletionFile(file.fileName()));
+                String bucketPath =
+                        snapshotReader.pathFactory().bucketPath(partition, 0).toString();
+                builder.withDataFiles(dataFiles)
+                        .rawConvertible(splitGroup.rawConvertible)
+                        .withBucketPath(bucketPath);
+
+                if (dvMaintainer != null) {
+                    List<DeletionFile> dataDeletionFiles = new ArrayList<>();
+                    for (DataFileMeta file : dataFiles) {
+                        DeletionFile deletionFile =
+                                dvMaintainer.notifyRemovedDeletionVector(file.fileName());
+                        dataDeletionFiles.add(deletionFile);
+                    }
+                    builder.withDataDeletionFiles(dataDeletionFiles);
                 }
-                builder.withDataDeletionFiles(dataDeletionFiles);
+                splits.add(builder.build());
             }
 
-            splits.add(builder.build());
+            // generate delete dv index meta
+            CommitMessage dvCommitMessage = null;
+            if (dvMaintainer != null) {
+                List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+                List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
+                List<IndexManifestEntry> indexEntries = dvMaintainer.persist();
+                for (IndexManifestEntry entry : indexEntries) {
+                    if (entry.kind() == FileKind.ADD) {
+                        newIndexFiles.add(entry.indexFile());
+                    } else {
+                        deletedIndexFiles.add(entry.indexFile());
+                    }
+                }
+                dvCommitMessage =
+                        new CommitMessageImpl(
+                                dvMaintainer.getPartition(),
+                                0,
+                                table.coreOptions().bucket(),
+                                DataIncrement.emptyIncrement(),
+                                new CompactIncrement(
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        newIndexFiles,
+                                        deletedIndexFiles));
+            }
+
+            result.put(partition, Pair.of(splits, dvCommitMessage));
         }
 
-        return splits;
+        return result;
     }
 
     public static List<DataFileMeta> upgrade(
@@ -246,60 +289,6 @@ public class IncrementalClusterManager {
         return filesAfterCluster.stream()
                 .map(file -> file.upgrade(outputLevel))
                 .collect(Collectors.toList());
-    }
-
-    public static Map<BinaryRow, AppendDeleteFileMaintainer> createAppendDvMaintainers(
-            FileStoreTable table, Set<BinaryRow> partitions, Snapshot snapshot) {
-        Map<BinaryRow, AppendDeleteFileMaintainer> dvMaintainers = new HashMap<>();
-        for (BinaryRow partition : partitions) {
-            AppendDeleteFileMaintainer appendDvMaintainer =
-                    BaseAppendDeleteFileMaintainer.forUnawareAppend(
-                            table.store().newIndexFileHandler(), snapshot, partition);
-            dvMaintainers.put(partition, appendDvMaintainer);
-        }
-        return dvMaintainers;
-    }
-
-    public static List<CommitMessage> producePartitionDvIndexCommitMessages(
-            FileStoreTable table,
-            List<DataSplit> splits,
-            AppendDeleteFileMaintainer appendDvMaintainer) {
-        checkArgument(appendDvMaintainer != null);
-        // remove deletion vector for files to be clustered
-        for (DataSplit dataSplit : splits) {
-            checkArgument(
-                    dataSplit.partition().equals(appendDvMaintainer.getPartition()),
-                    "partition of this dataSplit is not matched with the Dv Maintainer!");
-            dataSplit
-                    .dataFiles()
-                    .forEach(f -> appendDvMaintainer.notifyRemovedDeletionVector(f.fileName()));
-        }
-
-        // generate new dv index meta, handle by partition
-        List<IndexFileMeta> newIndexFiles = new ArrayList<>();
-        List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
-        List<IndexManifestEntry> indexEntries = appendDvMaintainer.persist();
-        for (IndexManifestEntry entry : indexEntries) {
-            if (entry.kind() == FileKind.ADD) {
-                newIndexFiles.add(entry.indexFile());
-            } else {
-                deletedIndexFiles.add(entry.indexFile());
-            }
-        }
-        CommitMessageImpl commitMessage =
-                new CommitMessageImpl(
-                        appendDvMaintainer.getPartition(),
-                        0,
-                        table.coreOptions().bucket(),
-                        DataIncrement.emptyIncrement(),
-                        new CompactIncrement(
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                newIndexFiles,
-                                deletedIndexFiles));
-
-        return Collections.singletonList(commitMessage);
     }
 
     public static void logForPartitionLevel(

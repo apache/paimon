@@ -26,7 +26,6 @@ import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -539,26 +538,8 @@ public class CompactProcedure extends BaseProcedure {
         Map<BinaryRow, CompactUnit> compactUnits =
                 incrementalClusterManager.prepareForCluster(fullCompaction);
 
-        Map<BinaryRow, AppendDeleteFileMaintainer> appendDvMaintainers =
-                table.coreOptions().deletionVectorsEnabled()
-                        ? IncrementalClusterManager.createAppendDvMaintainers(
-                                table, compactUnits.keySet(), incrementalClusterManager.snapshot())
-                        : Collections.emptyMap();
-
-        // generate splits for each partition
-        Map<BinaryRow, DataSplit[]> partitionSplits =
-                compactUnits.entrySet().stream()
-                        .collect(
-                                Collectors.toMap(
-                                        Map.Entry::getKey,
-                                        entry ->
-                                                incrementalClusterManager
-                                                        .toSplits(
-                                                                entry.getKey(),
-                                                                entry.getValue().files(),
-                                                                appendDvMaintainers.get(
-                                                                        entry.getKey()))
-                                                        .toArray(new DataSplit[0])));
+        Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> partitionSplits =
+                incrementalClusterManager.toSplitsAndRewriteDvFiles(compactUnits);
 
         // sort in partition
         TableSorter sorter =
@@ -573,13 +554,15 @@ public class CompactProcedure extends BaseProcedure {
 
         Dataset<Row> datasetForWrite =
                 partitionSplits.values().stream()
+                        .map(Pair::getKey)
                         .map(
-                                split -> {
+                                splits -> {
                                     Dataset<Row> dataset =
                                             PaimonUtils.createDataset(
                                                     spark(),
                                                     ScanPlanHelper$.MODULE$.createNewScanPlan(
-                                                            split, relation));
+                                                            splits.toArray(new DataSplit[0]),
+                                                            relation));
                                     return sorter.sort(dataset);
                                 })
                         .reduce(Dataset::union)
@@ -605,6 +588,8 @@ public class CompactProcedure extends BaseProcedure {
             List<CommitMessage> clusterMessages = new ArrayList<>();
             for (Map.Entry<BinaryRow, List<DataFileMeta>> entry : partitionClustered.entrySet()) {
                 BinaryRow partition = entry.getKey();
+                CommitMessageImpl dvCommitMessage =
+                        (CommitMessageImpl) partitionSplits.get(partition).getValue();
                 List<DataFileMeta> clusterBefore = compactUnits.get(partition).files();
                 // upgrade the clustered file to outputLevel
                 List<DataFileMeta> clusterAfter =
@@ -614,26 +599,15 @@ public class CompactProcedure extends BaseProcedure {
                         "Partition {}: upgrade file level to {}",
                         partition,
                         compactUnits.get(partition).outputLevel());
-                // get the dv index messages
-                List<CommitMessage> partitionDvIndexCommitMessages =
-                        appendDvMaintainers.get(entry.getKey()) == null
-                                ? Collections.emptyList()
-                                : IncrementalClusterManager.producePartitionDvIndexCommitMessages(
-                                        table,
-                                        Arrays.asList(partitionSplits.get(partition)),
-                                        appendDvMaintainers.get(entry.getKey()));
+
                 List<IndexFileMeta> newIndexFiles = new ArrayList<>();
                 List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
-                for (CommitMessage dvCommitMessage : partitionDvIndexCommitMessages) {
-                    newIndexFiles.addAll(
-                            ((CommitMessageImpl) dvCommitMessage)
-                                    .compactIncrement()
-                                    .newIndexFiles());
-                    deletedIndexFiles.addAll(
-                            ((CommitMessageImpl) dvCommitMessage)
-                                    .compactIncrement()
-                                    .deletedIndexFiles());
+                if (dvCommitMessage != null) {
+                    newIndexFiles = dvCommitMessage.compactIncrement().newIndexFiles();
+                    deletedIndexFiles = dvCommitMessage.compactIncrement().deletedIndexFiles();
                 }
+
+                // get the dv index messages
                 CompactIncrement compactIncrement =
                         new CompactIncrement(
                                 clusterBefore,
