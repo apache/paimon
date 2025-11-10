@@ -159,6 +159,29 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test(s"Paimon push down: apply CAST") {
+    if (gteqSpark3_4) {
+      withSparkSQLConf("spark.sql.ansi.enabled" -> "true") {
+        withTable("t") {
+          sql("""
+                |CREATE TABLE t (id int, value int, dt STRING)
+                |using paimon
+                |PARTITIONED BY (dt)
+                |""".stripMargin)
+
+          sql("""
+                |INSERT INTO t values
+                |(1, 100, '1')
+                |""".stripMargin)
+
+          val q = "SELECT * FROM t WHERE dt = 1"
+          assert(!checkFilterExists(q))
+          checkAnswer(sql(q), Seq(Row(1, 100, "1")))
+        }
+      }
+    }
+  }
+
   test("Paimon pushDown: limit for append-only tables with deletion vector") {
     withTable("dv_test") {
       spark.sql(
