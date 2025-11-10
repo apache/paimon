@@ -35,7 +35,7 @@ case class FormatTableStatistics[T <: PaimonFormatTableBaseScan](scan: T) extend
       .map(
         split => {
           if (split.length() != null) {
-            split.length()
+            split.length().longValue()
           } else {
             split.fileSize()
           }

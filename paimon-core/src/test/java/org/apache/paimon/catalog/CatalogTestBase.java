@@ -862,7 +862,7 @@ public abstract class CatalogTestBase {
             }
             writeAndCheckCommitFormatTable(table, datas, null);
             List<InternalRow> allRows = read(table, null, null, null, null);
-            assertThat(allRows).hasSize(size);
+            assertThat(allRows).containsExactlyInAnyOrder(datas);
         }
     }
 

@@ -23,7 +23,6 @@ import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.source.Split
 
-import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Statistics, SupportsReportStatistics}
 import org.apache.spark.sql.types.StructType
