@@ -61,7 +61,6 @@ public class FormatTableScan implements InnerTableScan {
 
     private final FormatTable table;
     private final CoreOptions coreOptions;
-    private final long splitMaxByteSize;
     @Nullable private PartitionPredicate partitionFilter;
     @Nullable private final Integer limit;
 
@@ -71,7 +70,6 @@ public class FormatTableScan implements InnerTableScan {
             @Nullable Integer limit) {
         this.table = table;
         this.coreOptions = new CoreOptions(table.options());
-        this.splitMaxByteSize = coreOptions.formatTableSplitMaxSize();
         this.partitionFilter = partitionFilter;
         this.limit = limit;
     }
@@ -244,7 +242,7 @@ public class FormatTableScan implements InnerTableScan {
             if (isDataFileName(file.getPath().getName())) {
                 if (isSplittableFile(table.format(), file.getPath().getName())) {
                     List<FormatDataSplit> fileSplits =
-                            splitLargeFile(file, splitMaxByteSize, partition);
+                            splitLargeFile(file, coreOptions.formatTableSplitMaxSize(), partition);
                     splits.addAll(fileSplits);
                 } else {
                     splits.add(new FormatDataSplit(file.getPath(), 0, file.getLen(), partition));
@@ -256,7 +254,19 @@ public class FormatTableScan implements InnerTableScan {
 
     private boolean isSplittableFile(FormatTable.Format format, String fileName) {
         return (format == FormatTable.Format.CSV || format == FormatTable.Format.JSON)
-                && fileName.split("\\.").length <= 2;
+                && isTextFileUncompressed(fileName);
+    }
+
+    private static boolean isTextFileUncompressed(String fileName) {
+        if (fileName == null || fileName.trim().isEmpty()) {
+            return false;
+        }
+        String[] parts = fileName.split("\\.");
+        if (parts.length < 2) {
+            return false;
+        }
+        String lastExt = parts[parts.length - 1].toLowerCase();
+        return "csv".equals(lastExt) || "json".equals(lastExt);
     }
 
     private List<FormatDataSplit> splitLargeFile(
