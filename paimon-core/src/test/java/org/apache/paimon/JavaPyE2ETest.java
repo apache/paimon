@@ -39,6 +39,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -81,6 +82,7 @@ public class JavaPyE2ETest {
     }
 
     @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testJavaWriteRead() throws Exception {
         Identifier identifier = identifier("mixed_test_tablej");
         Schema schema =
@@ -129,6 +131,7 @@ public class JavaPyE2ETest {
     }
 
     @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testRead() throws Exception {
         Identifier identifier = identifier("mixed_test_tablep");
         Table table = catalog.getTable(identifier);

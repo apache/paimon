@@ -196,6 +196,9 @@ function pytest_check() {
 
 # Mixed tests check - runs Java-Python interoperability tests
 function mixed_check() {
+    # Get Python version
+    PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    echo "Detected Python version: $PYTHON_VERSION"
     if [ "$PYTHON_VERSION" = "3.6" ]; then
         print_function "STAGE" "mixed tests checks... [SKIPPED]"
         return

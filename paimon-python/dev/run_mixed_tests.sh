@@ -66,7 +66,7 @@ run_java_write_test() {
 
     # Run the specific Java test method
     echo "Running Maven test for JavaPyE2ETest.testJavaWriteRead..."
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteRead -pl paimon-core -q; then
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteRead -pl paimon-core -q -Drun.e2e.tests=true; then
         echo -e "${GREEN}✓ Java test completed successfully${NC}"
         return 0
     else
@@ -119,7 +119,7 @@ run_java_read_test() {
 
     # Run the specific Java test method for reading Python-written data
     echo "Running Maven test for JavaPyE2ETest.testRead (Java Read)..."
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testRead -pl paimon-core -q; then
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testRead -pl paimon-core -q -Drun.e2e.tests=true; then
         echo -e "${GREEN}✓ Java read test completed successfully${NC}"
         return 0
     else
