@@ -185,7 +185,7 @@ public class FormatReadBuilderTest {
         long fileSize = fileIO.getFileSize(csvFile);
 
         // Test 1: Read entire CSV file (offset = 0, length = fileSize)
-        FormatDataSplit fullSplit = new FormatDataSplit(csvFile, fileSize, 0, null);
+        FormatDataSplit fullSplit = new FormatDataSplit(csvFile, fileSize, null);
         RecordReader<InternalRow> fullReader = readBuilder.createReader(fullSplit);
         List<InternalRow> fullResult = readAllRows(fullReader, rowType);
 

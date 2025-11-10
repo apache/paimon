@@ -46,9 +46,8 @@ public class FormatDataSplit implements Split {
         this.partition = partition;
     }
 
-    public FormatDataSplit(
-            Path filePath, long fileSize, long offset, @Nullable BinaryRow partition) {
-        this(filePath, fileSize, offset, fileSize, partition);
+    public FormatDataSplit(Path filePath, long fileSize, @Nullable BinaryRow partition) {
+        this(filePath, fileSize, 0L, fileSize, partition);
     }
 
     public Path filePath() {
@@ -67,7 +66,7 @@ public class FormatDataSplit implements Split {
         return offset;
     }
 
-    public Long length() {
+    public long length() {
         return length;
     }
 

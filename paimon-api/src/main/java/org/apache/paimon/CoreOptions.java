@@ -2022,11 +2022,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Format table file path only contain partition value.");
 
-    public static final ConfigOption<MemorySize> FORMAT_TABLE_SPLIT_MAX_BYTES =
-            ConfigOptions.key("format-table.split-max-bytes")
+    public static final ConfigOption<MemorySize> FORMAT_TABLE_SPLIT_TARGET_SIZE =
+            ConfigOptions.key("format-table.split.target-size")
                     .memoryType()
                     .defaultValue(VALUE_128_MB)
-                    .withDescription("Format table split max bytes.");
+                    .withFallbackKeys(SOURCE_SPLIT_TARGET_SIZE.key())
+                    .withDescription("Format table split target size.");
 
     public static final ConfigOption<String> BLOB_FIELD =
             key("blob-field")
@@ -3152,7 +3153,7 @@ public class CoreOptions implements Serializable {
     }
 
     public long formatTableSplitMaxSize() {
-        return options.get(FORMAT_TABLE_SPLIT_MAX_BYTES).getBytes();
+        return options.get(FORMAT_TABLE_SPLIT_TARGET_SIZE).getBytes();
     }
 
     public boolean blobAsDescriptor() {

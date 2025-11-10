@@ -46,7 +46,7 @@ public class FormatDataSplitTest {
         Predicate predicate = builder.equal(0, 5);
 
         // Create FormatDataSplit
-        FormatDataSplit split = new FormatDataSplit(filePath, 1024L, 100L, null);
+        FormatDataSplit split = new FormatDataSplit(filePath, 1024L, null);
 
         // Test Java serialization
         byte[] serialized = InstantiationUtil.serializeObject(split);
@@ -55,7 +55,7 @@ public class FormatDataSplitTest {
 
         // Verify the deserialized object
         assertThat(deserialized.filePath()).isEqualTo(filePath);
-        assertThat(deserialized.offset()).isEqualTo(100L);
+        assertThat(deserialized.offset()).isEqualTo(0L);
         assertThat(deserialized.fileSize()).isEqualTo(1024L);
         assertThat(deserialized.length()).isEqualTo(1024L);
 
