@@ -301,7 +301,7 @@ class DataBlobWriter(DataWriter):
             extra_files=[],
             creation_time=datetime.now(),
             delete_row_count=0,
-            file_source="APPEND",
+            file_source=0,
             value_stats_cols=self.normal_column_names,
             file_path=str(file_path),
             write_cols=self.write_cols)

@@ -44,7 +44,7 @@ class DataFileMeta:
     creation_time: Optional[datetime] = None
     delete_row_count: Optional[int] = None
     embedded_index: Optional[bytes] = None
-    file_source: Optional[str] = None
+    file_source: Optional[int] = None
     value_stats_cols: Optional[List[str]] = None
     external_path: Optional[str] = None
     first_row_id: Optional[int] = None
@@ -163,7 +163,7 @@ DATA_FILE_META_SCHEMA = {
          "default": None},
         {"name": "_DELETE_ROW_COUNT", "type": ["null", "long"], "default": None},
         {"name": "_EMBEDDED_FILE_INDEX", "type": ["null", "bytes"], "default": None},
-        {"name": "_FILE_SOURCE", "type": ["null", "string"], "default": None},
+        {"name": "_FILE_SOURCE", "type": ["null", "int"], "default": None},
         {"name": "_VALUE_STATS_COLS",
          "type": ["null", {"type": "array", "items": "string"}],
          "default": None},
