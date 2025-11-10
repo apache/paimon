@@ -824,6 +824,48 @@ public abstract class CatalogTestBase {
         catalog.dropTable(pid, true);
     }
 
+    @Test
+    public void testFormatTableSplitRead() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        Pair[] format2Compressions = {
+            Pair.of("csv", HadoopCompressionType.NONE),
+            Pair.of("json", HadoopCompressionType.NONE),
+            Pair.of("csv", HadoopCompressionType.GZIP),
+            Pair.of("json", HadoopCompressionType.GZIP),
+            Pair.of("parquet", HadoopCompressionType.ZSTD)
+        };
+        for (Pair<String, HadoopCompressionType> format2Compression : format2Compressions) {
+            String format = format2Compression.getKey();
+            String compression = format2Compression.getValue().value();
+            String dbName = format + "_split_db_" + compression;
+            catalog.createDatabase(dbName, true);
+
+            Identifier id = Identifier.create(dbName, format + "_split_table_" + compression);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("name", DataTypes.STRING())
+                            .column("score", DataTypes.DOUBLE())
+                            .options(getFormatTableOptions())
+                            .option("file.format", format)
+                            .option("source.split.target-size", "54 B")
+                            .option("file.compression", compression.toString())
+                            .build();
+            catalog.createTable(id, schema, true);
+            FormatTable table = (FormatTable) catalog.getTable(id);
+            int size = 50;
+            InternalRow[] datas = new InternalRow[size];
+            for (int i = 0; i < size; i++) {
+                datas[i] = GenericRow.of(i, BinaryString.fromString("User" + i), 85.5 + (i % 15));
+            }
+            writeAndCheckCommitFormatTable(table, datas, null);
+            List<InternalRow> allRows = read(table, null, null, null, null);
+            assertThat(allRows).containsExactlyInAnyOrder(datas);
+        }
+    }
+
     private void writeAndCheckCommitFormatTable(
             FormatTable table, InternalRow[] datas, InternalRow dataWithDiffPartition)
             throws Exception {
