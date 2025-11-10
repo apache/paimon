@@ -50,7 +50,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.CoreOptions.FORMAT_TABLE_SPLIT_TARGET_SIZE;
+import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
 import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -690,7 +690,7 @@ public class FormatTableScanTest {
             writeTestFile(fileIO, file3, 200);
 
             Map<String, String> options = new HashMap<>();
-            options.put(FORMAT_TABLE_SPLIT_TARGET_SIZE.key(), "100b");
+            options.put(SOURCE_SPLIT_TARGET_SIZE.key(), "100b");
 
             FormatTable formatTable =
                     createFormatTableWithOptions(
@@ -716,7 +716,7 @@ public class FormatTableScanTest {
             writeTestFile(fileIO, file3, 200);
 
             Map<String, String> options = new HashMap<>();
-            options.put(FORMAT_TABLE_SPLIT_TARGET_SIZE.key(), "100b");
+            options.put(SOURCE_SPLIT_TARGET_SIZE.key(), "100b");
             if ("csv".equals(format)) {
                 options.put(CsvOptions.LINE_DELIMITER.key(), "\001");
             } else {
@@ -746,7 +746,7 @@ public class FormatTableScanTest {
 
         // Set split max size to 100 bytes
         Map<String, String> options = new HashMap<>();
-        options.put(FORMAT_TABLE_SPLIT_TARGET_SIZE.key(), "100b");
+        options.put(SOURCE_SPLIT_TARGET_SIZE.key(), "100b");
 
         FormatTable formatTable =
                 createFormatTableWithOptions(tableLocation, FormatTable.Format.PARQUET, options);

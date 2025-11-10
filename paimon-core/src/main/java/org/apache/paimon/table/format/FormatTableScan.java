@@ -244,7 +244,7 @@ public class FormatTableScan implements InnerTableScan {
             if (isDataFileName(file.getPath().getName())) {
                 if (isSplittableFile(table.format(), file.getPath().getName())) {
                     List<FormatDataSplit> fileSplits =
-                            splitLargeFile(file, coreOptions.formatTableSplitMaxSize(), partition);
+                            splitLargeFile(file, coreOptions.splitTargetSize(), partition);
                     splits.addAll(fileSplits);
                 } else {
                     splits.add(new FormatDataSplit(file.getPath(), file.getLen(), partition));
