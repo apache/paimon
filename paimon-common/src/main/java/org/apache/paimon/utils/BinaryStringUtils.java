@@ -447,12 +447,12 @@ public class BinaryStringUtils {
         while (end < sizeInBytes) {
             end =
                     MemorySegmentUtils.find(
-                            segments,
-                            offset + beg,
-                            sizeInBytes - beg,
-                            sepSegs,
-                            sepOffset,
-                            sepSize)
+                                    segments,
+                                    offset + beg,
+                                    sizeInBytes - beg,
+                                    sepSegs,
+                                    sepOffset,
+                                    sepSize)
                             - offset;
 
             if (end > -1) {
