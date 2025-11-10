@@ -34,7 +34,7 @@ under the License.
     <packaging>jar</packaging>
 
     <properties>
-        <hive.version>3.1.2</hive.version>
+        <hive.version>4.0.1</hive.version>
         <hiverunner.version>6.1.0</hiverunner.version>
         <jackson.version>2.13.3</jackson.version>
     </properties>
