@@ -56,7 +56,17 @@ jobs:
             build-essential \
             git \
             curl \
+            openjdk-8-jdk \
+            maven \
             && rm -rf /var/lib/apt/lists/*
+
+      - name: Set JAVA_HOME
+        run: echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
+
+      - name: Verify Java and Maven installation
+        run: |
+          java -version
+          mvn -version
 
       - name: Verify Python version
         run: python --version
