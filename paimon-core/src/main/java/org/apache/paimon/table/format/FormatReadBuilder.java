@@ -30,6 +30,7 @@ import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -37,13 +38,13 @@ import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -172,18 +173,24 @@ public class FormatReadBuilder implements ReadBuilder {
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
                         table.partitionKeys(), readType().getFields(), table.partitionType());
-
-        return new DataFileRecordReader(
-                readType(),
-                readerFactory,
-                formatReaderContext,
-                null,
-                null,
-                PartitionUtils.create(partitionMapping, dataSplit.partition()),
-                false,
-                null,
-                0,
-                Collections.emptyMap());
+        try {
+            FileRecordReader<InternalRow> reader;
+            if (table.format() == FormatTable.Format.CSV
+                    || table.format() == FormatTable.Format.JSON) {
+                reader =
+                        readerFactory.createReader(
+                                formatReaderContext, dataSplit.offset(), dataSplit.length());
+            } else {
+                reader = readerFactory.createReader(formatReaderContext);
+            }
+            return new DataFileRecordReader(
+                    readType(),
+                    reader,
+                    PartitionUtils.create(partitionMapping, dataSplit.partition()));
+        } catch (Exception e) {
+            FileUtils.checkExists(formatReaderContext.fileIO(), formatReaderContext.filePath());
+            throw e;
+        }
     }
 
     private static RowType getRowTypeWithoutPartition(RowType rowType, List<String> partitionKeys) {

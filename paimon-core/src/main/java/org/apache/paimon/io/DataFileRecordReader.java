@@ -39,6 +39,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Map;
 
 /** Reads {@link InternalRow} from data files. */
@@ -82,6 +83,23 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         this.maxSequenceNumber = maxSequenceNumber;
         this.systemFields = systemFields;
         this.selection = context.selection();
+    }
+
+    public DataFileRecordReader(
+            RowType tableRowType,
+            FileRecordReader<InternalRow> reader,
+            @Nullable PartitionInfo partitionInfo)
+            throws IOException {
+        this.tableRowType = tableRowType;
+        this.reader = reader;
+        this.indexMapping = null;
+        this.partitionInfo = partitionInfo;
+        this.castMapping = null;
+        this.rowTrackingEnabled = false;
+        this.firstRowId = null;
+        this.maxSequenceNumber = 0L;
+        this.systemFields = Collections.emptyMap();
+        this.selection = null;
     }
 
     @Nullable
