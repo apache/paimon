@@ -45,6 +45,7 @@ import org.apache.paimon.utils.Pair;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +56,7 @@ import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
 import static org.apache.paimon.predicate.PredicateBuilder.fieldIdxToPartitionIdx;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAndByPartition;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link ReadBuilder} for {@link FormatTable}. */
 public class FormatReadBuilder implements ReadBuilder {
@@ -175,17 +177,25 @@ public class FormatReadBuilder implements ReadBuilder {
                         table.partitionKeys(), readType().getFields(), table.partitionType());
         try {
             FileRecordReader<InternalRow> reader;
-            if (dataSplit.length() != null) {
+            Long length = dataSplit.length();
+            if (length != null) {
                 reader =
-                        readerFactory.createReader(
-                                formatReaderContext, dataSplit.offset(), dataSplit.length());
+                        readerFactory.createReader(formatReaderContext, dataSplit.offset(), length);
             } else {
+                checkArgument(dataSplit.offset() == 0, "Offset must be 0.");
                 reader = readerFactory.createReader(formatReaderContext);
             }
             return new DataFileRecordReader(
                     readType(),
                     reader,
-                    PartitionUtils.create(partitionMapping, dataSplit.partition()));
+                    null,
+                    null,
+                    PartitionUtils.create(partitionMapping, dataSplit.partition()),
+                    false,
+                    null,
+                    0,
+                    Collections.emptyMap(),
+                    null);
         } catch (Exception e) {
             FileUtils.checkExists(formatReaderContext.fileIO(), formatReaderContext.filePath());
             throw e;

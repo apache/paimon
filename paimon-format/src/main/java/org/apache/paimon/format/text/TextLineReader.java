@@ -34,18 +34,21 @@ public interface TextLineReader extends Closeable {
     static TextLineReader create(
             InputStream inputStream, String delimiter, long offset, @Nullable Long length)
             throws IOException {
-        byte[] delimiterBytes =
-                delimiter != null && !"\n".equals(delimiter)
-                        ? delimiter.getBytes(StandardCharsets.UTF_8)
-                        : null;
-        if (delimiterBytes == null || delimiterBytes.length == 0) {
+        if (isDefaultDelimiter(delimiter)) {
             return new StandardLineReader(inputStream, offset, length);
         } else {
             if (offset != 0 || length != null) {
                 throw new UnsupportedOperationException(
                         "Custom line text file does not support offset and length.");
             }
-            return new CustomLineReader(inputStream, delimiterBytes);
+            return new CustomLineReader(inputStream, delimiter.getBytes(StandardCharsets.UTF_8));
         }
+    }
+
+    static boolean isDefaultDelimiter(String delimiter) {
+        return delimiter == null
+                || "\n".equals(delimiter)
+                || "\r\n".equals(delimiter)
+                || "\r".equals(delimiter);
     }
 }

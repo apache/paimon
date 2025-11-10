@@ -39,7 +39,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Map;
 
 /** Reads {@link InternalRow} from data files. */
@@ -68,13 +67,32 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             long maxSequenceNumber,
             Map<String, Integer> systemFields)
             throws IOException {
+        this(
+                tableRowType,
+                createReader(readerFactory, context),
+                indexMapping,
+                castMapping,
+                partitionInfo,
+                rowTrackingEnabled,
+                firstRowId,
+                maxSequenceNumber,
+                systemFields,
+                context.selection());
+    }
+
+    public DataFileRecordReader(
+            RowType tableRowType,
+            FileRecordReader<InternalRow> reader,
+            @Nullable int[] indexMapping,
+            @Nullable CastFieldGetter[] castMapping,
+            @Nullable PartitionInfo partitionInfo,
+            boolean rowTrackingEnabled,
+            @Nullable Long firstRowId,
+            long maxSequenceNumber,
+            Map<String, Integer> systemFields,
+            @Nullable RoaringBitmap32 selection) {
         this.tableRowType = tableRowType;
-        try {
-            this.reader = readerFactory.createReader(context);
-        } catch (Exception e) {
-            FileUtils.checkExists(context.fileIO(), context.filePath());
-            throw e;
-        }
+        this.reader = reader;
         this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
@@ -82,24 +100,18 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         this.firstRowId = firstRowId;
         this.maxSequenceNumber = maxSequenceNumber;
         this.systemFields = systemFields;
-        this.selection = context.selection();
+        this.selection = selection;
     }
 
-    public DataFileRecordReader(
-            RowType tableRowType,
-            FileRecordReader<InternalRow> reader,
-            @Nullable PartitionInfo partitionInfo)
+    private static FileRecordReader<InternalRow> createReader(
+            FormatReaderFactory readerFactory, FormatReaderFactory.Context context)
             throws IOException {
-        this.tableRowType = tableRowType;
-        this.reader = reader;
-        this.indexMapping = null;
-        this.partitionInfo = partitionInfo;
-        this.castMapping = null;
-        this.rowTrackingEnabled = false;
-        this.firstRowId = null;
-        this.maxSequenceNumber = 0L;
-        this.systemFields = Collections.emptyMap();
-        this.selection = null;
+        try {
+            return readerFactory.createReader(context);
+        } catch (Exception e) {
+            FileUtils.checkExists(context.fileIO(), context.filePath());
+            throw e;
+        }
     }
 
     @Nullable

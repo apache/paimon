@@ -28,6 +28,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.DefaultPartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
@@ -49,12 +50,15 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.paimon.format.text.HadoopCompressionUtils.isCompressed;
+import static org.apache.paimon.format.text.TextLineReader.isDefaultDelimiter;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 
@@ -65,6 +69,8 @@ public class FormatTableScan implements InnerTableScan {
     private final CoreOptions coreOptions;
     @Nullable private PartitionPredicate partitionFilter;
     @Nullable private final Integer limit;
+    private final long targetSplitSize;
+    private final FormatTable.Format format;
 
     public FormatTableScan(
             FormatTable table,
@@ -74,6 +80,8 @@ public class FormatTableScan implements InnerTableScan {
         this.coreOptions = new CoreOptions(table.options());
         this.partitionFilter = partitionFilter;
         this.limit = limit;
+        this.targetSplitSize = coreOptions.splitTargetSize();
+        this.format = table.format();
     }
 
     @Override
@@ -242,56 +250,51 @@ public class FormatTableScan implements InnerTableScan {
         FileStatus[] files = fileIO.listFiles(path, true);
         for (FileStatus file : files) {
             if (isDataFileName(file.getPath().getName())) {
-                List<FormatDataSplit> fileSplits =
-                        tryToSplitLargeFile(
-                                table.format(), file, coreOptions.splitTargetSize(), partition);
+                List<FormatDataSplit> fileSplits = tryToSplitLargeFile(file, partition);
                 splits.addAll(fileSplits);
             }
         }
         return splits;
     }
 
-    private List<FormatDataSplit> tryToSplitLargeFile(
-            FormatTable.Format format, FileStatus file, long maxSplitBytes, BinaryRow partition) {
-        boolean isSplittableFile =
-                ((format == FormatTable.Format.CSV
-                                        && !table.options()
-                                                .containsKey(CsvOptions.LINE_DELIMITER.key()))
-                                || (format == FormatTable.Format.JSON
-                                        && !table.options()
-                                                .containsKey(JsonOptions.LINE_DELIMITER.key())))
-                        && isTextFileUncompressed(file.getPath().getName());
+    private List<FormatDataSplit> tryToSplitLargeFile(FileStatus file, BinaryRow partition) {
+        if (!preferToSplitFile(file)) {
+            return Collections.singletonList(
+                    new FormatDataSplit(file.getPath(), file.getLen(), partition));
+        }
         List<FormatDataSplit> splits = new ArrayList<>();
-        if (isSplittableFile && file.getLen() > maxSplitBytes) {
-            long remainingBytes = file.getLen();
-            long currentStart = 0;
+        long remainingBytes = file.getLen();
+        long currentStart = 0;
 
-            while (remainingBytes > 0) {
-                long splitSize = Math.min(maxSplitBytes, remainingBytes);
+        while (remainingBytes > 0) {
+            long splitSize = Math.min(targetSplitSize, remainingBytes);
 
-                FormatDataSplit split =
-                        new FormatDataSplit(
-                                file.getPath(), file.getLen(), currentStart, splitSize, partition);
-                splits.add(split);
-                currentStart += splitSize;
-                remainingBytes -= splitSize;
-            }
-        } else {
-            splits.add(new FormatDataSplit(file.getPath(), file.getLen(), partition));
+            FormatDataSplit split =
+                    new FormatDataSplit(
+                            file.getPath(), file.getLen(), currentStart, splitSize, partition);
+            splits.add(split);
+            currentStart += splitSize;
+            remainingBytes -= splitSize;
         }
         return splits;
     }
 
-    private static boolean isTextFileUncompressed(String fileName) {
-        if (fileName == null || fileName.trim().isEmpty()) {
+    private boolean preferToSplitFile(FileStatus file) {
+        if (file.getLen() <= targetSplitSize) {
             return false;
         }
-        String[] parts = fileName.split("\\.");
-        if (parts.length < 2) {
-            return false;
+
+        Options options = coreOptions.toConfiguration();
+        switch (format) {
+            case CSV:
+                return !isCompressed(file.getPath())
+                        && isDefaultDelimiter(options.get(CsvOptions.LINE_DELIMITER));
+            case JSON:
+                return !isCompressed(file.getPath())
+                        && isDefaultDelimiter(options.get(JsonOptions.LINE_DELIMITER));
+            default:
+                return false;
         }
-        String lastExt = parts[parts.length - 1].toLowerCase();
-        return "csv".equals(lastExt) || "json".equals(lastExt);
     }
 
     public static Map<String, String> extractLeadingEqualityPartitionSpecWhenOnlyAnd(

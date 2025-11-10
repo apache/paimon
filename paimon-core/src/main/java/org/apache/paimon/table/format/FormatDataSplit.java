@@ -70,6 +70,7 @@ public class FormatDataSplit implements Split {
         return offset;
     }
 
+    @Nullable
     public Long length() {
         return length;
     }
