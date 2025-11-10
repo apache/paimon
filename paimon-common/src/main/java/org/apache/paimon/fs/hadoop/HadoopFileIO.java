@@ -27,6 +27,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.hadoop.SerializableConfiguration;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.Pair;
@@ -58,6 +59,8 @@ public class HadoopFileIO implements FileIO {
 
     private org.apache.paimon.options.Options options;
 
+    private boolean atomicRenameEnabled = true;
+
     protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
 
     private final Path path;
@@ -81,6 +84,7 @@ public class HadoopFileIO implements FileIO {
     public void configure(CatalogContext context) {
         this.hadoopConf = new SerializableConfiguration(context.hadoopConf());
         this.options = context.options();
+        this.atomicRenameEnabled = options.get(CatalogOptions.FILE_IO_ATOMIC_RENAME_ENABLED);
     }
 
     public Configuration hadoopConf() {
@@ -168,8 +172,12 @@ public class HadoopFileIO implements FileIO {
 
     @Override
     public void overwriteFileUtf8(Path path, String content) throws IOException {
-        boolean success = tryAtomicOverwriteViaRename(path, content);
-        if (!success) {
+        if (atomicRenameEnabled) {
+            boolean success = tryAtomicOverwriteViaRename(path, content);
+            if (!success) {
+                FileIO.super.overwriteFileUtf8(path, content);
+            }
+        } else {
             FileIO.super.overwriteFileUtf8(path, content);
         }
     }
