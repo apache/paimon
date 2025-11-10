@@ -43,7 +43,7 @@ public class StandardLineReader implements TextLineReader {
     private int bufferStart;
     private int bufferEnd;
     private int bufferPosition;
-    private boolean closed;
+    private boolean endInput;
 
     public StandardLineReader(InputStream in, long offset, @Nullable Long length)
             throws IOException {
@@ -51,6 +51,7 @@ public class StandardLineReader implements TextLineReader {
         this.buffer = new byte[8192];
         this.length = length;
         this.lineBuilder = new ByteArrayOutputStream();
+        this.endInput = false;
         if (offset == 0) {
             readAtBeginning();
         } else {
@@ -80,16 +81,16 @@ public class StandardLineReader implements TextLineReader {
     }
 
     private void skipFirstLine() throws IOException {
-        while (!closed) {
+        while (!endInput) {
             if (reachLengthLimit()) {
-                close();
+                endInput();
                 return;
             }
 
             // fill buffer if necessary
             if (bufferPosition >= bufferEnd) {
                 fillBuffer();
-                if (closed) {
+                if (endInput) {
                     return;
                 }
             }
@@ -107,7 +108,7 @@ public class StandardLineReader implements TextLineReader {
         lineBuilder.reset();
 
         if (reachLengthLimit()) {
-            close();
+            endInput();
             return null;
         }
 
@@ -115,7 +116,7 @@ public class StandardLineReader implements TextLineReader {
             fillBuffer();
         }
 
-        while (!closed) {
+        while (!endInput) {
             if (seekToStartOfLineTerminator()) {
                 copyToLineBuilder();
                 seekPastLineTerminator();
@@ -158,7 +159,7 @@ public class StandardLineReader implements TextLineReader {
             // fill buffer if necessary
             if (bufferPosition >= bufferEnd) {
                 fillBuffer();
-                if (closed) {
+                if (endInput) {
                     return;
                 }
             }
@@ -172,7 +173,7 @@ public class StandardLineReader implements TextLineReader {
     }
 
     private void fillBuffer() throws IOException {
-        if (closed) {
+        if (endInput) {
             return;
         }
         checkArgument(bufferPosition >= bufferEnd, "Buffer is not empty");
@@ -180,7 +181,7 @@ public class StandardLineReader implements TextLineReader {
         bufferPosition = 0;
         bufferEnd = IOUtils.readNBytes(in, buffer, 0, buffer.length);
         if (bufferEnd == 0) {
-            close();
+            endInput();
         }
     }
 
@@ -205,9 +206,12 @@ public class StandardLineReader implements TextLineReader {
         return lineBuilder.toString(UTF_8.name());
     }
 
+    private void endInput() {
+        endInput = true;
+    }
+
     @Override
     public void close() throws IOException {
-        closed = true;
         in.close();
     }
 }
