@@ -98,7 +98,6 @@ public class IncrementalClusterManager {
                         table.partitionKeys().toArray(new String[0]),
                         table.coreOptions().legacyPartitionName());
         this.snapshot = table.snapshotManager().latestSnapshot();
-        checkArgument(snapshot != null, "No snapshot found in table %s", table.name());
         this.snapshotReader =
                 table.newSnapshotReader()
                         .dropStats()
@@ -115,7 +114,11 @@ public class IncrementalClusterManager {
         this.clusterKeys = options.clusteringColumns();
         this.historyPartitionCluster =
                 HistoryPartitionCluster.create(
-                        table, incrementalClusterStrategy, partitionComputer, specifiedPartitions);
+                        table,
+                        snapshot,
+                        incrementalClusterStrategy,
+                        partitionComputer,
+                        specifiedPartitions);
     }
 
     public Map<BinaryRow, CompactUnit> prepareForCluster(boolean fullCompaction) {
