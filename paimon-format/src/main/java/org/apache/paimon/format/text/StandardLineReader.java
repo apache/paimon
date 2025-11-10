@@ -79,6 +79,28 @@ public class StandardLineReader implements TextLineReader {
         skipFirstLine();
     }
 
+    private void skipFirstLine() throws IOException {
+        while (!closed) {
+            if (reachLengthLimit()) {
+                close();
+                return;
+            }
+
+            // fill buffer if necessary
+            if (bufferPosition >= bufferEnd) {
+                fillBuffer();
+                if (closed) {
+                    return;
+                }
+            }
+
+            if (seekToStartOfLineTerminator()) {
+                seekPastLineTerminator();
+                return;
+            }
+        }
+    }
+
     @Nullable
     @Override
     public String readLine() throws IOException {
@@ -109,28 +131,6 @@ public class StandardLineReader implements TextLineReader {
             return null;
         }
         return line;
-    }
-
-    private void skipFirstLine() throws IOException {
-        while (!closed) {
-            if (reachLengthLimit()) {
-                close();
-                return;
-            }
-
-            // fill buffer if necessary
-            if (bufferPosition >= bufferEnd) {
-                fillBuffer();
-                if (closed) {
-                    return;
-                }
-            }
-
-            if (seekToStartOfLineTerminator()) {
-                seekPastLineTerminator();
-                return;
-            }
-        }
     }
 
     private boolean seekToStartOfLineTerminator() {
