@@ -31,6 +31,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -53,6 +54,33 @@ public class StandardLineReaderTest {
     public void tearDown() throws IOException {
         if (java.nio.file.Files.exists(testFile)) {
             java.nio.file.Files.delete(testFile);
+        }
+    }
+
+    /**
+     * After the stream is closed, we cannot use getPos, so we need to ensure that it is manually
+     * closed.
+     */
+    @Test
+    public void testCloseShouldNotBeInvoked() throws IOException {
+        String content = "line1\nline2\nline3";
+        AtomicBoolean closed = new AtomicBoolean(false);
+        try (TextLineReader reader =
+                TextLineReader.create(
+                        new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8)) {
+                            @Override
+                            public void close() {
+                                closed.set(true);
+                            }
+                        },
+                        "\n",
+                        0,
+                        null)) {
+            assertThat(reader.readLine()).isEqualTo("line1");
+            assertThat(reader.readLine()).isEqualTo("line2");
+            assertThat(reader.readLine()).isEqualTo("line3");
+            assertThat(reader.readLine()).isNull();
+            assertThat(closed.get()).isFalse();
         }
     }
 
