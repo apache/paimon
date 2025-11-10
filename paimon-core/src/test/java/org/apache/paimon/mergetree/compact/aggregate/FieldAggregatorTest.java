@@ -188,6 +188,98 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldListAggWithDefaultDelimiterAndDistinctWithMultiUser() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+
+        BinaryString result =
+                Stream.of(
+                                BinaryString.fromString("user1"),
+                                BinaryString.fromString("user2"),
+                                BinaryString.fromString("user1,user3"))
+                        .sequential()
+                        .reduce((l, r) -> (BinaryString) fieldListaggAgg.agg(l, r))
+                        .orElse(null);
+
+        assertNotNull(result);
+        assertEquals("user1,user2,user3", result.toString());
+    }
+
+    @Test
+    public void testFieldListAggWithDefaultDelimiterAndDistinctWithEmptyLeftUser() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+
+        BinaryString result =
+                Stream.of(
+                                BinaryString.fromString(""),
+                                BinaryString.fromString("user2"),
+                                BinaryString.fromString("user1,user3"))
+                        .sequential()
+                        .reduce((l, r) -> (BinaryString) fieldListaggAgg.agg(l, r))
+                        .orElse(null);
+
+        assertNotNull(result);
+        assertEquals("user2,user1,user3", result.toString());
+    }
+
+    @Test
+    public void testFieldListAggWithDefaultDelimiterAndDistinctWithMultiKvString() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+
+        BinaryString result =
+                Stream.of(
+                                BinaryString.fromString("k1=v1,k2=v2"),
+                                BinaryString.fromString("k1=v1,k3=v3"),
+                                BinaryString.fromString(""))
+                        .sequential()
+                        .reduce((l, r) -> (BinaryString) fieldListaggAgg.agg(l, r))
+                        .orElse(null);
+
+        assertNotNull(result);
+        assertEquals("k1=v1,k2=v2,k3=v3", result.toString());
+    }
+
+    @Test
+    public void testFieldListAggWithDefaultDelimiterAndDistinctWithMultiDuplicatedKvString() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+
+        BinaryString result =
+                Stream.of(
+                                BinaryString.fromString("k1=v1,k2=v2"),
+                                BinaryString.fromString("k1=v1,k2=v3"),
+                                BinaryString.fromString(""))
+                        .sequential()
+                        .reduce((l, r) -> (BinaryString) fieldListaggAgg.agg(l, r))
+                        .orElse(null);
+
+        assertNotNull(result);
+        assertEquals("k1=v1,k2=v2,k2=v3", result.toString());
+    }
+
+    @Test
     public void testFieldListAggWithCustomDelimiter() {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
@@ -528,16 +620,16 @@ public class FieldAggregatorTest {
 
         Object[] input1 =
                 new Object[] {
-                    GenericRow.of(1, BinaryString.fromString("A")),
-                    GenericRow.of(1, BinaryString.fromString("B"))
+                        GenericRow.of(1, BinaryString.fromString("A")),
+                        GenericRow.of(1, BinaryString.fromString("B"))
                 };
         result = (InternalArray) agg.agg(null, new GenericArray(input1));
         assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(input1);
 
         Object[] input2 =
                 new Object[] {
-                    GenericRow.of(1, BinaryString.fromString("A")),
-                    GenericRow.of(2, BinaryString.fromString("A"))
+                        GenericRow.of(1, BinaryString.fromString("A")),
+                        GenericRow.of(2, BinaryString.fromString("A"))
                 };
         result = (InternalArray) agg.agg(new GenericArray(input1), new GenericArray(input2));
         assertThat(unnest(result, elementGetter))
@@ -565,16 +657,16 @@ public class FieldAggregatorTest {
 
         Object[] input1 =
                 new Object[] {
-                    new GenericArray(new Object[] {1, 1}), new GenericArray(new Object[] {1, 2})
+                        new GenericArray(new Object[] {1, 1}), new GenericArray(new Object[] {1, 2})
                 };
         result = (InternalArray) agg.agg(null, new GenericArray(input1));
         assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(input1);
 
         Object[] input2 =
                 new Object[] {
-                    new GenericArray(new Object[] {1, 1}),
-                    new GenericArray(new Object[] {1, 2}),
-                    new GenericArray(new Object[] {2, 1})
+                        new GenericArray(new Object[] {1, 1}),
+                        new GenericArray(new Object[] {1, 2}),
+                        new GenericArray(new Object[] {2, 1})
                 };
         result = (InternalArray) agg.agg(new GenericArray(input1), new GenericArray(input2));
         assertThat(unnest(result, elementGetter))
@@ -607,9 +699,9 @@ public class FieldAggregatorTest {
 
         Object[] input2 =
                 new Object[] {
-                    new GenericMap(toMap(1, "A")),
-                    new GenericMap(toMap(2, "B", 1, "A")),
-                    new GenericMap(toMap(1, "C"))
+                        new GenericMap(toMap(1, "A")),
+                        new GenericMap(toMap(2, "B", 1, "A")),
+                        new GenericMap(toMap(1, "C"))
                 };
         result = (InternalArray) agg.agg(new GenericArray(input1), new GenericArray(input2));
         assertThat(unnest(result, elementGetter))
@@ -680,14 +772,14 @@ public class FieldAggregatorTest {
 
         Object[] accElements =
                 new Object[] {
-                    GenericRow.of(1, BinaryString.fromString("A")),
-                    GenericRow.of(1, BinaryString.fromString("B")),
-                    GenericRow.of(2, BinaryString.fromString("B"))
+                        GenericRow.of(1, BinaryString.fromString("A")),
+                        GenericRow.of(1, BinaryString.fromString("B")),
+                        GenericRow.of(2, BinaryString.fromString("B"))
                 };
         Object[] retractElements =
                 new Object[] {
-                    GenericRow.of(1, BinaryString.fromString("A")),
-                    GenericRow.of(2, BinaryString.fromString("B"))
+                        GenericRow.of(1, BinaryString.fromString("A")),
+                        GenericRow.of(2, BinaryString.fromString("B"))
                 };
         result =
                 (InternalArray)
@@ -709,13 +801,13 @@ public class FieldAggregatorTest {
 
         accElements =
                 new Object[] {
-                    new GenericArray(new Object[] {1, 1}),
-                    new GenericArray(new Object[] {1, 2}),
-                    new GenericArray(new Object[] {2, 1})
+                        new GenericArray(new Object[] {1, 1}),
+                        new GenericArray(new Object[] {1, 2}),
+                        new GenericArray(new Object[] {2, 1})
                 };
         retractElements =
                 new Object[] {
-                    new GenericArray(new Object[] {1, 1}), new GenericArray(new Object[] {1, 2})
+                        new GenericArray(new Object[] {1, 1}), new GenericArray(new Object[] {1, 2})
                 };
         result =
                 (InternalArray)
@@ -737,9 +829,9 @@ public class FieldAggregatorTest {
 
         accElements =
                 new Object[] {
-                    new GenericMap(toMap(1, "A")),
-                    new GenericMap(toMap(2, "B", 1, "A")),
-                    new GenericMap(toMap(1, "C"))
+                        new GenericMap(toMap(1, "A")),
+                        new GenericMap(toMap(2, "B", 1, "A")),
+                        new GenericMap(toMap(1, "C"))
                 };
         retractElements =
                 new Object[] {new GenericMap(toMap(1, "A")), new GenericMap(toMap(1, "A", 2, "B"))};
@@ -786,15 +878,15 @@ public class FieldAggregatorTest {
 
         Object[] accElements =
                 new Object[] {
-                    GenericRow.of(1, BinaryString.fromString("A")),
-                    GenericRow.of(1, BinaryString.fromString("A")),
-                    GenericRow.of(1, BinaryString.fromString("B")),
-                    GenericRow.of(2, BinaryString.fromString("B"))
+                        GenericRow.of(1, BinaryString.fromString("A")),
+                        GenericRow.of(1, BinaryString.fromString("A")),
+                        GenericRow.of(1, BinaryString.fromString("B")),
+                        GenericRow.of(2, BinaryString.fromString("B"))
                 };
         Object[] retractElements =
                 new Object[] {
-                    GenericRow.of(1, BinaryString.fromString("A")),
-                    GenericRow.of(2, BinaryString.fromString("B"))
+                        GenericRow.of(1, BinaryString.fromString("A")),
+                        GenericRow.of(2, BinaryString.fromString("B"))
                 };
         result =
                 (InternalArray)
@@ -818,14 +910,14 @@ public class FieldAggregatorTest {
 
         accElements =
                 new Object[] {
-                    new GenericArray(new Object[] {1, 1}),
-                    new GenericArray(new Object[] {1, 1}),
-                    new GenericArray(new Object[] {1, 2}),
-                    new GenericArray(new Object[] {2, 1})
+                        new GenericArray(new Object[] {1, 1}),
+                        new GenericArray(new Object[] {1, 1}),
+                        new GenericArray(new Object[] {1, 2}),
+                        new GenericArray(new Object[] {2, 1})
                 };
         retractElements =
                 new Object[] {
-                    new GenericArray(new Object[] {1, 1}), new GenericArray(new Object[] {1, 2})
+                        new GenericArray(new Object[] {1, 1}), new GenericArray(new Object[] {1, 2})
                 };
         result =
                 (InternalArray)
@@ -849,10 +941,10 @@ public class FieldAggregatorTest {
 
         accElements =
                 new Object[] {
-                    new GenericMap(toMap(1, "A")),
-                    new GenericMap(toMap(1, "A")),
-                    new GenericMap(toMap(2, "B", 1, "A")),
-                    new GenericMap(toMap(1, "C"))
+                        new GenericMap(toMap(1, "A")),
+                        new GenericMap(toMap(1, "A")),
+                        new GenericMap(toMap(2, "B", 1, "A")),
+                        new GenericMap(toMap(1, "C"))
                 };
         retractElements =
                 new Object[] {new GenericMap(toMap(1, "A")), new GenericMap(toMap(1, "A", 2, "B"))};
