@@ -25,8 +25,6 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.CloseShieldOutputStream;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
@@ -116,9 +114,20 @@ public class JsonFileFormat extends FileFormat {
 
         @Override
         public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
-            FileIO fileIO = context.fileIO();
-            Path filePath = context.filePath();
-            return new JsonFileReader(fileIO, filePath, projectedRowType, options);
+            return new JsonFileReader(
+                    context.fileIO(), context.filePath(), projectedRowType, options, 0, null);
+        }
+
+        @Override
+        public FileRecordReader<InternalRow> createReader(Context context, long offset, long length)
+                throws IOException {
+            return new JsonFileReader(
+                    context.fileIO(),
+                    context.filePath(),
+                    projectedRowType,
+                    options,
+                    offset,
+                    length);
         }
     }
 

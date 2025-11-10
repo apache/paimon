@@ -18,6 +18,8 @@
 
 package org.apache.paimon.format.text;
 
+import javax.annotation.Nullable;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -36,6 +38,7 @@ public class CustomLineReader implements TextLineReader {
         this.delimiter = delimiter;
     }
 
+    @Nullable
     @Override
     public String readLine() throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream(1024);
