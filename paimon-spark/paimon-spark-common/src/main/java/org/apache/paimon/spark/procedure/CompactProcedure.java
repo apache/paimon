@@ -26,7 +26,9 @@ import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -537,6 +539,12 @@ public class CompactProcedure extends BaseProcedure {
         Map<BinaryRow, CompactUnit> compactUnits =
                 incrementalClusterManager.prepareForCluster(fullCompaction);
 
+        Map<BinaryRow, AppendDeleteFileMaintainer> appendDvMaintainers =
+                table.coreOptions().deletionVectorsEnabled()
+                        ? IncrementalClusterManager.createAppendDvMaintainers(
+                                table, compactUnits.keySet(), incrementalClusterManager.snapshot())
+                        : Collections.emptyMap();
+
         // generate splits for each partition
         Map<BinaryRow, DataSplit[]> partitionSplits =
                 compactUnits.entrySet().stream()
@@ -547,7 +555,9 @@ public class CompactProcedure extends BaseProcedure {
                                                 incrementalClusterManager
                                                         .toSplits(
                                                                 entry.getKey(),
-                                                                entry.getValue().files())
+                                                                entry.getValue().files(),
+                                                                appendDvMaintainers.get(
+                                                                        entry.getKey()))
                                                         .toArray(new DataSplit[0])));
 
         // sort in partition
@@ -604,8 +614,33 @@ public class CompactProcedure extends BaseProcedure {
                         "Partition {}: upgrade file level to {}",
                         partition,
                         compactUnits.get(partition).outputLevel());
+                // get the dv index messages
+                List<CommitMessage> partitionDvIndexCommitMessages =
+                        appendDvMaintainers.get(entry.getKey()) == null
+                                ? Collections.emptyList()
+                                : IncrementalClusterManager.producePartitionDvIndexCommitMessages(
+                                        table,
+                                        Arrays.asList(partitionSplits.get(partition)),
+                                        appendDvMaintainers.get(entry.getKey()));
+                List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+                List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
+                for (CommitMessage dvCommitMessage : partitionDvIndexCommitMessages) {
+                    newIndexFiles.addAll(
+                            ((CommitMessageImpl) dvCommitMessage)
+                                    .compactIncrement()
+                                    .newIndexFiles());
+                    deletedIndexFiles.addAll(
+                            ((CommitMessageImpl) dvCommitMessage)
+                                    .compactIncrement()
+                                    .deletedIndexFiles());
+                }
                 CompactIncrement compactIncrement =
-                        new CompactIncrement(clusterBefore, clusterAfter, Collections.emptyList());
+                        new CompactIncrement(
+                                clusterBefore,
+                                clusterAfter,
+                                Collections.emptyList(),
+                                newIndexFiles,
+                                deletedIndexFiles);
                 clusterMessages.add(
                         new CommitMessageImpl(
                                 partition,

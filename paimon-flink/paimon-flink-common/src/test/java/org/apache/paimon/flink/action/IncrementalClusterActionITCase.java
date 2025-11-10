@@ -21,15 +21,25 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
+import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
+import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -565,6 +575,112 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
     }
 
+    @Test
+    public void testClusterWithDeletionVector() throws Exception {
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        FileStoreTable table = createTable(null, 1, dynamicOptions);
+
+        BinaryString randomStr = BinaryString.fromString(randomString(150));
+        List<CommitMessage> messages = new ArrayList<>();
+        // first write
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                messages.addAll(write(GenericRow.of(i, j, randomStr, 0)));
+            }
+        }
+        commit(messages);
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0, 1});
+
+        // first cluster
+        runAction(Collections.emptyList());
+
+        // second write
+        messages.clear();
+        messages.addAll(
+                write(
+                        GenericRow.of(0, 3, null, 0),
+                        GenericRow.of(1, 3, null, 0),
+                        GenericRow.of(2, 3, null, 0)));
+        messages.addAll(
+                write(
+                        GenericRow.of(3, 0, null, 0),
+                        GenericRow.of(3, 1, null, 0),
+                        GenericRow.of(3, 2, null, 0),
+                        GenericRow.of(3, 3, null, 0)));
+        commit(messages);
+
+        // write deletion vector for the table
+        AppendDeleteFileMaintainer maintainer =
+                BaseAppendDeleteFileMaintainer.forUnawareAppend(
+                        table.store().newIndexFileHandler(),
+                        table.latestSnapshot().get(),
+                        BinaryRow.EMPTY_ROW);
+        List<DataFileMeta> files =
+                readBuilder.newScan().plan().splits().stream()
+                        .map(s -> ((DataSplit) s).dataFiles())
+                        .flatMap(List::stream)
+                        .collect(Collectors.toList());
+        // delete (0,0) and (0,3)
+        for (DataFileMeta file : files) {
+            if (file.rowCount() == 9 || file.rowCount() == 3) {
+                BitmapDeletionVector dv = new BitmapDeletionVector();
+                dv.delete(0);
+                maintainer.notifyNewDeletionVector(file.fileName(), dv);
+            }
+        }
+        commit(produceDvIndexMessages(table, maintainer));
+        List<String> result1 =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        readBuilder.readType());
+        List<String> expected1 =
+                Lists.newArrayList(
+                        "+I[0, 1]",
+                        "+I[1, 0]",
+                        "+I[1, 1]",
+                        "+I[0, 2]",
+                        "+I[1, 2]",
+                        "+I[2, 0]",
+                        "+I[2, 1]",
+                        "+I[2, 2]",
+                        "+I[1, 3]",
+                        "+I[2, 3]",
+                        "+I[3, 0]",
+                        "+I[3, 1]",
+                        "+I[3, 2]",
+                        "+I[3, 3]");
+        assertThat(result1).containsExactlyElementsOf(expected1);
+
+        // second cluster
+        runAction(Collections.emptyList());
+        checkSnapshot(table);
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        List<String> result2 =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        readBuilder.readType());
+        assertThat(result2.size()).isEqualTo(expected1.size());
+        assertThat(splits.size()).isEqualTo(1);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
+        // dv index for level-5 file should be retained
+        assertThat(splits.get(0).deletionFiles().get().get(0)).isNotNull();
+        assertThat(((DataSplit) splits.get(0)).dataFiles().get(1).level()).isEqualTo(4);
+        assertThat((splits.get(0).deletionFiles().get().get(1))).isNull();
+
+        // full cluster
+        runAction(Lists.newArrayList("--compact_strategy", "full"));
+        checkSnapshot(table);
+        splits = readBuilder.newScan().plan().splits();
+        assertThat(splits.size()).isEqualTo(1);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(1);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
+        assertThat(splits.get(0).deletionFiles().get().get(0)).isNull();
+    }
+
     protected FileStoreTable createTable(String partitionKeys, int sinkParallelism)
             throws Exception {
         return createTable(partitionKeys, sinkParallelism, Collections.emptyMap());
@@ -644,6 +760,32 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
     private void checkSnapshot(FileStoreTable table) {
         assertThat(table.latestSnapshot().get().commitKind())
                 .isEqualTo(Snapshot.CommitKind.COMPACT);
+    }
+
+    private List<CommitMessage> produceDvIndexMessages(
+            FileStoreTable table, AppendDeleteFileMaintainer maintainer) {
+        List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+        List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
+        List<IndexManifestEntry> indexEntries = maintainer.persist();
+        for (IndexManifestEntry entry : indexEntries) {
+            if (entry.kind() == FileKind.ADD) {
+                newIndexFiles.add(entry.indexFile());
+            } else {
+                deletedIndexFiles.add(entry.indexFile());
+            }
+        }
+        return Collections.singletonList(
+                new CommitMessageImpl(
+                        maintainer.getPartition(),
+                        0,
+                        table.coreOptions().bucket(),
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                newIndexFiles,
+                                deletedIndexFiles)));
     }
 
     private void runAction(List<String> extra) throws Exception {
