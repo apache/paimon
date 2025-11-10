@@ -30,6 +30,8 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.InputStream;
 
+import static org.apache.paimon.format.text.HadoopCompressionUtils.createDecompressedInputStream;
+
 /** Base class for text-based file readers that provides common functionality. */
 public abstract class TextFileReader implements FileRecordReader<InternalRow> {
 
@@ -37,18 +39,25 @@ public abstract class TextFileReader implements FileRecordReader<InternalRow> {
     private final TextRecordIterator reader;
 
     protected final RowType rowType;
+    protected final long offset;
     protected final TextLineReader lineReader;
 
     protected boolean readerClosed = false;
 
-    protected TextFileReader(FileIO fileIO, Path filePath, RowType rowType, String delimiter)
+    protected TextFileReader(
+            FileIO fileIO,
+            Path filePath,
+            RowType rowType,
+            String delimiter,
+            long offset,
+            @Nullable Long length)
             throws IOException {
         this.filePath = filePath;
         this.rowType = rowType;
+        this.offset = offset;
         InputStream decompressedStream =
-                HadoopCompressionUtils.createDecompressedInputStream(
-                        fileIO.newInputStream(filePath), filePath);
-        this.lineReader = TextLineReader.create(decompressedStream, delimiter);
+                createDecompressedInputStream(fileIO.newInputStream(filePath), filePath);
+        this.lineReader = TextLineReader.create(decompressedStream, delimiter, offset, length);
         this.reader = new TextRecordIterator();
     }
 
@@ -131,6 +140,10 @@ public abstract class TextFileReader implements FileRecordReader<InternalRow> {
 
         @Override
         public long returnedPosition() {
+            if (offset > 0) {
+                throw new UnsupportedOperationException(
+                        "Cannot return position with reading offset.");
+            }
             return Math.max(0, currentPosition - 1);
         }
     }

@@ -39,6 +39,8 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -53,9 +55,15 @@ public class JsonFileReader extends TextFileReader {
 
     private final JsonOptions options;
 
-    public JsonFileReader(FileIO fileIO, Path filePath, RowType rowType, JsonOptions options)
+    public JsonFileReader(
+            FileIO fileIO,
+            Path filePath,
+            RowType rowType,
+            JsonOptions options,
+            long offset,
+            @Nullable Long length)
             throws IOException {
-        super(fileIO, filePath, rowType, options.getLineDelimiter());
+        super(fileIO, filePath, rowType, options.getLineDelimiter(), offset, length);
         this.options = options;
     }
 
