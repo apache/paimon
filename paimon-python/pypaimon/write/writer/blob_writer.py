@@ -172,17 +172,11 @@ class BlobWriter(AppendOnlyDataWriter):
         else:
             # row_count only (from BlobFileWriter)
             row_count = data_or_row_count
-            # For blob files, we don't have stats
-            # Use the actual blob column name instead of hardcoded 'blob_data'
-            # This ensures the stats schema matches the actual table schema
             data_fields = [PyarrowFieldParser.to_paimon_schema(pa.schema([(self.blob_column, pa.large_binary())]))[0]]
             min_value_stats = [None]
             max_value_stats = [None]
             value_null_counts = [0]
 
-        # min_seq = seqNumCounter.getValue() - super.recordCount()
-        # max_seq = seqNumCounter.getValue() - 1
-        # This ensures max_seq - min_seq + 1 == row_count
         min_seq = self.sequence_generator.current - row_count
         max_seq = self.sequence_generator.current - 1
         self.sequence_generator.start = self.sequence_generator.current
@@ -205,7 +199,7 @@ class BlobWriter(AppendOnlyDataWriter):
             extra_files=[],
             creation_time=datetime.now(),
             delete_row_count=0,
-            file_source="APPEND",
+            file_source=0,  # FileSource.APPEND = 0
             value_stats_cols=None,
             external_path=None,
             first_row_id=None,
