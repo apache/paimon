@@ -32,6 +32,9 @@ on:
 
 env:
   PYTHON_VERSIONS: "['3.6.15', '3.10']"
+  JDK_VERSION: 8
+  MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
+
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
@@ -49,6 +52,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
+      - name: Set up JDK ${{ env.JDK_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JDK_VERSION }}
+          distribution: 'temurin'
+
       - name: Install system dependencies
         shell: bash
         run: |
@@ -56,12 +65,7 @@ jobs:
             build-essential \
             git \
             curl \
-            openjdk-8-jdk \
-            maven \
             && rm -rf /var/lib/apt/lists/*
-
-      - name: Set JAVA_HOME
-        run: echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
 
       - name: Verify Java and Maven installation
         run: |
