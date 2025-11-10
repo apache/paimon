@@ -73,7 +73,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
-        initial_result = table_read.to_pandas(table_scan.plan().splits()).sort_values(by='id')
+        initial_result = table_read.to_pandas(table_scan.plan().splits())
         print(initial_result)
         self.assertEqual(len(initial_result), 6)
         self.assertListEqual(
@@ -86,5 +86,5 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
-        res = table_read.to_pandas(table_scan.plan().splits()).sort_values(by='id')
+        res = table_read.to_pandas(table_scan.plan().splits())
         print(res)

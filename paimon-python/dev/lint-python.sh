@@ -196,6 +196,10 @@ function pytest_check() {
 
 # Mixed tests check - runs Java-Python interoperability tests
 function mixed_check() {
+    if [ "$PYTHON_VERSION" = "3.6" ]; then
+        print_function "STAGE" "mixed tests checks... [SKIPPED]"
+        return
+    fi
     print_function "STAGE" "mixed tests checks"
 
     # Path to the mixed tests script

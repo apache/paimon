@@ -176,15 +176,15 @@ main() {
     echo -e "${YELLOW}=== Test Results Summary ===${NC}"
 
     if [[ $java_write_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ Java Test (JavaPyE2ETest.testJavaWriteRead): PASSED${NC}"
+        echo -e "${GREEN}✓ Java Write Test (JavaPyE2ETest.testJavaWriteRead): PASSED${NC}"
     else
-        echo -e "${RED}✗ Java Test (JavaPyE2ETest.testJavaWriteRead): FAILED${NC}"
+        echo -e "${RED}✗ Java Write Test (JavaPyE2ETest.testJavaWriteRead): FAILED${NC}"
     fi
 
     if [[ $python_read_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ Python Test (JavaPyReadWriteTest.testRead): PASSED${NC}"
+        echo -e "${GREEN}✓ Python Read Test (JavaPyReadWriteTest.testRead): PASSED${NC}"
     else
-        echo -e "${RED}✗ Python Test (JavaPyReadWriteTest.testRead): FAILED${NC}"
+        echo -e "${RED}✗ Python Read Test (JavaPyReadWriteTest.testRead): FAILED${NC}"
     fi
 
     if [[ $python_write_result -eq 0 ]]; then
