@@ -172,11 +172,8 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
         val assignerParallelism = Option(coreOptions.dynamicBucketAssignerParallelism)
           .map(_.toInt)
           .getOrElse(sparkParallelism)
-        val bootstrapped = bootstrapAndRepartitionByKeyHash(
-          withInitBucketCol,
-          assignerParallelism,
-          rowKindColIdx,
-          rowType)
+        val bootstrapped =
+          bootstrapAndRepartitionByKeyHash(withInitBucketCol, assignerParallelism, rowKindColIdx)
 
         val globalDynamicBucketProcessor =
           GlobalDynamicBucketProcessor(
@@ -378,11 +375,11 @@ case class PaimonSparkWriter(table: FileStoreTable, writeRowTracking: Boolean = 
   private def bootstrapAndRepartitionByKeyHash(
       data: DataFrame,
       parallelism: Int,
-      rowKindColIdx: Int,
-      rowType: RowType): RDD[(KeyPartOrRow, Array[Byte])] = {
+      rowKindColIdx: Int): RDD[(KeyPartOrRow, Array[Byte])] = {
     val numSparkPartitions = data.rdd.getNumPartitions
     val primaryKeys = table.schema().primaryKeys()
     val bootstrapType = IndexBootstrap.bootstrapType(table.schema())
+    val rowType = table.rowType()
     data.rdd
       .mapPartitions {
         iter =>
