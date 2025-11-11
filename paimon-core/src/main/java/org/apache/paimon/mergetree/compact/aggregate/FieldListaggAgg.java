@@ -68,7 +68,7 @@ public class FieldListaggAgg extends FieldAggregator {
                     BinaryStringUtils.splitByWholeSeparatorPreserveAllTokens(
                             inFieldSD, delimiterBinaryString);
 
-            List<BinaryString> toBeCollected =
+            List<BinaryString> concatItems =
                     Arrays.stream(binaryStrings)
                             .filter(it -> it.getSizeInBytes() > 0 && !mergeFieldSD.contains(it))
                             .collect(
@@ -86,7 +86,11 @@ public class FieldListaggAgg extends FieldAggregator {
                                         l.addAll(r);
                                     });
 
-            return BinaryStringUtils.concat(toBeCollected);
+            if (concatItems.size() == 1) {
+                return concatItems.get(0);
+            }
+
+            return BinaryStringUtils.concat(concatItems);
         }
 
         return BinaryStringUtils.concat(
