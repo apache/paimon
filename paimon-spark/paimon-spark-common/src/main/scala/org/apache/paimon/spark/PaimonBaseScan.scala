@@ -128,6 +128,13 @@ abstract class PaimonBaseScan(
     } else {
       ""
     }
+
+    val reservedFiltersStr = if (reservedFilters.nonEmpty) {
+      ", ReservedFilters: [" + reservedFilters.mkString(",") + "]"
+    } else {
+      ""
+    }
+
     val pushedTopNFilterStr = if (pushDownTopN.nonEmpty) {
       s", PushedTopNFilter: [${pushDownTopN.get.toString}]"
     } else {
@@ -169,7 +176,8 @@ abstract class PaimonBaseScan(
       ""
     }
 
-    s"PaimonScan: [${table.name}]" + latestSnapshotIdStr + currentSnapshotIdStr + pushedFiltersStr + pushedTopNFilterStr +
+    s"PaimonScan: [${table.name}]" + latestSnapshotIdStr + currentSnapshotIdStr +
+      pushedFiltersStr + reservedFiltersStr + pushedTopNFilterStr +
       pushDownLimit.map(limit => s", Limit: [$limit]").getOrElse("")
   }
 }
