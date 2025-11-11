@@ -80,14 +80,21 @@ public class FormatTableCommit implements BatchTableCommit {
                                     + commitMessage.getClass().getName());
                 }
             }
-            if (overwrite && staticPartitions != null && !staticPartitions.isEmpty()) {
+
+            if (staticPartitions != null && !staticPartitions.isEmpty()) {
                 Path partitionPath =
                         buildPartitionPath(
                                 location,
                                 staticPartitions,
                                 formatTablePartitionOnlyValueInPath,
                                 partitionKeys);
-                deletePreviousDataFile(partitionPath);
+
+                if (overwrite) {
+                    deletePreviousDataFile(partitionPath);
+                }
+                if (!fileIO.exists(partitionPath)) {
+                    fileIO.mkdirs(partitionPath);
+                }
             } else if (overwrite) {
                 Set<Path> partitionPaths = new HashSet<>();
                 for (TwoPhaseOutputStream.Committer c : committers) {
@@ -97,6 +104,7 @@ public class FormatTableCommit implements BatchTableCommit {
                     deletePreviousDataFile(p);
                 }
             }
+
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 committer.commit(this.fileIO);
             }

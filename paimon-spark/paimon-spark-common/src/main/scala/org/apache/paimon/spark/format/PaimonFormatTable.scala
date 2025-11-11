@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.format
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.format.csv.CsvOptions
 import org.apache.paimon.spark.{BaseTable, FormatTableScanBuilder, SparkInternalRowWrapper}
 import org.apache.paimon.spark.write.BaseV2WriteBuilder
