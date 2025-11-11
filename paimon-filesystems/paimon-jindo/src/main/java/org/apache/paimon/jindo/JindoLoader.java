@@ -30,11 +30,7 @@ public class JindoLoader implements FileIOLoader {
 
     @Override
     public List<String[]> requiredOptions() {
-        List<String[]> options = new ArrayList<>();
-        options.add(new String[] {"fs.oss.endpoint"});
-        options.add(new String[] {"fs.oss.accessKeyId"});
-        options.add(new String[] {"fs.oss.accessKeySecret"});
-        return options;
+        return new ArrayList<>();
     }
 
     @Override

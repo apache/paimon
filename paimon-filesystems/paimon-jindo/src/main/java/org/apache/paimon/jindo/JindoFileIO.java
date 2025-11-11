@@ -93,14 +93,6 @@ public class JindoFileIO extends HadoopCompliantFileIO {
     public void configure(CatalogContext context) {
         allowCache = context.options().get(FILE_IO_ALLOW_CACHE);
         hadoopOptions = new Options();
-        // https://github.com/aliyun/alibabacloud-jindodata/blob/master/docs/user/4.x/4.6.x/4.6.1/oss/hadoop/jindosdk_ide_hadoop.md
-        hadoopOptions.set("fs.oss.impl", "com.aliyun.jindodata.oss.JindoOssFileSystem");
-        hadoopOptions.set("fs.AbstractFileSystem.oss.impl", "com.aliyun.jindodata.oss.OSS");
-
-        // Misalignment can greatly affect performance, so the maximum buffer is set here
-        hadoopOptions.set("fs.oss.read.position.buffer.size", "8388608");
-        hadoopOptions.set("fs.oss.credentials.provider", SimpleCredentialsProvider.NAME);
-
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {
             for (String prefix : CONFIG_PREFIXES) {
@@ -117,6 +109,23 @@ public class JindoFileIO extends HadoopCompliantFileIO {
                             hadoopOptions.get(key));
                 }
             }
+        }
+        // as in rest catalog use could define ak for table so we need first use ak.
+        if (hadoopOptions.containsKey(OSS_ACCESS_KEY_ID)
+                && hadoopOptions.containsKey(OSS_ACCESS_KEY_SECRET)) {
+            LOG.info("Using Ak init Jindo.");
+            // https://github.com/aliyun/alibabacloud-jindodata/blob/master/docs/user/4.x/4.6.x/4.6.1/oss/hadoop/jindosdk_ide_hadoop.md
+            hadoopOptions.set("fs.oss.impl", "com.aliyun.jindodata.oss.JindoOssFileSystem");
+            hadoopOptions.set("fs.AbstractFileSystem.oss.impl", "com.aliyun.jindodata.oss.OSS");
+
+            // Misalignment can greatly affect performance, so the maximum buffer is set here
+            hadoopOptions.set("fs.oss.read.position.buffer.size", "8388608");
+            hadoopOptions.set("fs.oss.credentials.provider", SimpleCredentialsProvider.NAME);
+        } else {
+            LOG.info("Using hadoop conf init Jindo.");
+            context.hadoopConf()
+                    .iterator()
+                    .forEachRemaining(entry -> hadoopOptions.set(entry.getKey(), entry.getValue()));
         }
     }
 
