@@ -32,6 +32,9 @@ on:
 
 env:
   PYTHON_VERSIONS: "['3.6.15', '3.10']"
+  JDK_VERSION: 8
+  MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
+
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
@@ -49,6 +52,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
+      - name: Set up JDK ${{ env.JDK_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JDK_VERSION }}
+          distribution: 'temurin'
+
+      - name: Set up Maven
+        uses: stCarolas/setup-maven@v4.5
+        with:
+          maven-version: 3.8.8
+
       - name: Install system dependencies
         shell: bash
         run: |
@@ -58,8 +72,18 @@ jobs:
             curl \
             && rm -rf /var/lib/apt/lists/*
 
+      - name: Verify Java and Maven installation
+        run: |
+          java -version
+          mvn -version
+
       - name: Verify Python version
         run: python --version
+
+      - name: Build Java
+        run: |
+          echo "Start compiling modules"
+          mvn -T 2C -B clean install -DskipTests
 
       - name: Install Python dependencies
         shell: bash
