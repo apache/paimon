@@ -2030,6 +2030,16 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withFallbackKeys(FILE_COMPRESSION.key())
                     .withDescription("Format table file compression.");
+    public static final ConfigOption<String> FORMAT_TABLE_COMMIT_SYNC_PARTITION_HIVE_URI =
+            ConfigOptions.key("format-table.commit.sync-partition-hive.uri")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Format table commit sync partition hive uri.");
+    public static final ConfigOption<String> FORMAT_TABLE_COMMIT_SYNC_PARTITION_HIVE_WAREHOUSE =
+            ConfigOptions.key("format-table.commit.sync-partition-hive-warehouse")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Format table commit sync partition hive warehouse.");
 
     public static final ConfigOption<String> BLOB_FIELD =
             key("blob-field")
@@ -2324,6 +2334,14 @@ public class CoreOptions implements Serializable {
                             String.format("Unsupported format: %s", format));
             }
         }
+    }
+
+    public String formatTableCommitSyncPartitionHiveUri() {
+        return options.get(FORMAT_TABLE_COMMIT_SYNC_PARTITION_HIVE_URI);
+    }
+
+    public String formatTableCommitSyncPartitionHiveWarehouse() {
+        return options.get(FORMAT_TABLE_COMMIT_SYNC_PARTITION_HIVE_WAREHOUSE);
     }
 
     public MemorySize fileReaderAsyncThreshold() {
