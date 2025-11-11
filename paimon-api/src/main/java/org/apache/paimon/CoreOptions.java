@@ -229,6 +229,8 @@ public class CoreOptions implements Serializable {
     public static final String FILE_FORMAT_ORC = "orc";
     public static final String FILE_FORMAT_AVRO = "avro";
     public static final String FILE_FORMAT_PARQUET = "parquet";
+    public static final String FILE_FORMAT_CSV = "csv";
+    public static final String FILE_FORMAT_JSON = "json";
 
     public static final ConfigOption<String> FILE_FORMAT =
             key("file.format")
@@ -2022,6 +2024,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Format table file path only contain partition value.");
 
+    public static final ConfigOption<String> FORMAT_TABLE_FILE_COMPRESSION =
+            ConfigOptions.key("format-table.file.compression")
+                    .stringType()
+                    .noDefaultValue()
+                    .withFallbackKeys(FILE_COMPRESSION.key())
+                    .withDescription("Format table file compression.");
+
     public static final ConfigOption<String> BLOB_FIELD =
             key("blob-field")
                     .stringType()
@@ -2292,6 +2301,29 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String fileCompression() {
         return options.get(FILE_COMPRESSION);
+    }
+
+    public String formatTableFileCompression() {
+        if (options.containsKey(FILE_COMPRESSION.key())) {
+            return options.get(FILE_COMPRESSION.key());
+        } else if (options.containsKey(FORMAT_TABLE_FILE_COMPRESSION.key())) {
+            return options.get(FORMAT_TABLE_FILE_COMPRESSION.key());
+        } else {
+            String format = formatType();
+            switch (format) {
+                case FILE_FORMAT_PARQUET:
+                    return "snappy";
+                case FILE_FORMAT_AVRO:
+                case FILE_FORMAT_ORC:
+                    return "zstd";
+                case FILE_FORMAT_CSV:
+                case FILE_FORMAT_JSON:
+                    return "none";
+                default:
+                    throw new UnsupportedOperationException(
+                            String.format("Unsupported format: %s", format));
+            }
+        }
     }
 
     public MemorySize fileReaderAsyncThreshold() {

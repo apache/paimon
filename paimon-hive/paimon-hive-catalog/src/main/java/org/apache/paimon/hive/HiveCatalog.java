@@ -914,7 +914,6 @@ public class HiveCatalog extends AbstractCatalog {
         List<String> primaryKeys = schema.primaryKeys();
         Map<String, String> options = schema.options();
         int highestFieldId = RowType.currentHighestFieldId(fields);
-
         TableSchema newSchema =
                 new TableSchema(
                         0,

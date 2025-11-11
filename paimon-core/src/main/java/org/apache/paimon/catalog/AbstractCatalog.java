@@ -381,7 +381,7 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotBranch(identifier, "createTable");
         checkNotSystemTable(identifier, "createTable");
-        validateCreateTable(schema);
+        validateCreateTable(schema, false);
         validateCustomTablePath(schema.options());
 
         // check db exists
