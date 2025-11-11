@@ -18,8 +18,10 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
@@ -34,6 +36,8 @@ import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -49,6 +53,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -193,6 +198,23 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         // Perform an operation that will trigger REST request
         restCatalog.listDatabases();
         checkHeader(customHeaderName, customHeaderValue);
+    }
+
+    @Test
+    void testCreateFormatTableWhenEnableDataToken() throws Exception {
+        RESTCatalog restCatalog = initCatalog(true);
+        restCatalog.createDatabase("test_db", false);
+        // Create table creates a new table when it does not exist
+        Identifier identifier = Identifier.create("test_db", "new_table");
+        Schema schema = Schema.newBuilder().column("c1", DataTypes.INT()).build();
+        schema.options().put(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString());
+        schema.options().put(CoreOptions.FORMAT_TABLE_IMPLEMENTATION.key(), "engine");
+
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> restCatalog.createTable(identifier, schema, false))
+                .withMessage(
+                        "Cannot define format-table.implementation is engine for format table when data token is enabled and not define path.");
+        catalog.dropTable(identifier, true);
     }
 
     private void checkHeader(String headerName, String headerValue) {

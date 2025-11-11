@@ -59,6 +59,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.AUTO_CREATE;
+import static org.apache.paimon.CoreOptions.FORMAT_TABLE_IMPLEMENTATION;
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.CoreOptions.PARTITION_GENERATE_LEGACY_NAME;
 import static org.apache.paimon.CoreOptions.PATH;
@@ -142,7 +143,7 @@ public class CatalogUtils {
         }
     }
 
-    public static void validateCreateTable(Schema schema) {
+    public static void validateCreateTable(Schema schema, boolean dataTokenEnabled) {
         Options options = Options.fromMap(schema.options());
         checkArgument(
                 !options.get(AUTO_CREATE),
@@ -156,6 +157,15 @@ public class CatalogUtils {
                     options.get(PRIMARY_KEY) == null,
                     "Cannot define %s for format table.",
                     PRIMARY_KEY.key());
+            if (dataTokenEnabled) {
+                checkArgument(
+                        options.get(PATH) == null
+                                && options.get(FORMAT_TABLE_IMPLEMENTATION)
+                                        != CoreOptions.FormatTableImplementation.ENGINE,
+                        "Cannot define %s is engine for format table when data token is enabled and not define %s.",
+                        FORMAT_TABLE_IMPLEMENTATION.key(),
+                        PATH.key());
+            }
         }
         for (DataField field : schema.fields()) {
             validateDefaultValue(field.type(), field.defaultValue());
