@@ -35,6 +35,9 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.utils.PartitionPathUtils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
@@ -52,6 +55,8 @@ import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateSta
 
 /** Commit for Format Table. */
 public class FormatTableCommit implements BatchTableCommit {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FormatTableCommit.class);
 
     private String location;
     private final boolean formatTablePartitionOnlyValueInPath;
@@ -71,7 +76,8 @@ public class FormatTableCommit implements BatchTableCommit {
             Identifier tableIdentifier,
             @Nullable Map<String, String> staticPartitions,
             @Nullable String syncHiveUri,
-            @Nullable String syncHiveWarehouse) {
+            @Nullable String syncHiveWarehouse,
+            CatalogContext catalogContext) {
         this.location = location;
         this.fileIO = fileIO;
         this.formatTablePartitionOnlyValueInPath = formatTablePartitionOnlyValueInPath;
@@ -82,12 +88,20 @@ public class FormatTableCommit implements BatchTableCommit {
         this.tableIdentifier = tableIdentifier;
         if (syncHiveUri != null && syncHiveWarehouse != null) {
             try {
+                LOG.info(
+                        "Initializing Hive catalog with URI: "
+                                + syncHiveUri
+                                + " and warehouse: "
+                                + syncHiveWarehouse
+                                + " hadoop conf size: "
+                                + catalogContext.hadoopConf().size());
                 Options options = new Options();
                 options.set(CatalogOptions.URI, syncHiveUri);
                 options.set(CatalogOptions.WAREHOUSE, syncHiveWarehouse);
                 options.set(CatalogOptions.METASTORE, "hive");
 
-                CatalogContext context = CatalogContext.create(options);
+                CatalogContext context =
+                        CatalogContext.create(options, catalogContext.hadoopConf());
                 this.hiveCatalog = CatalogFactory.createCatalog(context);
             } catch (Exception e) {
                 throw new RuntimeException(
@@ -142,6 +156,7 @@ public class FormatTableCommit implements BatchTableCommit {
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 committer.commit(this.fileIO);
                 if (partitionKeys != null && !partitionKeys.isEmpty() && hiveCatalog != null) {
+                    LOG.info("Creating partition: " + committer.targetPath().getParent());
                     partitionSpecs.add(
                             extractPartitionSpecFromPath(
                                     committer.targetPath().getParent(), partitionKeys));
@@ -151,6 +166,7 @@ public class FormatTableCommit implements BatchTableCommit {
                 committer.clean(this.fileIO);
             }
             for (Map<String, String> partitionSpec : partitionSpecs) {
+                LOG.info("Creating partition: " + partitionSpec);
                 hiveCatalog.createPartitions(
                         tableIdentifier, Collections.singletonList(partitionSpec));
             }

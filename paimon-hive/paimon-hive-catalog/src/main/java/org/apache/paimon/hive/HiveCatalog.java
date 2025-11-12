@@ -705,6 +705,7 @@ public class HiveCatalog extends AbstractCatalog {
     private TableSchema loadTableSchema(Identifier identifier, Table table)
             throws TableNotExistException {
         if (isPaimonTable(table)) {
+            LOG.info("Found paimon table {}", identifier.getFullName());
             return tableSchemaInFileSystem(
                             getTableLocation(identifier, table),
                             identifier.getBranchNameOrDefault())
@@ -712,10 +713,12 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         if (!formatTableDisabled()) {
+            LOG.info("Found format table {}", identifier.getFullName());
             try {
                 Schema schema = tryToFormatSchema(table);
                 return TableSchema.create(0, schema);
             } catch (UnsupportedOperationException ignored) {
+                LOG.error("Failed to get format table schema", ignored);
             }
         }
 
