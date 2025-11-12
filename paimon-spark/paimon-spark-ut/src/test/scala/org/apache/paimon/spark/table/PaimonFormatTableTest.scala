@@ -118,6 +118,17 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
+  test("PaimonFormatTable table: dynamic options") {
+    withTable("t") {
+      sql(s"create table t (id INT, v INT, pt STRING) using csv")
+
+      withSparkSQLConf("spark.paimon.write.batch-size" -> "256") {
+        val options = getFormatTableScan("SELECT * FROM t").table.options()
+        assert(options.get("write.batch-size") == "256")
+      }
+    }
+  }
+
   test("PaimonFormatTable non partition table overwrite: csv") {
     val tableName = "paimon_non_partiiton_overwrite_test"
     withTable(tableName) {
