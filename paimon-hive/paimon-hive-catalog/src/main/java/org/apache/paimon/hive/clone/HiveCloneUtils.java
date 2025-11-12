@@ -19,6 +19,7 @@
 package org.apache.paimon.hive.clone;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.format.parquet.ParquetOptions;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -131,10 +132,17 @@ public class HiveCloneUtils {
 
     public static Schema hiveTableToPaimonSchema(HiveCatalog hiveCatalog, Identifier identifier)
             throws Exception {
+        return hiveTableToPaimonSchema(hiveCatalog, identifier, true);
+    }
+
+    public static Schema hiveTableToPaimonSchema(
+            HiveCatalog hiveCatalog, Identifier identifier, boolean enableTimezoneConversion)
+            throws Exception {
         String database = identifier.getDatabaseName();
         String table = identifier.getObjectName();
 
         IMetaStoreClient client = hiveCatalog.getHmsClient();
+
         // check primary key
         PrimaryKeysRequest primaryKeysRequest = new PrimaryKeysRequest(database, table);
         try {
@@ -151,6 +159,19 @@ public class HiveCloneUtils {
         List<FieldSchema> fields = extractor.extractSchema(client, hiveTable, database, table);
         List<String> partitionKeys = extractor.extractPartitionKeys(hiveTable);
         Map<String, String> options = extractor.extractOptions(hiveTable);
+
+        if (enableTimezoneConversion
+                && hasTimestampColumns(hiveTable)
+                && "parquet".equals(parseFormat(hiveTable))
+                && !options.containsKey(ParquetOptions.TIMESTAMP_INT96_ADJUST_ZONE)) {
+            options.put(ParquetOptions.TIMESTAMP_INT96_ADJUST_ZONE, "true");
+            LOG.debug(
+                    "Enabled {} for {}.{} (Parquet).",
+                    ParquetOptions.TIMESTAMP_INT96_ADJUST_ZONE,
+                    database,
+                    table);
+        }
+
         Schema.Builder schemaBuilder =
                 Schema.newBuilder()
                         .comment(options.get("comment"))
@@ -229,5 +250,13 @@ public class HiveCloneUtils {
             throw new UnsupportedOperationException("Unknown partition format: " + partition);
         }
         return format;
+    }
+
+    public static boolean hasTimestampColumns(Table hiveTable) {
+        List<FieldSchema> allCols = new ArrayList<>(hiveTable.getSd().getCols());
+        allCols.addAll(hiveTable.getPartitionKeys());
+
+        return allCols.stream()
+                .anyMatch(field -> field.getType().toLowerCase().contains("timestamp"));
     }
 }
