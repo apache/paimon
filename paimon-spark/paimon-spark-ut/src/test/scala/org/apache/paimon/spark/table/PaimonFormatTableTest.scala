@@ -118,7 +118,7 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
-  test("PaimonFormatTable table: dynamic options") {
+  test("PaimonFormatTable: set dynamic options") {
     withTable("t") {
       sql(s"create table t (id INT, v INT, pt STRING) using csv")
 
