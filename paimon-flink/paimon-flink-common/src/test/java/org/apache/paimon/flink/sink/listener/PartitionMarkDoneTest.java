@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
@@ -28,6 +29,9 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.flink.streaming.api.operators.collect.utils.MockOperatorStateStore;
 import org.junit.jupiter.api.Test;
 
+import java.util.function.Consumer;
+
+import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
@@ -38,22 +42,32 @@ class PartitionMarkDoneTest extends TableTestBase {
 
     @Test
     public void testTriggerByCompaction() throws Exception {
-        innerTest(true, true);
+        innerTest(options -> options.set(DELETION_VECTORS_ENABLED, true), true, false);
+    }
+
+    @Test
+    public void testTriggerByCompaction2() throws Exception {
+        innerTest(options -> options.set(BUCKET, -2), true, false);
     }
 
     @Test
     public void testNotTriggerByCompaction() throws Exception {
-        innerTest(false, true);
+        innerTest(options -> {}, true, true);
     }
 
     @Test
     public void testNotTriggerWhenRecoveryFromState() throws Exception {
-        innerTest(false, false);
+        innerTest(options -> {}, false, true);
     }
 
-    private void innerTest(boolean deletionVectors, boolean partitionMarkDoneRecoverFromState)
+    private void innerTest(
+            Consumer<Options> config, boolean recoverFromState, boolean shouldMarkDone)
             throws Exception {
         Identifier identifier = identifier("T");
+        Options options = new Options();
+        options.set(PARTITION_MARK_DONE_WHEN_END_INPUT, true);
+        options.set(PARTITION_MARK_DONE_ACTION, "success-file");
+        config.accept(options);
         Schema schema =
                 Schema.newBuilder()
                         .column("a", DataTypes.INT())
@@ -61,11 +75,7 @@ class PartitionMarkDoneTest extends TableTestBase {
                         .column("c", DataTypes.INT())
                         .partitionKeys("a")
                         .primaryKey("a", "b")
-                        .option(PARTITION_MARK_DONE_WHEN_END_INPUT.key(), "true")
-                        .option(PARTITION_MARK_DONE_ACTION.key(), "success-file")
-                        .option(
-                                DELETION_VECTORS_ENABLED.key(),
-                                Boolean.valueOf(deletionVectors).toString())
+                        .options(options.toMap())
                         .build();
         catalog.createTable(identifier, schema, true);
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
@@ -80,17 +90,17 @@ class PartitionMarkDoneTest extends TableTestBase {
                                 table)
                         .get();
 
-        if (!partitionMarkDoneRecoverFromState) {
-            notifyCommits(markDone, false, partitionMarkDoneRecoverFromState);
+        if (!recoverFromState) {
+            notifyCommits(markDone, false, false);
             assertThat(table.fileIO().exists(successFile)).isEqualTo(false);
             return;
         }
 
-        notifyCommits(markDone, true, partitionMarkDoneRecoverFromState);
-        assertThat(table.fileIO().exists(successFile)).isEqualTo(deletionVectors);
+        notifyCommits(markDone, true, true);
+        assertThat(table.fileIO().exists(successFile)).isEqualTo(!shouldMarkDone);
 
-        if (!deletionVectors) {
-            notifyCommits(markDone, false, partitionMarkDoneRecoverFromState);
+        if (shouldMarkDone) {
+            notifyCommits(markDone, false, true);
             assertThat(table.fileIO().exists(successFile)).isEqualTo(true);
         }
     }
