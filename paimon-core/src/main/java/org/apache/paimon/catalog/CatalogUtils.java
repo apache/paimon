@@ -157,11 +157,10 @@ public class CatalogUtils {
                     options.get(PRIMARY_KEY) == null,
                     "Cannot define %s for format table.",
                     PRIMARY_KEY.key());
-            if (dataTokenEnabled) {
+            if (dataTokenEnabled && options.get(PATH) == null) {
                 checkArgument(
-                        options.get(PATH) == null
-                                && options.get(FORMAT_TABLE_IMPLEMENTATION)
-                                        != CoreOptions.FormatTableImplementation.ENGINE,
+                        options.get(FORMAT_TABLE_IMPLEMENTATION)
+                                != CoreOptions.FormatTableImplementation.ENGINE,
                         "Cannot define %s is engine for format table when data token is enabled and not define %s.",
                         FORMAT_TABLE_IMPLEMENTATION.key(),
                         PATH.key());

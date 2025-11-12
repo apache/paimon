@@ -85,10 +85,11 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
         LinkedHashMap<String, DeletionVectorMeta> dvMetas = new LinkedHashMap<>(arrayData.size());
         for (int i = 0; i < arrayData.size(); i++) {
             InternalRow row = arrayData.getRow(i, DeletionVectorMeta.SCHEMA.getFieldCount());
+            String dataFileName = row.getString(0).toString();
             dvMetas.put(
-                    row.getString(0).toString(),
+                    dataFileName,
                     new DeletionVectorMeta(
-                            row.getString(0).toString(),
+                            dataFileName,
                             row.getInt(1),
                             row.getInt(2),
                             row.isNullAt(3) ? null : row.getLong(3)));
