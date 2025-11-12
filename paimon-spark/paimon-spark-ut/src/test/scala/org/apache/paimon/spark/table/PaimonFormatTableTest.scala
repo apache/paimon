@@ -34,6 +34,46 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     sql("USE test_db")
   }
 
+  test("PaimonFormatTable: partition path validate when insert overwrite empty data") {
+    val tableName = "paimon_format_test_partition_path"
+    val readTableName = s"${tableName}_read"
+    withTable(tableName) {
+      sql(
+        s"CREATE TABLE $tableName (f0 INT, f1 string, f2 INT) USING CSV TBLPROPERTIES (" +
+          s"'file.compression'='none', 'seq'='|', 'lineSep'='\n', " +
+          "'format-table.implementation'='paimon') PARTITIONED BY (`ds` bigint)")
+      sql(
+        s"CREATE TABLE $readTableName (f0 INT, f1 string, f2 INT) USING CSV TBLPROPERTIES (" +
+          s"'file.compression'='none', 'seq'='|', 'lineSep'='\n', " +
+          "'format-table.implementation'='paimon') PARTITIONED BY (`ds` bigint)")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      val readTable =
+        paimonCatalog
+          .getTable(Identifier.create("test_db", s"$readTableName"))
+          .asInstanceOf[FormatTable]
+
+      table.fileIO().mkdirs(new Path(table.location()))
+      readTable.fileIO().mkdirs(new Path(readTable.location()))
+
+      val partition = 20250920
+      val partitionPath = new Path(table.location(), s"ds=$partition")
+      checkAnswer(
+        sql(s"SELECT * FROM $readTableName where ds = $partition"),
+        Nil
+      )
+      checkAnswer(
+        sql(s"SELECT * FROM $tableName where ds = $partition"),
+        Nil
+      )
+      spark.sql(
+        s"INSERT OVERWRITE $tableName PARTITION (ds = $partition) select `f0`, `f1`, `f2` from $readTableName where ds = $partition")
+      assert(
+        table.fileIO().exists(partitionPath),
+        s"Partition directory should exist after empty insert: $partitionPath")
+    }
+  }
+
   test("PaimonFormatTableRead table: csv mode") {
     val tableName = "paimon_format_test_csv_malformed"
     withTable(tableName) {
