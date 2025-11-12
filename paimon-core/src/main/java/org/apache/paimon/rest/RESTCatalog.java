@@ -674,8 +674,8 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        // partitions of the REST Catalog server are automatically calculated and do not require
-        // special creating.
+        throw new UnsupportedOperationException(
+                "partitions of the REST Catalog server are automatically calculated and do not require special creating.");
     }
 
     @Override

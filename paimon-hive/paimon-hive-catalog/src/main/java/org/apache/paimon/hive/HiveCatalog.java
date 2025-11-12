@@ -360,7 +360,8 @@ public class HiveCatalog extends AbstractCatalog {
         TableSchema schema = loadTableSchema(tableIdentifier, hmsTable);
 
         if (!metastorePartitioned(schema)) {
-            return;
+            throw new UnsupportedOperationException(
+                    "Partitions are automatically calculated and do not require special creating, or set `metastore.partitioned-table` to `true`.");
         }
 
         int currentTime = (int) (System.currentTimeMillis() / 1000);

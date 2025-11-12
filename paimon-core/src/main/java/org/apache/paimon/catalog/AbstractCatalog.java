@@ -548,7 +548,10 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {}
+            throws TableNotExistException {
+        throw new UnsupportedOperationException(
+                "Partitions are automatically calculated and do not require special creating.");
+    }
 
     @Override
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
