@@ -683,7 +683,12 @@ public class FileDeletionTest {
         // result: exist A & B (because of tag2)
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
-                        snapshotManager, changelogManager, store.newSnapshotDeletion(), tagManager);
+                        snapshotManager,
+                        changelogManager,
+                        store.newSnapshotDeletion(),
+                        tagManager,
+                        new SchemaManager(fileIO, store.options().path()),
+                        false);
         expireSnapshots
                 .config(
                         ExpireConfig.builder()
@@ -755,7 +760,12 @@ public class FileDeletionTest {
 
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
-                        snapshotManager, changelogManager, snapshotDeletion, tagManager);
+                        snapshotManager,
+                        changelogManager,
+                        snapshotDeletion,
+                        tagManager,
+                        new SchemaManager(fileIO, store.options().path()),
+                        false);
         snapshotDeletion.readMergedDataFilesThrowException = true;
         expireSnapshots
                 .config(
@@ -819,7 +829,12 @@ public class FileDeletionTest {
                         store.options().fileOperationThreadNum());
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
-                        snapshotManager, changelogManager, snapshotDeletion, tagManager);
+                        snapshotManager,
+                        changelogManager,
+                        snapshotDeletion,
+                        tagManager,
+                        new SchemaManager(fileIO, store.options().path()),
+                        false);
         snapshotDeletion.manifestSkippingSetThrowException = true;
         expireSnapshots
                 .config(

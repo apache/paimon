@@ -19,12 +19,15 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.Changelog;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
@@ -55,14 +58,19 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private final ConsumerManager consumerManager;
     private final SnapshotDeletion snapshotDeletion;
     private final TagManager tagManager;
+    private final SchemaManager schemaManager;
+    private final boolean detectExpirationSettingEnabled;
 
     private ExpireConfig expireConfig;
+    private long latestSchemaId;
 
     public ExpireSnapshotsImpl(
             SnapshotManager snapshotManager,
             ChangelogManager changelogManager,
             SnapshotDeletion snapshotDeletion,
-            TagManager tagManager) {
+            TagManager tagManager,
+            SchemaManager schemaManager,
+            boolean detectExpirationSettingEnabled) {
         this.snapshotManager = snapshotManager;
         this.changelogManager = changelogManager;
         this.consumerManager =
@@ -73,6 +81,11 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         this.snapshotDeletion = snapshotDeletion;
         this.tagManager = tagManager;
         this.expireConfig = ExpireConfig.builder().build();
+        this.schemaManager = schemaManager;
+        this.detectExpirationSettingEnabled = detectExpirationSettingEnabled;
+        if (this.detectExpirationSettingEnabled) {
+            this.latestSchemaId = this.schemaManager.latest().get().id();
+        }
     }
 
     @Override
@@ -83,6 +96,14 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
     @Override
     public int expire() {
+        if (this.detectExpirationSettingEnabled) {
+            TableSchema latestTableSchema = this.schemaManager.latest().get();
+            if (this.latestSchemaId != latestTableSchema.id()) {
+                this.expireConfig = CoreOptions.fromMap(latestTableSchema.options()).expireConfig();
+                this.latestSchemaId = latestTableSchema.id();
+            }
+        }
+
         snapshotDeletion.setChangelogDecoupled(expireConfig.isChangelogDecoupled());
         int retainMax = expireConfig.getSnapshotRetainMax();
         int retainMin = expireConfig.getSnapshotRetainMin();
