@@ -20,6 +20,7 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.disk.IOManager;
@@ -64,6 +65,12 @@ public interface KeyValueBuffer {
             this.threshold = threshold;
             this.listBuffer = new ListBuffer();
             this.lazyBinaryBuffer = lazyBinaryBuffer;
+        }
+
+        @Nullable
+        @VisibleForTesting
+        BinaryBuffer binaryBuffer() {
+            return binaryBuffer;
         }
 
         @Override
@@ -218,7 +225,7 @@ public interface KeyValueBuffer {
         return new BinaryBuffer(buffer, kvSerializer);
     }
 
-    static KeyValueBuffer createHybridBuffer(
+    static HybridBuffer createHybridBuffer(
             CoreOptions options,
             RowType keyType,
             RowType valueType,

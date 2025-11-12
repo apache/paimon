@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.mergetree.compact.KeyValueBuffer.BinaryBuffer;
+import org.apache.paimon.mergetree.compact.KeyValueBuffer.HybridBuffer;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
@@ -119,10 +120,11 @@ public class KeyValueBufferTest {
         if (fallbackToBinary) {
             options.set(LOOKUP_MERGE_RECORDS_THRESHOLD, 100);
         }
-        KeyValueBuffer buffer =
+        HybridBuffer buffer =
                 KeyValueBuffer.createHybridBuffer(
                         new CoreOptions(options), keyType, valueType, ioManager);
         innerTestBuffer(buffer, 200);
+        assertThat(buffer.binaryBuffer() != null).isEqualTo(fallbackToBinary);
     }
 
     private void innerTestBuffer(KeyValueBuffer buffer, int recordNumber) throws Exception {
