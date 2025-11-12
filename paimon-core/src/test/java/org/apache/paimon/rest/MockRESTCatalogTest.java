@@ -204,7 +204,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     void testCreateFormatTableWhenEnableDataToken() throws Exception {
         RESTCatalog restCatalog = initCatalog(true);
         restCatalog.createDatabase("test_db", false);
-        // Create table creates a new table when it does not exist
+        // Create format table with engine impl without path is not allowed
         Identifier identifier = Identifier.create("test_db", "new_table");
         Schema schema = Schema.newBuilder().column("c1", DataTypes.INT()).build();
         schema.options().put(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString());
@@ -214,6 +214,11 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                 .isThrownBy(() -> restCatalog.createTable(identifier, schema, false))
                 .withMessage(
                         "Cannot define format-table.implementation is engine for format table when data token is enabled and not define path.");
+
+        // Create format table with engine impl and path
+        schema.options().put(CoreOptions.PATH.key(), dataPath + UUID.randomUUID());
+        restCatalog.createTable(identifier, schema, false);
+
         catalog.dropTable(identifier, true);
     }
 
