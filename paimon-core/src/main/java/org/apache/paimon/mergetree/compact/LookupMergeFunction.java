@@ -22,17 +22,12 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.mergetree.compact.KeyValueBuffer.BinaryBuffer;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.LazyField;
 
 import javax.annotation.Nullable;
 
 import java.util.Comparator;
-import java.util.function.Supplier;
-
-import static org.apache.paimon.mergetree.compact.KeyValueBuffer.createBinaryBuffer;
 
 /**
  * A {@link MergeFunction} for lookup, this wrapper only considers the latest high level record,
@@ -54,11 +49,7 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
             RowType valueType,
             @Nullable IOManager ioManager) {
         this.mergeFunction = mergeFunction;
-        Supplier<BinaryBuffer> binarySupplier =
-                () -> createBinaryBuffer(options, keyType, valueType, ioManager);
-        int threshold = options == null ? 1024 : options.lookupMergeRecordsThreshold();
-        this.candidates =
-                new KeyValueBuffer.HybridBuffer(threshold, new LazyField<>(binarySupplier));
+        this.candidates = KeyValueBuffer.createHybridBuffer(options, keyType, valueType, ioManager);
     }
 
     @Override
