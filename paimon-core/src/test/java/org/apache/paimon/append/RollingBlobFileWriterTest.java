@@ -81,7 +81,8 @@ public class RollingBlobFileWriterTest {
                 new DataFilePathFactory(
                         new Path(tempDir + "/bucket-0"),
                         "parquet",
-                        "data",
+                        "data-", // dataFilePrefix should include the hyphen to match expected
+                        // format: data-{uuid}-{count}
                         "changelog",
                         false,
                         null,
@@ -192,7 +193,8 @@ public class RollingBlobFileWriterTest {
                         new DataFilePathFactory(
                                 new Path(tempDir + "/blob-size-test"),
                                 "parquet",
-                                "data",
+                                "data-", // dataFilePrefix should include the hyphen to match
+                                // expected format: data-{uuid}-{count}
                                 "changelog",
                                 false,
                                 null,
@@ -259,6 +261,353 @@ public class RollingBlobFileWriterTest {
 
         // Verify schema ID is set correctly
         results.forEach(file -> assertThat(file.schemaId()).isEqualTo(SCHEMA_ID));
+    }
+
+    @Test
+    void testBlobFileNameFormatWithSharedUuid() throws IOException {
+        long blobTargetFileSize = 2 * 1024 * 1024L; // 2 MB for blob files
+
+        RollingBlobFileWriter fileNameTestWriter =
+                new RollingBlobFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        128 * 1024 * 1024,
+                        blobTargetFileSize,
+                        SCHEMA,
+                        pathFactory, // Use the same pathFactory to ensure shared UUID
+                        new LongCounter(),
+                        COMPRESSION,
+                        new StatsCollectorFactories(new CoreOptions(new Options())),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false, // asyncFileWrite
+                        false // statsDenseStore
+                        );
+
+        // Create blob data that will trigger rolling
+        byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
+        new Random(456).nextBytes(blobData);
+
+        // Write enough rows to trigger multiple blob file rollings
+        for (int i = 0; i < 10; i++) {
+            InternalRow row =
+                    GenericRow.of(i, BinaryString.fromString("test-" + i), new BlobData(blobData));
+            fileNameTestWriter.write(row);
+        }
+
+        fileNameTestWriter.close();
+        List<DataFileMeta> results = fileNameTestWriter.result();
+
+        // Filter blob files
+        List<DataFileMeta> blobFiles =
+                results.stream()
+                        .filter(file -> "blob".equals(file.fileFormat()))
+                        .collect(java.util.stream.Collectors.toList());
+
+        assertThat(blobFiles)
+                .as("Should have multiple blob files due to rolling")
+                .hasSizeGreaterThan(1);
+
+        // Extract UUID and counter from file names
+        // Format: data-{uuid}-{count}.blob
+        String firstFileName = blobFiles.get(0).fileName();
+        assertThat(firstFileName)
+                .as("File name should match expected format: data-{uuid}-{count}.blob")
+                .matches(
+                        "data-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}-\\d+\\.blob");
+
+        // Extract UUID from first file name
+        String uuid = firstFileName.substring(5, firstFileName.lastIndexOf('-'));
+        int firstCounter =
+                Integer.parseInt(
+                        firstFileName.substring(
+                                firstFileName.lastIndexOf('-') + 1,
+                                firstFileName.lastIndexOf('.')));
+
+        // Verify all blob files use the same UUID and have sequential counters
+        for (int i = 0; i < blobFiles.size(); i++) {
+            String fileName = blobFiles.get(i).fileName();
+            String fileUuid = fileName.substring(5, fileName.lastIndexOf('-'));
+            int counter =
+                    Integer.parseInt(
+                            fileName.substring(
+                                    fileName.lastIndexOf('-') + 1, fileName.lastIndexOf('.')));
+
+            assertThat(fileUuid).as("All blob files should use the same UUID").isEqualTo(uuid);
+
+            assertThat(counter)
+                    .as("File counter should be sequential starting from first counter")
+                    .isEqualTo(firstCounter + i);
+        }
+    }
+
+    @Test
+    void testBlobFileNameFormatWithSharedUuidNonDescriptorMode() throws IOException {
+        long blobTargetFileSize = 2 * 1024 * 1024L; // 2 MB for blob files
+
+        RollingBlobFileWriter fileNameTestWriter =
+                new RollingBlobFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        128 * 1024 * 1024,
+                        blobTargetFileSize,
+                        SCHEMA,
+                        pathFactory, // Use the same pathFactory to ensure shared UUID
+                        new LongCounter(),
+                        COMPRESSION,
+                        new StatsCollectorFactories(new CoreOptions(new Options())),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false, // asyncFileWrite
+                        false // statsDenseStore
+                        );
+
+        // Create blob data that will trigger rolling (non-descriptor mode: direct blob data)
+        byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
+        new Random(789).nextBytes(blobData);
+
+        // Write enough rows to trigger multiple blob file rollings
+        for (int i = 0; i < 10; i++) {
+            InternalRow row =
+                    GenericRow.of(i, BinaryString.fromString("test-" + i), new BlobData(blobData));
+            fileNameTestWriter.write(row);
+        }
+
+        fileNameTestWriter.close();
+        List<DataFileMeta> results = fileNameTestWriter.result();
+
+        // Filter blob files
+        List<DataFileMeta> blobFiles =
+                results.stream()
+                        .filter(file -> "blob".equals(file.fileFormat()))
+                        .collect(java.util.stream.Collectors.toList());
+
+        assertThat(blobFiles.size()).as("Should have at least one blob file").isPositive();
+
+        // Extract UUID and counter from file names
+        // Format: data-{uuid}-{count}.blob
+        String firstFileName = blobFiles.get(0).fileName();
+        assertThat(firstFileName)
+                .as("File name should match expected format: data-{uuid}-{count}.blob")
+                .matches(
+                        "data-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}-\\d+\\.blob");
+
+        // Extract UUID from first file name
+        String uuid = firstFileName.substring(5, firstFileName.lastIndexOf('-'));
+        int firstCounter =
+                Integer.parseInt(
+                        firstFileName.substring(
+                                firstFileName.lastIndexOf('-') + 1,
+                                firstFileName.lastIndexOf('.')));
+
+        // Verify all blob files use the same UUID and have sequential counters
+        for (int i = 0; i < blobFiles.size(); i++) {
+            String fileName = blobFiles.get(i).fileName();
+            String fileUuid = fileName.substring(5, fileName.lastIndexOf('-'));
+            int counter =
+                    Integer.parseInt(
+                            fileName.substring(
+                                    fileName.lastIndexOf('-') + 1, fileName.lastIndexOf('.')));
+
+            assertThat(fileUuid).as("All blob files should use the same UUID").isEqualTo(uuid);
+
+            assertThat(counter)
+                    .as("File counter should be sequential starting from first counter")
+                    .isEqualTo(firstCounter + i);
+        }
+    }
+
+    @Test
+    void testSequenceNumberIncrementInBlobAsDescriptorMode() throws IOException {
+        // Write multiple rows to trigger one-by-one writing in blob-as-descriptor mode
+        int numRows = 10;
+        for (int i = 0; i < numRows; i++) {
+            InternalRow row =
+                    GenericRow.of(
+                            i, BinaryString.fromString("test" + i), new BlobData(testBlobData));
+            writer.write(row);
+        }
+
+        writer.close();
+        List<DataFileMeta> metasResult = writer.result();
+
+        // Extract blob files (skip the first normal file)
+        List<DataFileMeta> blobFiles =
+                metasResult.stream()
+                        .filter(f -> f.fileFormat().equals("blob"))
+                        .collect(java.util.stream.Collectors.toList());
+
+        assertThat(blobFiles).as("Should have at least one blob file").isNotEmpty();
+
+        // Verify sequence numbers for each blob file
+        for (DataFileMeta blobFile : blobFiles) {
+            long minSeq = blobFile.minSequenceNumber();
+            long maxSeq = blobFile.maxSequenceNumber();
+            long rowCount = blobFile.rowCount();
+
+            // Critical assertion: min_seq should NOT equal max_seq when there are multiple rows
+            if (rowCount > 1) {
+                assertThat(minSeq)
+                        .as(
+                                "Sequence numbers should be different for files with multiple rows. "
+                                        + "File: %s, row_count: %d, min_seq: %d, max_seq: %d. "
+                                        + "This indicates sequence generator was not incremented for each row.",
+                                blobFile.fileName(), rowCount, minSeq, maxSeq)
+                        .isNotEqualTo(maxSeq);
+
+                // Verify that max_seq - min_seq + 1 equals row_count
+                // (each row should have a unique sequence number)
+                assertThat(maxSeq - minSeq + 1)
+                        .as(
+                                "Sequence number range should match row count. "
+                                        + "File: %s, row_count: %d, min_seq: %d, max_seq: %d, "
+                                        + "expected range: %d, actual range: %d",
+                                blobFile.fileName(),
+                                rowCount,
+                                minSeq,
+                                maxSeq,
+                                rowCount,
+                                maxSeq - minSeq + 1)
+                        .isEqualTo(rowCount);
+            } else {
+                // For single row files, min_seq == max_seq is acceptable
+                assertThat(minSeq)
+                        .as(
+                                "Single row file should have min_seq == max_seq. "
+                                        + "File: %s, min_seq: %d, max_seq: %d",
+                                blobFile.fileName(), minSeq, maxSeq)
+                        .isEqualTo(maxSeq);
+            }
+        }
+
+        // Verify total record count
+        assertThat(writer.recordCount()).isEqualTo(numRows);
+    }
+
+    @Test
+    void testSequenceNumberIncrementInNonDescriptorMode() throws IOException {
+        // Write multiple rows as a batch to trigger batch writing in non-descriptor mode
+        // (blob-as-descriptor=false, which is the default)
+        int numRows = 10;
+        for (int i = 0; i < numRows; i++) {
+            InternalRow row =
+                    GenericRow.of(
+                            i, BinaryString.fromString("test" + i), new BlobData(testBlobData));
+            writer.write(row);
+        }
+
+        writer.close();
+        List<DataFileMeta> metasResult = writer.result();
+
+        // Extract blob files (skip the first normal file)
+        List<DataFileMeta> blobFiles =
+                metasResult.stream()
+                        .filter(f -> f.fileFormat().equals("blob"))
+                        .collect(java.util.stream.Collectors.toList());
+
+        assertThat(blobFiles).as("Should have at least one blob file").isNotEmpty();
+
+        // Verify sequence numbers for each blob file
+        for (DataFileMeta blobFile : blobFiles) {
+            long minSeq = blobFile.minSequenceNumber();
+            long maxSeq = blobFile.maxSequenceNumber();
+            long rowCount = blobFile.rowCount();
+
+            // Critical assertion: min_seq should NOT equal max_seq when there are multiple rows
+            if (rowCount > 1) {
+                assertThat(minSeq)
+                        .as(
+                                "Sequence numbers should be different for files with multiple rows. "
+                                        + "File: %s, row_count: %d, min_seq: %d, max_seq: %d. "
+                                        + "This indicates sequence generator was not incremented for each row in batch.",
+                                blobFile.fileName(), rowCount, minSeq, maxSeq)
+                        .isNotEqualTo(maxSeq);
+
+                // Verify that max_seq - min_seq + 1 equals row_count
+                // (each row should have a unique sequence number)
+                assertThat(maxSeq - minSeq + 1)
+                        .as(
+                                "Sequence number range should match row count. "
+                                        + "File: %s, row_count: %d, min_seq: %d, max_seq: %d, "
+                                        + "expected range: %d, actual range: %d",
+                                blobFile.fileName(),
+                                rowCount,
+                                minSeq,
+                                maxSeq,
+                                rowCount,
+                                maxSeq - minSeq + 1)
+                        .isEqualTo(rowCount);
+            } else {
+                // For single row files, min_seq == max_seq is acceptable
+                assertThat(minSeq)
+                        .as(
+                                "Single row file should have min_seq == max_seq. "
+                                        + "File: %s, min_seq: %d, max_seq: %d",
+                                blobFile.fileName(), minSeq, maxSeq)
+                        .isEqualTo(maxSeq);
+            }
+        }
+
+        // Verify total record count
+        assertThat(writer.recordCount()).isEqualTo(numRows);
+    }
+
+    @Test
+    void testBlobStatsSchemaWithCustomColumnName() throws IOException {
+        RowType customSchema =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("name", DataTypes.STRING())
+                        .field("my_custom_blob", DataTypes.BLOB()) // Custom blob column name
+                        .build();
+
+        // Reinitialize writer with custom schema
+        writer =
+                new RollingBlobFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        TARGET_FILE_SIZE,
+                        TARGET_FILE_SIZE,
+                        customSchema, // Use custom schema
+                        pathFactory,
+                        seqNumCounter,
+                        COMPRESSION,
+                        new StatsCollectorFactories(new CoreOptions(new Options())),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false, // asyncFileWrite
+                        false // statsDenseStore
+                        );
+
+        // Write data
+        for (int i = 0; i < 3; i++) {
+            InternalRow row =
+                    GenericRow.of(
+                            i, BinaryString.fromString("test" + i), new BlobData(testBlobData));
+            writer.write(row);
+        }
+
+        writer.close();
+        List<DataFileMeta> metasResult = writer.result();
+
+        // Extract blob files
+        List<DataFileMeta> blobFiles =
+                metasResult.stream()
+                        .filter(f -> f.fileFormat().equals("blob"))
+                        .collect(java.util.stream.Collectors.toList());
+
+        assertThat(blobFiles).as("Should have at least one blob file").isNotEmpty();
+
+        for (DataFileMeta blobFile : blobFiles) {
+            assertThat(blobFile.fileName()).endsWith(".blob");
+            assertThat(blobFile.rowCount()).isGreaterThan(0);
+        }
+
+        // Verify total record count
+        assertThat(writer.recordCount()).isEqualTo(3);
     }
 
     /** Simple implementation of BundleRecords for testing. */

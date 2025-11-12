@@ -1518,6 +1518,565 @@ class DataBlobWriterTest(unittest.TestCase):
                 [RowKind.INSERT, RowKind.UPDATE_BEFORE, RowKind.UPDATE_AFTER, RowKind.DELETE],
                 f"Row {row_id}: RowKind should be valid")
 
+    def test_blob_as_descriptor_target_file_size_rolling(self):
+        import random
+        import os
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string()), ('blob_data', pa.large_binary())])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true',
+            'blob-as-descriptor': 'true', 'target-file-size': '1MB'
+        })
+        self.catalog.create_table('test_db.blob_target_size_test', schema, False)
+        table = self.catalog.get_table('test_db.blob_target_size_test')
+
+        # Create 5 external blob files (2MB each, > target-file-size)
+        num_blobs, blob_size = 5, 2 * 1024 * 1024
+        random.seed(42)
+        descriptors = []
+        for i in range(num_blobs):
+            path = os.path.join(self.temp_dir, f'external_blob_{i}')
+            data = bytes(bytearray([random.randint(0, 255) for _ in range(blob_size)]))
+            with open(path, 'wb') as f:
+                f.write(data)
+            descriptors.append(BlobDescriptor(path, 0, len(data)))
+
+        # Write data
+        test_data = pa.Table.from_pydict({
+            'id': list(range(1, num_blobs + 1)),
+            'name': [f'item_{i}' for i in range(1, num_blobs + 1)],
+            'blob_data': [d.serialize() for d in descriptors]
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        # Check blob files
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+        total_size = sum(f.file_size for f in blob_files)
+
+        # Verify that rolling works correctly: should have multiple files when total size exceeds target
+        # Each blob is 2MB, target-file-size is 1MB, so should have multiple files
+        self.assertGreater(
+            len(blob_files), 1,
+            f"Should have multiple blob files when total size ({total_size / 1024 / 1024:.2f}MB) exceeds target (1MB), "
+            f"but got {len(blob_files)} file(s)"
+        )
+
+        # Verify data integrity
+        result = table.new_read_builder().new_read().to_arrow(table.new_read_builder().new_scan().plan().splits())
+        self.assertEqual(result.num_rows, num_blobs)
+        self.assertEqual(result.column('id').to_pylist(), list(range(1, num_blobs + 1)))
+
+    def test_blob_file_name_format_with_shared_uuid(self):
+        import random
+        import re
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        # Create schema with blob column
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'blob-as-descriptor': 'true',
+            'blob.target-file-size': '1MB'  # Small target size to trigger multiple rollings
+        })
+
+        self.catalog.create_table('test_db.blob_file_name_test', schema, False)
+        table = self.catalog.get_table('test_db.blob_file_name_test')
+
+        # Create multiple external blob files (2MB each, > target-file-size)
+        # This will trigger multiple blob file rollings
+        num_blobs, blob_size = 5, 2 * 1024 * 1024
+        random.seed(789)
+        descriptors = []
+        for i in range(num_blobs):
+            path = os.path.join(self.temp_dir, f'external_blob_{i}')
+            data = bytes(bytearray([random.randint(0, 255) for _ in range(blob_size)]))
+            with open(path, 'wb') as f:
+                f.write(data)
+            descriptors.append(BlobDescriptor(path, 0, len(data)))
+
+        # Write data
+        test_data = pa.Table.from_pydict({
+            'id': list(range(1, num_blobs + 1)),
+            'name': [f'item_{i}' for i in range(1, num_blobs + 1)],
+            'blob_data': [d.serialize() for d in descriptors]
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        # Extract blob files from commit messages
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+
+        # Should have multiple blob files due to rolling
+        self.assertGreater(len(blob_files), 1, "Should have multiple blob files due to rolling")
+
+        # Verify file name format: data-{uuid}-{count}.blob
+        file_name_pattern = re.compile(
+            r'^data-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-'
+            r'[a-f0-9]{12}-(\d+)\.blob$'
+        )
+
+        first_file_name = blob_files[0].file_name
+        self.assertTrue(
+            file_name_pattern.match(first_file_name),
+            f"File name should match expected format: data-{{uuid}}-{{count}}.blob, got: {first_file_name}"
+        )
+
+        first_match = file_name_pattern.match(first_file_name)
+        first_counter = int(first_match.group(1))
+
+        # Extract UUID (everything between "data-" and last "-")
+        uuid_start = len("data-")
+        uuid_end = first_file_name.rfind('-', uuid_start)
+        shared_uuid = first_file_name[uuid_start:uuid_end]
+
+        # Verify all blob files use the same UUID and have sequential counters
+        for i, blob_file in enumerate(blob_files):
+            file_name = blob_file.file_name
+            match = file_name_pattern.match(file_name)
+
+            self.assertIsNotNone(
+                match,
+                f"File name should match expected format: data-{{uuid}}-{{count}}.blob, got: {file_name}"
+            )
+
+            counter = int(match.group(1))
+
+            # Extract UUID from this file
+            file_uuid = file_name[uuid_start:file_name.rfind('-', uuid_start)]
+
+            self.assertEqual(
+                file_uuid,
+                shared_uuid,
+                f"All blob files should use the same UUID. Expected: {shared_uuid}, got: {file_uuid} in {file_name}"
+            )
+
+            self.assertEqual(
+                counter,
+                first_counter + i,
+                f"File counter should be sequential. Expected: {first_counter + i}, got: {counter} in {file_name}"
+            )
+
+        # Verify data integrity
+        result = table.new_read_builder().new_read().to_arrow(table.new_read_builder().new_scan().plan().splits())
+        self.assertEqual(result.num_rows, num_blobs)
+        self.assertEqual(result.column('id').to_pylist(), list(range(1, num_blobs + 1)))
+
+    def test_blob_as_descriptor_sequence_number_increment(self):
+        import os
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        # Create schema with blob column (blob-as-descriptor=true)
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'blob-as-descriptor': 'true'
+        })
+
+        self.catalog.create_table('test_db.blob_sequence_test', schema, False)
+        table = self.catalog.get_table('test_db.blob_sequence_test')
+
+        # Create multiple external blob files
+        num_blobs = 10
+        descriptors = []
+        for i in range(num_blobs):
+            path = os.path.join(self.temp_dir, f'external_blob_seq_{i}')
+            data = f"blob data {i}".encode('utf-8')
+            with open(path, 'wb') as f:
+                f.write(data)
+            descriptors.append(BlobDescriptor(path, 0, len(data)))
+
+        # Write data row by row (this triggers the one-by-one writing in blob-as-descriptor mode)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+
+        # Write each row separately to ensure one-by-one writing
+        for i in range(num_blobs):
+            test_data = pa.Table.from_pydict({
+                'id': [i + 1],
+                'name': [f'item_{i}'],
+                'blob_data': [descriptors[i].serialize()]
+            }, schema=pa_schema)
+            writer.write_arrow(test_data)
+
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        # Extract blob files from commit messages
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+
+        # Verify that we have at least one blob file
+        self.assertGreater(len(blob_files), 0, "Should have at least one blob file")
+
+        # Verify sequence numbers for each blob file
+        for blob_file in blob_files:
+            min_seq = blob_file.min_sequence_number
+            max_seq = blob_file.max_sequence_number
+            row_count = blob_file.row_count
+
+            # Critical assertion: min_seq should NOT equal max_seq when there are multiple rows
+            if row_count > 1:
+                self.assertNotEqual(
+                    min_seq, max_seq,
+                    f"Sequence numbers should be different for files with multiple rows. "
+                    f"File: {blob_file.file_name}, row_count: {row_count}, "
+                    f"min_seq: {min_seq}, max_seq: {max_seq}. "
+                    f"This indicates sequence generator was not incremented for each row."
+                )
+                self.assertEqual(
+                    max_seq - min_seq + 1, row_count,
+                    f"Sequence number range should match row count. "
+                    f"File: {blob_file.file_name}, row_count: {row_count}, "
+                    f"min_seq: {min_seq}, max_seq: {max_seq}, "
+                    f"expected range: {row_count}, actual range: {max_seq - min_seq + 1}"
+                )
+            else:
+                # For single row files, min_seq == max_seq is acceptable
+                self.assertEqual(
+                    min_seq, max_seq,
+                    f"Single row file should have min_seq == max_seq. "
+                    f"File: {blob_file.file_name}, min_seq: {min_seq}, max_seq: {max_seq}"
+                )
+
+        # Verify data integrity
+        result = table.new_read_builder().new_read().to_arrow(table.new_read_builder().new_scan().plan().splits())
+        self.assertEqual(result.num_rows, num_blobs)
+        self.assertEqual(result.column('id').to_pylist(), list(range(1, num_blobs + 1)))
+
+    def test_blob_non_descriptor_sequence_number_increment(self):
+        from pypaimon import Schema
+
+        # Create schema with blob column (blob-as-descriptor=false, normal mode)
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'blob-as-descriptor': 'false'  # Normal mode, not descriptor mode
+        })
+
+        self.catalog.create_table('test_db.blob_sequence_non_desc_test', schema, False)
+        table = self.catalog.get_table('test_db.blob_sequence_non_desc_test')
+
+        # Create test data with multiple rows in a batch
+        num_rows = 10
+        test_data = pa.Table.from_pydict({
+            'id': list(range(1, num_rows + 1)),
+            'name': [f'item_{i}' for i in range(num_rows)],
+            'blob_data': [f'blob data {i}'.encode('utf-8') for i in range(num_rows)]
+        }, schema=pa_schema)
+
+        # Write data as a batch (this triggers batch writing in non-descriptor mode)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        # Extract blob files from commit messages
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+
+        # Verify that we have at least one blob file
+        self.assertGreater(len(blob_files), 0, "Should have at least one blob file")
+
+        # Verify sequence numbers for each blob file
+        for blob_file in blob_files:
+            min_seq = blob_file.min_sequence_number
+            max_seq = blob_file.max_sequence_number
+            row_count = blob_file.row_count
+
+            # Critical assertion: min_seq should NOT equal max_seq when there are multiple rows
+            if row_count > 1:
+                self.assertNotEqual(
+                    min_seq, max_seq,
+                    f"Sequence numbers should be different for files with multiple rows. "
+                    f"File: {blob_file.file_name}, row_count: {row_count}, "
+                    f"min_seq: {min_seq}, max_seq: {max_seq}. "
+                    f"This indicates sequence generator was not incremented for each row in batch."
+                )
+                self.assertEqual(
+                    max_seq - min_seq + 1, row_count,
+                    f"Sequence number range should match row count. "
+                    f"File: {blob_file.file_name}, row_count: {row_count}, "
+                    f"min_seq: {min_seq}, max_seq: {max_seq}, "
+                    f"expected range: {row_count}, actual range: {max_seq - min_seq + 1}"
+                )
+            else:
+                # For single row files, min_seq == max_seq is acceptable
+                self.assertEqual(
+                    min_seq, max_seq,
+                    f"Single row file should have min_seq == max_seq. "
+                    f"File: {blob_file.file_name}, min_seq: {min_seq}, max_seq: {max_seq}"
+                )
+
+        print("✅ Non-descriptor mode sequence number increment test passed")
+
+    def test_blob_stats_schema_with_custom_column_name(self):
+        from pypaimon import Schema
+
+        # Create schema with blob column using a custom name (not 'blob_data')
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('my_custom_blob', pa.large_binary())  # Custom blob column name
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true'
+        })
+
+        self.catalog.create_table('test_db.blob_custom_name_test', schema, False)
+        table = self.catalog.get_table('test_db.blob_custom_name_test')
+
+        # Write data
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'my_custom_blob': [b'blob1', b'blob2', b'blob3']
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        # Extract blob files from commit messages
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+
+        # Verify we have at least one blob file
+        self.assertGreater(len(blob_files), 0, "Should have at least one blob file")
+
+        # Verify that the stats schema uses the actual blob column name, not hardcoded 'blob_data'
+        for blob_file in blob_files:
+            value_stats = blob_file.value_stats
+            if value_stats is not None and value_stats.min_values is not None:
+                # Get the field names from the stats
+                # The stats should use 'my_custom_blob', not 'blob_data'
+                min_values = value_stats.min_values
+                if hasattr(min_values, 'fields') and len(min_values.fields) > 0:
+                    # Check if the field name matches the actual blob column name
+                    field_name = min_values.fields[0].name
+                    self.assertEqual(
+                        field_name, 'my_custom_blob',
+                        f"Blob stats field name should be 'my_custom_blob' (actual column name), "
+                        f"but got '{field_name}'. This indicates the field name was hardcoded "
+                        f"instead of using the blob_column parameter."
+                    )
+
+        # Verify data integrity
+        result = table.new_read_builder().new_read().to_arrow(table.new_read_builder().new_scan().plan().splits())
+        self.assertEqual(result.num_rows, 3)
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(result.column('name').to_pylist(), ['Alice', 'Bob', 'Charlie'])
+
+    def test_blob_file_name_format_with_shared_uuid_non_descriptor_mode(self):
+        import random
+        import re
+        from pypaimon import Schema
+
+        # Create schema with blob column (blob-as-descriptor=false)
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'blob-as-descriptor': 'false',  # Non-descriptor mode
+            'target-file-size': '1MB'  # Small target size to trigger multiple rollings
+        })
+
+        self.catalog.create_table('test_db.blob_file_name_test_non_desc', schema, False)
+        table = self.catalog.get_table('test_db.blob_file_name_test_non_desc')
+
+        num_blobs, blob_size = 5, 2 * 1024 * 1024
+        random.seed(123)
+        blob_data_list = []
+        for i in range(num_blobs):
+            blob_data = bytes(bytearray([random.randint(0, 255) for _ in range(blob_size)]))
+            blob_data_list.append(blob_data)
+
+        # Write data in batches to trigger multiple file rollings
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+
+        # Write data that will trigger rolling
+        test_data = pa.Table.from_pydict({
+            'id': list(range(1, num_blobs + 1)),
+            'name': [f'item_{i}' for i in range(1, num_blobs + 1)],
+            'blob_data': blob_data_list
+        }, schema=pa_schema)
+
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        # Extract blob files from commit messages
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+
+        # Should have at least one blob file (may have multiple if rolling occurred)
+        self.assertGreaterEqual(len(blob_files), 1, "Should have at least one blob file")
+
+        # Verify file name format: data-{uuid}-{count}.blob
+        file_name_pattern = re.compile(
+            r'^data-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-'
+            r'[a-f0-9]{12}-(\d+)\.blob$'
+        )
+
+        first_file_name = blob_files[0].file_name
+        self.assertTrue(
+            file_name_pattern.match(first_file_name),
+            f"File name should match expected format: data-{{uuid}}-{{count}}.blob, got: {first_file_name}"
+        )
+
+        # Extract UUID and counter from first file name
+        first_match = file_name_pattern.match(first_file_name)
+        first_counter = int(first_match.group(1))
+
+        # Extract UUID (everything between "data-" and last "-")
+        uuid_start = len("data-")
+        uuid_end = first_file_name.rfind('-', uuid_start)
+        shared_uuid = first_file_name[uuid_start:uuid_end]
+
+        # Verify all blob files use the same UUID and have sequential counters
+        for i, blob_file in enumerate(blob_files):
+            file_name = blob_file.file_name
+            match = file_name_pattern.match(file_name)
+
+            self.assertIsNotNone(
+                match,
+                f"File name should match expected format: data-{{uuid}}-{{count}}.blob, got: {file_name}"
+            )
+
+            counter = int(match.group(1))
+
+            # Extract UUID from this file
+            file_uuid = file_name[uuid_start:file_name.rfind('-', uuid_start)]
+
+            self.assertEqual(
+                file_uuid,
+                shared_uuid,
+                f"All blob files should use the same UUID. Expected: {shared_uuid}, got: {file_uuid} in {file_name}"
+            )
+
+            self.assertEqual(
+                counter,
+                first_counter + i,
+                f"File counter should be sequential. Expected: {first_counter + i}, got: {counter} in {file_name}"
+            )
+
+        # Verify data integrity
+        result = table.new_read_builder().new_read().to_arrow(table.new_read_builder().new_scan().plan().splits())
+        self.assertEqual(result.num_rows, num_blobs)
+        self.assertEqual(result.column('id').to_pylist(), list(range(1, num_blobs + 1)))
+
+    def test_blob_non_descriptor_target_file_size_rolling(self):
+        """Test that blob.target-file-size is respected in non-descriptor mode."""
+        from pypaimon import Schema
+
+        # Create schema with blob column (non-descriptor mode)
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+
+        # Test with blob.target-file-size set to a small value
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob.target-file-size': '1MB'  # Set blob-specific target file size
+            }
+        )
+
+        self.catalog.create_table('test_db.blob_non_descriptor_rolling', schema, False)
+        table = self.catalog.get_table('test_db.blob_non_descriptor_rolling')
+
+        # Write multiple blobs that together exceed the target size
+        # Each blob is 0.6MB, so 3 blobs = 1.8MB > 1MB target
+        num_blobs = 3
+        blob_size = int(0.6 * 1024 * 1024)  # 0.6MB per blob
+
+        test_data = pa.Table.from_pydict({
+            'id': list(range(1, num_blobs + 1)),
+            'blob_data': [b'x' * blob_size for _ in range(num_blobs)]
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        # Extract blob files from commit messages
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+
+        # The key test: verify that blob.target-file-size is used instead of target-file-size
+        # If target-file-size (default 256MB for append-only) was used, we'd have 1 file
+        # If blob.target-file-size (1MB) is used, we should have multiple files
+        total_data_size = num_blobs * blob_size
+
+        # Verify that the rolling logic used blob_target_file_size (1MB) not target_file_size (256MB)
+        # If target_file_size was used, all data would fit in one file
+        # If blob_target_file_size was used, data should be split
+        if total_data_size > 1024 * 1024:  # Total > 1MB
+            self.assertGreater(
+                len(blob_files), 1,
+                f"Should have multiple blob files when using blob.target-file-size (1MB). "
+                f"Total data size: {total_data_size / 1024 / 1024:.2f}MB, "
+                f"got {len(blob_files)} file(s). "
+                f"This indicates blob.target-file-size was ignored and target-file-size was used instead."
+            )
+
+        # Verify data integrity
+        result = table.new_read_builder().new_read().to_arrow(
+            table.new_read_builder().new_scan().plan().splits()
+        )
+        self.assertEqual(result.num_rows, num_blobs)
+        self.assertEqual(result.column('id').to_pylist(), list(range(1, num_blobs + 1)))
 
 if __name__ == '__main__':
     unittest.main()
