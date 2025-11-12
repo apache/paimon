@@ -29,7 +29,7 @@ import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
-/** Scan for {@link FormatTable} */
+/** Scan for [[ FormatTable ]] */
 case class PaimonFormatTableScan(
     table: FormatTable,
     requiredSchema: StructType,
