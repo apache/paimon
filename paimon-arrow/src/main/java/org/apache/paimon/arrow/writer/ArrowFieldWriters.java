@@ -526,7 +526,8 @@ public class ArrowFieldWriters {
 
         @Override
         public void reset() {
-            fieldVector.reset();
+            super.reset();
+            elementWriter.reset();
             offset = 0;
         }
 
@@ -613,7 +614,9 @@ public class ArrowFieldWriters {
 
         @Override
         public void reset() {
-            fieldVector.reset();
+            super.reset();
+            keyWriter.reset();
+            valueWriter.reset();
             offset = 0;
         }
 
@@ -767,6 +770,14 @@ public class ArrowFieldWriters {
                 FieldVector fieldVector, ArrowFieldWriter[] fieldWriters, boolean isNullable) {
             super(fieldVector, isNullable);
             this.fieldWriters = fieldWriters;
+        }
+
+        @Override
+        public void reset() {
+            super.reset();
+            for (ArrowFieldWriter fieldWriter : fieldWriters) {
+                fieldWriter.reset();
+            }
         }
 
         @Override
