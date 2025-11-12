@@ -25,10 +25,11 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.mergetree.compact.KeyValueBuffer.BinaryBuffer;
+import org.apache.paimon.mergetree.compact.KeyValueBuffer.HybridBuffer;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
@@ -40,7 +41,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
 
+import static java.util.Collections.singletonList;
+import static org.apache.paimon.CoreOptions.LOOKUP_MERGE_RECORDS_THRESHOLD;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link KeyValueBuffer}. */
@@ -55,30 +59,14 @@ public class KeyValueBufferTest {
     @BeforeEach
     public void beforeEach() {
         this.ioManager = new IOManagerImpl(tempDir.toString());
-        this.keyType =
-                new RowType(
-                        new ArrayList<DataField>() {
-                            {
-                                add(new DataField(0, "key", new IntType()));
-                            }
-                        });
-        this.valueType =
-                new RowType(
-                        new ArrayList<DataField>() {
-                            {
-                                add(new DataField(0, "value", new IntType()));
-                            }
-                        });
+        this.keyType = new RowType(singletonList(new DataField(0, "key", DataTypes.INT())));
+        this.valueType = new RowType(singletonList(new DataField(0, "value", DataTypes.INT())));
     }
 
     @AfterEach
-    public void afterEach() {
+    public void afterEach() throws Exception {
         if (ioManager != null) {
-            try {
-                ioManager.close();
-            } catch (Exception e) {
-                // Ignore exception during close
-            }
+            ioManager.close();
         }
     }
 
@@ -114,10 +102,35 @@ public class KeyValueBufferTest {
         BinaryBuffer binaryBuffer =
                 KeyValueBuffer.createBinaryBuffer(
                         new CoreOptions(options), keyType, valueType, ioManager);
+        innerTestBuffer(binaryBuffer, 10);
+    }
 
+    @Test
+    public void testHybridBufferWithoutFallback() throws Exception {
+        innerTestHybridBuffer(false);
+    }
+
+    @Test
+    public void testHybridBufferWithFallback() throws Exception {
+        innerTestHybridBuffer(true);
+    }
+
+    private void innerTestHybridBuffer(boolean fallbackToBinary) throws Exception {
+        Options options = new Options();
+        if (fallbackToBinary) {
+            options.set(LOOKUP_MERGE_RECORDS_THRESHOLD, 100);
+        }
+        HybridBuffer buffer =
+                KeyValueBuffer.createHybridBuffer(
+                        new CoreOptions(options), keyType, valueType, ioManager);
+        innerTestBuffer(buffer, 200);
+        assertThat(buffer.binaryBuffer() != null).isEqualTo(fallbackToBinary);
+    }
+
+    private void innerTestBuffer(KeyValueBuffer buffer, int recordNumber) throws Exception {
         // Create test data
         List<KeyValue> testData = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < recordNumber; i++) {
             // Create key as BinaryRow
             BinaryRow key = new BinaryRow(1);
             BinaryRowWriter keyWriter = new BinaryRowWriter(key);
@@ -135,14 +148,34 @@ public class KeyValueBufferTest {
 
         // Put data into buffer
         for (KeyValue kv : testData) {
-            binaryBuffer.put(kv);
+            buffer.put(kv);
         }
 
         // Verify data through iterator
-        try (CloseableIterator<KeyValue> iterator = binaryBuffer.iterator()) {
+        try (CloseableIterator<KeyValue> iterator = buffer.iterator()) {
             int count = 0;
             while (iterator.hasNext()) {
                 KeyValue kv = iterator.next();
+                KeyValue expected = testData.get(count);
+                assertThat(kv.key().getInt(0)).isEqualTo(expected.key().getInt(0));
+                assertThat(kv.value().getInt(0)).isEqualTo(expected.value().getInt(0));
+                assertThat(kv.sequenceNumber()).isEqualTo(expected.sequenceNumber());
+                assertThat(kv.valueKind()).isEqualTo(expected.valueKind());
+                count++;
+            }
+            assertThat(count).isEqualTo(testData.size());
+        }
+
+        // Verify data through iterator without hasNext
+        try (CloseableIterator<KeyValue> iterator = buffer.iterator()) {
+            int count = 0;
+            while (true) {
+                KeyValue kv;
+                try {
+                    kv = iterator.next();
+                } catch (NoSuchElementException e) {
+                    break;
+                }
                 KeyValue expected = testData.get(count);
                 assertThat(kv.key().getInt(0)).isEqualTo(expected.key().getInt(0));
                 assertThat(kv.value().getInt(0)).isEqualTo(expected.value().getInt(0));
