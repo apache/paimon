@@ -118,6 +118,35 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
+  test("PaimonFormatTable write: partition key in diff position") {
+    val tableName = "paimon_format_test_orc_mode"
+    withTable(tableName) {
+      sql(
+        s"CREATE TABLE $tableName (`ds` bigint, age INT, `ds1` bigint, name STRING, `ds2` bigint) USING ORC TBLPROPERTIES (" +
+          s"'format-table.implementation'='paimon') PARTITIONED BY (`ds`, `ds1`, `ds2`)")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      val partition = 20250920
+      table.fileIO().mkdirs(new Path(table.location()))
+      spark.sql(s"INSERT INTO $tableName  VALUES (5, 11, 12, 'ab', 13), (7, 11, 12, 'Larry', 13)")
+      checkAnswer(
+        spark.sql(s"SELECT ds, age, ds1, name, ds2 FROM $tableName ORDER BY age"),
+        Row(5, 11, 12, "ab", 13) :: Row(7, 11, 12, "Larry", 13) :: Nil
+      )
+    }
+  }
+
+  test("PaimonFormatTable: set dynamic options") {
+    withTable("t") {
+      sql(s"create table t (id INT, v INT, pt STRING) using csv")
+
+      withSparkSQLConf("spark.paimon.write.batch-size" -> "256") {
+        val options = getFormatTableScan("SELECT * FROM t").table.options()
+        assert(options.get("write.batch-size") == "256")
+      }
+    }
+  }
+
   test("PaimonFormatTable non partition table overwrite: csv") {
     val tableName = "paimon_non_partiiton_overwrite_test"
     withTable(tableName) {
