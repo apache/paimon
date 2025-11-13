@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.BoundedTwoInputOperator;
+import org.apache.paimon.flink.utils.OrphanFilesCleanUtil;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -33,19 +34,14 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.FileStorePathFactory;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.CoreOptions;
-import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.streaming.api.operators.InputSelection;
-import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.Collector;
@@ -88,22 +84,9 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         this.parallelism = parallelism;
     }
 
-    protected void configureFlinkEnvironment(StreamExecutionEnvironment env) {
-        Configuration flinkConf = new Configuration();
-        flinkConf.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH);
-        flinkConf.set(ExecutionOptions.SORT_INPUTS, false);
-        flinkConf.set(ExecutionOptions.USE_BATCH_STATE_BACKEND, false);
-        if (parallelism != null) {
-            flinkConf.set(CoreOptions.DEFAULT_PARALLELISM, parallelism);
-        }
-        // Flink 1.17 introduced this config, use string to keep compatibility
-        flinkConf.setString("execution.batch.adaptive.auto-parallelism.enabled", "false");
-        env.configure(flinkConf);
-    }
-
     @Nullable
     public DataStream<CleanOrphanFilesResult> doOrphanClean(StreamExecutionEnvironment env) {
-        configureFlinkEnvironment(env);
+        OrphanFilesCleanUtil.configureFlinkEnvironment(env, parallelism);
         LOG.info("Starting orphan files clean for table {}", table.name());
         long start = System.currentTimeMillis();
         List<String> branches = validBranches();
@@ -274,7 +257,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                     @Override
                                     public void endInput(int inputId) {
                                         buildEnd =
-                                                endInputForDeleted(
+                                                OrphanFilesCleanUtil.endInputForDeleted(
                                                         inputId,
                                                         buildEnd,
                                                         emittedFilesCount,
@@ -408,7 +391,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         return sum(result);
     }
 
-    protected static CleanOrphanFilesResult sum(DataStream<CleanOrphanFilesResult> deleted) {
+    public static CleanOrphanFilesResult sum(DataStream<CleanOrphanFilesResult> deleted) {
         long deletedFilesCount = 0;
         long deletedFilesLenInBytes = 0;
         if (deleted != null) {
@@ -462,30 +445,5 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                 path -> deletedFilesCount.incrementAndGet(),
                 deletedFilesLenInBytes::addAndGet);
         out.collect(new Tuple2<>(deletedFilesCount.get(), deletedFilesLenInBytes.get()));
-    }
-
-    protected static boolean endInputForDeleted(
-            int inputId,
-            boolean buildEnd,
-            long emittedFilesCount,
-            long emittedFilesLen,
-            Output<StreamRecord<CleanOrphanFilesResult>> output) {
-        switch (inputId) {
-            case 1:
-                checkState(!buildEnd, "Should not build ended.");
-                LOG.info("Finish build phase.");
-                buildEnd = true;
-                break;
-            case 2:
-                checkState(buildEnd, "Should build ended.");
-                LOG.info("Finish probe phase.");
-                LOG.info("Clean files count : {}", emittedFilesCount);
-                LOG.info("Clean files size : {}", emittedFilesLen);
-                output.collect(
-                        new StreamRecord<>(
-                                new CleanOrphanFilesResult(emittedFilesCount, emittedFilesLen)));
-                break;
-        }
-        return buildEnd;
     }
 }

@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.BoundedTwoInputOperator;
+import org.apache.paimon.flink.utils.OrphanFilesCleanUtil;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -61,21 +62,29 @@ import java.util.function.Consumer;
 
 import static org.apache.flink.api.common.typeinfo.BasicTypeInfo.STRING_TYPE_INFO;
 import static org.apache.flink.util.Preconditions.checkState;
+import static org.apache.paimon.flink.orphan.FlinkOrphanFilesClean.sum;
 
 /**
  * Flink {@link OrphanFilesClean}, it will submit a job for multiple tables in a combined
  * DataStream.
  */
 public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
-        extends FlinkOrphanFilesClean {
+        implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     protected static final Logger LOG =
             LoggerFactory.getLogger(CombinedFlinkOrphanFilesClean.class);
 
     protected String databaseName;
+    protected final long olderThanMillis;
+    protected final boolean dryRun;
+    @Nullable protected final Integer parallelism;
     protected List<T> cleaners;
     // Map to store cleaners by their full identifier name, for quick lookup in ProcessFunctions
     protected Map<String, T> cleanerMap;
+    // Map from table location to cleaner for quick lookup in BoundedTwoInputOperator
+    protected Map<String, T> locationToCleanerMap;
 
     public CombinedFlinkOrphanFilesClean(
             String databaseName,
@@ -83,16 +92,21 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
             long olderThanMillis,
             boolean dryRun,
             @Nullable Integer parallelism) {
-        super(cleaners.get(0).getTable(), olderThanMillis, dryRun, parallelism);
+        this.olderThanMillis = olderThanMillis;
+        this.dryRun = dryRun;
         this.databaseName = databaseName;
+        this.parallelism = parallelism;
         this.cleaners = cleaners;
         // Initialize cleanerMap for quick lookup
         this.cleanerMap = new HashMap<>();
+        this.locationToCleanerMap = new HashMap<>();
         for (T cleaner : cleaners) {
             FileStoreTable table = cleaner.getTable();
             Identifier id = table.catalogEnvironment().identifier();
             if (id != null) {
                 this.cleanerMap.put(id.getFullName(), cleaner);
+                String locationPath = table.location().toUri().getPath();
+                this.locationToCleanerMap.put(locationPath, cleaner);
             }
         }
     }
@@ -124,9 +138,8 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
     }
 
     @Nullable
-    @Override
     public DataStream<CleanOrphanFilesResult> doOrphanClean(StreamExecutionEnvironment env) {
-        configureFlinkEnvironment(env);
+        OrphanFilesCleanUtil.configureFlinkEnvironment(env, parallelism);
         LOG.info("Starting orphan files clean for {} tables: {}", cleaners.size(), cleaners);
         List<BranchTableInfo> branchTableInfos = new ArrayList<>();
         long start = System.currentTimeMillis();
@@ -388,7 +401,7 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                     @Override
                                     public void endInput(int inputId) {
                                         buildEnd =
-                                                endInputForDeleted(
+                                                OrphanFilesCleanUtil.endInputForDeleted(
                                                         inputId,
                                                         buildEnd,
                                                         emittedFilesCount,
@@ -413,10 +426,19 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                         String value = fileInfo.f0;
                                         Path path = new Path(value);
                                         if (!used.contains(path.getName())) {
-                                            emittedFilesCount++;
-                                            emittedFilesLen += fileInfo.f1;
-                                            cleanFile(path);
-                                            LOG.info("Dry clean: {}", path);
+                                            T cleanerForPath = getCleanerForPath(path);
+                                            // Safety check: only delete files that belong to
+                                            // current table
+                                            if (cleanerForPath != null) {
+                                                emittedFilesCount++;
+                                                emittedFilesLen += fileInfo.f1;
+                                                cleanerForPath.cleanFile(path);
+                                                LOG.info("Dry clean: {}", path);
+                                            } else {
+                                                LOG.warn(
+                                                        "[COMBINED_ORPHAN_CLEAN] Cannot find corresponding cleaner for file: {}, skip cleaning",
+                                                        path);
+                                            }
                                         }
                                     }
                                 });
@@ -441,7 +463,7 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                             .store()
                                             .manifestFileFactory()
                                             .create());
-            retryReadingFiles(
+            OrphanFilesClean.retryReadingFiles(
                             () -> manifestFile.readWithIOException(tuple2.f1),
                             Collections.<ManifestEntry>emptyList())
                     .forEach(
@@ -518,6 +540,18 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                     "Cleaner for table " + tableKey + " not found in cleanerMap");
         }
         return cleaner;
+    }
+
+    private T getCleanerForPath(Path path) {
+        T cleanerForPath = null;
+        String pathStr = path.toUri().getPath();
+        for (Map.Entry<String, T> entry : locationToCleanerMap.entrySet()) {
+            if (pathStr.startsWith(entry.getKey())) {
+                cleanerForPath = entry.getValue();
+                break;
+            }
+        }
+        return cleanerForPath;
     }
 
     private static class BranchTableInfo implements Serializable {

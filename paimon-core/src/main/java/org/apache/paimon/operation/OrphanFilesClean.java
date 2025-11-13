@@ -216,7 +216,7 @@ public abstract class OrphanFilesClean implements Serializable {
         cleanFile(filePath);
     }
 
-    protected void cleanFile(Path path) {
+    public void cleanFile(Path path) {
         if (!dryRun) {
             try {
                 if (fileIO.isDir(path)) {
@@ -421,7 +421,7 @@ public abstract class OrphanFilesClean implements Serializable {
      * {@link FileNotFoundException}, return default value. Finally, if retry times reaches the
      * limits, rethrow the IOException.
      */
-    protected static <T> T retryReadingFiles(SupplierWithIOException<T> reader, T defaultValue)
+    public static <T> T retryReadingFiles(SupplierWithIOException<T> reader, T defaultValue)
             throws IOException {
         int retryNumber = 0;
         IOException caught = null;

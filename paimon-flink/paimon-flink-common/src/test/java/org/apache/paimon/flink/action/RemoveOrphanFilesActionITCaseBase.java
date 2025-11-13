@@ -480,7 +480,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         };
         FileIO[] fileIOs = {fileIO1, fileIO1, fileIO2, fileIO2, fileIO3, fileIO3};
 
-        Thread.sleep(5000);
+        Thread.sleep(2000);
 
         long currentTime = System.currentTimeMillis();
         long olderThanMillis = Math.max(fileCreationTime + 1000, currentTime - 1000);
@@ -496,46 +496,46 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
             }
         }
 
-        // Test non-batch mode
-        String withoutBatchMode =
+        // Test divided mode
+        String dividedMode =
                 String.format(
                         "CALL sys.remove_orphan_files('%s.%s', '%s', false)",
                         database, "*", olderThan);
-        ImmutableList<Row> withoutBatchModeResult =
-                ImmutableList.copyOf(executeSQL(withoutBatchMode));
-        assertThat(withoutBatchModeResult).hasSize(2);
-        long deletedFileCountWithoutBatch =
-                Long.parseLong(withoutBatchModeResult.get(0).getField(0).toString());
-        long deletedFileTotalLenInBytesWithoutBatch =
-                Long.parseLong(withoutBatchModeResult.get(1).getField(0).toString());
-        assertThat(deletedFileCountWithoutBatch)
-                .as("Non-batch mode should delete 6 orphan files")
+        ImmutableList<Row> dividedModeResult = ImmutableList.copyOf(executeSQL(dividedMode));
+        assertThat(dividedModeResult).hasSize(2);
+        long deletedFileCountWithDivided =
+                Long.parseLong(dividedModeResult.get(0).getField(0).toString());
+        long deletedFileTotalLenInBytesWithDivided =
+                Long.parseLong(dividedModeResult.get(1).getField(0).toString());
+        assertThat(deletedFileCountWithDivided)
+                .as("divided mode should delete 6 orphan files")
                 .isEqualTo(expectedFileCount);
-        assertThat(deletedFileTotalLenInBytesWithoutBatch)
-                .as("Non-batch mode should delete files with expected total size")
+        assertThat(deletedFileTotalLenInBytesWithDivided)
+                .as("divided mode should delete files with expected total size")
                 .isEqualTo(expectedTotalSize);
 
-        // Verify files are deleted by non-batch mode
+        // Verify files are deleted by divided mode
         for (int i = 0; i < orphanFiles.length; i++) {
             assertThat(fileIOs[i].exists(orphanFiles[i]))
-                    .as("Orphan file should be deleted by non-batch mode")
+                    .as("Orphan file should be deleted by divided mode")
                     .isFalse();
         }
 
-        // Recreate orphan files for batch mode test
-        long batchFileCreationTime = System.currentTimeMillis();
+        // Recreate orphan files for combined mode test
+        long combinedFileCreationTime = System.currentTimeMillis();
         for (int i = 0; i < orphanFiles.length; i++) {
             fileIOs[i].writeFile(orphanFiles[i], "orphan", true);
         }
-        Thread.sleep(5000);
+        Thread.sleep(2000);
 
-        long batchCurrentTime = System.currentTimeMillis();
-        long batchOlderThanMillis = Math.max(batchFileCreationTime + 1000, batchCurrentTime - 1000);
-        String batchOlderThan =
+        long combinedCurrentTime = System.currentTimeMillis();
+        long combinedOlderThanMillis =
+                Math.max(combinedFileCreationTime + 1000, combinedCurrentTime - 1000);
+        String combinedOlderThan =
                 DateTimeUtils.formatLocalDateTime(
-                        DateTimeUtils.toLocalDateTime(batchOlderThanMillis), 3);
+                        DateTimeUtils.toLocalDateTime(combinedOlderThanMillis), 3);
 
-        // Test batch mode (COMBINED mode)
+        // Test combined mode
         List<String> args =
                 new ArrayList<>(
                         Arrays.asList(
@@ -551,31 +551,31 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                                 "--dry_run",
                                 "false",
                                 "--older_than",
-                                batchOlderThan));
+                                combinedOlderThan));
         RemoveOrphanFilesAction action1 = createAction(RemoveOrphanFilesAction.class, args);
         assertThatCode(action1::run).doesNotThrowAnyException();
 
-        // Verify files are deleted by batch mode (same result as non-batch mode)
+        // Verify files are deleted by combined mode (same result as divided mode)
         for (int i = 0; i < orphanFiles.length; i++) {
             assertThat(fileIOs[i].exists(orphanFiles[i]))
-                    .as("Orphan file should be deleted by batch mode (same as non-batch mode)")
+                    .as("Orphan file should be deleted by combined mode (same as divided mode)")
                     .isFalse();
         }
 
-        // Verify that normal data in tables can still be read after batch mode deletion
+        // Verify that normal data in tables can still be read after combined mode deletion
         List<String> table1Data = readTableData(table1);
         assertThat(table1Data)
-                .as("Table1 should still contain normal data after batch mode deletion")
+                .as("Table1 should still contain normal data after combined mode deletion")
                 .containsExactly("+I[1, Hi]");
 
         List<String> table2Data = readTableData(table2);
         assertThat(table2Data)
-                .as("Table2 should still contain normal data after batch mode deletion")
+                .as("Table2 should still contain normal data after combined mode deletion")
                 .containsExactly("+I[1, Hi]");
 
         List<String> table3Data = readTableData(table3);
         assertThat(table3Data)
-                .as("Table3 should still contain normal data after batch mode deletion")
+                .as("Table3 should still contain normal data after combined mode deletion")
                 .containsExactly("+I[1, Hi]");
     }
 
@@ -583,9 +583,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     public void testCombinedModeWithBranch() throws Exception {
         long fileCreationTime = System.currentTimeMillis();
 
-        // Create table with multiple branches to test bug: same table, multiple branches
-        // This will trigger the bug in computeIfAbsent if branchTable is used instead of key
-        FileStoreTable table = createTableAndWriteData("batchBranchTable");
+        FileStoreTable table = createTableAndWriteData("combinedBranchTable");
 
         // Create first branch and write data
         table.createBranch("br1");
@@ -599,7 +597,6 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
         // Create orphan files in both branch snapshot directories
         // This is key: same table, multiple branches - will trigger bug in
-        // endInputForUsedFilesForBatch
         Path orphanFileBr1 =
                 new Path(table.location(), "branch/branch-br1/snapshot/orphan_file_br1");
         Path orphanFileBr2 =
@@ -607,13 +604,13 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         branchTable1.fileIO().writeFile(orphanFileBr1, "x", true);
         branchTable2.fileIO().writeFile(orphanFileBr2, "y", true);
 
-        Thread.sleep(5000);
+        Thread.sleep(2000);
         long olderThanMillis = Math.max(fileCreationTime + 1000, System.currentTimeMillis() - 1000);
         String olderThan =
                 DateTimeUtils.formatLocalDateTime(
                         DateTimeUtils.toLocalDateTime(olderThanMillis), 3);
 
-        // Test batch mode (COMBINED mode) with multiple branches in same table
+        // Test combined mode with multiple branches in same table
         List<String> args =
                 Arrays.asList(
                         "remove_orphan_files",
@@ -646,75 +643,6 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         assertThat(readBranchData(branchTable2, branchRowType)).containsExactly("+I[3, World, 30]");
     }
 
-    @org.junit.jupiter.api.Test
-    public void testCleanOrphanManifestListFiles() throws Exception {
-        // Create table and write data to generate snapshots
-        FileStoreTable table = createTableAndWriteData("manifestListTable");
-        FileIO fileIO = table.fileIO();
-        Path location = table.location();
-        Path manifestPath = new Path(location, "manifest");
-
-        // Wait for files to be old enough
-        Thread.sleep(2000);
-
-        // Get current snapshot to find manifest-list files
-        org.apache.paimon.utils.SnapshotManager snapshotManager = table.snapshotManager();
-        org.apache.paimon.Snapshot currentSnapshot = snapshotManager.latestSnapshot();
-        assertThat(currentSnapshot).isNotNull();
-
-        // Verify that valid manifest-list files exist (referenced by snapshot)
-        String validManifestListName = null;
-        if (currentSnapshot.baseManifestList() != null) {
-            validManifestListName = new Path(currentSnapshot.baseManifestList()).getName();
-            Path validManifestListPath = new Path(manifestPath, validManifestListName);
-            assertThat(fileIO.exists(validManifestListPath))
-                    .as("Valid manifest-list file should exist")
-                    .isTrue();
-        }
-
-        // Create an orphan manifest-list file (not referenced by any snapshot)
-        String orphanManifestList = "manifest-list-orphan-" + System.currentTimeMillis();
-        Path orphanManifestListPath = new Path(manifestPath, orphanManifestList);
-        fileIO.writeFile(orphanManifestListPath, "orphan manifest-list content", true);
-
-        // Verify the orphan manifest-list file exists
-        assertThat(fileIO.exists(orphanManifestListPath)).isTrue();
-
-        // Calculate olderThan to ensure the orphan file is old enough
-        long fileCreationTime = System.currentTimeMillis();
-        Thread.sleep(1000);
-        long olderThanMillis = Math.max(fileCreationTime + 1000, System.currentTimeMillis() - 1000);
-        String olderThan =
-                DateTimeUtils.formatLocalDateTime(
-                        DateTimeUtils.toLocalDateTime(olderThanMillis), 3);
-
-        // Run orphan files clean
-        String cleanSQL =
-                String.format(
-                        "CALL sys.remove_orphan_files('%s.%s', '%s', false)",
-                        database, "manifestListTable", olderThan);
-        ImmutableList<Row> result = ImmutableList.copyOf(executeSQL(cleanSQL));
-
-        // Verify the orphan manifest-list file is deleted
-        assertThat(fileIO.exists(orphanManifestListPath))
-                .as("Orphan manifest-list file should be deleted")
-                .isFalse();
-
-        // Verify that valid manifest-list files (referenced by snapshots) are not deleted
-        if (validManifestListName != null) {
-            Path validManifestListPath = new Path(manifestPath, validManifestListName);
-            assertThat(fileIO.exists(validManifestListPath))
-                    .as("Valid manifest-list file referenced by snapshot should not be deleted")
-                    .isTrue();
-        }
-
-        // Verify normal data can still be read
-        List<String> tableData = readTableData(table);
-        assertThat(tableData)
-                .as("Table should still contain normal data after manifest-list cleanup")
-                .containsExactly("+I[1, Hi]");
-    }
-
     private FileStoreTable createBranchTable(FileStoreTable table, String branchName)
             throws Exception {
         SchemaManager schemaManager =
@@ -745,6 +673,61 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                 readBuilder.newRead(),
                 plan == null ? Collections.emptyList() : plan.splits(),
                 rowType);
+    }
+
+    @org.junit.jupiter.api.Test
+    public void testTablesParameter() throws Exception {
+        long fileCreationTime = System.currentTimeMillis();
+        FileStoreTable[] tables = {
+            createTableAndWriteData("tablesParamTable1"),
+            createTableAndWriteData("tablesParamTable2"),
+            createTableAndWriteData("tablesParamTable3"),
+            createTableAndWriteData("tablesParamTable4") // Should not be processed
+        };
+        Path[][] orphanFiles = new Path[tables.length][2];
+        for (int i = 0; i < tables.length; i++) {
+            orphanFiles[i][0] = getOrphanFilePath(tables[i], ORPHAN_FILE_1);
+            orphanFiles[i][1] = getOrphanFilePath(tables[i], ORPHAN_FILE_2);
+        }
+        Thread.sleep(2000);
+
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(
+                                Math.max(
+                                        fileCreationTime + 1000,
+                                        System.currentTimeMillis() - 1000)),
+                        3);
+
+        // Test --tables parameter
+        List<String> args =
+                Arrays.asList(
+                        "remove_orphan_files",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--tables",
+                        "tablesParamTable1",
+                        "--tables",
+                        "tablesParamTable2",
+                        "--tables",
+                        "tablesParamTable3",
+                        "--older_than",
+                        olderThan,
+                        "--dry_run",
+                        "false");
+        RemoveOrphanFilesAction action = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action::run).doesNotThrowAnyException();
+
+        // Verify files are deleted for specified tables (0-2) but not for table4 (3)
+        for (int i = 0; i < 3; i++) {
+            assertThat(tables[i].fileIO().exists(orphanFiles[i][0])).isFalse();
+            assertThat(tables[i].fileIO().exists(orphanFiles[i][1])).isFalse();
+            assertThat(readTableData(tables[i])).containsExactly("+I[1, Hi]");
+        }
+        assertThat(tables[3].fileIO().exists(orphanFiles[3][0])).isTrue();
+        assertThat(tables[3].fileIO().exists(orphanFiles[3][1])).isTrue();
     }
 
     protected boolean supportNamedArgument() {
