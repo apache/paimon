@@ -456,7 +456,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     }
 
     @org.junit.jupiter.api.Test
-    public void testBatchTableProcessing() throws Exception {
+    public void testCombinedMode() throws Exception {
         long fileCreationTime = System.currentTimeMillis();
         FileStoreTable table1 = createTableAndWriteData("batchTable1");
         FileStoreTable table2 = createTableAndWriteData("batchTable2");
@@ -580,7 +580,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
     }
 
     @org.junit.jupiter.api.Test
-    public void testBatchTableProcessingWithBranch() throws Exception {
+    public void testCombinedModeWithBranch() throws Exception {
         long fileCreationTime = System.currentTimeMillis();
 
         // Create table with multiple branches to test bug: same table, multiple branches
