@@ -643,38 +643,6 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         assertThat(readBranchData(branchTable2, branchRowType)).containsExactly("+I[3, World, 30]");
     }
 
-    private FileStoreTable createBranchTable(FileStoreTable table, String branchName)
-            throws Exception {
-        SchemaManager schemaManager =
-                new SchemaManager(table.fileIO(), table.location(), branchName);
-        TableSchema branchSchema =
-                schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.INT()));
-        Options branchOptions = new Options(branchSchema.options());
-        branchOptions.set(CoreOptions.BRANCH, branchName);
-        branchSchema = branchSchema.copy(branchOptions.toMap());
-        return FileStoreTableFactory.create(table.fileIO(), table.location(), branchSchema);
-    }
-
-    private void writeToBranch(FileStoreTable branchTable, GenericRow data) throws Exception {
-        String commitUser = UUID.randomUUID().toString();
-        StreamTableWrite write = branchTable.newWrite(commitUser);
-        StreamTableCommit commit = branchTable.newCommit(commitUser);
-        write.write(data);
-        commit.commit(1, write.prepareCommit(false, 1));
-        write.close();
-        commit.close();
-    }
-
-    private List<String> readBranchData(FileStoreTable branchTable, RowType rowType)
-            throws Exception {
-        ReadBuilder readBuilder = branchTable.newReadBuilder();
-        TableScan.Plan plan = readBuilder.newScan().plan();
-        return getResultLocal(
-                readBuilder.newRead(),
-                plan == null ? Collections.emptyList() : plan.splits(),
-                rowType);
-    }
-
     @org.junit.jupiter.api.Test
     public void testTablesParameter() throws Exception {
         long fileCreationTime = System.currentTimeMillis();
@@ -728,6 +696,107 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         }
         assertThat(tables[3].fileIO().exists(orphanFiles[3][0])).isTrue();
         assertThat(tables[3].fileIO().exists(orphanFiles[3][1])).isTrue();
+    }
+
+    @org.junit.jupiter.api.Test
+    public void testTablePrefixConflict() throws Exception {
+        long fileCreationTime = System.currentTimeMillis();
+
+        FileStoreTable table1 = createTableAndWriteData("table1");
+        FileStoreTable table10 = createTableAndWriteData("table10");
+
+        // Create orphan files in both tables
+        Path orphanFile1 = getOrphanFilePath(table1, ORPHAN_FILE_1);
+        Path orphanFile10_1 = getOrphanFilePath(table10, ORPHAN_FILE_1);
+        Path orphanFile10_2 = getOrphanFilePath(table10, "bucket-0/orphan_file_table10_specific");
+
+        FileIO fileIO1 = table1.fileIO();
+        FileIO fileIO10 = table10.fileIO();
+        fileIO1.writeFile(orphanFile1, "table1_orphan", true);
+        fileIO10.writeFile(orphanFile10_1, "table10_orphan1", true);
+        fileIO10.writeFile(orphanFile10_2, "table10_orphan2", true);
+
+        Path table1Location = table1.location();
+        Path table10Location = table10.location();
+        String table1Path = table1Location.toUri().getPath();
+        String table10Path = table10Location.toUri().getPath();
+        assertThat(table10Path)
+                .startsWith(table1Path)
+                .as("table10 path should start with table1 path to test prefix conflict");
+        // Also verify they are different paths
+        assertThat(table10Path)
+                .isNotEqualTo(table1Path)
+                .as("table10 path should be different from table1 path");
+
+        Thread.sleep(2000);
+
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(
+                                Math.max(
+                                        fileCreationTime + 1000,
+                                        System.currentTimeMillis() - 1000)),
+                        3);
+
+        // Test combined mode with prefix conflict tables
+        List<String> args =
+                Arrays.asList(
+                        "remove_orphan_files",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--tables",
+                        "table1",
+                        "--tables",
+                        "table10",
+                        "--mode",
+                        "combined",
+                        "--older_than",
+                        olderThan,
+                        "--dry_run",
+                        "false");
+        RemoveOrphanFilesAction action = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action::run).doesNotThrowAnyException();
+
+        assertThat(fileIO1.exists(orphanFile1)).isFalse();
+        assertThat(fileIO10.exists(orphanFile10_1)).isFalse();
+        assertThat(fileIO10.exists(orphanFile10_2)).isFalse();
+
+        assertThat(readTableData(table1)).containsExactly("+I[1, Hi]");
+        assertThat(readTableData(table10)).containsExactly("+I[1, Hi]");
+    }
+
+    private FileStoreTable createBranchTable(FileStoreTable table, String branchName)
+            throws Exception {
+        SchemaManager schemaManager =
+                new SchemaManager(table.fileIO(), table.location(), branchName);
+        TableSchema branchSchema =
+                schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.INT()));
+        Options branchOptions = new Options(branchSchema.options());
+        branchOptions.set(CoreOptions.BRANCH, branchName);
+        branchSchema = branchSchema.copy(branchOptions.toMap());
+        return FileStoreTableFactory.create(table.fileIO(), table.location(), branchSchema);
+    }
+
+    private void writeToBranch(FileStoreTable branchTable, GenericRow data) throws Exception {
+        String commitUser = UUID.randomUUID().toString();
+        StreamTableWrite write = branchTable.newWrite(commitUser);
+        StreamTableCommit commit = branchTable.newCommit(commitUser);
+        write.write(data);
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+    }
+
+    private List<String> readBranchData(FileStoreTable branchTable, RowType rowType)
+            throws Exception {
+        ReadBuilder readBuilder = branchTable.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        return getResultLocal(
+                readBuilder.newRead(),
+                plan == null ? Collections.emptyList() : plan.splits(),
+                rowType);
     }
 
     protected boolean supportNamedArgument() {

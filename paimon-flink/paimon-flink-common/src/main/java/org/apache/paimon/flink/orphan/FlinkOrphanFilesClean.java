@@ -416,26 +416,6 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         return this.table;
     }
 
-    @Override
-    protected List<String> validBranches() {
-        return super.validBranches();
-    }
-
-    @Override
-    protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {
-        return super.safelyGetAllSnapshots(branch);
-    }
-
-    @Override
-    protected void collectWithoutDataFile(
-            String branch,
-            Snapshot snapshot,
-            Consumer<String> usedFileConsumer,
-            Consumer<String> manifestConsumer)
-            throws IOException {
-        super.collectWithoutDataFile(branch, snapshot, usedFileConsumer, manifestConsumer);
-    }
-
     protected void processForBranchSnapshotDirDeleted(
             String branch, Collector<Tuple2<Long, Long>> out) {
         AtomicLong deletedFilesCount = new AtomicLong(0);

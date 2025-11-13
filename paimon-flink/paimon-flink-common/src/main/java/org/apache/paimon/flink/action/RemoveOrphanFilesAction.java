@@ -34,7 +34,7 @@ import static org.apache.paimon.operation.OrphanFilesClean.olderThanMillis;
 public class RemoveOrphanFilesAction extends ActionBase {
 
     private final String databaseName;
-    private final List<String> tableNames;
+    @Nullable private final List<String> tableNames;
     @Nullable private final String parallelism;
 
     private String olderThan = null;
@@ -43,7 +43,7 @@ public class RemoveOrphanFilesAction extends ActionBase {
 
     public RemoveOrphanFilesAction(
             String databaseName,
-            List<String> tableNames,
+            @Nullable List<String> tableNames,
             @Nullable String parallelism,
             Map<String, String> catalogConfig) {
         super(catalogConfig);

@@ -101,7 +101,7 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
                         + "--warehouse <warehouse_path> \\\n"
                         + "--database <database_name> \\\n"
                         + "[--table <table_name>] \\\n"
-                        + "[--tables <table1,table2,...>] \\\n"
+                        + "[--tables <table1>] [--tables <table2>] ... \\\n"
                         + "[--older_than <timestamp>] \\\n"
                         + "[--dry_run <false/true>] \\\n"
                         + "[--mode <divided|combined>]");
@@ -121,7 +121,8 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
         System.out.println();
 
         System.out.println(
-                "Use '--table' to specify a single table, or '--tables' to specify multiple tables (comma-separated, e.g., 'table1,table2,table3'). "
+                "Use '--table' to specify a single table, or '--tables' multiple times to specify multiple tables "
+                        + "(e.g., '--tables table1 --tables table2 --tables table3'). "
                         + "These two parameters cannot be used together.");
         System.out.println();
 

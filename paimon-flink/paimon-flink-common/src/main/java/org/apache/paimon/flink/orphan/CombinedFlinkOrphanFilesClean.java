@@ -543,12 +543,17 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
     }
 
     private T getCleanerForPath(Path path) {
-        T cleanerForPath = null;
         String pathStr = path.toUri().getPath();
+        T cleanerForPath = null;
+        String longestMatch = null;
+
         for (Map.Entry<String, T> entry : locationToCleanerMap.entrySet()) {
-            if (pathStr.startsWith(entry.getKey())) {
-                cleanerForPath = entry.getValue();
-                break;
+            String tableLocation = entry.getKey();
+            if (pathStr.startsWith(tableLocation)) {
+                if (longestMatch == null || tableLocation.length() > longestMatch.length()) {
+                    longestMatch = tableLocation;
+                    cleanerForPath = entry.getValue();
+                }
             }
         }
         return cleanerForPath;
