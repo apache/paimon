@@ -535,7 +535,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                 DateTimeUtils.formatLocalDateTime(
                         DateTimeUtils.toLocalDateTime(batchOlderThanMillis), 3);
 
-        // Test batch mode
+        // Test batch mode (COMBINED mode)
         List<String> args =
                 new ArrayList<>(
                         Arrays.asList(
@@ -546,8 +546,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                                 database,
                                 "--table",
                                 "*",
-                                "--batch_table_processing",
-                                "true",
+                                "--mode",
+                                "combined",
                                 "--dry_run",
                                 "false",
                                 "--older_than",
@@ -613,7 +613,7 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                 DateTimeUtils.formatLocalDateTime(
                         DateTimeUtils.toLocalDateTime(olderThanMillis), 3);
 
-        // Test batch mode with multiple branches in same table
+        // Test batch mode (COMBINED mode) with multiple branches in same table
         List<String> args =
                 Arrays.asList(
                         "remove_orphan_files",
@@ -623,8 +623,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                         database,
                         "--table",
                         "*",
-                        "--batch_table_processing",
-                        "true",
+                        "--mode",
+                        "combined",
                         "--dry_run",
                         "false",
                         "--older_than",
