@@ -2036,7 +2036,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Format table commit sync partition hive uri.");
     public static final ConfigOption<String> FORMAT_TABLE_COMMIT_SYNC_PARTITION_HIVE_WAREHOUSE =
-            ConfigOptions.key("format-table.commit.sync-partition-hive-warehouse")
+            ConfigOptions.key("format-table.commit.sync-partition-hive.warehouse")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("Format table commit sync partition hive warehouse.");
