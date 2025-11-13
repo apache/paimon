@@ -32,7 +32,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
 
@@ -40,18 +39,16 @@ import static org.apache.paimon.format.FileFormat.fileFormat;
 public class FormatTableFileWriter {
 
     private final FileIO fileIO;
-    private RowType rowType;
-    private RowType partitionType;
+    private RowType writeRowType;
     private final FileFormat fileFormat;
     private final FileStorePathFactory pathFactory;
     protected final Map<BinaryRow, FormatTableRecordWriter> writers;
     protected final CoreOptions options;
 
     public FormatTableFileWriter(
-            FileIO fileIO, RowType rowType, CoreOptions options, RowType partitionType) {
+            FileIO fileIO, RowType writeRowType, CoreOptions options, RowType partitionType) {
         this.fileIO = fileIO;
-        this.rowType = rowType;
-        this.partitionType = partitionType;
+        this.writeRowType = writeRowType;
         this.fileFormat = fileFormat(options);
         this.writers = new HashMap<>();
         this.options = options;
@@ -72,7 +69,7 @@ public class FormatTableFileWriter {
     }
 
     public void withWriteType(RowType writeType) {
-        this.rowType = writeType;
+        this.writeRowType = writeType;
     }
 
     public void write(BinaryRow partition, InternalRow data) throws Exception {
@@ -101,11 +98,6 @@ public class FormatTableFileWriter {
     }
 
     private FormatTableRecordWriter createWriter(BinaryRow partition) {
-        RowType writeRowType =
-                rowType.project(
-                        rowType.getFieldNames().stream()
-                                .filter(name -> !partitionType.getFieldNames().contains(name))
-                                .collect(Collectors.toList()));
         return new FormatTableRecordWriter(
                 fileIO,
                 fileFormat,
