@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import static org.apache.flink.util.Preconditions.checkState;
 
+/** Utility class for orphan files clean operations in Flink. */
 public class OrphanFilesCleanUtil {
 
     protected static final Logger LOG = LoggerFactory.getLogger(FlinkOrphanFilesClean.class);
