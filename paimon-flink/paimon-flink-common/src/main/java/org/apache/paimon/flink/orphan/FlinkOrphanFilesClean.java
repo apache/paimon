@@ -347,8 +347,12 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         if (tableName == null || "*".equals(tableName)) {
             tableNames = catalog.listTables(databaseName);
         }
+        List<Identifier> tableIdentifiers =
+                tableNames.stream()
+                        .map(table -> Identifier.create(databaseName, table))
+                        .collect(Collectors.toList());
         return executeDatabaseOrphanFiles(
-                env, catalog, olderThanMillis, dryRun, parallelism, databaseName, tableNames);
+                env, catalog, olderThanMillis, dryRun, parallelism, tableIdentifiers);
     }
 
     public static CleanOrphanFilesResult executeDatabaseOrphanFiles(
@@ -357,14 +361,12 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
             long olderThanMillis,
             boolean dryRun,
             @Nullable Integer parallelism,
-            String databaseName,
-            @Nullable List<String> tableNames)
+            List<Identifier> tableIdentifiers)
             throws Catalog.TableNotExistException {
-        tableNames = Objects.nonNull(tableNames) ? tableNames : new ArrayList<>();
+        tableIdentifiers = Objects.nonNull(tableIdentifiers) ? tableIdentifiers : new ArrayList<>();
         List<DataStream<CleanOrphanFilesResult>> orphanFilesCleans =
-                new ArrayList<>(tableNames.size());
-        for (String t : tableNames) {
-            Identifier identifier = new Identifier(databaseName, t);
+                new ArrayList<>(tableIdentifiers.size());
+        for (Identifier identifier : tableIdentifiers) {
             Table table = catalog.getTable(identifier);
             checkArgument(
                     table instanceof FileStoreTable,

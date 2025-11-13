@@ -18,11 +18,13 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.catalog.Identifier;
+
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.fromString;
 
@@ -50,29 +52,37 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
                             + "Use '--table' for a single table or '--tables' for multiple tables.");
         }
 
-        List<String> tableNames;
-        if (params.has(TABLE)) {
-            // Single table mode
-            tableNames = Collections.singletonList(params.getRequired(TABLE));
-        } else if (params.has(TABLES)) {
+        List<Identifier> tableIdentifiers;
+        RemoveOrphanFilesAction action;
+        if (params.has(TABLES)) {
             // Multiple tables mode
             Collection<String> tablesParams = params.getMultiParameter(TABLES);
             if (tablesParams == null || tablesParams.isEmpty()) {
-                tableNames = Collections.emptyList();
+                tableIdentifiers = new ArrayList<>();
             } else {
-                tableNames = new ArrayList<>(tablesParams);
+                tableIdentifiers =
+                        tablesParams.stream()
+                                .map(
+                                        tablesParam ->
+                                                Identifier.create(
+                                                        params.getRequired(DATABASE), tablesParam))
+                                .collect(Collectors.toList());
             }
+            action =
+                    new RemoveOrphanFilesAction(
+                            params.getRequired(DATABASE),
+                            tableIdentifiers,
+                            params.get(PARALLELISM),
+                            catalogConfigMap(params));
         } else {
-            // No table specified, process all tables
-            tableNames = Collections.emptyList();
+            // Single table mode
+            action =
+                    new RemoveOrphanFilesAction(
+                            params.getRequired(DATABASE),
+                            params.get(TABLE),
+                            params.get(PARALLELISM),
+                            catalogConfigMap(params));
         }
-
-        RemoveOrphanFilesAction action =
-                new RemoveOrphanFilesAction(
-                        params.getRequired(DATABASE),
-                        tableNames,
-                        params.get(PARALLELISM),
-                        catalogConfigMap(params));
 
         if (params.has(OLDER_THAN)) {
             action.olderThan(params.get(OLDER_THAN));

@@ -57,6 +57,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -76,37 +77,33 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
     protected static final Logger LOG =
             LoggerFactory.getLogger(CombinedFlinkOrphanFilesClean.class);
 
-    protected String databaseName;
+    protected final List<Identifier> tableIdentifiers;
     protected final long olderThanMillis;
     protected final boolean dryRun;
     @Nullable protected final Integer parallelism;
-    protected List<T> cleaners;
     // Map to store cleaners by their full identifier name, for quick lookup in ProcessFunctions
-    protected Map<String, T> cleanerMap;
+    protected final Map<String, T> cleanerMap;
     // Map from table location to cleaner for quick lookup in BoundedTwoInputOperator
-    protected Map<String, T> locationToCleanerMap;
+    protected final Map<String, T> locationToCleanerMap;
 
     public CombinedFlinkOrphanFilesClean(
-            String databaseName,
-            List<T> cleaners,
+            List<Identifier> tableIdentifiers,
+            Map<String, T> cleanerMap,
             long olderThanMillis,
             boolean dryRun,
             @Nullable Integer parallelism) {
         this.olderThanMillis = olderThanMillis;
         this.dryRun = dryRun;
-        this.databaseName = databaseName;
+        this.tableIdentifiers = tableIdentifiers;
         this.parallelism = parallelism;
-        this.cleaners = cleaners;
-        // Initialize cleanerMap for quick lookup
-        this.cleanerMap = new HashMap<>();
+        this.cleanerMap = cleanerMap;
         this.locationToCleanerMap = new HashMap<>();
-        for (T cleaner : cleaners) {
+        for (Identifier identifier : tableIdentifiers) {
+            T cleaner = cleanerMap.get(identifier.getFullName());
             FileStoreTable table = cleaner.getTable();
-            Identifier id = table.catalogEnvironment().identifier();
-            if (id != null) {
-                this.cleanerMap.put(id.getFullName(), cleaner);
-                String locationPath = table.location().toUri().getPath();
-                this.locationToCleanerMap.put(locationPath, cleaner);
+            if (Objects.nonNull(table)) {
+                String tableLocation = table.location().toUri().getPath();
+                this.locationToCleanerMap.put(tableLocation, cleaner);
             }
         }
     }
@@ -140,16 +137,19 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
     @Nullable
     public DataStream<CleanOrphanFilesResult> doOrphanClean(StreamExecutionEnvironment env) {
         OrphanFilesCleanUtil.configureFlinkEnvironment(env, parallelism);
-        LOG.info("Starting orphan files clean for {} tables: {}", cleaners.size(), cleaners);
+        LOG.info(
+                "Starting orphan files clean for {} tables: {}",
+                tableIdentifiers.size(),
+                tableIdentifiers);
         List<BranchTableInfo> branchTableInfos = new ArrayList<>();
         long start = System.currentTimeMillis();
-        for (T cleaner : cleaners) {
-            FileStoreTable table = cleaner.getTable();
-            Identifier identifier = table.catalogEnvironment().identifier();
-            if (identifier == null) {
-                LOG.warn("Table {} does not have identifier, skip it", table.name());
+        for (Identifier identifier : tableIdentifiers) {
+            T cleaner = cleanerMap.get(identifier.getFullName());
+            if (Objects.isNull(cleaner)) {
+                LOG.warn("Table {} does not have cleaner, skip it", identifier);
                 continue;
             }
+            FileStoreTable table = cleaner.getTable();
             Map<String, String> catalogOptions = new HashMap<>();
             org.apache.paimon.catalog.CatalogContext catalogContext =
                     table.catalogEnvironment().catalogContext();
@@ -168,7 +168,7 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
         }
         LOG.info(
                 "End orphan files validBranches for {} tables: spend [{}] ms",
-                cleaners.size(),
+                cleanerMap.size(),
                 System.currentTimeMillis() - start);
 
         // snapshot and changelog files are the root of everything, so they are handled specially
@@ -366,9 +366,12 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                                     ctx,
                                             Collector<Tuple2<String, Long>> out) {
                                         // Process all tables sequentially in a single thread
-                                        for (T cleaner :
-                                                CombinedFlinkOrphanFilesClean.this.cleaners) {
-                                            cleaner.listPaimonFilesForTable(out);
+                                        for (Identifier identifier : tableIdentifiers) {
+                                            if (cleanerMap.containsKey(identifier.getFullName())) {
+                                                cleanerMap
+                                                        .get(identifier.getFullName())
+                                                        .listPaimonFilesForTable(out);
+                                            }
                                         }
                                     }
                                 })
@@ -495,13 +498,11 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
             long olderThanMillis,
             boolean dryRun,
             @Nullable Integer parallelism,
-            String databaseName,
-            List<String> tableNames) {
-        List<FlinkOrphanFilesClean> cleaners = new ArrayList<>();
-
-        for (String tableName : tableNames) {
+            List<Identifier> tableIdentifiers) {
+        Map<String, FlinkOrphanFilesClean> cleanersMap = new HashMap<>();
+        List<Identifier> validIdentifiers = new ArrayList<>();
+        for (Identifier identifier : tableIdentifiers) {
             try {
-                Identifier identifier = new Identifier(databaseName, tableName);
                 Table table = catalog.getTable(identifier);
                 if (!(table instanceof FileStoreTable)) {
                     LOG.warn("table {} is not a FileStoreTable, so ignore it", table.name());
@@ -511,22 +512,23 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                 FlinkOrphanFilesClean cleaner =
                         new FlinkOrphanFilesClean(
                                 (FileStoreTable) table, olderThanMillis, dryRun, parallelism);
-                cleaners.add(cleaner);
+                validIdentifiers.add(identifier);
+                cleanersMap.put(identifier.getFullName(), cleaner);
             } catch (Catalog.TableNotExistException e) {
-                LOG.warn("Table {}.{} does not exist, so ignore it", databaseName, tableName, e);
+                LOG.warn("Table {} does not exist, so ignore it", identifier.getFullName(), e);
             } catch (Exception e) {
-                LOG.warn("Failed to process table {}.{}, so ignore it", databaseName, tableName, e);
+                LOG.warn("Failed to process table {}, so ignore it", identifier.getFullName(), e);
             }
         }
 
-        if (cleaners.isEmpty()) {
+        if (cleanersMap.isEmpty()) {
             return sum(null);
         }
 
         // Process all tables in a single DataStream
         DataStream<CleanOrphanFilesResult> clean =
                 new CombinedFlinkOrphanFilesClean<>(
-                                databaseName, cleaners, olderThanMillis, dryRun, parallelism)
+                                validIdentifiers, cleanersMap, olderThanMillis, dryRun, parallelism)
                         .doOrphanClean(env);
 
         return sum(clean);
