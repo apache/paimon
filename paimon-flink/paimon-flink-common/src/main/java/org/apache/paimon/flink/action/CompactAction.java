@@ -88,13 +88,13 @@ public class CompactAction extends TableActionBase {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CompactAction.class);
 
-    private List<Map<String, String>> partitions;
+    protected List<Map<String, String>> partitions;
 
-    private String whereSql;
+    protected String whereSql;
 
-    @Nullable private Duration partitionIdleTime = null;
+    @Nullable protected Duration partitionIdleTime = null;
 
-    private Boolean fullCompaction;
+    protected Boolean fullCompaction;
 
     public CompactAction(
             String database,
@@ -145,7 +145,7 @@ public class CompactAction extends TableActionBase {
         buildImpl();
     }
 
-    private boolean buildImpl() throws Exception {
+    protected boolean buildImpl() throws Exception {
         ReadableConfig conf = env.getConfiguration();
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
@@ -166,7 +166,7 @@ public class CompactAction extends TableActionBase {
         }
     }
 
-    private void buildForBucketedTableCompact(
+    protected void buildForBucketedTableCompact(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
             throws Exception {
         if (fullCompaction == null) {
@@ -202,7 +202,7 @@ public class CompactAction extends TableActionBase {
         sinkBuilder.withInput(source).build();
     }
 
-    private void buildForAppendTableCompact(
+    protected void buildForAppendTableCompact(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
             throws Exception {
         AppendTableCompactBuilder builder =
@@ -213,7 +213,7 @@ public class CompactAction extends TableActionBase {
         builder.build();
     }
 
-    private boolean buildForIncrementalClustering(
+    protected boolean buildForIncrementalClustering(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
             throws Exception {
         checkArgument(!isStreaming, "Incremental clustering currently only supports batch mode");
@@ -402,7 +402,7 @@ public class CompactAction extends TableActionBase {
         return PartitionPredicate.fromPredicate(partitionType, predicate);
     }
 
-    private boolean buildForPostponeBucketCompaction(
+    protected boolean buildForPostponeBucketCompaction(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming) {
         checkArgument(
                 !isStreaming, "Postpone bucket compaction currently only supports batch mode");
