@@ -18,7 +18,13 @@
 
 package org.apache.paimon.flink.action;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
+
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.fromString;
 
 /** Factory to create {@link RemoveOrphanFilesAction}. */
 public class RemoveOrphanFilesActionFactory implements ActionFactory {
@@ -27,8 +33,8 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
     private static final String OLDER_THAN = "older_than";
     private static final String DRY_RUN = "dry_run";
     private static final String PARALLELISM = "parallelism";
-    private static final String BATCH_TABLE_PROCESSING = "batch_table_processing";
-    private static final String BATCH_SIZE = "batch_size";
+    private static final String TABLES = "tables";
+    private static final String MODE = "mode";
 
     @Override
     public String identifier() {
@@ -37,10 +43,34 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
+        // Check that table and tables parameters are not used together
+        if (params.has(TABLE) && params.has(TABLES)) {
+            throw new IllegalArgumentException(
+                    "Cannot specify both '--table' and '--tables' parameters. "
+                            + "Use '--table' for a single table or '--tables' for multiple tables.");
+        }
+
+        List<String> tableNames;
+        if (params.has(TABLE)) {
+            // Single table mode
+            tableNames = Collections.singletonList(params.getRequired(TABLE));
+        } else if (params.has(TABLES)) {
+            // Multiple tables mode
+            Collection<String> tablesParams = params.getMultiParameter(TABLES);
+            if (tablesParams == null || tablesParams.isEmpty()) {
+                tableNames = Collections.emptyList();
+            } else {
+                tableNames = new ArrayList<>(tablesParams);
+            }
+        } else {
+            // No table specified, process all tables
+            tableNames = Collections.emptyList();
+        }
+
         RemoveOrphanFilesAction action =
                 new RemoveOrphanFilesAction(
                         params.getRequired(DATABASE),
-                        params.get(TABLE),
+                        tableNames,
                         params.get(PARALLELISM),
                         catalogConfigMap(params));
 
@@ -52,13 +82,8 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
             action.dryRun();
         }
 
-        if (params.has(BATCH_TABLE_PROCESSING)
-                && Boolean.parseBoolean(params.get(BATCH_TABLE_PROCESSING))) {
-            action.batchTableProcessing(true);
-        }
-
-        if (params.has(BATCH_SIZE)) {
-            action.batchSize(Integer.parseInt(params.get(BATCH_SIZE)));
+        if (params.has(MODE)) {
+            action.mode(fromString(params.get(MODE)));
         }
 
         return Optional.of(action);
@@ -75,11 +100,11 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
                 "  remove_orphan_files \\\n"
                         + "--warehouse <warehouse_path> \\\n"
                         + "--database <database_name> \\\n"
-                        + "--table <table_name> \\\n"
+                        + "[--table <table_name>] \\\n"
+                        + "[--tables <table1,table2,...>] \\\n"
                         + "[--older_than <timestamp>] \\\n"
                         + "[--dry_run <false/true>] \\\n"
-                        + "[--batch_table_processing <false/true>] \\\n"
-                        + "[--batch_size <size>]");
+                        + "[--mode <divided|combined>]");
 
         System.out.println();
         System.out.println(
@@ -92,21 +117,22 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
         System.out.println();
 
         System.out.println(
-                "If the table is null or *, all orphan files in all tables under the db will be cleaned up.");
+                "If neither '--table' nor '--tables' is specified, all orphan files in all tables under the db will be cleaned up.");
         System.out.println();
 
         System.out.println(
-                "When '--batch_table_processing true', multiple tables will be processed within a single DataStream "
+                "Use '--table' to specify a single table, or '--tables' to specify multiple tables (comma-separated, e.g., 'table1,table2,table3'). "
+                        + "These two parameters cannot be used together.");
+        System.out.println();
+
+        System.out.println(
+                "When '--mode combined', multiple tables will be processed within a single DataStream "
                         + "during job graph construction, instead of creating one dataStream per table. "
                         + "This significantly reduces job graph construction time, when processing "
                         + "thousands of tables (jobs may fail to start within timeout limits). "
                         + "It also reduces JobGraph complexity and avoids stack over flow issue and resource allocation failures during job running. "
-                        + "Note: Batch mode only applies when processing all tables (table is null or *) and catalog supports paginated listing. "
-                        + "Default is false.");
-        System.out.println();
-        System.out.println(
-                "When '--batch_table_processing' is enabled, '--batch_size' controls how many tables are processed "
-                        + "in each basic dataStream. Default batch size is 1000.");
+                        + "When '--mode divided', create one DataStream per table during job graph construction. "
+                        + "Default is 'divided'.");
         System.out.println();
     }
 }

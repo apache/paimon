@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.orphan;
 
-import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
@@ -31,7 +30,6 @@ import org.apache.paimon.operation.CleanOrphanFilesResult;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -63,20 +61,23 @@ import java.util.function.Consumer;
 
 import static org.apache.flink.api.common.typeinfo.BasicTypeInfo.STRING_TYPE_INFO;
 import static org.apache.flink.util.Preconditions.checkState;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Flink {@link OrphanFilesClean}, it will submit a job for multiple tables in batches. */
-public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
+/**
+ * Flink {@link OrphanFilesClean}, it will submit a job for multiple tables in a combined
+ * DataStream.
+ */
+public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
         extends FlinkOrphanFilesClean {
 
-    protected static final Logger LOG = LoggerFactory.getLogger(BatchFlinkOrphanFilesClean.class);
+    protected static final Logger LOG =
+            LoggerFactory.getLogger(CombinedFlinkOrphanFilesClean.class);
 
     protected String databaseName;
     protected List<T> cleaners;
     // Map to store cleaners by their full identifier name, for quick lookup in ProcessFunctions
     protected Map<String, T> cleanerMap;
 
-    public BatchFlinkOrphanFilesClean(
+    public CombinedFlinkOrphanFilesClean(
             String databaseName,
             List<T> cleaners,
             long olderThanMillis,
@@ -351,7 +352,8 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                                     ctx,
                                             Collector<Tuple2<String, Long>> out) {
                                         // Process all tables sequentially in a single thread
-                                        for (T cleaner : BatchFlinkOrphanFilesClean.this.cleaners) {
+                                        for (T cleaner :
+                                                CombinedFlinkOrphanFilesClean.this.cleaners) {
                                             cleaner.listPaimonFilesForTable(out);
                                         }
                                     }
@@ -471,171 +473,40 @@ public class BatchFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
             boolean dryRun,
             @Nullable Integer parallelism,
             String databaseName,
-            @Nullable String tableName,
-            int batchSize)
-            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
-        List<DataStream<CleanOrphanFilesResult>> orphanFilesCleans = new ArrayList<>();
+            List<String> tableNames) {
+        List<FlinkOrphanFilesClean> cleaners = new ArrayList<>();
 
-        if (tableName == null || "*".equals(tableName)) {
-            processAllTablesInBatches(
-                    env,
-                    catalog,
-                    databaseName,
-                    olderThanMillis,
-                    dryRun,
-                    parallelism,
-                    batchSize,
-                    orphanFilesCleans);
-        } else {
-            processSingleTable(
-                    env,
-                    catalog,
-                    databaseName,
-                    tableName,
-                    olderThanMillis,
-                    dryRun,
-                    parallelism,
-                    orphanFilesCleans);
-        }
-
-        DataStream<CleanOrphanFilesResult> result = null;
-        for (DataStream<CleanOrphanFilesResult> clean : orphanFilesCleans) {
-            if (result == null) {
-                result = clean;
-            } else {
-                result = result.union(clean);
-            }
-        }
-
-        return sum(result);
-    }
-
-    private static void processAllTablesInBatches(
-            StreamExecutionEnvironment env,
-            Catalog catalog,
-            String databaseName,
-            long olderThanMillis,
-            boolean dryRun,
-            @Nullable Integer parallelism,
-            int batchSize,
-            List<DataStream<CleanOrphanFilesResult>> orphanFilesCleans)
-            throws Catalog.DatabaseNotExistException {
-        String pageToken = null;
-        List<FlinkOrphanFilesClean> batchCleaners = new ArrayList<>();
-        int totalTablesCollected = 0;
-        int batchCount = 0;
-        int pageCount = 0;
-
-        do {
-            pageCount++;
-            PagedList<Table> pagedTables =
-                    catalog.listTableDetailsPaged(databaseName, null, pageToken, null, null);
-            LOG.info(
-                    "[BATCH_ORPHAN_CLEAN] Page {} START: received {} tables from catalog, current batchCleaners.size() = {}, total collected = {}",
-                    pageCount,
-                    pagedTables.getElements().size(),
-                    batchCleaners.size(),
-                    totalTablesCollected);
-
-            for (Table table : pagedTables.getElements()) {
+        for (String tableName : tableNames) {
+            try {
+                Identifier identifier = new Identifier(databaseName, tableName);
+                Table table = catalog.getTable(identifier);
                 if (!(table instanceof FileStoreTable)) {
                     LOG.warn("table {} is not a FileStoreTable, so ignore it", table.name());
                     continue;
                 }
+
                 FlinkOrphanFilesClean cleaner =
                         new FlinkOrphanFilesClean(
                                 (FileStoreTable) table, olderThanMillis, dryRun, parallelism);
-                batchCleaners.add(cleaner);
-                totalTablesCollected++;
-
-                // When batch reaches batchSize, process it
-                if (batchCleaners.size() >= batchSize) {
-                    batchCount++;
-                    LOG.info(
-                            "[BATCH_ORPHAN_CLEAN] Processing batch #{} of {} tables (batch size: {}), total collected so far: {}",
-                            batchCount,
-                            batchCleaners.size(),
-                            batchSize,
-                            totalTablesCollected);
-                    DataStream<CleanOrphanFilesResult> clean =
-                            new BatchFlinkOrphanFilesClean<>(
-                                            databaseName,
-                                            new ArrayList<>(batchCleaners),
-                                            olderThanMillis,
-                                            dryRun,
-                                            parallelism)
-                                    .doOrphanClean(env);
-                    if (clean != null) {
-                        orphanFilesCleans.add(clean);
-                    }
-                    batchCleaners.clear();
-                    LOG.info(
-                            "[BATCH_ORPHAN_CLEAN] Batch #{} processed and cleared, batchCleaners.size() = {}",
-                            batchCount,
-                            batchCleaners.size());
-                }
-            }
-            pageToken = pagedTables.getNextPageToken();
-            LOG.info(
-                    "[BATCH_ORPHAN_CLEAN] Page {} FINISHED: batchCleaners.size() = {}, hasNextPage: {}",
-                    pageCount,
-                    batchCleaners.size(),
-                    !StringUtils.isNullOrWhitespaceOnly(pageToken));
-        } while (!StringUtils.isNullOrWhitespaceOnly(pageToken));
-
-        // Process remaining tables in the last batch
-        if (!batchCleaners.isEmpty()) {
-            batchCount++;
-            LOG.info(
-                    "[BATCH_ORPHAN_CLEAN] Processing final batch #{} of {} tables (batch size: {}), total collected: {}",
-                    batchCount,
-                    batchCleaners.size(),
-                    batchSize,
-                    totalTablesCollected);
-            DataStream<CleanOrphanFilesResult> clean =
-                    new BatchFlinkOrphanFilesClean<>(
-                                    databaseName,
-                                    batchCleaners,
-                                    olderThanMillis,
-                                    dryRun,
-                                    parallelism)
-                            .doOrphanClean(env);
-            if (clean != null) {
-                orphanFilesCleans.add(clean);
+                cleaners.add(cleaner);
+            } catch (Catalog.TableNotExistException e) {
+                LOG.warn("Table {}.{} does not exist, so ignore it", databaseName, tableName, e);
+            } catch (Exception e) {
+                LOG.warn("Failed to process table {}.{}, so ignore it", databaseName, tableName, e);
             }
         }
 
-        LOG.info(
-                "[BATCH_ORPHAN_CLEAN] Batch processing completed: total batches = {}, total tables collected = {}, total pages = {}",
-                batchCount,
-                totalTablesCollected,
-                pageCount);
-    }
+        if (cleaners.isEmpty()) {
+            return sum(null);
+        }
 
-    private static void processSingleTable(
-            StreamExecutionEnvironment env,
-            Catalog catalog,
-            String databaseName,
-            String tableName,
-            long olderThanMillis,
-            boolean dryRun,
-            @Nullable Integer parallelism,
-            List<DataStream<CleanOrphanFilesResult>> orphanFilesCleans)
-            throws Catalog.TableNotExistException {
-        Identifier identifier = new Identifier(databaseName, tableName);
-        Table table = catalog.getTable(identifier);
-        checkArgument(
-                table instanceof FileStoreTable,
-                "Only FileStoreTable supports remove-orphan-files action. The table type is '%s'.",
-                table.getClass().getName());
-
+        // Process all tables in a single DataStream
         DataStream<CleanOrphanFilesResult> clean =
-                new FlinkOrphanFilesClean(
-                                (FileStoreTable) table, olderThanMillis, dryRun, parallelism)
+                new CombinedFlinkOrphanFilesClean<>(
+                                databaseName, cleaners, olderThanMillis, dryRun, parallelism)
                         .doOrphanClean(env);
-        if (clean != null) {
-            orphanFilesCleans.add(clean);
-        }
+
+        return sum(clean);
     }
 
     private T getCleanerForTable(BranchTableInfo branchTableInfo) {

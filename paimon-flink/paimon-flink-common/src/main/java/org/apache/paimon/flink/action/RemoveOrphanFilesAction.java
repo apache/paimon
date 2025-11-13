@@ -18,35 +18,37 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.flink.orphan.BatchFlinkOrphanFilesClean;
+import org.apache.paimon.flink.orphan.CombinedFlinkOrphanFilesClean;
 import org.apache.paimon.flink.orphan.FlinkOrphanFilesClean;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
 import static org.apache.paimon.operation.OrphanFilesClean.olderThanMillis;
 
 /** Action to remove the orphan data files and metadata files. */
 public class RemoveOrphanFilesAction extends ActionBase {
 
     private final String databaseName;
-    @Nullable private final String tableName;
+    private final List<String> tableNames;
     @Nullable private final String parallelism;
 
     private String olderThan = null;
     private boolean dryRun = false;
-    private boolean batchTableProcessing = false;
-    private int batchSize = 1000;
+    private MultiTablesSinkMode mode = DIVIDED;
 
     public RemoveOrphanFilesAction(
             String databaseName,
-            @Nullable String tableName,
+            List<String> tableNames,
             @Nullable String parallelism,
             Map<String, String> catalogConfig) {
         super(catalogConfig);
         this.databaseName = databaseName;
-        this.tableName = tableName;
+        this.tableNames = tableNames;
         this.parallelism = parallelism;
     }
 
@@ -58,28 +60,27 @@ public class RemoveOrphanFilesAction extends ActionBase {
         this.dryRun = true;
     }
 
-    public void batchTableProcessing(boolean batchTableProcessing) {
-        this.batchTableProcessing = batchTableProcessing;
-    }
-
-    public void batchSize(int batchSize) {
-        this.batchSize = batchSize;
+    public void mode(MultiTablesSinkMode mode) {
+        this.mode = mode;
     }
 
     @Override
     public void run() throws Exception {
-        if (batchTableProcessing
-                && (tableName == null || "*".equals(tableName))
-                && catalog.supportsListObjectsPaged()) {
-            BatchFlinkOrphanFilesClean.executeDatabaseOrphanFiles(
+        List<String> effectiveTableNames = tableNames;
+        if (effectiveTableNames == null
+                || effectiveTableNames.isEmpty()
+                || (tableNames.size() == 1 && "*".equals(tableNames.get(0)))) {
+            effectiveTableNames = catalog.listTables(databaseName);
+        }
+        if (COMBINED.equals(mode)) {
+            CombinedFlinkOrphanFilesClean.executeDatabaseOrphanFiles(
                     env,
                     catalog,
                     olderThanMillis(olderThan),
                     dryRun,
                     parallelism == null ? null : Integer.parseInt(parallelism),
                     databaseName,
-                    tableName,
-                    batchSize);
+                    effectiveTableNames);
         } else {
             FlinkOrphanFilesClean.executeDatabaseOrphanFiles(
                     env,
@@ -88,7 +89,7 @@ public class RemoveOrphanFilesAction extends ActionBase {
                     dryRun,
                     parallelism == null ? null : Integer.parseInt(parallelism),
                     databaseName,
-                    tableName);
+                    effectiveTableNames);
         }
     }
 }

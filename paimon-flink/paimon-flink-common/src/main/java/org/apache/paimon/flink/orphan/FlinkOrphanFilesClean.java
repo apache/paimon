@@ -62,6 +62,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -363,7 +364,20 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         if (tableName == null || "*".equals(tableName)) {
             tableNames = catalog.listTables(databaseName);
         }
+        return executeDatabaseOrphanFiles(
+                env, catalog, olderThanMillis, dryRun, parallelism, databaseName, tableNames);
+    }
 
+    public static CleanOrphanFilesResult executeDatabaseOrphanFiles(
+            StreamExecutionEnvironment env,
+            Catalog catalog,
+            long olderThanMillis,
+            boolean dryRun,
+            @Nullable Integer parallelism,
+            String databaseName,
+            @Nullable List<String> tableNames)
+            throws Catalog.TableNotExistException {
+        tableNames = Objects.nonNull(tableNames) ? tableNames : new ArrayList<>();
         List<DataStream<CleanOrphanFilesResult>> orphanFilesCleans =
                 new ArrayList<>(tableNames.size());
         for (String t : tableNames) {
@@ -391,7 +405,6 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                 result = result.union(clean);
             }
         }
-
         return sum(result);
     }
 
