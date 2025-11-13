@@ -217,8 +217,8 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                                             new Tuple2<>(
                                                                     branch + ":" + tableKey,
                                                                     manifest);
-                                                    LOG.info(
-                                                            "[BATCH_ORPHAN_CLEAN] Outputting manifest to side output: branch={}, tableKey={}, manifest={}",
+                                                    LOG.debug(
+                                                            "[COMBINED_ORPHAN_CLEAN] Outputting manifest to side output: branch={}, tableKey={}, manifest={}",
                                                             branch,
                                                             tableKey,
                                                             manifest);
@@ -245,16 +245,16 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                     public void processElement(
                                             StreamRecord<Tuple2<String, String>> element) {
                                         manifests.add(element.getValue());
-                                        LOG.info(
-                                                "[BATCH_ORPHAN_CLEAN] Added manifest to set: {}, current size: {}",
+                                        LOG.debug(
+                                                "[COMBINED_ORPHAN_CLEAN] Added manifest to set: {}, current size: {}",
                                                 element.getValue(),
                                                 manifests.size());
                                     }
 
                                     @Override
                                     public void endInput() throws IOException {
-                                        LOG.info(
-                                                "[BATCH_ORPHAN_CLEAN] endInput() called, manifests.size()={}",
+                                        LOG.debug(
+                                                "[COMBINED_ORPHAN_CLEAN] endInput() called, manifests.size()={}",
                                                 manifests.size());
 
                                         // Group manifests by tableIdentifier
@@ -269,7 +269,7 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
 
                                             if (tableIdentifier == null) {
                                                 LOG.error(
-                                                        "[BATCH_ORPHAN_CLEAN] Invalid manifest format: {}, expected format: branch:tableIdentifier",
+                                                        "[COMBINED_ORPHAN_CLEAN] Invalid manifest format: {}, expected format: branch:tableIdentifier",
                                                         tuple2.f0);
                                                 throw new RuntimeException(
                                                         "Invalid manifest format: "
@@ -277,8 +277,8 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                                                 + ". Expected format: branch:tableIdentifier");
                                             }
 
-                                            LOG.info(
-                                                    "[BATCH_ORPHAN_CLEAN] Parsed manifest: branch={}, tableIdentifier={}, manifestFile={}",
+                                            LOG.debug(
+                                                    "[COMBINED_ORPHAN_CLEAN] Parsed manifest: branch={}, tableIdentifier={}, manifestFile={}",
                                                     branch,
                                                     tableIdentifier,
                                                     tuple2.f1);
@@ -289,8 +289,8 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                                     .add(new Tuple2<>(branch, tuple2.f1));
                                         }
 
-                                        LOG.info(
-                                                "[BATCH_ORPHAN_CLEAN] Grouped manifests by table, manifestsByTable.size()={}",
+                                        LOG.debug(
+                                                "[COMBINED_ORPHAN_CLEAN] Grouped manifests by table, manifestsByTable.size()={}",
                                                 manifestsByTable.size());
 
                                         // Process manifests for each table
@@ -300,8 +300,8 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                             Set<Tuple2<String, String>> tableManifests =
                                                     entry.getValue();
 
-                                            LOG.info(
-                                                    "[BATCH_ORPHAN_CLEAN] Processing table: {}, manifests count: {}",
+                                            LOG.debug(
+                                                    "[COMBINED_ORPHAN_CLEAN] Processing table: {}, manifests count: {}",
                                                     tableIdentifier,
                                                     tableManifests.size());
 
@@ -309,24 +309,24 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                                 T cleanerToUse = cleanerMap.get(tableIdentifier);
                                                 if (cleanerToUse == null) {
                                                     LOG.error(
-                                                            "[BATCH_ORPHAN_CLEAN] Cleaner for table {} not found in cleanerMap",
+                                                            "[COMBINED_ORPHAN_CLEAN] Cleaner for table {} not found in cleanerMap",
                                                             tableIdentifier);
                                                     throw new RuntimeException(
                                                             "Cleaner for table "
                                                                     + tableIdentifier
                                                                     + " not found in cleanerMap");
                                                 }
-                                                LOG.info(
-                                                        "[BATCH_ORPHAN_CLEAN] Calling endInputForUsedFilesForBatch for table: {}",
+                                                LOG.debug(
+                                                        "[COMBINED_ORPHAN_CLEAN] Calling endInputForUsedFilesForCombined for table: {}",
                                                         tableIdentifier);
-                                                endInputForUsedFilesForBatch(
+                                                endInputForUsedFilesForCombined(
                                                         cleanerToUse, tableManifests, output);
-                                                LOG.info(
-                                                        "[BATCH_ORPHAN_CLEAN] Finished endInputForUsedFilesForBatch for table: {}",
+                                                LOG.debug(
+                                                        "[COMBINED_ORPHAN_CLEAN] Finished endInputForUsedFilesForCombined for table: {}",
                                                         tableIdentifier);
                                             } catch (Exception e) {
                                                 LOG.error(
-                                                        "[BATCH_ORPHAN_CLEAN] Failed to process manifests for table: {}",
+                                                        "[COMBINED_ORPHAN_CLEAN] Failed to process manifests for table: {}",
                                                         tableIdentifier,
                                                         e);
                                                 throw new IOException(
@@ -336,7 +336,7 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                             }
                                         }
 
-                                        LOG.info("[BATCH_ORPHAN_CLEAN] endInput() finished");
+                                        LOG.debug("[COMBINED_ORPHAN_CLEAN] endInput() finished");
                                     }
                                 });
 
@@ -398,8 +398,8 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                                     @Override
                                     public void processElement1(StreamRecord<String> element) {
                                         used.add(element.getValue());
-                                        LOG.info(
-                                                "[BATCH_ORPHAN_CLEAN] Added to used set: fileName={}, usedSetSize={}",
+                                        LOG.debug(
+                                                "[COMBINED_ORPHAN_CLEAN] Added to used set: fileName={}, usedSetSize={}",
                                                 element.getValue(),
                                                 used.size());
                                     }
@@ -424,7 +424,7 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
         return deleted;
     }
 
-    private void endInputForUsedFilesForBatch(
+    private void endInputForUsedFilesForCombined(
             T cleaner, Set<Tuple2<String, String>> manifests, Output<StreamRecord<String>> output)
             throws IOException {
         FileStoreTable tableToUse = cleaner.getTable();
@@ -447,16 +447,16 @@ public class CombinedFlinkOrphanFilesClean<T extends FlinkOrphanFilesClean>
                             f -> {
                                 // Use file name for comparison, same as FlinkOrphanFilesClean
                                 String fileName = f.fileName();
-                                LOG.info(
-                                        "[BATCH_ORPHAN_CLEAN] From manifest: branch={}, manifestFile={}, fileName={}",
+                                LOG.debug(
+                                        "[COMBINED_ORPHAN_CLEAN] From manifest: branch={}, manifestFile={}, fileName={}",
                                         branch,
                                         tuple2.f1,
                                         fileName);
                                 output.collect(new StreamRecord<>(fileName));
                                 // Handle extra files
                                 for (String extraFile : f.file().extraFiles()) {
-                                    LOG.info(
-                                            "[BATCH_ORPHAN_CLEAN] From manifest extra file: branch={}, manifestFile={}, extraFile={}",
+                                    LOG.debug(
+                                            "[COMBINED_ORPHAN_CLEAN] From manifest extra file: branch={}, manifestFile={}, extraFile={}",
                                             branch,
                                             tuple2.f1,
                                             extraFile);
