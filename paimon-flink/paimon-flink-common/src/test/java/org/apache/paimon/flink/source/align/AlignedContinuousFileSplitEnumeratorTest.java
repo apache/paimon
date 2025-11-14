@@ -27,11 +27,13 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -51,13 +53,16 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
+import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Unit tests for the {@link AlignedContinuousFileSplitEnumerator}. */
-public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBase {
+public class AlignedContinuousFileSplitEnumeratorTest
+        extends FileSplitEnumeratorTestBase<FileStoreSourceSplit> {
 
     private static final RowType ROW_TYPE =
             RowType.of(
@@ -249,5 +254,21 @@ public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumerato
                     false,
                     -1);
         }
+    }
+
+    @Override
+    protected FileStoreSourceSplit createSnapshotSplit(
+            int snapshotId, int bucket, List<DataFileMeta> files, int... partitions) {
+        return new FileStoreSourceSplit(
+                UUID.randomUUID().toString(),
+                DataSplit.builder()
+                        .withSnapshot(snapshotId)
+                        .withPartition(row(partitions))
+                        .withBucket(bucket)
+                        .withDataFiles(files)
+                        .isStreaming(true)
+                        .withBucketPath("/temp/xxx") // not used
+                        .build(),
+                0);
     }
 }

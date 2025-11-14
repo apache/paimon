@@ -20,6 +20,7 @@ package org.apache.paimon.flink.pipeline.cdc.util;
 
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataType;
 
 import org.apache.flink.cdc.common.types.utils.DataTypeUtils;
@@ -30,7 +31,21 @@ public class PaimonToFlinkCDCTypeConverter {
 
     /** Convert Paimon schema to Flink CDC schema. */
     public static org.apache.flink.cdc.common.schema.Schema convertPaimonSchemaToFlinkCDCSchema(
+            TableSchema schema) {
+        if (schema == null) {
+            return null;
+        }
+
+        return convertPaimonSchemaToFlinkCDCSchema(schema.toSchema());
+    }
+
+    /** Convert Paimon schema to Flink CDC schema. */
+    public static org.apache.flink.cdc.common.schema.Schema convertPaimonSchemaToFlinkCDCSchema(
             Schema schema) {
+        if (schema == null) {
+            return null;
+        }
+
         org.apache.flink.cdc.common.schema.Schema.Builder builder =
                 new org.apache.flink.cdc.common.schema.Schema.Builder();
         schema.fields()
