@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -27,6 +28,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.system.RowTrackingTable;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -134,6 +136,121 @@ public class FlinkTableSourceTest extends TableTestBase {
         filters = ImmutableList.of(p2Like("a%"), and(col1Equal1(), p1Equal1()));
         Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(ImmutableList.of(filters.get(1)));
+    }
+
+    @Test
+    public void testApplyRowIdFilters() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
+        Schema schema =
+                Schema.newBuilder()
+                        .column("col1", DataTypes.INT())
+                        .column("col2", DataTypes.STRING())
+                        .column("col3", DataTypes.DOUBLE())
+                        .column("p1", DataTypes.INT())
+                        .column("p2", DataTypes.STRING())
+                        .partitionKeys("p1", "p2")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        TableSchema tableSchema = new SchemaManager(fileIO, tablePath).createTable(schema);
+        Table table =
+                new RowTrackingTable(
+                        FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema));
+        SystemTableSource tableSource =
+                new SystemTableSource(table, false, ObjectIdentifier.of("catalog1", "db1", "T"));
+
+        List<ResolvedExpression> filters;
+
+        // col1 = 1 && p1 = 1 => [p1 = 1], idList = NULL
+        filters = ImmutableList.of(col1Equal1(), p1Equal1());
+        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+                .containsExactlyInAnyOrderElementsOf(ImmutableList.of(filters.get(0)));
+        Assertions.assertThat(tableSource.getRowIds()).isNull();
+
+        // col1 = 1 || _ROW_ID = 1 => [col1 = 1 || _ROW_ID = 1], idList = NULL
+        filters = ImmutableList.of(or(col1Equal1(), rowIdEqual(1)));
+        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+                .containsExactlyInAnyOrderElementsOf(ImmutableList.of(filters.get(0)));
+        Assertions.assertThat(tableSource.getRowIds()).isNull();
+
+        // _ROW_ID = 1 && col1 = 1 => [col1 = 1], idList = [1]
+        filters = ImmutableList.of(rowIdEqual(1), col1Equal1());
+        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+                .containsExactlyInAnyOrderElementsOf(ImmutableList.of(filters.get(1)));
+        Assertions.assertThat(tableSource.getRowIds())
+                .containsExactlyInAnyOrderElementsOf(ImmutableList.of(1L));
+
+        // _ROW_ID in (1, 2, 3) && col1 = 1 => [col1 = 1], idList = [1, 2, 3]
+        filters = ImmutableList.of(rowIdIn(1L, 2L, 3L), col1Equal1());
+        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+                .containsExactlyInAnyOrderElementsOf(ImmutableList.of(filters.get(1)));
+        Assertions.assertThat(tableSource.getRowIds())
+                .containsExactlyInAnyOrderElementsOf(ImmutableList.of(1L, 2L, 3L));
+
+        // _ROW_ID = 1 && _ROW_ID = 2 && p1 = 1 => None, idList = []
+        filters = ImmutableList.of(rowIdEqual(1), rowIdEqual(2), p1Equal1());
+        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters()).isEmpty();
+        Assertions.assertThat(tableSource.getRowIds()).isEmpty();
+
+        // _ROW_ID = 1 && (_ROW_ID = 1 || _ROW_ID = 2) => None, idList = [1]
+        filters = ImmutableList.of(rowIdEqual(1), or(rowIdEqual(1), rowIdEqual(2)));
+        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters()).isEmpty();
+        Assertions.assertThat(tableSource.getRowIds())
+                .containsExactlyInAnyOrderElementsOf(ImmutableList.of(1L));
+
+        // _ROW_ID in (1, 2, 3, 4) && _ROW_ID in (1, 4, 6, 9) => None, idList = [1, 4]
+        filters = ImmutableList.of(rowIdIn(1L, 2L, 3L, 4L), rowIdIn(1L, 4L, 6L, 9L));
+        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters()).isEmpty();
+        Assertions.assertThat(tableSource.getRowIds())
+                .containsExactlyInAnyOrderElementsOf(ImmutableList.of(1L, 4L));
+
+        // _ROW_ID in (1, 2, 3, 4) || _ROW_ID in (4, 5) => None, idList = [1, 2, 3, 4, 5]
+        filters = ImmutableList.of(or(rowIdIn(1L, 2L, 3L, 4L), rowIdIn(4L, 5L)));
+        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters()).isEmpty();
+        Assertions.assertThat(tableSource.getRowIds())
+                .containsExactlyInAnyOrderElementsOf(ImmutableList.of(1L, 2L, 3L, 4L, 5L));
+
+        // _ROW_ID is NULL && _ROW_ID in (4, 5) => None, idList = []
+        filters = ImmutableList.of(rowIdIsNull(), rowIdIn(4L, 5L));
+        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters()).isEmpty();
+        Assertions.assertThat(tableSource.getRowIds()).isEmpty();
+    }
+
+    private ResolvedExpression rowIdIsNull() {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.IS_NULL,
+                ImmutableList.of(
+                        new FieldReferenceExpression(
+                                "_ROW_ID", org.apache.flink.table.api.DataTypes.BIGINT(), 0, 5)),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression rowIdEqual(long literal) {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.EQUALS,
+                ImmutableList.of(
+                        new FieldReferenceExpression(
+                                "_ROW_ID", org.apache.flink.table.api.DataTypes.BIGINT(), 0, 5),
+                        new ValueLiteralExpression(
+                                literal, org.apache.flink.table.api.DataTypes.BIGINT().notNull())),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression rowIdIn(Long... literals) {
+        ImmutableList.Builder<ResolvedExpression> argsBuilder = ImmutableList.builder();
+        argsBuilder.add(
+                new FieldReferenceExpression(
+                        "_ROW_ID", org.apache.flink.table.api.DataTypes.BIGINT(), 0, 5));
+        for (long literal : literals) {
+            argsBuilder.add(
+                    new ValueLiteralExpression(
+                            literal, org.apache.flink.table.api.DataTypes.BIGINT().notNull()));
+        }
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.IN,
+                argsBuilder.build(),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
     }
 
     private ResolvedExpression col1Equal1() {
