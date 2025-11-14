@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.OutputStream;
+import java.net.URI;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
@@ -90,6 +91,8 @@ public class BlobTableITCase extends CatalogITCaseBase {
                 Blob.fromDescriptor(
                         uriReaderFactory.create(newBlobDescriptor.uri()), blobDescriptor);
         assertThat(blob.toData()).isEqualTo(blobData);
+        URI blobUri = URI.create(blob.toDescriptor().uri());
+        assertThat(blobUri.getScheme()).isNotNull();
         batchSql("ALTER TABLE blob_table_descriptor SET ('blob-as-descriptor'='false')");
         assertThat(batchSql("SELECT * FROM blob_table_descriptor"))
                 .containsExactlyInAnyOrder(Row.of(1, "paimon", blobData));

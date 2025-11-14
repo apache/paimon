@@ -18,8 +18,9 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import List, Optional
+
+from urlpath import URL
 
 from pypaimon.manifest.schema.simple_stats import (KEY_STATS_SCHEMA, VALUE_STATS_SCHEMA,
                                                    SimpleStats)
@@ -53,8 +54,13 @@ class DataFileMeta:
     # not a schema field, just for internal usage
     file_path: str = None
 
-    def set_file_path(self, table_path: Path, partition: GenericRow, bucket: int):
+    def set_file_path(self, table_path: URL, partition: GenericRow, bucket: int):
+        """
+        Set file path, preserving URI scheme using URL.
+        """
         path_builder = table_path
+
+        # Build full path with partition and bucket
         partition_dict = partition.to_dict()
         for field_name, field_value in partition_dict.items():
             path_builder = path_builder / (field_name + "=" + str(field_value))
