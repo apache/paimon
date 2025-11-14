@@ -116,8 +116,8 @@ public class IcebergConversions {
 
     private static ByteBuffer timestampToByteBuffer(Timestamp timestamp, int precision) {
         Preconditions.checkArgument(
-                precision > 3 && precision <= 6,
-                "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 6.");
+                precision >= 3 && precision <= 6,
+                "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 6.");
         return ByteBuffer.allocate(8)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putLong(0, timestamp.toMicros());
@@ -157,8 +157,11 @@ public class IcebergConversions {
                 long timestampLong =
                         ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
                 Preconditions.checkArgument(
-                        timestampPrecision > 3 && timestampPrecision <= 6,
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 6.");
+                        timestampPrecision >= 3 && timestampPrecision <= 6,
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 6.");
+                if (timestampPrecision == 3) {
+                    return Timestamp.fromEpochMillis(timestampLong);
+                }
                 return Timestamp.fromMicros(timestampLong);
             default:
                 throw new UnsupportedOperationException("Cannot deserialize type: " + type);
