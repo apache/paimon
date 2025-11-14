@@ -154,8 +154,10 @@ public class FormatTableCommit implements BatchTableCommit {
                 committer.clean(this.fileIO);
             }
             for (Map<String, String> partitionSpec : partitionSpecs) {
-                hiveCatalog.createPartitions(
-                        tableIdentifier, Collections.singletonList(partitionSpec));
+                if (hiveCatalog != null) {
+                    hiveCatalog.createPartitions(
+                            tableIdentifier, Collections.singletonList(partitionSpec));
+                }
             }
 
         } catch (Exception e) {
