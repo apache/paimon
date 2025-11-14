@@ -73,4 +73,29 @@ public class RowDataVectorizer extends Vectorizer<InternalRow> {
             }
         }
     }
+
+    public int vectorizeAndGetBytes(InternalRow row, VectorizedRowBatch batch) {
+        int rowId = batch.size++;
+        int memBytes = 0;
+        for (int i = 0; i < fieldNames.length; ++i) {
+            ColumnVector fieldColumn = batch.cols[i];
+            if (row.isNullAt(i)) {
+                if (!isNullable[i]) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Field '%s' expected not null but found null value. A possible cause is that the "
+                                            + "table used %s or %s merge-engine and the aggregate function produced "
+                                            + "null value when retracting.",
+                                    fieldNames[i],
+                                    CoreOptions.MergeEngine.PARTIAL_UPDATE,
+                                    CoreOptions.MergeEngine.AGGREGATE));
+                }
+                fieldColumn.noNulls = false;
+                fieldColumn.isNull[rowId] = true;
+            } else {
+                memBytes += fieldWriters[i].writeAndGetBytes(rowId, fieldColumn, row, i);
+            }
+        }
+        return memBytes;
+    }
 }
