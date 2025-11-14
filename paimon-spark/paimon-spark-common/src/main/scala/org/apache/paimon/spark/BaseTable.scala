@@ -21,10 +21,11 @@ package org.apache.paimon.spark
 import org.apache.paimon.table.Table
 import org.apache.paimon.utils.StringUtils
 
+import org.apache.spark.sql.connector.catalog.TableCapability
 import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.types.StructType
 
-import java.util.{Map => JMap}
+import java.util.{Collections => JCollections, Map => JMap, Set => JSet}
 
 import scala.collection.JavaConverters._
 
@@ -34,6 +35,8 @@ abstract class BaseTable
 
   val table: Table
 
+  override def capabilities(): JSet[TableCapability] = JCollections.emptySet[TableCapability]()
+
   override def name: String = table.fullName
 
   override lazy val schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType)
@@ -42,9 +45,7 @@ abstract class BaseTable
     table.partitionKeys().asScala.map(p => Expressions.identity(StringUtils.quote(p))).toArray
   }
 
-  override def properties: JMap[String, String] = {
-    table.options()
-  }
+  override def properties: JMap[String, String] = table.options()
 
   override def toString: String = {
     s"${table.getClass.getSimpleName}[${table.fullName()}]"
