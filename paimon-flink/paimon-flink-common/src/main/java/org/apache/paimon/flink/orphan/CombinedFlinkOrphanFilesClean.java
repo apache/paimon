@@ -166,8 +166,10 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
                 buildBranchSnapshotDirDeletedStream(env, branchIdentifiers);
 
         // branch and manifest file
-        final OutputTag<Tuple2<String, String>> manifestOutputTag =
-                new OutputTag<Tuple2<String, String>>("manifest-output") {};
+        // f0: Identifier (table identifier without branch)
+        // f1: Tuple2<String, String> (branch, manifest)
+        final OutputTag<Tuple2<Identifier, Tuple2<String, String>>> manifestOutputTag =
+                new OutputTag<Tuple2<Identifier, Tuple2<String, String>>>("manifest-output") {};
 
         SingleOutputStreamOperator<String> usedManifestFiles =
                 env.fromCollection(branchIdentifiers)
@@ -209,17 +211,23 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
                                         FlinkOrphanFilesClean cleaner =
                                                 getCleanerForTable(identifier);
                                         String branch = identifier.getBranchNameOrDefault();
-                                        String tableKey = buildTableKey(identifier);
+                                        Identifier tableIdentifier =
+                                                Identifier.create(
+                                                        identifier.getDatabaseName(),
+                                                        identifier.getTableName());
                                         Consumer<String> manifestConsumer =
                                                 manifest -> {
-                                                    Tuple2<String, String> tuple2 =
-                                                            new Tuple2<>(
-                                                                    branch + "::" + tableKey,
-                                                                    manifest);
+                                                    Tuple2<Identifier, Tuple2<String, String>>
+                                                            tuple2 =
+                                                                    new Tuple2<>(
+                                                                            tableIdentifier,
+                                                                            new Tuple2<>(
+                                                                                    branch,
+                                                                                    manifest));
                                                     LOG.trace(
-                                                            "[COMBINED_ORPHAN_CLEAN] Outputting manifest to side output: branch={}, tableKey={}, manifest={}",
+                                                            "[COMBINED_ORPHAN_CLEAN] Outputting manifest to side output: identifier={}, branch={}, manifest={}",
+                                                            tableIdentifier,
                                                             branch,
-                                                            tableKey,
                                                             manifest);
                                                     ctx.output(manifestOutputTag, tuple2);
                                                 };
@@ -231,72 +239,54 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
         DataStream<String> usedFiles =
                 usedManifestFiles
                         .getSideOutput(manifestOutputTag)
-                        .keyBy(tuple2 -> tuple2.f0 + "::" + tuple2.f1)
+                        .keyBy(tuple2 -> tuple2.f0) // Use Identifier object directly as key
                         .transform(
                                 "datafile-reader",
                                 STRING_TYPE_INFO,
-                                new BoundedOneInputOperator<Tuple2<String, String>, String>() {
+                                new BoundedOneInputOperator<
+                                        Tuple2<Identifier, Tuple2<String, String>>, String>() {
 
-                                    private final Set<Tuple2<String, String>> manifests =
-                                            new HashSet<>();
+                                    // Map from Identifier to Set of (branch, manifest) tuples
+                                    private final Map<Identifier, Set<Tuple2<String, String>>>
+                                            manifestsByTable = new HashMap<>();
 
                                     @Override
                                     public void processElement(
-                                            StreamRecord<Tuple2<String, String>> element) {
-                                        manifests.add(element.getValue());
+                                            StreamRecord<Tuple2<Identifier, Tuple2<String, String>>>
+                                                    element) {
+                                        Tuple2<Identifier, Tuple2<String, String>> value =
+                                                element.getValue();
+                                        Identifier tableIdentifier = value.f0;
+                                        Tuple2<String, String> branchAndManifest = value.f1;
+                                        String branch = branchAndManifest.f0;
+                                        String manifest = branchAndManifest.f1;
+
+                                        manifestsByTable
+                                                .computeIfAbsent(
+                                                        tableIdentifier, k -> new HashSet<>())
+                                                .add(new Tuple2<>(branch, manifest));
+
                                         LOG.trace(
-                                                "[COMBINED_ORPHAN_CLEAN] Added manifest to set: {}, current size: {}",
-                                                element.getValue(),
-                                                manifests.size());
+                                                "[COMBINED_ORPHAN_CLEAN] Added manifest to set: identifier={}, branch={}, manifest={}, current size: {}",
+                                                tableIdentifier,
+                                                branch,
+                                                manifest,
+                                                manifestsByTable.get(tableIdentifier).size());
                                     }
 
                                     @Override
                                     public void endInput() throws IOException {
                                         LOG.trace(
-                                                "[COMBINED_ORPHAN_CLEAN] endInput() called, manifests.size()={}",
-                                                manifests.size());
-
-                                        // Group manifests by tableIdentifier
-                                        Map<String, Set<Tuple2<String, String>>> manifestsByTable =
-                                                new HashMap<>();
-                                        for (Tuple2<String, String> tuple2 : manifests) {
-                                            // Parse branch::tableIdentifier from tuple2.f0
-                                            int delimiterIndex = tuple2.f0.indexOf("::");
-                                            if (delimiterIndex < 0) {
-                                                LOG.error(
-                                                        "[COMBINED_ORPHAN_CLEAN] Invalid manifest format: {}, expected format: branch::tableIdentifier",
-                                                        tuple2.f0);
-                                                throw new RuntimeException(
-                                                        "Invalid manifest format: "
-                                                                + tuple2.f0
-                                                                + ". Expected format: branch::tableIdentifier");
-                                            }
-                                            String branch = tuple2.f0.substring(0, delimiterIndex);
-                                            String tableIdentifier =
-                                                    tuple2.f0.substring(delimiterIndex + 2);
-
-                                            LOG.trace(
-                                                    "[COMBINED_ORPHAN_CLEAN] Parsed manifest: branch={}, tableIdentifier={}, manifestFile={}",
-                                                    branch,
-                                                    tableIdentifier,
-                                                    tuple2.f1);
-
-                                            manifestsByTable
-                                                    .computeIfAbsent(
-                                                            tableIdentifier, k -> new HashSet<>())
-                                                    .add(new Tuple2<>(branch, tuple2.f1));
-                                        }
-
-                                        LOG.trace(
-                                                "[COMBINED_ORPHAN_CLEAN] Grouped manifests by table, manifestsByTable.size()={}",
+                                                "[COMBINED_ORPHAN_CLEAN] endInput() called, manifestsByTable.size()={}",
                                                 manifestsByTable.size());
 
                                         // Process manifests for each table
-                                        for (Map.Entry<String, Set<Tuple2<String, String>>> entry :
-                                                manifestsByTable.entrySet()) {
-                                            String tableIdentifier = entry.getKey();
+                                        for (Map.Entry<Identifier, Set<Tuple2<String, String>>>
+                                                entry : manifestsByTable.entrySet()) {
+                                            Identifier tableIdentifier = entry.getKey();
                                             Set<Tuple2<String, String>> tableManifests =
                                                     entry.getValue();
+                                            String tableKey = buildTableKey(tableIdentifier);
 
                                             LOG.trace(
                                                     "[COMBINED_ORPHAN_CLEAN] Processing table: {}, manifests count: {}",
@@ -305,32 +295,32 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
 
                                             try {
                                                 FlinkOrphanFilesClean cleanerToUse =
-                                                        cleanerMap.get(tableIdentifier);
+                                                        cleanerMap.get(tableKey);
                                                 if (cleanerToUse == null) {
                                                     LOG.error(
                                                             "[COMBINED_ORPHAN_CLEAN] Cleaner for table {} not found in cleanerMap",
-                                                            tableIdentifier);
+                                                            tableKey);
                                                     throw new RuntimeException(
                                                             "Cleaner for table "
-                                                                    + tableIdentifier
+                                                                    + tableKey
                                                                     + " not found in cleanerMap");
                                                 }
                                                 LOG.trace(
                                                         "[COMBINED_ORPHAN_CLEAN] Calling endInputForUsedFilesForCombined for table: {}",
-                                                        tableIdentifier);
+                                                        tableKey);
                                                 endInputForUsedFilesForCombined(
                                                         cleanerToUse, tableManifests, output);
                                                 LOG.trace(
                                                         "[COMBINED_ORPHAN_CLEAN] Finished endInputForUsedFilesForCombined for table: {}",
-                                                        tableIdentifier);
+                                                        tableKey);
                                             } catch (Exception e) {
                                                 LOG.error(
                                                         "[COMBINED_ORPHAN_CLEAN] Failed to process manifests for table: {}",
-                                                        tableIdentifier,
+                                                        tableKey,
                                                         e);
                                                 throw new IOException(
                                                         "Failed to process manifests for table: "
-                                                                + tableIdentifier,
+                                                                + tableKey,
                                                         e);
                                             }
                                         }
