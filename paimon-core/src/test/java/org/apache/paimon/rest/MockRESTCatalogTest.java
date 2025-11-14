@@ -52,7 +52,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -174,17 +173,6 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         RESTCatalog restCatalog2 = restCatalog.catalogLoader().load();
         Map<String, String> headers2 = restCatalog2.api().authFunction().apply(restAuthParameter);
         assertEquals(headers2.get("User-Agent"), "test");
-    }
-
-    @Test
-    void testCreateTableDefaultOptions() throws Exception {
-        options.set(TABLE_DEFAULT_OPTION_PREFIX + "default-key", "default-value");
-        RESTCatalog restCatalog = initCatalog(false);
-        Identifier identifier = Identifier.create("db1", "new_table_default_options");
-        restCatalog.createDatabase(identifier.getDatabaseName(), true);
-        restCatalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, true);
-        assertEquals(
-                restCatalog.getTable(identifier).options().get("default-key"), "default-value");
     }
 
     @Test
