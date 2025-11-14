@@ -77,6 +77,14 @@ under the License.
             <type>test-jar</type>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-common</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+
         <!-- dependencies for IT cases -->
 
         <dependency>
