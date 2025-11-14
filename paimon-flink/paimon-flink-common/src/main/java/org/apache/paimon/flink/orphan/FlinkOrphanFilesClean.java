@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.BoundedTwoInputOperator;
+import org.apache.paimon.flink.utils.OrphanFilesCleanUtil;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -33,13 +34,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.FileStorePathFactory;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.CoreOptions;
-import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -61,6 +58,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -88,16 +86,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
     @Nullable
     public DataStream<CleanOrphanFilesResult> doOrphanClean(StreamExecutionEnvironment env) {
-        Configuration flinkConf = new Configuration();
-        flinkConf.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH);
-        flinkConf.set(ExecutionOptions.SORT_INPUTS, false);
-        flinkConf.set(ExecutionOptions.USE_BATCH_STATE_BACKEND, false);
-        if (parallelism != null) {
-            flinkConf.set(CoreOptions.DEFAULT_PARALLELISM, parallelism);
-        }
-        // Flink 1.17 introduced this config, use string to keep compatibility
-        flinkConf.setString("execution.batch.adaptive.auto-parallelism.enabled", "false");
-        env.configure(flinkConf);
+        OrphanFilesCleanUtil.configureFlinkEnvironment(env, parallelism);
         LOG.info("Starting orphan files clean for table {}", table.name());
         long start = System.currentTimeMillis();
         List<String> branches = validBranches();
@@ -116,16 +105,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             String branch,
                                             ProcessFunction<String, Tuple2<Long, Long>>.Context ctx,
                                             Collector<Tuple2<Long, Long>> out) {
-                                        AtomicLong deletedFilesCount = new AtomicLong(0);
-                                        AtomicLong deletedFilesLenInBytes = new AtomicLong(0);
-                                        cleanBranchSnapshotDir(
-                                                branch,
-                                                path -> deletedFilesCount.incrementAndGet(),
-                                                deletedFilesLenInBytes::addAndGet);
-                                        out.collect(
-                                                new Tuple2<>(
-                                                        deletedFilesCount.get(),
-                                                        deletedFilesLenInBytes.get()));
+                                        processForBranchSnapshotDirDeleted(branch, out);
                                     }
                                 })
                         .keyBy(tuple -> 1)
@@ -276,26 +256,13 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
                                     @Override
                                     public void endInput(int inputId) {
-                                        switch (inputId) {
-                                            case 1:
-                                                checkState(!buildEnd, "Should not build ended.");
-                                                LOG.info("Finish build phase.");
-                                                buildEnd = true;
-                                                break;
-                                            case 2:
-                                                checkState(buildEnd, "Should build ended.");
-                                                LOG.info("Finish probe phase.");
-                                                LOG.info(
-                                                        "Clean files count : {}",
-                                                        emittedFilesCount);
-                                                LOG.info("Clean files size : {}", emittedFilesLen);
-                                                output.collect(
-                                                        new StreamRecord<>(
-                                                                new CleanOrphanFilesResult(
-                                                                        emittedFilesCount,
-                                                                        emittedFilesLen)));
-                                                break;
-                                        }
+                                        buildEnd =
+                                                OrphanFilesCleanUtil.endInputForDeleted(
+                                                        inputId,
+                                                        buildEnd,
+                                                        emittedFilesCount,
+                                                        emittedFilesLen,
+                                                        output);
                                     }
 
                                     @Override
@@ -323,7 +290,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         return deleted;
     }
 
-    private void listPaimonFilesForTable(Collector<Tuple2<String, Long>> out) {
+    protected void listPaimonFilesForTable(Collector<Tuple2<String, Long>> out) {
         FileStorePathFactory pathFactory = table.store().pathFactory();
         List<String> dirs =
                 listPaimonFileDirs(
@@ -380,11 +347,26 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         if (tableName == null || "*".equals(tableName)) {
             tableNames = catalog.listTables(databaseName);
         }
+        List<Identifier> tableIdentifiers =
+                tableNames.stream()
+                        .map(table -> Identifier.create(databaseName, table))
+                        .collect(Collectors.toList());
+        return executeDatabaseOrphanFiles(
+                env, catalog, olderThanMillis, dryRun, parallelism, tableIdentifiers);
+    }
 
+    public static CleanOrphanFilesResult executeDatabaseOrphanFiles(
+            StreamExecutionEnvironment env,
+            Catalog catalog,
+            long olderThanMillis,
+            boolean dryRun,
+            @Nullable Integer parallelism,
+            List<Identifier> tableIdentifiers)
+            throws Catalog.TableNotExistException {
+        tableIdentifiers = Objects.nonNull(tableIdentifiers) ? tableIdentifiers : new ArrayList<>();
         List<DataStream<CleanOrphanFilesResult>> orphanFilesCleans =
-                new ArrayList<>(tableNames.size());
-        for (String t : tableNames) {
-            Identifier identifier = new Identifier(databaseName, t);
+                new ArrayList<>(tableIdentifiers.size());
+        for (Identifier identifier : tableIdentifiers) {
             Table table = catalog.getTable(identifier);
             checkArgument(
                     table instanceof FileStoreTable,
@@ -408,11 +390,10 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                 result = result.union(clean);
             }
         }
-
         return sum(result);
     }
 
-    private static CleanOrphanFilesResult sum(DataStream<CleanOrphanFilesResult> deleted) {
+    public static CleanOrphanFilesResult sum(DataStream<CleanOrphanFilesResult> deleted) {
         long deletedFilesCount = 0;
         long deletedFilesLenInBytes = 0;
         if (deleted != null) {
@@ -431,5 +412,20 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
             }
         }
         return new CleanOrphanFilesResult(deletedFilesCount, deletedFilesLenInBytes);
+    }
+
+    protected FileStoreTable getTable() {
+        return this.table;
+    }
+
+    protected void processForBranchSnapshotDirDeleted(
+            String branch, Collector<Tuple2<Long, Long>> out) {
+        AtomicLong deletedFilesCount = new AtomicLong(0);
+        AtomicLong deletedFilesLenInBytes = new AtomicLong(0);
+        cleanBranchSnapshotDir(
+                branch,
+                path -> deletedFilesCount.incrementAndGet(),
+                deletedFilesLenInBytes::addAndGet);
+        out.collect(new Tuple2<>(deletedFilesCount.get(), deletedFilesLenInBytes.get()));
     }
 }

@@ -18,22 +18,38 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.orphan.CombinedFlinkOrphanFilesClean;
+import org.apache.paimon.flink.orphan.FlinkOrphanFilesClean;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.orphan.FlinkOrphanFilesClean.executeDatabaseOrphanFiles;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
 import static org.apache.paimon.operation.OrphanFilesClean.olderThanMillis;
 
 /** Action to remove the orphan data files and metadata files. */
 public class RemoveOrphanFilesAction extends ActionBase {
 
+    protected static final Logger LOG = LoggerFactory.getLogger(RemoveOrphanFilesAction.class);
+
     private final String databaseName;
-    @Nullable private final String tableName;
+    @Nullable private final List<Identifier> tableIdentifiers;
     @Nullable private final String parallelism;
 
     private String olderThan = null;
     private boolean dryRun = false;
+    private MultiTablesSinkMode mode = DIVIDED;
 
     public RemoveOrphanFilesAction(
             String databaseName,
@@ -42,7 +58,22 @@ public class RemoveOrphanFilesAction extends ActionBase {
             Map<String, String> catalogConfig) {
         super(catalogConfig);
         this.databaseName = databaseName;
-        this.tableName = tableName;
+        this.tableIdentifiers =
+                Objects.isNull(tableName)
+                        ? new ArrayList<>()
+                        : Collections.singletonList(Identifier.create(databaseName, tableName));
+        this.parallelism = parallelism;
+    }
+
+    public RemoveOrphanFilesAction(
+            String databaseName,
+            List<Identifier> tableIdentifiers,
+            @Nullable String parallelism,
+            Map<String, String> catalogConfig) {
+        super(catalogConfig);
+        this.databaseName = databaseName;
+        this.tableIdentifiers =
+                Objects.nonNull(tableIdentifiers) ? tableIdentifiers : new ArrayList<>();
         this.parallelism = parallelism;
     }
 
@@ -54,15 +85,42 @@ public class RemoveOrphanFilesAction extends ActionBase {
         this.dryRun = true;
     }
 
+    public void mode(MultiTablesSinkMode mode) {
+        this.mode = mode;
+    }
+
     @Override
     public void run() throws Exception {
-        executeDatabaseOrphanFiles(
-                env,
-                catalog,
-                olderThanMillis(olderThan),
-                dryRun,
-                parallelism == null ? null : Integer.parseInt(parallelism),
-                databaseName,
-                tableName);
+        List<Identifier> effectiveTableIdentifiers = tableIdentifiers;
+        if (effectiveTableIdentifiers == null
+                || effectiveTableIdentifiers.isEmpty()
+                || (effectiveTableIdentifiers.size() == 1
+                        && "*".equals(effectiveTableIdentifiers.get(0).getTableName()))) {
+            if (Objects.isNull(databaseName)) {
+                LOG.warn("databaseName is null, will skip orphan files clean.");
+                return;
+            }
+            effectiveTableIdentifiers =
+                    catalog.listTables(databaseName).stream()
+                            .map(table -> Identifier.create(databaseName, table))
+                            .collect(Collectors.toList());
+        }
+        if (COMBINED.equals(mode)) {
+            CombinedFlinkOrphanFilesClean.executeDatabaseOrphanFiles(
+                    env,
+                    catalog,
+                    olderThanMillis(olderThan),
+                    dryRun,
+                    parallelism == null ? null : Integer.parseInt(parallelism),
+                    effectiveTableIdentifiers);
+        } else {
+            FlinkOrphanFilesClean.executeDatabaseOrphanFiles(
+                    env,
+                    catalog,
+                    olderThanMillis(olderThan),
+                    dryRun,
+                    parallelism == null ? null : Integer.parseInt(parallelism),
+                    effectiveTableIdentifiers);
+        }
     }
 }

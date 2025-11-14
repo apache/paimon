@@ -106,7 +106,7 @@ public abstract class OrphanFilesClean implements Serializable {
         this.dryRun = dryRun;
     }
 
-    protected List<String> validBranches() {
+    public List<String> validBranches() {
         List<String> branches = table.branchManager().branches();
 
         List<String> abnormalBranches = new ArrayList<>();
@@ -216,7 +216,7 @@ public abstract class OrphanFilesClean implements Serializable {
         cleanFile(filePath);
     }
 
-    protected void cleanFile(Path path) {
+    public void cleanFile(Path path) {
         if (!dryRun) {
             try {
                 if (fileIO.isDir(path)) {
@@ -229,7 +229,7 @@ public abstract class OrphanFilesClean implements Serializable {
         }
     }
 
-    protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {
+    public Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {
         FileStoreTable branchTable = table.switchToBranch(branch);
         SnapshotManager snapshotManager = branchTable.snapshotManager();
         ChangelogManager changelogManager = branchTable.changelogManager();
@@ -240,7 +240,7 @@ public abstract class OrphanFilesClean implements Serializable {
         return readSnapshots;
     }
 
-    protected void collectWithoutDataFile(
+    public void collectWithoutDataFile(
             String branch,
             Snapshot snapshot,
             Consumer<String> usedFileConsumer,
@@ -421,7 +421,7 @@ public abstract class OrphanFilesClean implements Serializable {
      * {@link FileNotFoundException}, return default value. Finally, if retry times reaches the
      * limits, rethrow the IOException.
      */
-    protected static <T> T retryReadingFiles(SupplierWithIOException<T> reader, T defaultValue)
+    public static <T> T retryReadingFiles(SupplierWithIOException<T> reader, T defaultValue)
             throws IOException {
         int retryNumber = 0;
         IOException caught = null;
