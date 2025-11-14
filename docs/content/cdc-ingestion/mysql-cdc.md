@@ -32,14 +32,14 @@ Paimon supports synchronizing changes from different databases using change data
 
 Download `CDC Bundled Jar` and put them under <FLINK_HOME>/lib/.
 
-| Version | Bundled Jar                                                                                                             |
-|---------|-------------------------------------------------------------------------------------------------------------------------|
-| 3.1.x   | <li> flink-sql-connector-mysql-cdc-3.1.x.jar <li> mysql-connector-java-8.0.27.jar                                       |
+| Version | Bundled Jar                                                                                                                                                                                                                                                                                                                                |
+|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 3.5.0   | <li> <a href="https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-mysql-cdc/3.5.0/flink-sql-connector-mysql-cdc-3.5.0.jar">flink-sql-connector-mysql-cdc-3.5.0.jar</a> <li> <a href="https://repo1.maven.org/maven2/mysql/mysql-connector-java/8.0.27/mysql-connector-java-8.0.27.jar">mysql-connector-java-8.0.27.jar</a> |
 
 {{< hint danger >}}
-Only cdc 3.1+ is supported.
+Currently, only CDC 3.5.0 or above is supported.
 
-You can download the `flink-connector-mysql-cdc` jar package by clicking [here](https://repo.maven.apache.org/maven2/org/apache/flink/flink-connector-mysql-cdc/).
+You can download the `flink-sql-connector-mysql-cdc` jar package by clicking [here](https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-mysql-cdc/).
 
 {{< /hint >}}
 
