@@ -361,8 +361,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     public abstract Comparator<InternalRow> newKeyComparator();
 
     private List<CommitCallback> createCommitCallbacks(String commitUser, FileStoreTable table) {
-        List<CommitCallback> callbacks =
-                new ArrayList<>(CallbackUtils.loadCommitCallbacks(options, table));
+        List<CommitCallback> callbacks = new ArrayList<>();
 
         if (options.partitionedTableInMetastore() && !schema.partitionKeys().isEmpty()) {
             PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
@@ -397,6 +396,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             callbacks.add(new IcebergCommitCallback(table, commitUser));
         }
 
+        callbacks.addAll(CallbackUtils.loadCommitCallbacks(options, table));
         return callbacks;
     }
 
