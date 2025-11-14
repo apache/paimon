@@ -96,6 +96,7 @@ public class RESTCatalog implements Catalog {
     private final RESTApi api;
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
+    protected final Map<String, String> tableDefaultOptions;
 
     public RESTCatalog(CatalogContext context) {
         this(context, true);
@@ -110,6 +111,7 @@ public class RESTCatalog implements Catalog {
                         context.preferIO(),
                         context.fallbackIO());
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
+        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(context.options().toMap());
     }
 
     @Override
@@ -453,6 +455,7 @@ public class RESTCatalog implements Catalog {
             checkNotSystemTable(identifier, "createTable");
             validateCreateTable(schema, dataTokenEnabled);
             createExternalTablePathIfNotExist(schema);
+            tableDefaultOptions.forEach(schema.options()::putIfAbsent);
             Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
             api.createTable(identifier, newSchema);
         } catch (AlreadyExistsException e) {

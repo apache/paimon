@@ -113,6 +113,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final RowType keyType;
     private final RowType valueType;
     private final FileIO fileIO;
+    private final SchemaManager schemaManager;
     private final RowType partitionType;
     private final String commitUser;
     @Nullable private final RecordLevelExpire recordLevelExpire;
@@ -148,6 +149,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 dvMaintainerFactory,
                 tableName);
         this.fileIO = fileIO;
+        this.schemaManager = schemaManager;
         this.partitionType = partitionType;
         this.keyType = keyType;
         this.valueType = valueType;
@@ -378,7 +380,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                                 fileIO,
                                 keyReaderFactory.pathFactory(),
                                 keyReaderFactory.schema(),
-                                lookupLevels);
+                                lookupLevels,
+                                schemaManager);
             }
             return new LookupMergeTreeCompactRewriter(
                     maxLevel,
