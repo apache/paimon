@@ -27,7 +27,9 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.LookupLevels.RemoteFileDownloader;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.RowType;
 
 import org.apache.commons.io.IOUtils;
 
@@ -36,7 +38,9 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Manager to manage remote files for lookup. */
 public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
@@ -45,17 +49,22 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
     private final DataFilePathFactory pathFactory;
     private final TableSchema schema;
     private final LookupLevels<T> lookupLevels;
+    private final SchemaManager schemaManager;
+    private final Map<Long, RowType> schemaRowTypes;
 
     public RemoteLookupFileManager(
             FileIO fileIO,
             DataFilePathFactory pathFactory,
             TableSchema schema,
-            LookupLevels<T> lookupLevels) {
+            LookupLevels<T> lookupLevels,
+            SchemaManager schemaManager) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.schema = schema;
         this.lookupLevels = lookupLevels;
         this.lookupLevels.setRemoteFileDownloader(this);
+        this.schemaManager = schemaManager;
+        this.schemaRowTypes = new HashMap<>();
     }
 
     public DataFileMeta genRemoteLookupFile(DataFileMeta file) throws IOException {
@@ -81,8 +90,14 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
 
     @Override
     public boolean tryToDownload(DataFileMeta dataFile, File localFile) {
-        if (dataFile.schemaId() != schema.id()) {
-            return false;
+        long schemaId = dataFile.schemaId();
+        if (schemaId != schema.id()) {
+            if (!schemaRowTypes.containsKey(schemaId)) {
+                schemaRowTypes.put(schemaId, schemaManager.schema(schemaId).logicalRowType());
+            }
+            if (!schema.logicalRowType().equals(schemaRowTypes.get(schemaId))) {
+                return false;
+            }
         }
 
         String remoteSstName = lookupLevels.remoteSstName(dataFile.fileName());
