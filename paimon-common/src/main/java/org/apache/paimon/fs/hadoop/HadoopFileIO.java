@@ -160,7 +160,7 @@ public class HadoopFileIO implements FileIO {
     }
 
     @Override
-    public boolean rename(Path src, Path dst) throws IOException {
+    public boolean renameImpl(Path src, Path dst) throws IOException {
         org.apache.hadoop.fs.Path hadoopSrc = path(src);
         org.apache.hadoop.fs.Path hadoopDst = path(dst);
         return getFileSystem(hadoopSrc).rename(hadoopSrc, hadoopDst);
