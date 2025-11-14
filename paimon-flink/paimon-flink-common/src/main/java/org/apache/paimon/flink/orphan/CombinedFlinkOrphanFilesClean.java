@@ -97,8 +97,8 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
         this.parallelism = parallelism;
         this.cleanerMap = cleanerMap;
         this.locationToCleanerMap = new HashMap<>();
-        for (Identifier identifier : tableIdentifiers) {
-            FlinkOrphanFilesClean cleaner = cleanerMap.get(identifier.getFullName());
+        for (Identifier tableIdentifier : tableIdentifiers) {
+            FlinkOrphanFilesClean cleaner = cleanerMap.get(tableIdentifier.getFullName());
             FileStoreTable table = cleaner.getTable();
             if (Objects.nonNull(table)) {
                 String tableLocation = table.location().toUri().getPath();
@@ -108,20 +108,18 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
     }
 
     protected DataStream<CleanOrphanFilesResult> buildBranchSnapshotDirDeletedStream(
-            StreamExecutionEnvironment env, List<BranchTableInfo> branchTableInfos) {
-        return env.fromCollection(branchTableInfos)
+            StreamExecutionEnvironment env, List<Identifier> branchIdentifiers) {
+        return env.fromCollection(branchIdentifiers)
                 .process(
-                        new ProcessFunction<BranchTableInfo, Tuple2<Long, Long>>() {
-
+                        new ProcessFunction<Identifier, Tuple2<Long, Long>>() {
                             @Override
                             public void processElement(
-                                    BranchTableInfo branchTableInfo,
-                                    ProcessFunction<BranchTableInfo, Tuple2<Long, Long>>.Context
-                                            ctx,
+                                    Identifier identifier,
+                                    ProcessFunction<Identifier, Tuple2<Long, Long>>.Context ctx,
                                     Collector<Tuple2<Long, Long>> out) {
-                                FlinkOrphanFilesClean cleaner = getCleanerForTable(branchTableInfo);
+                                FlinkOrphanFilesClean cleaner = getCleanerForTable(identifier);
                                 cleaner.processForBranchSnapshotDirDeleted(
-                                        branchTableInfo.getBranch(), out);
+                                        identifier.getBranchNameOrDefault(), out);
                             }
                         })
                 .keyBy(tuple -> 1)
@@ -140,30 +138,22 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
                 "Starting orphan files clean for {} tables: {}",
                 tableIdentifiers.size(),
                 tableIdentifiers);
-        List<BranchTableInfo> branchTableInfos = new ArrayList<>();
+        List<Identifier> branchIdentifiers = new ArrayList<>();
         long start = System.currentTimeMillis();
-        for (Identifier identifier : tableIdentifiers) {
-            FlinkOrphanFilesClean cleaner = cleanerMap.get(identifier.getFullName());
+        for (Identifier tableIdentifier : tableIdentifiers) {
+            FlinkOrphanFilesClean cleaner = cleanerMap.get(tableIdentifier.getFullName());
             if (Objects.isNull(cleaner)) {
-                LOG.warn("Table {} does not have cleaner, skip it", identifier);
+                LOG.warn("Table {} does not have cleaner, skip it", tableIdentifier);
                 continue;
-            }
-            FileStoreTable table = cleaner.getTable();
-            Map<String, String> catalogOptions = new HashMap<>();
-            org.apache.paimon.catalog.CatalogContext catalogContext =
-                    table.catalogEnvironment().catalogContext();
-            if (catalogContext != null) {
-                catalogOptions.putAll(catalogContext.options().toMap());
             }
             List<String> branches = cleaner.validBranches();
             branches.forEach(
                     branch ->
-                            branchTableInfos.add(
-                                    new BranchTableInfo(
-                                            branch,
-                                            identifier.getDatabaseName(),
-                                            identifier.getObjectName(),
-                                            catalogOptions)));
+                            branchIdentifiers.add(
+                                    new Identifier(
+                                            tableIdentifier.getDatabaseName(),
+                                            tableIdentifier.getTableName(),
+                                            branch)));
         }
         LOG.info(
                 "End orphan files validBranches for {} tables: spend [{}] ms",
@@ -173,62 +163,55 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
         // snapshot and changelog files are the root of everything, so they are handled specially
         // here, and subsequently, we will not count their orphan files.
         DataStream<CleanOrphanFilesResult> branchSnapshotDirDeleted =
-                buildBranchSnapshotDirDeletedStream(env, branchTableInfos);
+                buildBranchSnapshotDirDeletedStream(env, branchIdentifiers);
 
         // branch and manifest file
         final OutputTag<Tuple2<String, String>> manifestOutputTag =
                 new OutputTag<Tuple2<String, String>>("manifest-output") {};
 
         SingleOutputStreamOperator<String> usedManifestFiles =
-                env.fromCollection(branchTableInfos)
+                env.fromCollection(branchIdentifiers)
                         .process(
-                                new ProcessFunction<
-                                        BranchTableInfo, Tuple2<BranchTableInfo, String>>() {
+                                new ProcessFunction<Identifier, Tuple2<Identifier, String>>() {
 
                                     @Override
                                     public void processElement(
-                                            BranchTableInfo branchTableInfo,
-                                            ProcessFunction<
-                                                                    BranchTableInfo,
-                                                                    Tuple2<BranchTableInfo, String>>
+                                            Identifier identifier,
+                                            ProcessFunction<Identifier, Tuple2<Identifier, String>>
                                                             .Context
                                                     ctx,
-                                            Collector<Tuple2<BranchTableInfo, String>> out)
+                                            Collector<Tuple2<Identifier, String>> out)
                                             throws Exception {
                                         FlinkOrphanFilesClean cleaner =
-                                                getCleanerForTable(branchTableInfo);
+                                                getCleanerForTable(identifier);
                                         for (Snapshot snapshot :
                                                 cleaner.safelyGetAllSnapshots(
-                                                        branchTableInfo.getBranch())) {
+                                                        identifier.getBranchNameOrDefault())) {
                                             out.collect(
-                                                    new Tuple2<>(
-                                                            branchTableInfo, snapshot.toJson()));
+                                                    new Tuple2<>(identifier, snapshot.toJson()));
                                         }
                                     }
                                 })
                         .rebalance()
                         .process(
-                                new ProcessFunction<Tuple2<BranchTableInfo, String>, String>() {
+                                new ProcessFunction<Tuple2<Identifier, String>, String>() {
 
                                     @Override
                                     public void processElement(
-                                            Tuple2<BranchTableInfo, String> branchAndSnapshot,
-                                            ProcessFunction<Tuple2<BranchTableInfo, String>, String>
+                                            Tuple2<Identifier, String> branchAndSnapshot,
+                                            ProcessFunction<Tuple2<Identifier, String>, String>
                                                             .Context
                                                     ctx,
                                             Collector<String> out)
                                             throws Exception {
-                                        BranchTableInfo branchTableInfo = branchAndSnapshot.f0;
+                                        Identifier identifier = branchAndSnapshot.f0;
                                         Snapshot snapshot = Snapshot.fromJson(branchAndSnapshot.f1);
                                         FlinkOrphanFilesClean cleaner =
-                                                getCleanerForTable(branchTableInfo);
-                                        String branch = branchTableInfo.getBranch();
-                                        String tableKey =
-                                                branchTableInfo.getIdentifier().getFullName();
+                                                getCleanerForTable(identifier);
+                                        String branch = identifier.getBranchNameOrDefault();
+                                        String tableKey = buildTableKey(identifier);
                                         Consumer<String> manifestConsumer =
                                                 manifest -> {
-                                                    // Use "::" as delimiter to avoid conflicts with
-                                                    // branch names containing ":"
                                                     Tuple2<String, String> tuple2 =
                                                             new Tuple2<>(
                                                                     branch + "::" + tableKey,
@@ -369,9 +352,9 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
                                             Collector<Tuple2<String, Long>> out) {
                                         // Process all tables sequentially in a single thread
                                         for (Identifier identifier : tableIdentifiers) {
-                                            if (cleanerMap.containsKey(identifier.getFullName())) {
+                                            if (cleanerMap.containsKey(buildTableKey(identifier))) {
                                                 cleanerMap
-                                                        .get(identifier.getFullName())
+                                                        .get(buildTableKey(identifier))
                                                         .listPaimonFilesForTable(out);
                                             }
                                         }
@@ -505,10 +488,10 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
             @Nullable Integer parallelism,
             List<Identifier> tableIdentifiers) {
         Map<String, FlinkOrphanFilesClean> cleanersMap = new HashMap<>();
-        List<Identifier> validIdentifiers = new ArrayList<>();
-        for (Identifier identifier : tableIdentifiers) {
+        List<Identifier> validTableIdentifiers = new ArrayList<>();
+        for (Identifier tableIdentifier : tableIdentifiers) {
             try {
-                Table table = catalog.getTable(identifier);
+                Table table = catalog.getTable(tableIdentifier);
                 if (!(table instanceof FileStoreTable)) {
                     LOG.warn("table {} is not a FileStoreTable, so ignore it", table.name());
                     continue;
@@ -517,12 +500,15 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
                 FlinkOrphanFilesClean cleaner =
                         new FlinkOrphanFilesClean(
                                 (FileStoreTable) table, olderThanMillis, dryRun, parallelism);
-                validIdentifiers.add(identifier);
-                cleanersMap.put(identifier.getFullName(), cleaner);
+                validTableIdentifiers.add(tableIdentifier);
+                cleanersMap.put(tableIdentifier.getFullName(), cleaner);
             } catch (Catalog.TableNotExistException e) {
-                LOG.warn("Table {} does not exist, so ignore it", identifier.getFullName(), e);
+                LOG.warn("Table {} does not exist, so ignore it", tableIdentifier.getFullName(), e);
             } catch (Exception e) {
-                LOG.warn("Failed to process table {}, so ignore it", identifier.getFullName(), e);
+                LOG.warn(
+                        "Failed to process table {}, so ignore it",
+                        tableIdentifier.getFullName(),
+                        e);
             }
         }
 
@@ -533,14 +519,18 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
         // Process all tables in a single DataStream
         DataStream<CleanOrphanFilesResult> clean =
                 new CombinedFlinkOrphanFilesClean(
-                                validIdentifiers, cleanersMap, olderThanMillis, dryRun, parallelism)
+                                validTableIdentifiers,
+                                cleanersMap,
+                                olderThanMillis,
+                                dryRun,
+                                parallelism)
                         .doOrphanClean(env);
 
         return sum(clean);
     }
 
-    private FlinkOrphanFilesClean getCleanerForTable(BranchTableInfo branchTableInfo) {
-        String tableKey = branchTableInfo.getIdentifier().getFullName();
+    private FlinkOrphanFilesClean getCleanerForTable(Identifier identifier) {
+        String tableKey = buildTableKey(identifier);
         FlinkOrphanFilesClean cleaner = cleanerMap.get(tableKey);
         if (cleaner == null) {
             throw new RuntimeException(
@@ -566,35 +556,8 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
         return cleanerForPath;
     }
 
-    private static class BranchTableInfo implements Serializable {
-        private static final long serialVersionUID = 1L;
-
-        private final String branch;
-        private final String databaseName;
-        private final String tableName;
-        private final Map<String, String> catalogOptions;
-
-        public BranchTableInfo(
-                String branch,
-                String databaseName,
-                String tableName,
-                Map<String, String> catalogOptions) {
-            this.branch = branch;
-            this.databaseName = databaseName;
-            this.tableName = tableName;
-            this.catalogOptions = catalogOptions;
-        }
-
-        public String getBranch() {
-            return branch;
-        }
-
-        public Identifier getIdentifier() {
-            return new Identifier(databaseName, tableName);
-        }
-
-        public Map<String, String> getCatalogOptions() {
-            return catalogOptions;
-        }
+    // build table full name which does not include branch name
+    private String buildTableKey(Identifier identifier) {
+        return String.format("%s.%s", identifier.getDatabaseName(), identifier.getTableName());
     }
 }
