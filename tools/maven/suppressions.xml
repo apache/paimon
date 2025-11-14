@@ -24,6 +24,7 @@ under the License.
 
 <suppressions>
 		<suppress files="DataTypes.java" checks="MethodNameCheck"/>
+	<suppress files="CoreOptions.java" checks="FileLength"/>
 
 		<!-- target directory is not relevant for checkstyle -->
 		<suppress

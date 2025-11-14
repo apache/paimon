@@ -47,6 +47,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -132,6 +133,26 @@ public class DataSplit implements Split {
 
     public OptionalLong earliestFileCreationEpochMillis() {
         return this.dataFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).min();
+    }
+
+    public BinaryRow readPartition() {
+        return partition();
+    }
+
+    public HashMap<String, String> fileBucketPathMapping() {
+        throw new UnsupportedOperationException("fileMappings is not supported");
+    }
+
+    public HashMap<String, String> fileBranchMapping() {
+        throw new UnsupportedOperationException("fileMappings is not supported");
+    }
+
+    public String dataSplitType() {
+        return DataSplitType.DATA_SPLIT.name();
+    }
+
+    public List<DeletionFile> dataDeletionFiles() {
+        return dataDeletionFiles;
     }
 
     @Override
