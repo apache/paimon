@@ -19,6 +19,7 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -74,15 +75,19 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
 
     @Override
     public BatchTableCommit newCommit() {
-        boolean formatTablePartitionOnlyValueInPath =
-                (new CoreOptions(table.options())).formatTablePartitionOnlyValueInPath();
+        CoreOptions options = new CoreOptions(table.options());
+        boolean formatTablePartitionOnlyValueInPath = options.formatTablePartitionOnlyValueInPath();
+        String syncHiveUri = options.formatTableCommitSyncPartitionHiveUri();
         return new FormatTableCommit(
                 table.location(),
                 table.partitionKeys(),
                 table.fileIO(),
                 formatTablePartitionOnlyValueInPath,
                 overwrite,
-                staticPartition);
+                Identifier.fromString(table.fullName()),
+                staticPartition,
+                syncHiveUri,
+                table.catalogContext());
     }
 
     @Override

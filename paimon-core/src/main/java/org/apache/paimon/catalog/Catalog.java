@@ -954,6 +954,8 @@ public interface Catalog extends AutoCloseable {
     /** Serializable loader to create catalog. */
     CatalogLoader catalogLoader();
 
+    CatalogContext catalogContext();
+
     /** Return a boolean that indicates whether this catalog is case-sensitive. */
     boolean caseSensitive();
 
