@@ -707,14 +707,14 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
         // Create orphan files in both tables
         Path orphanFile1 = getOrphanFilePath(table1, ORPHAN_FILE_1);
-        Path orphanFile10_1 = getOrphanFilePath(table10, ORPHAN_FILE_1);
-        Path orphanFile10_2 = getOrphanFilePath(table10, "bucket-0/orphan_file_table10_specific");
+        Path orphanFile101 = getOrphanFilePath(table10, ORPHAN_FILE_1);
+        Path orphanFile102 = getOrphanFilePath(table10, "bucket-0/orphan_file_table10_specific");
 
         FileIO fileIO1 = table1.fileIO();
         FileIO fileIO10 = table10.fileIO();
         fileIO1.writeFile(orphanFile1, "table1_orphan", true);
-        fileIO10.writeFile(orphanFile10_1, "table10_orphan1", true);
-        fileIO10.writeFile(orphanFile10_2, "table10_orphan2", true);
+        fileIO10.writeFile(orphanFile101, "table10_orphan1", true);
+        fileIO10.writeFile(orphanFile102, "table10_orphan2", true);
 
         Path table1Location = table1.location();
         Path table10Location = table10.location();
@@ -760,8 +760,8 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         assertThatCode(action::run).doesNotThrowAnyException();
 
         assertThat(fileIO1.exists(orphanFile1)).isFalse();
-        assertThat(fileIO10.exists(orphanFile10_1)).isFalse();
-        assertThat(fileIO10.exists(orphanFile10_2)).isFalse();
+        assertThat(fileIO10.exists(orphanFile101)).isFalse();
+        assertThat(fileIO10.exists(orphanFile102)).isFalse();
 
         assertThat(readTableData(table1)).containsExactly("+I[1, Hi]");
         assertThat(readTableData(table10)).containsExactly("+I[1, Hi]");
