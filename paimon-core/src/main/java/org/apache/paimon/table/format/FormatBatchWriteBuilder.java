@@ -78,7 +78,6 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
         CoreOptions options = new CoreOptions(table.options());
         boolean formatTablePartitionOnlyValueInPath = options.formatTablePartitionOnlyValueInPath();
         String syncHiveUri = options.formatTableCommitSyncPartitionHiveUri();
-        String syncHiveWarehouse = options.formatTableCommitSyncPartitionHiveWarehouse();
         return new FormatTableCommit(
                 table.location(),
                 table.partitionKeys(),
@@ -88,7 +87,6 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
                 Identifier.fromString(table.fullName()),
                 staticPartition,
                 syncHiveUri,
-                syncHiveWarehouse,
                 table.catalogContext());
     }
 

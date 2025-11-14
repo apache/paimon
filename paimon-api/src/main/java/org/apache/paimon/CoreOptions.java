@@ -2035,11 +2035,6 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("Format table commit sync partition hive uri.");
-    public static final ConfigOption<String> FORMAT_TABLE_COMMIT_SYNC_PARTITION_HIVE_WAREHOUSE =
-            ConfigOptions.key("format-table.commit.sync-partition-hive.warehouse")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("Format table commit sync partition hive warehouse.");
 
     public static final ConfigOption<String> BLOB_FIELD =
             key("blob-field")
@@ -2338,10 +2333,6 @@ public class CoreOptions implements Serializable {
 
     public String formatTableCommitSyncPartitionHiveUri() {
         return options.get(FORMAT_TABLE_COMMIT_SYNC_PARTITION_HIVE_URI);
-    }
-
-    public String formatTableCommitSyncPartitionHiveWarehouse() {
-        return options.get(FORMAT_TABLE_COMMIT_SYNC_PARTITION_HIVE_WAREHOUSE);
     }
 
     public MemorySize fileReaderAsyncThreshold() {

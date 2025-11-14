@@ -71,7 +71,6 @@ public class FormatTableCommit implements BatchTableCommit {
             Identifier tableIdentifier,
             @Nullable Map<String, String> staticPartitions,
             @Nullable String syncHiveUri,
-            @Nullable String syncHiveWarehouse,
             CatalogContext catalogContext) {
         this.location = location;
         this.fileIO = fileIO;
@@ -81,22 +80,18 @@ public class FormatTableCommit implements BatchTableCommit {
         this.overwrite = overwrite;
         this.partitionKeys = partitionKeys;
         this.tableIdentifier = tableIdentifier;
-        if (syncHiveUri != null && syncHiveWarehouse != null) {
+        if (syncHiveUri != null) {
             try {
                 Options options = new Options();
                 options.set(CatalogOptions.URI, syncHiveUri);
-                options.set(CatalogOptions.WAREHOUSE, syncHiveWarehouse);
                 options.set(CatalogOptions.METASTORE, "hive");
-
                 CatalogContext context =
                         CatalogContext.create(options, catalogContext.hadoopConf());
                 this.hiveCatalog = CatalogFactory.createCatalog(context);
             } catch (Exception e) {
                 throw new RuntimeException(
-                        "Failed to initialize Hive catalog with URI: "
-                                + syncHiveUri
-                                + " and warehouse: "
-                                + syncHiveWarehouse,
+                        String.format(
+                                "Failed to initialize Hive catalog with URI: %s", syncHiveUri),
                         e);
             }
         }
