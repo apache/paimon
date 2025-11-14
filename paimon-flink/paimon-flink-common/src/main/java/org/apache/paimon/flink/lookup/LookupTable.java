@@ -18,9 +18,12 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.utils.Filter;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -29,7 +32,7 @@ import java.util.List;
 /** A lookup table which provides get and refresh. */
 public interface LookupTable extends Closeable {
 
-    void specificPartitionFilter(Predicate filter);
+    void specifyPartitions(List<BinaryRow> scanPartitions, @Nullable Predicate partitionFilter);
 
     void open() throws Exception;
 

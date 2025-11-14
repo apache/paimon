@@ -55,6 +55,7 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -92,7 +93,8 @@ public abstract class FullCacheLookupTable implements LookupTable {
     private final FileStoreTable table;
     private Future<?> refreshFuture;
     private LookupStreamingReader reader;
-    private Predicate specificPartition;
+    private List<BinaryRow> scanPartitions = Collections.emptyList();
+    @Nullable private Predicate partitionFilter;
     @Nullable private Filter<InternalRow> cacheRowFilter;
 
     public FullCacheLookupTable(Context context) {
@@ -139,8 +141,10 @@ public abstract class FullCacheLookupTable implements LookupTable {
     }
 
     @Override
-    public void specificPartitionFilter(Predicate filter) {
-        this.specificPartition = filter;
+    public void specifyPartitions(
+            List<BinaryRow> scanPartitions, @Nullable Predicate partitionFilter) {
+        this.scanPartitions = scanPartitions;
+        this.partitionFilter = partitionFilter;
     }
 
     @Override
@@ -172,14 +176,15 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     protected void bootstrap() throws Exception {
         Predicate scanPredicate =
-                PredicateBuilder.andNullable(context.tablePredicate, specificPartition);
+                PredicateBuilder.andNullable(context.tablePredicate, partitionFilter);
         this.reader =
                 new LookupStreamingReader(
                         context.table,
                         context.projection,
                         scanPredicate,
                         context.requiredCachedBucketIds,
-                        cacheRowFilter);
+                        cacheRowFilter,
+                        scanPartitions);
         if (!stateFactory.preferBulkLoad()) {
             doRefresh();
             return;
