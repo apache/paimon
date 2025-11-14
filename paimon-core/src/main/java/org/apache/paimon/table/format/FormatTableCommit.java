@@ -116,6 +116,8 @@ public class FormatTableCommit implements BatchTableCommit {
                 }
             }
 
+            Set<Map<String, String>> partitionSpecs = new HashSet<>();
+
             if (staticPartitions != null && !staticPartitions.isEmpty()) {
                 Path partitionPath =
                         buildPartitionPath(
@@ -123,7 +125,7 @@ public class FormatTableCommit implements BatchTableCommit {
                                 staticPartitions,
                                 formatTablePartitionOnlyValueInPath,
                                 partitionKeys);
-
+                partitionSpecs.add(staticPartitions);
                 if (overwrite) {
                     deletePreviousDataFile(partitionPath);
                 }
@@ -139,7 +141,6 @@ public class FormatTableCommit implements BatchTableCommit {
                     deletePreviousDataFile(p);
                 }
             }
-            Set<Map<String, String>> partitionSpecs = new HashSet<>();
 
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 committer.commit(this.fileIO);
