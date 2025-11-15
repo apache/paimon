@@ -775,6 +775,13 @@ public class DataEvolutionTableTest extends TableTestBase {
                         });
 
         assertThat(readF1).containsExactly("a200", "a300", "a400");
+
+        Predicate predicate3 =
+                new PredicateBuilder(table.rowType()).notEqual(1, BinaryString.fromString("a500"));
+        rowIds = globalIndexScan(table, predicate3);
+        assertNotNull(rowIds);
+        assertThat(rowIds.size()).isEqualTo(count - 1);
+        assertThat(rowIds).doesNotContain(500L);
     }
 
     private List<Long> globalIndexScan(FileStoreTable table, Predicate predicate) throws Exception {
