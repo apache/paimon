@@ -59,6 +59,7 @@ case class MinEvaluator(idx: Int, dataField: DataField, evolutions: SimpleStatsE
 
   override def update(dataSplit: DataSplit): Unit = {
     val other = dataSplit.minValue(idx, dataField, evolutions)
+    // if (_result == null || (other != null && CompareUtils.compareLiteral(dataField.`type`(), _result, other) > 0)) {
     if (_result == null || CompareUtils.compareLiteral(dataField.`type`(), _result, other) > 0) {
       _result = other;
     }
@@ -80,7 +81,7 @@ case class MaxEvaluator(idx: Int, dataField: DataField, evolutions: SimpleStatsE
 
   override def update(dataSplit: DataSplit): Unit = {
     val other = dataSplit.maxValue(idx, dataField, evolutions)
-    if (_result == null || CompareUtils.compareLiteral(dataField.`type`(), _result, other) < 0) {
+    if (_result == null || (other != null && CompareUtils.compareLiteral(dataField.`type`(), _result, other) < 0)) {
       _result = other
     }
   }
