@@ -16,18 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index;
+package org.apache.paimon.index.globalindex;
 
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.data.BinaryRow;
 
-/** Path factory to create an index path. */
-public interface IndexPathFactory {
+import java.util.Set;
 
-    Path newPath(String fileName);
+public interface GlobalIndexScanBuilder {
 
-    Path newPath();
+    GlobalIndexScanBuilder withSnapshot(long snapshotId);
 
-    Path toPath(IndexFileMeta file);
+    GlobalIndexScanBuilder withPartition(BinaryRow binaryRow);
 
-    boolean isExternalPath();
+    GlobalIndexScanBuilder withShard(int shardId);
+
+    ShardGlobalIndexScanner build();
+
+    Set<Integer> shardList();
 }

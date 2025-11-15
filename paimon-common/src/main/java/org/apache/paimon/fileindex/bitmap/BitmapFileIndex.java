@@ -18,8 +18,6 @@
 
 package org.apache.paimon.fileindex.bitmap;
 
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
@@ -28,22 +26,13 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.LocalZonedTimestampType;
-import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
 import java.io.DataOutputStream;
-import java.nio.ByteBuffer;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /** The implementation of bitmap file index. */
 public class BitmapFileIndex implements FileIndexer {
@@ -80,18 +69,18 @@ public class BitmapFileIndex implements FileIndexer {
     private static class Writer extends FileIndexWriter {
 
         private final int version;
-        private final DataType dataType;
-        private final Function<Object, Object> valueMapper;
-        private final Map<Object, RoaringBitmap32> id2bitmap = new HashMap<>();
+        private final BitmapWriterHelper<RoaringBitmap32> helper;
         private final RoaringBitmap32 nullBitmap = new RoaringBitmap32();
         private int rowNumber;
-        private final Options options;
 
         public Writer(DataType dataType, Options options) {
             this.version = options.getInteger(VERSION, VERSION_2);
-            this.dataType = dataType;
-            this.valueMapper = getValueMapper(dataType);
-            this.options = options;
+            this.helper =
+                    new BitmapWriterHelper<>(
+                            version,
+                            dataType,
+                            options,
+                            new BitmapWriterHelper.Bitmap32Operations());
         }
 
         @Override
@@ -99,112 +88,95 @@ public class BitmapFileIndex implements FileIndexer {
             if (key == null) {
                 nullBitmap.add(rowNumber++);
             } else {
-                id2bitmap
-                        .computeIfAbsent(valueMapper.apply(key), k -> new RoaringBitmap32())
-                        .add(rowNumber++);
+                helper.add(key, rowNumber++);
             }
         }
 
         @Override
         public byte[] serializedBytes() {
-
             try {
-
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
                 DataOutputStream dos = new DataOutputStream(output);
 
-                dos.writeByte(version);
-
-                // 1.serialize bitmaps to bytes
                 byte[] nullBitmapBytes = nullBitmap.serialize();
-                Map<Object, byte[]> id2bitmapBytes =
-                        id2bitmap.entrySet().stream()
-                                .collect(
-                                        Collectors.toMap(
-                                                Map.Entry::getKey, e -> e.getValue().serialize()));
+                int nullBitmapLength =
+                        nullBitmap.isEmpty() || nullBitmap.getCardinality() == 1
+                                ? 0
+                                : nullBitmapBytes.length;
+                int nullOffset =
+                        nullBitmap.getCardinality() == 1 ? -1 - nullBitmap.iterator().next() : 0;
 
-                // 2.build bitmap file index meta
-                LinkedHashMap<Object, Integer> bitmapOffsets = new LinkedHashMap<>();
-                LinkedList<byte[]> serializeBitmaps = new LinkedList<>();
-                int[] offsetRef = {
-                    nullBitmap.isEmpty() || nullBitmap.getCardinality() == 1
-                            ? 0
-                            : nullBitmapBytes.length
-                };
-                id2bitmap.forEach(
-                        (k, v) -> {
-                            if (v.getCardinality() == 1) {
-                                bitmapOffsets.put(k, -1 - v.iterator().next());
-                            } else {
-                                byte[] bytes = id2bitmapBytes.get(k);
-                                serializeBitmaps.add(bytes);
-                                bitmapOffsets.put(k, offsetRef[0]);
-                                offsetRef[0] += bytes.length;
-                            }
-                        });
-                BitmapFileIndexMeta bitmapFileIndexMeta;
+                // Special handling for VERSION_1
                 if (version == VERSION_1) {
-                    bitmapFileIndexMeta =
+                    dos.writeByte(version);
+                    BitmapFileIndexMeta bitmapFileIndexMeta =
                             new BitmapFileIndexMeta(
-                                    dataType,
-                                    options,
+                                    helper.dataType,
+                                    helper.options,
                                     rowNumber,
-                                    id2bitmap.size(),
+                                    helper.getId2bitmap().size(),
                                     !nullBitmap.isEmpty(),
-                                    nullBitmap.getCardinality() == 1
-                                            ? -1 - nullBitmap.iterator().next()
-                                            : 0,
-                                    bitmapOffsets);
-                } else if (version == VERSION_2) {
-                    bitmapFileIndexMeta =
-                            new BitmapFileIndexMetaV2(
-                                    dataType,
-                                    options,
-                                    rowNumber,
-                                    id2bitmap.size(),
-                                    !nullBitmap.isEmpty(),
-                                    nullBitmap.getCardinality() == 1
-                                            ? -1 - nullBitmap.iterator().next()
-                                            : 0,
-                                    nullBitmapBytes.length,
-                                    bitmapOffsets,
-                                    offsetRef[0]);
+                                    nullOffset,
+                                    buildBitmapOffsets(nullBitmapLength));
+                    bitmapFileIndexMeta.serialize(dos);
+                    writeBody(dos, nullBitmapBytes, nullBitmapLength);
                 } else {
-                    throw new RuntimeException("invalid version: " + version);
+                    helper.serialize(
+                            dos,
+                            nullBitmapLength > 0 ? nullBitmapBytes : null,
+                            nullBitmapLength,
+                            rowNumber,
+                            !nullBitmap.isEmpty(),
+                            nullOffset);
                 }
 
-                // 3.serialize meta
-                bitmapFileIndexMeta.serialize(dos);
-
-                // 4.serialize body
-                if (nullBitmap.getCardinality() > 1) {
-                    dos.write(nullBitmapBytes);
-                }
-                for (byte[] bytes : serializeBitmaps) {
-                    dos.write(bytes);
-                }
                 return output.toByteArray();
             } catch (Exception e) {
                 throw new RuntimeException(e);
+            }
+        }
+
+        private LinkedHashMap<Object, Integer> buildBitmapOffsets(int nullBitmapLength) {
+            LinkedHashMap<Object, Integer> bitmapOffsets = new LinkedHashMap<>();
+            int[] offsetRef = {nullBitmapLength};
+            helper.getId2bitmap()
+                    .forEach(
+                            (k, v) -> {
+                                if (v.getCardinality() == 1) {
+                                    bitmapOffsets.put(k, -1 - v.iterator().next());
+                                } else {
+                                    byte[] bytes = v.serialize();
+                                    bitmapOffsets.put(k, offsetRef[0]);
+                                    offsetRef[0] += bytes.length;
+                                }
+                            });
+            return bitmapOffsets;
+        }
+
+        private void writeBody(DataOutputStream dos, byte[] nullBitmapBytes, int nullBitmapLength)
+                throws Exception {
+            if (nullBitmapLength > 0) {
+                dos.write(nullBitmapBytes);
+            }
+            for (RoaringBitmap32 bitmap : helper.getId2bitmap().values()) {
+                if (bitmap.getCardinality() > 1) {
+                    dos.write(bitmap.serialize());
+                }
             }
         }
     }
 
     private static class Reader extends FileIndexReader {
 
-        private final SeekableInputStream seekableInputStream;
-        private final int headStart;
-        private final Map<Object, RoaringBitmap32> bitmaps = new LinkedHashMap<>();
-
-        private BitmapFileIndexMeta bitmapFileIndexMeta;
-        private Function<Object, Object> valueMapper;
-
-        private final Options options;
+        private final BitmapReaderHelper<RoaringBitmap32> helper;
 
         public Reader(SeekableInputStream seekableInputStream, int start, Options options) {
-            this.seekableInputStream = seekableInputStream;
-            this.headStart = start;
-            this.options = options;
+            this.helper =
+                    new BitmapReaderHelper<>(
+                            seekableInputStream,
+                            start,
+                            options,
+                            new BitmapReaderHelper.Bitmap32Operations());
         }
 
         @Override
@@ -221,8 +193,8 @@ public class BitmapFileIndex implements FileIndexer {
         public FileIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
             return new BitmapIndexResult(
                     () -> {
-                        readInternalMeta(fieldRef.type());
-                        return getInListResultBitmap(literals);
+                        helper.readInternalMeta(fieldRef.type(), this::createBitmapFileIndexMeta);
+                        return helper.getInListResultBitmap(literals);
                     });
         }
 
@@ -230,9 +202,9 @@ public class BitmapFileIndex implements FileIndexer {
         public FileIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
             return new BitmapIndexResult(
                     () -> {
-                        readInternalMeta(fieldRef.type());
-                        RoaringBitmap32 bitmap = getInListResultBitmap(literals);
-                        bitmap.flip(0, bitmapFileIndexMeta.getRowCount());
+                        helper.readInternalMeta(fieldRef.type(), this::createBitmapFileIndexMeta);
+                        RoaringBitmap32 bitmap = helper.getInListResultBitmap(literals);
+                        bitmap.flip(0, helper.getBitmapFileIndexMeta().getRowCount());
                         return bitmap;
                     });
         }
@@ -247,143 +219,19 @@ public class BitmapFileIndex implements FileIndexer {
             return visitNotIn(fieldRef, Collections.singletonList(null));
         }
 
-        private RoaringBitmap32 getInListResultBitmap(List<Object> literals) {
-            return RoaringBitmap32.or(
-                    literals.stream()
-                            .map(
-                                    it ->
-                                            bitmaps.computeIfAbsent(
-                                                    valueMapper.apply(it), this::readBitmap))
-                            .iterator());
-        }
-
-        private RoaringBitmap32 readBitmap(Object bitmapId) {
-            try {
-                BitmapFileIndexMeta.Entry entry = bitmapFileIndexMeta.findEntry(bitmapId);
-                if (entry == null) {
-                    return new RoaringBitmap32();
-                } else {
-                    int offset = entry.offset;
-                    if (offset < 0) {
-                        return RoaringBitmap32.bitmapOf(-1 - offset);
-                    } else {
-                        seekableInputStream.seek(bitmapFileIndexMeta.getBodyStart() + offset);
-                        RoaringBitmap32 bitmap = new RoaringBitmap32();
-                        int length = entry.length;
-                        if (length != -1) {
-                            DataInputStream input = new DataInputStream(seekableInputStream);
-                            byte[] bytes = new byte[length];
-                            input.readFully(bytes);
-                            bitmap.deserialize(ByteBuffer.wrap(bytes));
-                            return bitmap;
-                        }
-                        bitmap.deserialize(new DataInputStream(seekableInputStream));
-                        return bitmap;
-                    }
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+        private BitmapFileIndexMeta createBitmapFileIndexMeta(
+                int version, DataType dataType, Options options) {
+            if (version == VERSION_1) {
+                return new BitmapFileIndexMeta(dataType, options);
+            } else if (version == VERSION_2) {
+                return new BitmapFileIndexMetaV2(dataType, options);
+            } else if (version > VERSION_2) {
+                throw new RuntimeException(
+                        String.format(
+                                "read index file fail, your plugin version is lower than %d",
+                                version));
             }
+            throw new RuntimeException("Invalid version: " + version);
         }
-
-        private void readInternalMeta(DataType dataType) {
-            if (this.bitmapFileIndexMeta == null) {
-                this.valueMapper = getValueMapper(dataType);
-                try {
-                    seekableInputStream.seek(headStart);
-                    int version = seekableInputStream.read();
-                    if (version == VERSION_1) {
-                        this.bitmapFileIndexMeta = new BitmapFileIndexMeta(dataType, options);
-                        this.bitmapFileIndexMeta.deserialize(seekableInputStream);
-                    } else if (version == VERSION_2) {
-                        this.bitmapFileIndexMeta = new BitmapFileIndexMetaV2(dataType, options);
-                        this.bitmapFileIndexMeta.deserialize(seekableInputStream);
-                    } else if (version > VERSION_2) {
-                        throw new RuntimeException(
-                                String.format(
-                                        "read index file fail, "
-                                                + "your plugin version is lower than %d",
-                                        version));
-                    }
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        }
-    }
-
-    // Currently, it is mainly used to convert timestamps to long
-    public static Function<Object, Object> getValueMapper(DataType dataType) {
-        return dataType.accept(
-                new BitmapTypeVisitor<Function<Object, Object>>() {
-
-                    @Override
-                    public Function<Object, Object> visitBinaryString() {
-                        return o -> {
-                            if (o instanceof BinaryString) {
-                                return ((BinaryString) o).copy();
-                            }
-                            return o;
-                        };
-                    }
-
-                    @Override
-                    public Function<Object, Object> visitByte() {
-                        return Function.identity();
-                    }
-
-                    @Override
-                    public Function<Object, Object> visitShort() {
-                        return Function.identity();
-                    }
-
-                    @Override
-                    public Function<Object, Object> visitInt() {
-                        return Function.identity();
-                    }
-
-                    @Override
-                    public Function<Object, Object> visitLong() {
-                        return Function.identity();
-                    }
-
-                    @Override
-                    public Function<Object, Object> visitFloat() {
-                        return Function.identity();
-                    }
-
-                    @Override
-                    public Function<Object, Object> visitDouble() {
-                        return Function.identity();
-                    }
-
-                    @Override
-                    public Function<Object, Object> visitBoolean() {
-                        return Function.identity();
-                    }
-
-                    @Override
-                    public Function<Object, Object> visit(TimestampType timestampType) {
-                        return getTimeStampMapper(timestampType.getPrecision());
-                    }
-
-                    @Override
-                    public Function<Object, Object> visit(
-                            LocalZonedTimestampType localZonedTimestampType) {
-                        return getTimeStampMapper(localZonedTimestampType.getPrecision());
-                    }
-
-                    private Function<Object, Object> getTimeStampMapper(int precision) {
-                        return o -> {
-                            if (o == null) {
-                                return null;
-                            } else if (precision <= 3) {
-                                return ((Timestamp) o).getMillisecond();
-                            } else {
-                                return ((Timestamp) o).toMicros();
-                            }
-                        };
-                    }
-                });
     }
 }

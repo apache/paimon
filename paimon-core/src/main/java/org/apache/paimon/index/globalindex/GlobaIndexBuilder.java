@@ -16,18 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index;
+package org.apache.paimon.index.globalindex;
 
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.utils.Pair;
 
-/** Path factory to create an index path. */
-public interface IndexPathFactory {
+import java.util.List;
 
-    Path newPath(String fileName);
+/** To write global file index. */
+public abstract class GlobaIndexBuilder {
 
-    Path newPath();
+    protected final GlobalIndexFileHelper globalIndexFileHelper;
 
-    Path toPath(IndexFileMeta file);
+    protected GlobaIndexBuilder(GlobalIndexFileHelper globalIndexFileHelper) {
+        this.globalIndexFileHelper = globalIndexFileHelper;
+    }
 
-    boolean isExternalPath();
+    public abstract void indexTo(Object key, long rowId);
+
+    public abstract List<Pair<String, byte[]>> end();
 }

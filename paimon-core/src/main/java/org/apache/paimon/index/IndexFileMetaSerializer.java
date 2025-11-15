@@ -45,7 +45,10 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 record.fileSize(),
                 record.rowCount(),
                 dvMetasToRowArrayData(record.dvRanges()),
-                fromString(record.externalPath()));
+                record.externalPath(),
+                record.getShard(),
+                record.indexFieldId(),
+                record.indexMeta());
     }
 
     @Override
@@ -56,7 +59,10 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 row.getLong(2),
                 row.getLong(3),
                 row.isNullAt(4) ? null : rowArrayDataToDvMetas(row.getArray(4)),
-                row.isNullAt(5) ? null : row.getString(5).toString());
+                row.isNullAt(5) ? null : row.getString(5).toString(),
+                row.isNullAt(6) ? null : row.getInt(6),
+                row.isNullAt(7) ? null : row.getInt(7),
+                row.isNullAt(8) ? null : row.getBinary(8));
     }
 
     public static InternalArray dvMetasToRowArrayData(

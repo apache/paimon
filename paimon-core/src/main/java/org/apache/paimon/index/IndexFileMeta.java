@@ -22,7 +22,9 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -53,12 +55,19 @@ public class IndexFileMeta {
                                     4,
                                     "_DELETIONS_VECTORS_RANGES",
                                     new ArrayType(true, DeletionVectorMeta.SCHEMA)),
-                            new DataField(5, "_EXTERNAL_PATH", newStringType(true))));
+                            new DataField(5, "_EXTERNAL_PATH", newStringType(true)),
+                            new DataField(6, "_SHARD", new IntType(true)),
+                            new DataField(7, "_INDEX_FIELD_ID", new IntType(true)),
+                            new DataField(8, "_INDEX_META", new BinaryType())));
 
     private final String indexType;
     private final String fileName;
     private final long fileSize;
     private final long rowCount;
+
+    @Nullable private final Integer shard;
+    @Nullable private final Integer indexFieldId;
+    @Nullable private final byte[] indexMeta;
 
     /**
      * Metadata only used by {@link DeletionVectorsIndexFile}, use LinkedHashMap to ensure that the
@@ -75,16 +84,55 @@ public class IndexFileMeta {
             long rowCount,
             @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
             @Nullable String externalPath) {
+        this(indexType, fileName, fileSize, rowCount, dvRanges, externalPath, null, null, null);
+    }
+
+    public IndexFileMeta(
+            String indexType,
+            String fileName,
+            long fileSize,
+            long rowCount,
+            @Nullable Integer shard,
+            @Nullable Integer indexFieldId,
+            @Nullable byte[] indexMeta) {
+        this(indexType, fileName, fileSize, rowCount, null, null, shard, indexFieldId, indexMeta);
+    }
+
+    public IndexFileMeta(
+            String indexType,
+            String fileName,
+            long fileSize,
+            long rowCount,
+            @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
+            @Nullable String externalPath,
+            @Nullable Integer shard,
+            @Nullable Integer indexFieldId,
+            @Nullable byte[] indexMeta) {
         this.indexType = indexType;
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.rowCount = rowCount;
         this.dvRanges = dvRanges;
         this.externalPath = externalPath;
+        this.shard = shard;
+        this.indexFieldId = indexFieldId;
+        this.indexMeta = indexMeta;
     }
 
     public String indexType() {
         return indexType;
+    }
+
+    public Integer getShard() {
+        return shard;
+    }
+
+    public Integer indexFieldId() {
+        return indexFieldId;
+    }
+
+    public byte[] indexMeta() {
+        return indexMeta;
     }
 
     public String fileName() {

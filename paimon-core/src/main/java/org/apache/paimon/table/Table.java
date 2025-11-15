@@ -198,4 +198,7 @@ public interface Table extends Serializable {
 
     /** Returns a new stream write builder. */
     StreamWriteBuilder newStreamWriteBuilder();
+
+    //    /** Returns a new global index scan builder */
+    //    GlobalIndexScanBuilder newIndexScanBuilder();
 }

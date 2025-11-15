@@ -348,8 +348,8 @@ public class BitmapFileIndexMeta {
     public static class Entry {
 
         Object key;
-        int offset;
-        int length;
+        public int offset;
+        public int length;
 
         public Entry(Object key, int offset, int length) {
             this.key = key;
