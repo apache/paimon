@@ -24,6 +24,7 @@ import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -59,7 +60,10 @@ public class IndexManifestEntry {
                                     7,
                                     "_DELETIONS_VECTORS_RANGES",
                                     new ArrayType(true, DeletionVectorMeta.SCHEMA)),
-                            new DataField(8, "_EXTERNAL_PATH", newStringType(true))));
+                            new DataField(8, "_EXTERNAL_PATH", newStringType(true)),
+                            new DataField(9, "_SHARD", new IntType(true)),
+                            new DataField(10, "_INDEX_FIELD_ID", new IntType(true)),
+                            new DataField(11, "_INDEX_META", new BinaryType())));
 
     private final FileKind kind;
     private final BinaryRow partition;

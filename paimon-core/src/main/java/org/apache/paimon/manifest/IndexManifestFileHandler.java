@@ -22,7 +22,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
@@ -37,7 +36,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
-import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -62,39 +60,32 @@ public class IndexManifestFileHandler {
             checkArgument(entry.kind() == FileKind.ADD);
         }
 
-        Pair<List<IndexManifestEntry>, List<IndexManifestEntry>> previous =
-                separateIndexEntries(entries);
-        Pair<List<IndexManifestEntry>, List<IndexManifestEntry>> current =
-                separateIndexEntries(newIndexFiles);
+        Map<String, List<IndexManifestEntry>> previous = separateIndexEntries(entries);
+        Map<String, List<IndexManifestEntry>> current = separateIndexEntries(newIndexFiles);
 
-        // Step1: get the hash index files;
-        List<IndexManifestEntry> indexEntries =
-                getIndexManifestFileCombine(HASH_INDEX)
-                        .combine(previous.getLeft(), current.getLeft());
-
-        // Step2: get the dv index files;
-        indexEntries.addAll(
-                getIndexManifestFileCombine(DELETION_VECTORS_INDEX)
-                        .combine(previous.getRight(), current.getRight()));
+        List<IndexManifestEntry> indexEntries = new ArrayList<>();
+        for (String indexName : current.keySet()) {
+            if (!previous.containsKey(indexName)) {
+                indexEntries.addAll(current.get(indexName));
+            } else {
+                indexEntries.addAll(
+                        getIndexManifestFileCombine(indexName)
+                                .combine(previous.get(indexName), current.get(indexName)));
+            }
+        }
 
         return indexManifestFile.writeWithoutRolling(indexEntries);
     }
 
-    private Pair<List<IndexManifestEntry>, List<IndexManifestEntry>> separateIndexEntries(
+    private Map<String, List<IndexManifestEntry>> separateIndexEntries(
             List<IndexManifestEntry> indexFiles) {
-        List<IndexManifestEntry> hashEntries = new ArrayList<>();
-        List<IndexManifestEntry> dvEntries = new ArrayList<>();
+        Map<String, List<IndexManifestEntry>> result = new HashMap<>();
+
         for (IndexManifestEntry entry : indexFiles) {
             String indexType = entry.indexFile().indexType();
-            if (indexType.equals(DELETION_VECTORS_INDEX)) {
-                dvEntries.add(entry);
-            } else if (indexType.equals(HASH_INDEX)) {
-                hashEntries.add(entry);
-            } else {
-                throw new IllegalArgumentException("Can't recognize this index type: " + indexType);
-            }
+            result.computeIfAbsent(indexType, k -> new ArrayList<>()).add(entry);
         }
-        return Pair.of(hashEntries, dvEntries);
+        return result;
     }
 
     private IndexManifestFileCombiner getIndexManifestFileCombine(String indexType) {

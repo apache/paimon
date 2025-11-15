@@ -337,6 +337,11 @@ public class FileStorePathFactory {
         } else {
             return new IndexPathFactory() {
                 @Override
+                public Path newPath(String fileName) {
+                    return toPath(fileName);
+                }
+
+                @Override
                 public Path newPath() {
                     return toPath(INDEX_PREFIX + uuid + "-" + indexFileCount.getAndIncrement());
                 }

@@ -24,9 +24,11 @@ import org.roaringbitmap.longlong.Roaring64Bitmap;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.Objects;
 
 /** A compressed bitmap for 64-bit integer. */
@@ -46,6 +48,22 @@ public class RoaringBitmap64 {
         roaringBitmap.or(other.roaringBitmap);
     }
 
+    public long getCardinality() {
+        return roaringBitmap.getLongCardinality();
+    }
+
+    public boolean isEmpty() {
+        return roaringBitmap.isEmpty();
+    }
+
+    public void flip(final long rangeStart, final long rangeEnd) {
+        roaringBitmap.flip(rangeStart, rangeEnd);
+    }
+
+    public Iterator<Long> iterator() {
+        return roaringBitmap.iterator();
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -62,12 +80,14 @@ public class RoaringBitmap64 {
         roaringBitmap.clear();
     }
 
-    public byte[] serialize() throws IOException {
+    public byte[] serialize() {
         try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 DataOutputStream dos = new DataOutputStream(bos)) {
             roaringBitmap.runOptimize();
             roaringBitmap.serialize(dos);
             return bos.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to serialize RoaringBitmap64", e);
         }
     }
 
@@ -78,6 +98,10 @@ public class RoaringBitmap64 {
         }
     }
 
+    public void deserialize(DataInput in) throws IOException {
+        roaringBitmap.deserialize(in);
+    }
+
     @VisibleForTesting
     public static RoaringBitmap64 bitmapOf(long... dat) {
         RoaringBitmap64 roaringBitmap64 = new RoaringBitmap64();
@@ -85,5 +109,28 @@ public class RoaringBitmap64 {
             roaringBitmap64.add(ele);
         }
         return roaringBitmap64;
+    }
+
+    public static RoaringBitmap64 or(RoaringBitmap64 left, RoaringBitmap64 right) {
+        RoaringBitmap64 result = new RoaringBitmap64();
+        result.roaringBitmap.or(left.roaringBitmap);
+        result.roaringBitmap.or(right.roaringBitmap);
+        return result;
+    }
+
+    public static RoaringBitmap64 or(Iterator<RoaringBitmap64> iterator) {
+        RoaringBitmap64 result = new RoaringBitmap64();
+        while (iterator.hasNext()) {
+            RoaringBitmap64 next = iterator.next();
+            result.roaringBitmap.or(next.roaringBitmap);
+        }
+        return result;
+    }
+
+    public static RoaringBitmap64 and(RoaringBitmap64 left, RoaringBitmap64 right) {
+        RoaringBitmap64 result = new RoaringBitmap64();
+        result.roaringBitmap.and(left.roaringBitmap);
+        result.roaringBitmap.and(right.roaringBitmap);
+        return result;
     }
 }
