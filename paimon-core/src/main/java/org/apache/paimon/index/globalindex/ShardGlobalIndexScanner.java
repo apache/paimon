@@ -28,6 +28,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -42,13 +43,14 @@ import java.util.function.Function;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Scanner for shard-based global indexes. */
-public class ShardGlobalIndexScanner {
+public class ShardGlobalIndexScanner implements Closeable {
 
     private final FileStoreTable fileStoreTable;
-    private final FileIO fileIO;
     private final GlobalIndexFileHelper globalIndexFileInputHelper;
     private final Map<Integer, Map<String, List<IndexFileMeta>>> indexMetas;
     private final Map<Integer, DataField> columnIdToDataField;
+
+    private GlobalIndexPredicate globalIndexPredicate;
 
     public ShardGlobalIndexScanner(
             FileStoreTable fileStoreTable,
@@ -56,7 +58,7 @@ public class ShardGlobalIndexScanner {
             long shardId,
             List<IndexManifestEntry> entries) {
         this.fileStoreTable = fileStoreTable;
-        this.fileIO = fileStoreTable.fileIO();
+        FileIO fileIO = fileStoreTable.fileIO();
         this.globalIndexFileInputHelper =
                 new GlobalIndexFileHelper(
                         fileIO,
@@ -86,36 +88,52 @@ public class ShardGlobalIndexScanner {
     }
 
     public GlobalIndexResult scan(Predicate predicate) {
-        Function<Integer, Collection<GlobalIndexLeafPredicator>> readerFunction =
-                fieldId -> {
-                    if (!indexMetas.containsKey(fieldId)) {
-                        return Collections.emptyList();
-                    }
-                    Map<String, List<IndexFileMeta>> indexMetas = this.indexMetas.get(fieldId);
+        GlobalIndexPredicate globalIndexPredicate = getGlobalIndexPredicate();
+        return globalIndexPredicate.evaluate(predicate);
+    }
 
-                    Set<GlobalIndexLeafPredicator> readers = new HashSet<>();
-                    try {
-                        for (Map.Entry<String, List<IndexFileMeta>> entry : indexMetas.entrySet()) {
-                            String indexType = entry.getKey();
-                            List<IndexFileMeta> metas = entry.getValue();
-                            GlobalIndexerFactory globalIndexerFactory =
-                                    GlobalIndexerFactoryUtils.load(indexType);
-                            GlobalIndexer globalIndexer =
-                                    globalIndexerFactory.create(
-                                            columnIdToDataField.get(fieldId).type(),
-                                            new Options(fileStoreTable.options()));
-                            readers.add(
-                                    globalIndexer.createReader(globalIndexFileInputHelper, metas));
+    private GlobalIndexPredicate getGlobalIndexPredicate() {
+        if (globalIndexPredicate == null) {
+            Function<Integer, Collection<GlobalIndexLeafPredicator>> readerFunction =
+                    fieldId -> {
+                        if (!indexMetas.containsKey(fieldId)) {
+                            return Collections.emptyList();
                         }
-                    } catch (IOException e) {
-                        throw new RuntimeException("Failed to create global index reader", e);
-                    }
+                        Map<String, List<IndexFileMeta>> indexMetas = this.indexMetas.get(fieldId);
 
-                    return readers;
-                };
-        try (GlobalIndexPredicate globalIndexPredicate =
-                new GlobalIndexPredicate(readerFunction, fileStoreTable.rowType())) {
-            return globalIndexPredicate.evaluate(predicate);
+                        Set<GlobalIndexLeafPredicator> readers = new HashSet<>();
+                        try {
+                            for (Map.Entry<String, List<IndexFileMeta>> entry :
+                                    indexMetas.entrySet()) {
+                                String indexType = entry.getKey();
+                                List<IndexFileMeta> metas = entry.getValue();
+                                GlobalIndexerFactory globalIndexerFactory =
+                                        GlobalIndexerFactoryUtils.load(indexType);
+                                GlobalIndexer globalIndexer =
+                                        globalIndexerFactory.create(
+                                                columnIdToDataField.get(fieldId).type(),
+                                                new Options(fileStoreTable.options()));
+                                readers.add(
+                                        globalIndexer.createReader(
+                                                globalIndexFileInputHelper, metas));
+                            }
+                        } catch (IOException e) {
+                            throw new RuntimeException("Failed to create global index reader", e);
+                        }
+
+                        return readers;
+                    };
+
+            globalIndexPredicate =
+                    new GlobalIndexPredicate(readerFunction, fileStoreTable.rowType());
+        }
+        return globalIndexPredicate;
+    }
+
+    @Override
+    public void close() throws IOException {
+        if (globalIndexPredicate != null) {
+            globalIndexPredicate.close();
         }
     }
 }
