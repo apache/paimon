@@ -112,18 +112,33 @@ public class BitmapWriterHelper<BITMAP> {
                     }
                 });
 
-        // 3. Create and serialize meta
-        BitmapFileIndexMeta bitmapFileIndexMeta =
-                new BitmapFileIndexMetaV2(
-                        dataType,
-                        options,
-                        rowCount,
-                        id2bitmap.size(),
-                        hasNull,
-                        nullOffset,
-                        nullBitmapLength,
-                        bitmapOffsets,
-                        offsetRef[0]);
+        // 3. Create and serialize meta based on version
+        BitmapFileIndexMeta bitmapFileIndexMeta;
+        if (version == 1) {
+            // VERSION_1: Use BitmapFileIndexMeta without null bitmap length
+            bitmapFileIndexMeta =
+                    new BitmapFileIndexMeta(
+                            dataType,
+                            options,
+                            rowCount,
+                            id2bitmap.size(),
+                            hasNull,
+                            nullOffset,
+                            bitmapOffsets);
+        } else {
+            // VERSION_2: Use BitmapFileIndexMetaV2 with null bitmap length
+            bitmapFileIndexMeta =
+                    new BitmapFileIndexMetaV2(
+                            dataType,
+                            options,
+                            rowCount,
+                            id2bitmap.size(),
+                            hasNull,
+                            nullOffset,
+                            nullBitmapLength,
+                            bitmapOffsets,
+                            offsetRef[0]);
+        }
 
         bitmapFileIndexMeta.serialize(dos);
 

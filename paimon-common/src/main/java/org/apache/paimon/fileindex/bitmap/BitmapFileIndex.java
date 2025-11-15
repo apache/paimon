@@ -31,7 +31,6 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 
 /** The implementation of bitmap file index. */
@@ -106,62 +105,18 @@ public class BitmapFileIndex implements FileIndexer {
                 int nullOffset =
                         nullBitmap.getCardinality() == 1 ? -1 - nullBitmap.iterator().next() : 0;
 
-                // Special handling for VERSION_1
-                if (version == VERSION_1) {
-                    dos.writeByte(version);
-                    BitmapFileIndexMeta bitmapFileIndexMeta =
-                            new BitmapFileIndexMeta(
-                                    helper.dataType,
-                                    helper.options,
-                                    rowNumber,
-                                    helper.getId2bitmap().size(),
-                                    !nullBitmap.isEmpty(),
-                                    nullOffset,
-                                    buildBitmapOffsets(nullBitmapLength));
-                    bitmapFileIndexMeta.serialize(dos);
-                    writeBody(dos, nullBitmapBytes, nullBitmapLength);
-                } else {
-                    helper.serialize(
-                            dos,
-                            nullBitmapLength > 0 ? nullBitmapBytes : null,
-                            nullBitmapLength,
-                            rowNumber,
-                            !nullBitmap.isEmpty(),
-                            nullOffset);
-                }
+                // Unified serialization for both VERSION_1 and VERSION_2
+                helper.serialize(
+                        dos,
+                        nullBitmapLength > 0 ? nullBitmapBytes : null,
+                        nullBitmapLength,
+                        rowNumber,
+                        !nullBitmap.isEmpty(),
+                        nullOffset);
 
                 return output.toByteArray();
             } catch (Exception e) {
                 throw new RuntimeException(e);
-            }
-        }
-
-        private LinkedHashMap<Object, Integer> buildBitmapOffsets(int nullBitmapLength) {
-            LinkedHashMap<Object, Integer> bitmapOffsets = new LinkedHashMap<>();
-            int[] offsetRef = {nullBitmapLength};
-            helper.getId2bitmap()
-                    .forEach(
-                            (k, v) -> {
-                                if (v.getCardinality() == 1) {
-                                    bitmapOffsets.put(k, -1 - v.iterator().next());
-                                } else {
-                                    byte[] bytes = v.serialize();
-                                    bitmapOffsets.put(k, offsetRef[0]);
-                                    offsetRef[0] += bytes.length;
-                                }
-                            });
-            return bitmapOffsets;
-        }
-
-        private void writeBody(DataOutputStream dos, byte[] nullBitmapBytes, int nullBitmapLength)
-                throws Exception {
-            if (nullBitmapLength > 0) {
-                dos.write(nullBitmapBytes);
-            }
-            for (RoaringBitmap32 bitmap : helper.getId2bitmap().values()) {
-                if (bitmap.getCardinality() > 1) {
-                    dos.write(bitmap.serialize());
-                }
             }
         }
     }
