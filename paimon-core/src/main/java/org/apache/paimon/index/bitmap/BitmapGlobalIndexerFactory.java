@@ -16,18 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index;
+package org.apache.paimon.index.bitmap;
 
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.globalindex.GlobalIndexer;
+import org.apache.paimon.index.globalindex.GlobalIndexerFactory;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataType;
 
-/** Path factory to create an index path. */
-public interface IndexPathFactory {
+public class BitmapGlobalIndexerFactory implements GlobalIndexerFactory {
 
-    Path newPath(String fileName);
+    public static final String IDENTIFIER = "bitmap";
 
-    Path newPath();
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
+    }
 
-    Path toPath(IndexFileMeta file);
-
-    boolean isExternalPath();
+    @Override
+    public GlobalIndexer create(DataType type, Options options) {
+        return new BitmapGlobalIndexer(type, options);
+    }
 }

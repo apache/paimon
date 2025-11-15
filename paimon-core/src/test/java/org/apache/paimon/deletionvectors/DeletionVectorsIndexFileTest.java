@@ -354,6 +354,11 @@ public class DeletionVectorsIndexFileTest {
         Path dir = new Path(tempPath.toUri());
         return new IndexPathFactory() {
             @Override
+            public Path newPath(String fileName) {
+                return new Path(dir, fileName);
+            }
+
+            @Override
             public Path newPath() {
                 return new Path(dir, UUID.randomUUID().toString());
             }

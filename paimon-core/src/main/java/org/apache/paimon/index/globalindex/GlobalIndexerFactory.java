@@ -16,18 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index;
+package org.apache.paimon.index.globalindex;
 
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.fileindex.FileIndexer;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataType;
 
-/** Path factory to create an index path. */
-public interface IndexPathFactory {
+/** File index factory to construct {@link FileIndexer}. */
+public interface GlobalIndexerFactory {
 
-    Path newPath(String fileName);
+    String identifier();
 
-    Path newPath();
-
-    Path toPath(IndexFileMeta file);
-
-    boolean isExternalPath();
+    GlobalIndexer create(DataType type, Options options);
 }

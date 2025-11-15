@@ -19,10 +19,26 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.bitmap.BitmapGlobalIndexerFactory;
+import org.apache.paimon.index.bitmap.GlobalBitmapIndexResult;
+import org.apache.paimon.index.globalindex.GlobaIndexBuilder;
+import org.apache.paimon.index.globalindex.GlobalIndexFileHelper;
+import org.apache.paimon.index.globalindex.GlobalIndexResult;
+import org.apache.paimon.index.globalindex.GlobalIndexScanBuilder;
+import org.apache.paimon.index.globalindex.GlobalIndexer;
+import org.apache.paimon.index.globalindex.GlobalIndexerFactory;
+import org.apache.paimon.index.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.index.globalindex.ShardGlobalIndexScanner;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.DataEvolutionFileReader;
@@ -36,8 +52,10 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
 
@@ -45,10 +63,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /** Test for table with data evolution. */
 public class DataEvolutionTableTest extends TableTestBase {
@@ -639,6 +659,156 @@ public class DataEvolutionTableTest extends TableTestBase {
                     assertThat(r.getString(1).toString()).isEqualTo("a");
                     assertThat(r.getString(2).toString()).isEqualTo("c");
                 });
+    }
+
+    @Test
+    public void testGlobalIndex() throws Exception {
+        createTableDefault();
+        long count = 100000;
+
+        Schema schema = schemaDefault();
+        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0);
+                BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+
+            for (int i = 0; i < count; i++) {
+                write0.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+                write1.write(GenericRow.of(BinaryString.fromString("b" + i)));
+            }
+
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = new ArrayList<>();
+            commitables.addAll(write0.prepareCommit());
+            commitables.addAll(write1.prepareCommit());
+            setFirstRowId(commitables, 0L);
+            commit.commit(commitables);
+        }
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        FileIO fileIO = table.fileIO();
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withReadType(
+                                SpecialFields.rowTypeWithRowTracking(
+                                        table.rowType().project("f1")));
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        assertThat(reader).isInstanceOf(DataEvolutionFileReader.class);
+
+        GlobalIndexFileHelper globalIndexFileHelper =
+                new GlobalIndexFileHelper(
+                        fileIO,
+                        table.store().pathFactory().indexFileFactory(BinaryRow.EMPTY_ROW, 0));
+
+        DataField indexField = table.rowType().getField("f1");
+
+        GlobalIndexerFactory globalIndexerFactory =
+                GlobalIndexerFactoryUtils.load(BitmapGlobalIndexerFactory.IDENTIFIER);
+        GlobalIndexer globalIndexer = globalIndexerFactory.create(indexField.type(), new Options());
+        GlobaIndexBuilder globaIndexBuilder = globalIndexer.createBuilder(globalIndexFileHelper);
+
+        reader.forEachRemaining(r -> globaIndexBuilder.indexTo(r.getString(0), r.getLong(1)));
+
+        List<Pair<String, byte[]>> results = globaIndexBuilder.end();
+
+        List<IndexFileMeta> indexFileMetaList = new ArrayList<>();
+        for (Pair<String, byte[]> result : results) {
+            String fileName = result.getLeft();
+            byte[] meta = result.getRight();
+            long fileSize = fileIO.getFileSize(globalIndexFileHelper.filePath(fileName));
+            indexFileMetaList.add(
+                    new IndexFileMeta(
+                            BitmapGlobalIndexerFactory.IDENTIFIER,
+                            fileName,
+                            fileSize,
+                            count,
+                            0,
+                            indexField.id(),
+                            meta));
+        }
+
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetaList);
+
+        CommitMessage commitMessage =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        dataIncrement,
+                        CompactIncrement.emptyIncrement());
+
+        table.newBatchWriteBuilder().newCommit().commit(Collections.singletonList(commitMessage));
+
+        Predicate predicate =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a100"));
+
+        List<Long> rowIds = globalIndexScan(table, predicate);
+        assertNotNull(rowIds);
+        assertThat(rowIds.size()).isEqualTo(1);
+        assertThat(rowIds.get(0)).isEqualTo(100L);
+
+        Predicate predicate2 =
+                new PredicateBuilder(table.rowType())
+                        .in(
+                                1,
+                                Arrays.asList(
+                                        BinaryString.fromString("a200"),
+                                        BinaryString.fromString("a300"),
+                                        BinaryString.fromString("a400")));
+
+        rowIds = globalIndexScan(table, predicate2);
+        assertNotNull(rowIds);
+        assertThat(rowIds.size()).isEqualTo(3);
+        assertThat(rowIds).containsExactlyInAnyOrder(200L, 300L, 400L);
+
+        readBuilder = table.newReadBuilder().withRowIds(rowIds);
+
+        List<String> readF1 = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(
+                        row -> {
+                            readF1.add(row.getString(1).toString());
+                        });
+
+        assertThat(readF1).containsExactly("a200", "a300", "a400");
+    }
+
+    private List<Long> globalIndexScan(FileStoreTable table, Predicate predicate) throws Exception {
+        GlobalIndexScanBuilder indexScanBuilder = table.newIndexScanBuilder();
+        Set<Integer> shards = indexScanBuilder.shardList();
+        GlobalIndexResult globalFileIndexResult = GlobalIndexResult.ALL;
+        for (int i = 0; i < shards.size(); i++) {
+            ShardGlobalIndexScanner scanner = indexScanBuilder.withShard(0).build();
+            GlobalIndexResult globalIndexResult = scanner.scan(predicate);
+            globalFileIndexResult = globalFileIndexResult.and(globalIndexResult);
+            if (globalFileIndexResult == GlobalIndexResult.NONE) {
+                break;
+            }
+        }
+
+        List<Long> rowIds = null;
+        if (globalFileIndexResult != GlobalIndexResult.ALL) {
+            final List<Long> finalRowIds = new ArrayList<>();
+            if (globalFileIndexResult instanceof GlobalBitmapIndexResult) {
+                ((GlobalBitmapIndexResult) globalFileIndexResult)
+                        .rowIds()
+                        .forEachRemaining(finalRowIds::add);
+            } else {
+                // Convert Range objects to row IDs
+                globalFileIndexResult
+                        .results()
+                        .forEachRemaining(
+                                range -> {
+                                    range.iterator().forEachRemaining(finalRowIds::add);
+                                });
+            }
+            rowIds = finalRowIds;
+        }
+        return rowIds;
     }
 
     protected Schema schemaDefault() {

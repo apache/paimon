@@ -53,7 +53,10 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                 indexFile.fileSize(),
                 indexFile.rowCount(),
                 dvMetasToRowArrayData(indexFile.dvRanges()),
-                fromString(indexFile.externalPath()));
+                indexFile.externalPath(),
+                record.indexFile().getShard(),
+                record.indexFile().indexFieldId(),
+                record.indexFile().indexMeta());
     }
 
     @Override
@@ -72,6 +75,9 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                         row.getLong(5),
                         row.getLong(6),
                         row.isNullAt(7) ? null : rowArrayDataToDvMetas(row.getArray(7)),
-                        row.isNullAt(8) ? null : row.getString(8).toString()));
+                        row.isNullAt(8) ? null : row.getString(8).toString(),
+                        row.isNullAt(9) ? null : row.getInt(9),
+                        row.isNullAt(10) ? null : row.getInt(10),
+                        row.isNullAt(11) ? null : row.getBinary(11)));
     }
 }
