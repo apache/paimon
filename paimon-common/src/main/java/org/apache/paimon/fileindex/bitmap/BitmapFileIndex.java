@@ -67,13 +67,11 @@ public class BitmapFileIndex implements FileIndexer {
 
     private static class Writer extends FileIndexWriter {
 
-        private final int version;
         private final BitmapWriterHelper<RoaringBitmap32> helper;
-        private final RoaringBitmap32 nullBitmap = new RoaringBitmap32();
         private int rowNumber;
 
         public Writer(DataType dataType, Options options) {
-            this.version = options.getInteger(VERSION, VERSION_2);
+            int version = options.getInteger(VERSION, VERSION_2);
             this.helper =
                     new BitmapWriterHelper<>(
                             version,
@@ -84,11 +82,7 @@ public class BitmapFileIndex implements FileIndexer {
 
         @Override
         public void write(Object key) {
-            if (key == null) {
-                nullBitmap.add(rowNumber++);
-            } else {
-                helper.add(key, rowNumber++);
-            }
+            helper.add(key, rowNumber++);
         }
 
         @Override
@@ -96,24 +90,7 @@ public class BitmapFileIndex implements FileIndexer {
             try {
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
                 DataOutputStream dos = new DataOutputStream(output);
-
-                byte[] nullBitmapBytes = nullBitmap.serialize();
-                int nullBitmapLength =
-                        nullBitmap.isEmpty() || nullBitmap.getCardinality() == 1
-                                ? 0
-                                : nullBitmapBytes.length;
-                int nullOffset =
-                        nullBitmap.getCardinality() == 1 ? -1 - nullBitmap.iterator().next() : 0;
-
-                // Unified serialization for both VERSION_1 and VERSION_2
-                helper.serialize(
-                        dos,
-                        nullBitmapLength > 0 ? nullBitmapBytes : null,
-                        nullBitmapLength,
-                        rowNumber,
-                        !nullBitmap.isEmpty(),
-                        nullOffset);
-
+                helper.serialize(dos, rowNumber);
                 return output.toByteArray();
             } catch (Exception e) {
                 throw new RuntimeException(e);

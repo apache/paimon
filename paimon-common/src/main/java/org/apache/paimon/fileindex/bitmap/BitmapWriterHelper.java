@@ -43,6 +43,7 @@ public class BitmapWriterHelper<BITMAP> {
     protected final Map<Object, BITMAP> id2bitmap = new HashMap<>();
     protected final Options options;
     protected final BitmapOperations<BITMAP> operations;
+    protected final BITMAP nullBitmap;
 
     public BitmapWriterHelper(
             int version, DataType dataType, Options options, BitmapOperations<BITMAP> operations) {
@@ -51,43 +52,51 @@ public class BitmapWriterHelper<BITMAP> {
         this.valueMapper = BitmapIndexUtils.getValueMapper(dataType);
         this.options = options;
         this.operations = operations;
+        this.nullBitmap = operations.createEmptyBitmap();
     }
 
     /**
-     * Adds a value to the bitmap at the specified index.
+     * Adds a value to the bitmap at the specified index. Handles null keys by adding them to the
+     * null bitmap.
      *
-     * @param key the key to map
+     * @param key the key to map (can be null)
      * @param index the bitmap index to set
      */
     public void add(Object key, long index) {
-        Object mappedKey = valueMapper.apply(key);
-        id2bitmap.computeIfAbsent(mappedKey, k -> operations.createEmptyBitmap());
-        operations.addToBitmap(id2bitmap.get(mappedKey), index);
+        if (key == null) {
+            operations.addToBitmap(nullBitmap, index);
+        } else {
+            Object mappedKey = valueMapper.apply(key);
+            id2bitmap.computeIfAbsent(mappedKey, k -> operations.createEmptyBitmap());
+            operations.addToBitmap(id2bitmap.get(mappedKey), index);
+        }
     }
 
     /**
-     * Serializes the bitmaps and metadata to the output stream.
+     * Serializes the bitmaps and metadata to the output stream. Handles null bitmap serialization
+     * internally.
      *
      * @param dos the output stream
-     * @param nullBitmapBytes the serialized null bitmap (null if not applicable)
-     * @param nullBitmapLength the length of null bitmap bytes (0 if not applicable)
      * @param rowCount the total row count
-     * @param hasNull whether null values exist
-     * @param nullOffset the offset for null bitmap (0 or negative encoded value)
      * @throws Exception if serialization fails
      */
-    public void serialize(
-            DataOutputStream dos,
-            byte[] nullBitmapBytes,
-            int nullBitmapLength,
-            int rowCount,
-            boolean hasNull,
-            int nullOffset)
-            throws Exception {
+    public void serialize(DataOutputStream dos, int rowCount) throws Exception {
 
         dos.writeByte(version);
 
-        // 1. Serialize bitmaps to bytes
+        // 1. Prepare null bitmap data
+        byte[] nullBitmapBytes = operations.serializeBitmap(nullBitmap);
+        boolean hasNull = !operations.isEmpty(nullBitmap);
+        int nullBitmapLength =
+                operations.isEmpty(nullBitmap) || operations.getCardinality(nullBitmap) == 1
+                        ? 0
+                        : nullBitmapBytes.length;
+        int nullOffset =
+                operations.getCardinality(nullBitmap) == 1
+                        ? (int) (-1 - operations.getFirstValue(nullBitmap))
+                        : 0;
+
+        // 2. Serialize bitmaps to bytes
         Map<Object, byte[]> id2bitmapBytes =
                 id2bitmap.entrySet().stream()
                         .collect(
@@ -95,7 +104,7 @@ public class BitmapWriterHelper<BITMAP> {
                                         Map.Entry::getKey,
                                         e -> operations.serializeBitmap(e.getValue())));
 
-        // 2. Build bitmap file index meta
+        // 3. Build bitmap file index meta
         LinkedHashMap<Object, Integer> bitmapOffsets = new LinkedHashMap<>();
         LinkedList<byte[]> serializeBitmaps = new LinkedList<>();
         int[] offsetRef = {nullBitmapLength};
@@ -112,7 +121,7 @@ public class BitmapWriterHelper<BITMAP> {
                     }
                 });
 
-        // 3. Create and serialize meta based on version
+        // 4. Create and serialize meta based on version
         BitmapFileIndexMeta bitmapFileIndexMeta;
         if (version == 1) {
             // VERSION_1: Use BitmapFileIndexMeta without null bitmap length
@@ -142,8 +151,8 @@ public class BitmapWriterHelper<BITMAP> {
 
         bitmapFileIndexMeta.serialize(dos);
 
-        // 4. Serialize body
-        if (nullBitmapBytes != null && nullBitmapLength > 0) {
+        // 5. Serialize body
+        if (nullBitmapLength > 0) {
             dos.write(nullBitmapBytes);
         }
         for (byte[] bytes : serializeBitmaps) {
@@ -166,6 +175,8 @@ public class BitmapWriterHelper<BITMAP> {
         long getCardinality(BITMAP bitmap);
 
         long getFirstValue(BITMAP bitmap);
+
+        boolean isEmpty(BITMAP bitmap);
     }
 
     /** Operations for RoaringBitmap32. */
@@ -196,6 +207,11 @@ public class BitmapWriterHelper<BITMAP> {
         public long getFirstValue(org.apache.paimon.utils.RoaringBitmap32 bitmap) {
             return bitmap.iterator().next();
         }
+
+        @Override
+        public boolean isEmpty(org.apache.paimon.utils.RoaringBitmap32 bitmap) {
+            return bitmap.isEmpty();
+        }
     }
 
     /** Operations for RoaringBitmap64. */
@@ -225,6 +241,11 @@ public class BitmapWriterHelper<BITMAP> {
         @Override
         public long getFirstValue(org.apache.paimon.utils.RoaringBitmap64 bitmap) {
             return bitmap.iterator().next();
+        }
+
+        @Override
+        public boolean isEmpty(org.apache.paimon.utils.RoaringBitmap64 bitmap) {
+            return bitmap.isEmpty();
         }
     }
 }

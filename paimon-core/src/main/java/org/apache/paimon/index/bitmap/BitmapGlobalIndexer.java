@@ -74,7 +74,6 @@ public class BitmapGlobalIndexer extends GlobalIndexer {
     private static class Writer extends GlobaIndexBuilder {
 
         private final BitmapWriterHelper<RoaringBitmap64> helper;
-        private final RoaringBitmap64 nullBitmap = new RoaringBitmap64();
         private int rowCount = 0;
 
         public Writer(
@@ -92,11 +91,7 @@ public class BitmapGlobalIndexer extends GlobalIndexer {
         @Override
         public void indexTo(Object key, long rowId) {
             rowCount++;
-            if (key == null) {
-                nullBitmap.add(rowId);
-            } else {
-                helper.add(key, rowId);
-            }
+            helper.add(key, rowId);
         }
 
         @Override
@@ -104,23 +99,7 @@ public class BitmapGlobalIndexer extends GlobalIndexer {
             String outputFileName = globalIndexFileHelper.newFileName("bitmap");
             try (DataOutputStream dos =
                     new DataOutputStream(globalIndexFileHelper.newOutputStream(outputFileName))) {
-                byte[] nullBitmapBytes = nullBitmap.serialize();
-                int nullBitmapLength =
-                        nullBitmap.isEmpty() || nullBitmap.getCardinality() == 1
-                                ? 0
-                                : nullBitmapBytes.length;
-                int nullOffset =
-                        nullBitmap.getCardinality() == 1
-                                ? (int) (-1 - nullBitmap.iterator().next())
-                                : 0;
-
-                helper.serialize(
-                        dos,
-                        nullBitmapLength > 0 ? nullBitmapBytes : null,
-                        nullBitmapLength,
-                        rowCount,
-                        !nullBitmap.isEmpty(),
-                        nullOffset);
+                helper.serialize(dos, rowCount);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
