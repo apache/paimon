@@ -296,7 +296,7 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
   }
 
   // https://github.com/apache/paimon/issues/6610
-  test("Push down aggregate - MIN/MAX of a column which in one partition is all null and the other is not") {
+  test("Push down aggregate: aggregate a column in one partition is all null and another is not") {
     withTable("T") {
       spark.sql("CREATE TABLE T (c1 INT, c2 LONG) PARTITIONED BY(day STRING)")
 
