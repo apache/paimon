@@ -789,11 +789,12 @@ public class DataEvolutionTableTest extends TableTestBase {
         Set<Integer> shards = indexScanBuilder.shardList();
         GlobalIndexResult globalFileIndexResult = GlobalIndexResult.ALL;
         for (int i = 0; i < shards.size(); i++) {
-            ShardGlobalIndexScanner scanner = indexScanBuilder.withShard(0).build();
-            GlobalIndexResult globalIndexResult = scanner.scan(predicate);
-            globalFileIndexResult = globalFileIndexResult.and(globalIndexResult);
-            if (globalFileIndexResult == GlobalIndexResult.NONE) {
-                break;
+            try (ShardGlobalIndexScanner scanner = indexScanBuilder.withShard(0).build()) {
+                GlobalIndexResult globalIndexResult = scanner.scan(predicate);
+                globalFileIndexResult = globalFileIndexResult.and(globalIndexResult);
+                if (globalFileIndexResult == GlobalIndexResult.NONE) {
+                    break;
+                }
             }
         }
 
