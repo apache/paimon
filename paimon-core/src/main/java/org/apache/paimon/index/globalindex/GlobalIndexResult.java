@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.Set;
 
+/** Result of a global index query. */
 public interface GlobalIndexResult {
 
     GlobalIndexResult ALL =

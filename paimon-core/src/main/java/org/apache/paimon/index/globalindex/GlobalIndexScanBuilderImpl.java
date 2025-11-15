@@ -29,6 +29,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/** Implementation of {@link GlobalIndexScanBuilder}. */
 public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
 
     private final FileStoreTable fileStoreTable;

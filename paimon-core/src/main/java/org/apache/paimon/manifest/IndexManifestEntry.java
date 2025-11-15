@@ -132,20 +132,4 @@ public class IndexManifestEntry {
                 + indexFile
                 + '}';
     }
-
-    public enum IndexKind {
-        GLOBAL_INDEX(0),
-        DELETION_VECTOR_INDEX(1),
-        OTHER(2);
-
-        private final int value;
-
-        IndexKind(int value) {
-            this.value = value;
-        }
-
-        public int getValue() {
-            return value;
-        }
-    }
 }

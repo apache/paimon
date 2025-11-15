@@ -47,6 +47,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.index.globalindex.GlobalIndexResult.ALL;
 
+/** Predicate for filtering data using global indexes. */
 public class GlobalIndexPredicate implements Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(GlobalIndexPredicate.class);
