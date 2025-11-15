@@ -132,7 +132,7 @@ public interface FileStoreTable extends DataTable {
 
     RowKeyExtractor createRowKeyExtractor();
 
-    /** Returns a new global index scan builder */
+    /** Returns a new global index scan builder. */
     default GlobalIndexScanBuilder newIndexScanBuilder() {
         return new GlobalIndexScanBuilderImpl(this);
     }

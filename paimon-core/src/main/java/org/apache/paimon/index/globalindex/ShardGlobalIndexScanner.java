@@ -41,6 +41,7 @@ import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
+/** Scanner for shard-based global indexes. */
 public class ShardGlobalIndexScanner {
 
     private final FileStoreTable fileStoreTable;

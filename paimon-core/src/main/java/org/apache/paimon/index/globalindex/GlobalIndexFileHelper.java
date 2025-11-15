@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.UUID;
 
+/** Helper class for managing global index files. */
 public class GlobalIndexFileHelper {
 
     private final FileIO fileIO;

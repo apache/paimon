@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 
 import java.util.Set;
 
+/** Builder for scanning global indexes. */
 public interface GlobalIndexScanBuilder {
 
     GlobalIndexScanBuilder withSnapshot(long snapshotId);

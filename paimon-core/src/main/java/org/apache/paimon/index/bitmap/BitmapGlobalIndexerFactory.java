@@ -23,6 +23,7 @@ import org.apache.paimon.index.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
+/** Factory for creating bitmap global indexers. */
 public class BitmapGlobalIndexerFactory implements GlobalIndexerFactory {
 
     public static final String IDENTIFIER = "bitmap";

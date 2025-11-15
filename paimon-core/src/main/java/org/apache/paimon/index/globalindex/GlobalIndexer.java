@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataType;
 import java.io.IOException;
 import java.util.List;
 
+/** Abstract base class for global indexers. */
 public abstract class GlobalIndexer {
 
     public abstract GlobaIndexBuilder createBuilder(GlobalIndexFileHelper globalIndexFileGenerator)
