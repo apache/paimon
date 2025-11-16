@@ -143,7 +143,7 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
                         + "thousands of tables (jobs may fail to start within timeout limits). "
                         + "It also reduces JobGraph complexity and avoids stack over flow issue and resource allocation failures during job running. "
                         + "When '--mode divided', create one DataStream per table during job graph construction. "
-                        + "Default is 'divided'.");
+                        + "Default is 'combined'.");
         System.out.println();
     }
 }
