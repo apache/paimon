@@ -49,7 +49,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -797,6 +799,122 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                 readBuilder.newRead(),
                 plan == null ? Collections.emptyList() : plan.splits(),
                 rowType);
+    }
+
+    @org.junit.jupiter.api.Test
+    public void testOrphanCleanWithExternalPath() throws Exception {
+        long fileCreationTime = System.currentTimeMillis();
+
+        String externalPath = getTempDirPath("external-path");
+        String externalPathUri = "file://" + externalPath;
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), externalPathUri);
+        options.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(),
+                CoreOptions.ExternalPathStrategy.ROUND_ROBIN.toString());
+
+        FileStoreTable table =
+                createFileStoreTable(
+                        "externalPathTable",
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        options);
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+
+        FileIO fileIO = table.fileIO();
+        Path externalOrphanFile = new Path(externalPath, "bucket-0/orphan_file_external");
+        fileIO.writeFile(externalOrphanFile, "external_orphan_data", true);
+
+        Path tableOrphanFile = getOrphanFilePath(table, ORPHAN_FILE_1);
+        fileIO.writeFile(tableOrphanFile, "table_orphan_data", true);
+
+        Thread.sleep(2000);
+
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(
+                                Math.max(
+                                        fileCreationTime + 1000,
+                                        System.currentTimeMillis() - 1000)),
+                        3);
+
+        List<String> argsDivided =
+                Arrays.asList(
+                        "remove_orphan_files",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        "externalPathTable",
+                        "--mode",
+                        "divided",
+                        "--older_than",
+                        olderThan,
+                        "--dry_run",
+                        "false");
+        RemoveOrphanFilesAction actionDivided =
+                createAction(RemoveOrphanFilesAction.class, argsDivided);
+        assertThatCode(actionDivided::run).doesNotThrowAnyException();
+
+        assertThat(fileIO.exists(tableOrphanFile))
+                .as("Table location orphan file should be deleted in divided mode")
+                .isFalse();
+        assertThat(fileIO.exists(externalOrphanFile))
+                .as("External path orphan file should be deleted in divided mode")
+                .isFalse();
+
+        fileIO.writeFile(externalOrphanFile, "external_orphan_data", true);
+        fileIO.writeFile(tableOrphanFile, "table_orphan_data", true);
+        Thread.sleep(2000);
+
+        // Recalculate olderThan after recreating orphan files
+        // Use current time minus 1 second to ensure the newly created files are old enough
+        long currentTime = System.currentTimeMillis();
+        String olderThanForCombined =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(currentTime - 1000), 3);
+
+        List<String> argsCombined =
+                Arrays.asList(
+                        "remove_orphan_files",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        "externalPathTable",
+                        "--mode",
+                        "combined",
+                        "--older_than",
+                        olderThanForCombined,
+                        "--dry_run",
+                        "false");
+        RemoveOrphanFilesAction actionCombined =
+                createAction(RemoveOrphanFilesAction.class, argsCombined);
+        assertThatCode(actionCombined::run).doesNotThrowAnyException();
+
+        assertThat(fileIO.exists(tableOrphanFile))
+                .as("Table location orphan file should be deleted in combined mode")
+                .isFalse();
+        assertThat(fileIO.exists(externalOrphanFile))
+                .as("External path orphan file should be deleted in combined mode")
+                .isFalse();
+
+        assertThat(readTableData(table)).containsExactly("+I[1, Hi]");
     }
 
     protected boolean supportNamedArgument() {

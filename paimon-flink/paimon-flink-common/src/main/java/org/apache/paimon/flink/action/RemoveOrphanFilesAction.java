@@ -35,7 +35,6 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
-import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
 import static org.apache.paimon.operation.OrphanFilesClean.olderThanMillis;
 
 /** Action to remove the orphan data files and metadata files. */
@@ -49,7 +48,7 @@ public class RemoveOrphanFilesAction extends ActionBase {
 
     private String olderThan = null;
     private boolean dryRun = false;
-    private MultiTablesSinkMode mode = DIVIDED;
+    private MultiTablesSinkMode mode = COMBINED;
 
     public RemoveOrphanFilesAction(
             String databaseName,

@@ -101,8 +101,18 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
             FlinkOrphanFilesClean cleaner = cleanerMap.get(tableIdentifier.getFullName());
             FileStoreTable table = cleaner.getTable();
             if (Objects.nonNull(table)) {
+                // Add table location
                 String tableLocation = table.location().toUri().getPath();
                 this.locationToCleanerMap.put(tableLocation, cleaner);
+                // Add external paths if they exist
+                String externalPaths = table.coreOptions().dataFileExternalPaths();
+                if (externalPaths != null && !externalPaths.isEmpty()) {
+                    String[] externalPathArr = externalPaths.split(",");
+                    for (String externalPathStr : externalPathArr) {
+                        String externalPath = new Path(externalPathStr.trim()).toUri().getPath();
+                        this.locationToCleanerMap.put(externalPath, cleaner);
+                    }
+                }
             }
         }
     }
