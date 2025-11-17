@@ -45,7 +45,7 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 record.fileSize(),
                 record.rowCount(),
                 dvMetasToRowArrayData(record.dvRanges()),
-                record.externalPath(),
+                fromString(record.externalPath()),
                 record.getShard(),
                 record.indexFieldId(),
                 record.indexMeta());
