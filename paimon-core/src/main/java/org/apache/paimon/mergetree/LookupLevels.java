@@ -68,6 +68,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private final Function<Long, BloomFilter.Builder> bfGenerator;
     private final Cache<String, LookupFile> lookupFileCache;
     private final Set<String> ownCachedFiles;
+    private final String remoteSstSuffix;
 
     @Nullable private RemoteFileDownloader remoteFileDownloader;
 
@@ -91,6 +92,12 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         this.bfGenerator = bfGenerator;
         this.lookupFileCache = lookupFileCache;
         this.ownCachedFiles = new HashSet<>();
+        this.remoteSstSuffix =
+                "."
+                        + persistProcessor.identifier()
+                        + "."
+                        + CURRENT_VERSION
+                        + REMOTE_LOOKUP_FILE_SUFFIX;
         levels.addDropFileCallback(this);
     }
 
@@ -214,13 +221,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         }
     }
 
-    public String remoteSstName(String dataFileName) {
-        return dataFileName
-                + "."
-                + persistProcessor.identifier()
-                + "."
-                + CURRENT_VERSION
-                + REMOTE_LOOKUP_FILE_SUFFIX;
+    public String remoteSstSuffix() {
+        return remoteSstSuffix;
     }
 
     @Override
