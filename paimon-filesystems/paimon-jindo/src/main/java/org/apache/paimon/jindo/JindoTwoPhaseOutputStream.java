@@ -22,16 +22,14 @@ import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
 import org.apache.paimon.fs.Path;
 
-import com.aliyun.jindodata.api.spec.protos.JdoObjectPart;
-
 import java.io.IOException;
 
 /** Jindo implementation of TwoPhaseOutputStream using multipart upload. */
 public class JindoTwoPhaseOutputStream
-        extends MultiPartUploadTwoPhaseOutputStream<JdoObjectPart, String> {
+        extends MultiPartUploadTwoPhaseOutputStream<SerializableJdoObjectPart, String> {
 
     public JindoTwoPhaseOutputStream(
-            MultiPartUploadStore<JdoObjectPart, String> multiPartUploadStore,
+            MultiPartUploadStore<SerializableJdoObjectPart, String> multiPartUploadStore,
             org.apache.hadoop.fs.Path hadoopPath,
             Path targetPath)
             throws IOException {

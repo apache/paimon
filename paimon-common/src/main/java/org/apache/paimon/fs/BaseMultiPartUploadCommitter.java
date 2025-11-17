@@ -18,6 +18,7 @@
 
 package org.apache.paimon.fs;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.rest.RESTTokenFileIO;
 
 import org.slf4j.Logger;
@@ -32,7 +33,7 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
 
     private static final Logger LOG = LoggerFactory.getLogger(BaseMultiPartUploadCommitter.class);
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private final String uploadId;
     private final String objectName;
@@ -80,6 +81,11 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     @Override
     public Path targetPath() {
         return this.targetPath;
+    }
+
+    @VisibleForTesting
+    public List<T> uploadedParts() {
+        return uploadedParts;
     }
 
     @Override
