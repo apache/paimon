@@ -214,12 +214,11 @@ public class RescaleProcedure extends BaseProcedure {
 
     private int currentBucketNum(
             FileStoreTable table, Snapshot snapshot, PartitionPredicate partitionPredicate) {
-        Iterator<ManifestEntry> it =
-                table.newSnapshotReader()
-                        .withSnapshot(snapshot)
-                        .withPartitionFilter(partitionPredicate)
-                        .onlyReadRealBuckets()
-                        .readFileIterator();
+        SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshot);
+        if (partitionPredicate != null) {
+            snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);
+        }
+        Iterator<ManifestEntry> it = snapshotReader.onlyReadRealBuckets().readFileIterator();
         checkArgument(
                 it.hasNext(),
                 "The specified partition does not have any data files. No need to rescale.");
