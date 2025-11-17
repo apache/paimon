@@ -239,7 +239,7 @@ public class CatalogUtils {
         Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
 
         if (options.type() == TableType.FORMAT_TABLE) {
-            return toFormatTable(identifier, schema, dataFileIO);
+            return toFormatTable(identifier, schema, dataFileIO, catalogContext);
         }
 
         if (options.type() == TableType.OBJECT_TABLE) {
@@ -379,7 +379,10 @@ public class CatalogUtils {
     }
 
     private static FormatTable toFormatTable(
-            Identifier identifier, TableSchema schema, Function<Path, FileIO> fileIO) {
+            Identifier identifier,
+            TableSchema schema,
+            Function<Path, FileIO> fileIO,
+            CatalogContext catalogContext) {
         Map<String, String> options = schema.options();
         FormatTable.Format format =
                 FormatTable.parseFormat(
@@ -396,6 +399,7 @@ public class CatalogUtils {
                 .format(format)
                 .options(options)
                 .comment(schema.comment())
+                .catalogContext(catalogContext)
                 .build();
     }
 

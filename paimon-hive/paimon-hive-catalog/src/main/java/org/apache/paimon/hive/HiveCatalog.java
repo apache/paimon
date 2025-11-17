@@ -516,13 +516,7 @@ public class HiveCatalog extends AbstractCatalog {
         String tagToPartitionField = table.coreOptions().tagToPartitionField();
         if (tagToPartitionField != null) {
             try {
-                List<Partition> partitions =
-                        clients.run(
-                                client ->
-                                        client.listPartitions(
-                                                identifier.getDatabaseName(),
-                                                identifier.getTableName(),
-                                                Short.MAX_VALUE));
+                List<Partition> partitions = listPartitionsFromHms(identifier);
                 return partitions.stream()
                         .map(
                                 part -> {
@@ -556,6 +550,17 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
         return listPartitionsFromFileSystem(table);
+    }
+
+    @VisibleForTesting
+    public List<Partition> listPartitionsFromHms(Identifier identifier)
+            throws TException, InterruptedException {
+        return clients.run(
+                client ->
+                        client.listPartitions(
+                                identifier.getDatabaseName(),
+                                identifier.getTableName(),
+                                Short.MAX_VALUE));
     }
 
     private List<Map<String, String>> removePartitionsExistsInOtherBranches(

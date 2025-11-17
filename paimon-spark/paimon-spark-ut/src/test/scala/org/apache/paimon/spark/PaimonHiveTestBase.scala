@@ -31,8 +31,6 @@ import java.io.File
 
 class PaimonHiveTestBase extends PaimonSparkTestBase {
 
-  import PaimonHiveTestBase._
-
   protected lazy val tempHiveDBDir: File = Utils.createTempDir
 
   protected lazy val testHiveMetastore: TestHiveMetastore = new TestHiveMetastore
@@ -42,6 +40,8 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
   protected val paimonHiveCatalogName: String = "paimon_hive"
 
   protected val hiveDbName: String = "test_hive"
+
+  val hiveUri: String = PaimonHiveTestBase.hiveUri
 
   /**
    * Add spark_catalog ([[SparkGenericCatalog]] in hive) and paimon_hive ([[SparkCatalog]] in hive)
@@ -61,7 +61,7 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
   }
 
   override protected def beforeAll(): Unit = {
-    testHiveMetastore.start(hivePort)
+    testHiveMetastore.start(PaimonHiveTestBase.hivePort)
     super.beforeAll()
     spark.sql(s"USE $sparkCatalogName")
     spark.sql(s"CREATE DATABASE IF NOT EXISTS $hiveDbName")

@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -68,6 +69,8 @@ public interface FormatTable extends Table {
     @Override
     FormatTable copy(Map<String, String> dynamicOptions);
 
+    CatalogContext catalogContext();
+
     /** Currently supported formats. */
     enum Format {
         ORC,
@@ -105,6 +108,7 @@ public interface FormatTable extends Table {
         private Format format;
         private Map<String, String> options;
         @Nullable private String comment;
+        private CatalogContext catalogContext;
 
         public Builder fileIO(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -146,9 +150,22 @@ public interface FormatTable extends Table {
             return this;
         }
 
+        public Builder catalogContext(CatalogContext catalogContext) {
+            this.catalogContext = catalogContext;
+            return this;
+        }
+
         public FormatTable build() {
             return new FormatTableImpl(
-                    fileIO, identifier, rowType, partitionKeys, location, format, options, comment);
+                    fileIO,
+                    identifier,
+                    rowType,
+                    partitionKeys,
+                    location,
+                    format,
+                    options,
+                    comment,
+                    catalogContext);
         }
     }
 
@@ -165,6 +182,7 @@ public interface FormatTable extends Table {
         private final Format format;
         private final Map<String, String> options;
         @Nullable private final String comment;
+        private CatalogContext catalogContext;
 
         public FormatTableImpl(
                 FileIO fileIO,
@@ -174,7 +192,8 @@ public interface FormatTable extends Table {
                 String location,
                 Format format,
                 Map<String, String> options,
-                @Nullable String comment) {
+                @Nullable String comment,
+                CatalogContext catalogContext) {
             this.fileIO = fileIO;
             this.identifier = identifier;
             this.rowType = rowType;
@@ -183,6 +202,7 @@ public interface FormatTable extends Table {
             this.format = format;
             this.options = options;
             this.comment = comment;
+            this.catalogContext = catalogContext;
         }
 
         @Override
@@ -247,7 +267,13 @@ public interface FormatTable extends Table {
                     location,
                     format,
                     newOptions,
-                    comment);
+                    comment,
+                    catalogContext);
+        }
+
+        @Override
+        public CatalogContext catalogContext() {
+            return this.catalogContext;
         }
     }
 
