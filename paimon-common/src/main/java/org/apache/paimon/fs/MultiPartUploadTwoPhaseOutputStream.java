@@ -84,9 +84,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         }
         buffer.write(b);
         position++;
-        if (buffer.size() >= partSizeThreshold()) {
-            uploadPart();
-        }
+        uploadPartIfLargerThanThreshold();
     }
 
     @Override
@@ -102,9 +100,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         int remaining = len;
         int offset = off;
         while (remaining > 0) {
-            if (buffer.size() >= partSizeThreshold()) {
-                uploadPart();
-            }
+            uploadPartIfLargerThanThreshold();
             int currentSize = buffer.size();
             int space = partSizeThreshold() - currentSize;
             int count = Math.min(remaining, space);
@@ -112,10 +108,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             offset += count;
             remaining -= count;
             position += count;
-            // consume buffer if it is full
-            if (buffer.size() >= partSizeThreshold()) {
-                uploadPart();
-            }
+            uploadPartIfLargerThanThreshold();
         }
     }
 
@@ -124,7 +117,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         if (closed) {
             throw new IOException("Stream is closed");
         }
-        uploadPart();
+        uploadPartIfLargerThanThreshold();
     }
 
     @Override
@@ -142,15 +135,18 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             throw new IOException("Stream is already closed but committer is null");
         }
         closed = true;
-
-        if (buffer.size() > 0) {
-            uploadPart();
-        }
-
+        // Only last upload part can be smaller than part size threshold
+        uploadPartUtil();
         return committer();
     }
 
-    private void uploadPart() throws IOException {
+    private void uploadPartIfLargerThanThreshold() throws IOException {
+        if (buffer.size() >= partSizeThreshold()) {
+            uploadPartUtil();
+        }
+    }
+
+    private void uploadPartUtil() throws IOException {
         if (buffer.size() == 0) {
             return;
         }
