@@ -45,6 +45,21 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Format table: check partition sync") {
+    val tableName = "t"
+    withTable(tableName) {
+      sql(s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (`ds` bigint)")
+      sql(s"INSERT INTO $tableName VALUES (1, 2023)")
+      checkAnswer(sql(s"SELECT * FROM $tableName"), Seq(Row(1, 2023)))
+      checkAnswer(sql(s"show partitions `$tableName`"), Nil)
+      sql(
+        s"Alter table $tableName SET TBLPROPERTIES ('format-table.commit-hive-sync-url'='$hiveUri')")
+      sql(s"INSERT INTO $tableName VALUES (1, 2024)")
+      checkAnswer(sql(s"SELECT * FROM $tableName where ds = 2024"), Seq(Row(1, 2024)))
+      checkAnswer(sql(s"show partitions `$tableName`"), Seq(Row(2024)))
+    }
+  }
+
   test("Format table: write partitioned table") {
     for (
       (format, compression) <- Seq(

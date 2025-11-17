@@ -20,7 +20,6 @@ package org.apache.paimon.privilege;
 
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
@@ -83,11 +82,6 @@ public class PrivilegedCatalog extends DelegateCatalog {
     @Override
     public CatalogLoader catalogLoader() {
         return new PrivilegedCatalogLoader(wrapped.catalogLoader(), privilegeManagerLoader);
-    }
-
-    @Override
-    public CatalogContext catalogContext() {
-        return wrapped.catalogContext();
     }
 
     @Override

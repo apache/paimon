@@ -99,11 +99,6 @@ public abstract class AbstractCatalog implements Catalog {
         return context.options().toMap();
     }
 
-    @Override
-    public CatalogContext catalogContext() {
-        return this.context;
-    }
-
     public abstract String warehouse();
 
     public FileIO fileIO() {

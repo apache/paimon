@@ -125,11 +125,6 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public CatalogContext catalogContext() {
-        return this.context;
-    }
-
-    @Override
     public List<String> listDatabases() {
         return api.listDatabases();
     }

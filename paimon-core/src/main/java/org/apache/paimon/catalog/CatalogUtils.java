@@ -239,7 +239,7 @@ public class CatalogUtils {
         Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
 
         if (options.type() == TableType.FORMAT_TABLE) {
-            return toFormatTable(identifier, schema, dataFileIO, catalog.catalogContext());
+            return toFormatTable(identifier, schema, dataFileIO, catalogContext);
         }
 
         if (options.type() == TableType.OBJECT_TABLE) {

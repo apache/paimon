@@ -160,11 +160,6 @@ public class CachingCatalog extends DelegateCatalog {
     }
 
     @Override
-    public CatalogContext catalogContext() {
-        return wrapped.catalogContext();
-    }
-
-    @Override
     public Database getDatabase(String databaseName) throws DatabaseNotExistException {
         Database database = databaseCache.getIfPresent(databaseName);
         if (database != null) {
