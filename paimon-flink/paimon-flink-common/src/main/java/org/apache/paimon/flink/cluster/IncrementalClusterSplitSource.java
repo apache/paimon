@@ -116,7 +116,8 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
                                         table.fullName(), partitionSpec),
                                 InternalTypeInfo.of(
                                         LogicalTypeConversion.toLogicalType(table.rowType())),
-                                new ReadOperator(table::newRead, null, null)),
+                                new ReadOperator(table::newRead, null, null))
+                        .setParallelism(partitioned.getParallelism()),
                 source.forward()
                         .transform(
                                 "Remove files to be clustered",
