@@ -39,7 +39,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.StartupMode;
@@ -57,7 +56,7 @@ public class LookupDataTableScan extends DataTableStreamScan {
     private final StartupMode startupMode;
     private final LookupStreamScanMode lookupScanMode;
 
-    private List<BinaryRow> scanPartitions = Collections.emptyList();
+    @Nullable private List<BinaryRow> scanPartitions = null;
 
     public LookupDataTableScan(
             FileStoreTable table,
@@ -105,7 +104,7 @@ public class LookupDataTableScan extends DataTableStreamScan {
     }
 
     private boolean shouldReopen(Snapshot snapshot) {
-        if (scanPartitions.isEmpty()) {
+        if (scanPartitions == null) {
             return true;
         }
 
