@@ -22,10 +22,10 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarBinaryType;
 
 import javax.annotation.Nullable;
 
@@ -56,16 +56,30 @@ public class IndexFileMeta {
                                     "_DELETIONS_VECTORS_RANGES",
                                     new ArrayType(true, DeletionVectorMeta.SCHEMA)),
                             new DataField(5, "_EXTERNAL_PATH", newStringType(true)),
-                            new DataField(6, "_SHARD", new IntType(true)),
-                            new DataField(7, "_INDEX_FIELD_ID", new IntType(true)),
-                            new DataField(8, "_INDEX_META", new BinaryType())));
+                            new DataField(
+                                    6,
+                                    "_GLOBAL_INDEX",
+                                    new RowType(
+                                            false,
+                                            Arrays.asList(
+                                                    new DataField(0, "_ROW_RANGE_START", new BigIntType(true)),
+                                                    new DataField(1, "_ROW_RANGE_END", new BigIntType(true)),
+                                                    new DataField(
+                                                            2,
+                                                            "_INDEX_FIELD_ID",
+                                                            new IntType(true)),
+                                                    new DataField(
+                                                            3,
+                                                            "_INDEX_META",
+                                                            new VarBinaryType()))))));
 
     private final String indexType;
     private final String fileName;
     private final long fileSize;
     private final long rowCount;
 
-    @Nullable private final Integer shard;
+    @Nullable private final Long rowRangeStart;
+    @Nullable private final Long rowRangeEnd;
     @Nullable private final Integer indexFieldId;
     @Nullable private final byte[] indexMeta;
 
@@ -92,7 +106,7 @@ public class IndexFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
-            @Nullable Integer shard,
+            @Nullable Long shard,
             @Nullable Integer indexFieldId,
             @Nullable byte[] indexMeta) {
         this(indexType, fileName, fileSize, rowCount, null, null, shard, indexFieldId, indexMeta);
