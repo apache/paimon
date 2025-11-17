@@ -48,7 +48,8 @@ case class PaimonScan(
     filters,
     reservedFilters,
     pushDownLimit,
-    pushDownTopN)
+    pushDownTopN,
+    bucketedScanDisabled)
   with SupportsRuntimeV2Filtering {
   def disableBucketedScan(): PaimonScan = {
     copy(bucketedScanDisabled = true)
