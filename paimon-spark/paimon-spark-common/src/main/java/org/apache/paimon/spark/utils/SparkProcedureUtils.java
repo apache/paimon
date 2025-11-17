@@ -22,6 +22,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionUtils;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.SparkSession;
@@ -34,6 +35,8 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -87,5 +90,21 @@ public class SparkProcedureUtils {
                     readParallelism);
         }
         return readParallelism;
+    }
+
+    public static String toWhere(String partitions) {
+        List<Map<String, String>> maps = ParameterUtils.getPartitions(partitions.split(";"));
+
+        return maps.stream()
+                .map(
+                        a ->
+                                a.entrySet().stream()
+                                        .map(entry -> entry.getKey() + "=" + entry.getValue())
+                                        .reduce((s0, s1) -> s0 + " AND " + s1))
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .map(a -> "(" + a + ")")
+                .reduce((a, b) -> a + " OR " + b)
+                .orElse(null);
     }
 }

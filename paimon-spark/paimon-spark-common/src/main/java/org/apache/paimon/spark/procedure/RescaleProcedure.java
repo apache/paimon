@@ -20,7 +20,6 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
@@ -30,7 +29,6 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.Dataset;
@@ -112,7 +110,7 @@ public class RescaleProcedure extends BaseProcedure {
         checkArgument(
                 partitions == null || where == null,
                 "partitions and where cannot be used together.");
-        String finalWhere = partitions != null ? toWhere(partitions) : where;
+        String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : where;
 
         return modifyPaimonTable(
                 tableIdent,
@@ -230,56 +228,6 @@ public class RescaleProcedure extends BaseProcedure {
 
     private boolean blank(InternalRow args, int index) {
         return args.isNullAt(index) || StringUtils.isNullOrWhitespaceOnly(args.getString(index));
-    }
-
-    @VisibleForTesting
-    static String toWhere(String partitions) {
-        List<Map<String, String>> maps = ParameterUtils.getPartitions(partitions.split(";"));
-
-        return maps.stream()
-                .map(
-                        a ->
-                                a.entrySet().stream()
-                                        .map(
-                                                entry -> {
-                                                    String value = entry.getValue();
-                                                    // If value is already quoted, keep it as is
-                                                    if ((value.startsWith("'")
-                                                                    && value.endsWith("'"))
-                                                            || (value.startsWith("\"")
-                                                                    && value.endsWith("\""))) {
-                                                        return entry.getKey() + "=" + value;
-                                                    } else {
-                                                        // Try to parse as number, if successful,
-                                                        // don't add quotes
-                                                        // Otherwise, add single quotes for string
-                                                        // literals
-                                                        try {
-                                                            Long.parseLong(value);
-                                                            // It's a number, don't add quotes
-                                                            return entry.getKey() + "=" + value;
-                                                        } catch (NumberFormatException e) {
-                                                            try {
-                                                                Double.parseDouble(value);
-                                                                // It's a number, don't add quotes
-                                                                return entry.getKey() + "=" + value;
-                                                            } catch (NumberFormatException e2) {
-                                                                // It's not a number, add quotes for
-                                                                // string literals
-                                                                return entry.getKey()
-                                                                        + "='"
-                                                                        + value
-                                                                        + "'";
-                                                            }
-                                                        }
-                                                    }
-                                                })
-                                        .reduce((s0, s1) -> s0 + " AND " + s1))
-                .filter(Optional::isPresent)
-                .map(Optional::get)
-                .map(a -> "(" + a + ")")
-                .reduce((a, b) -> a + " OR " + b)
-                .orElse(null);
     }
 
     @Override
