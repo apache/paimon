@@ -55,7 +55,6 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -93,7 +92,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     private final FileStoreTable table;
     private Future<?> refreshFuture;
     private LookupStreamingReader reader;
-    private List<BinaryRow> scanPartitions = Collections.emptyList();
+    @Nullable private List<BinaryRow> scanPartitions;
     @Nullable private Predicate partitionFilter;
     @Nullable private Filter<InternalRow> cacheRowFilter;
 

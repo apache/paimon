@@ -69,7 +69,7 @@ public class LookupStreamingReader {
             @Nullable Predicate predicate,
             Set<Integer> requireCachedBucketIds,
             @Nullable Filter<InternalRow> cacheRowFilter,
-            List<BinaryRow> scanPartitions) {
+            @Nullable List<BinaryRow> scanPartitions) {
         this.table = table;
         this.projection = projection;
         this.cacheRowFilter = cacheRowFilter;
