@@ -160,14 +160,16 @@ abstract class PaimonBaseScan(
       ""
     }
 
-    val latestSnapshotIdStr = latestSnapshot match {
-      case Some(snapshot) => s", latestSnapshotId: [${snapshot.id}]"
-      case None => ""
+    val latestSnapshotIdStr = if (latestSnapshot.nonEmpty) {
+      s", latestSnapshotId: [${latestSnapshot.get.id}]"
+    } else {
+      ""
     }
 
-    val currentSnapshotIdStr = currentSnapshot match {
-      case Some(snapshot) => s", currentSnapshotId: [${snapshot.id}]"
-      case None => ""
+    val currentSnapshotIdStr = if (currentSnapshot.nonEmpty) {
+      s", currentSnapshotId: [${currentSnapshot.get.id}]"
+    } else {
+      ""
     }
 
     s"PaimonScan: [${table.name}]" + latestSnapshotIdStr + currentSnapshotIdStr +
