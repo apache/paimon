@@ -165,11 +165,12 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Snapshot latestSnapshot() {
-        Snapshot snapshot = null;
+        Snapshot snapshot;
         if (snapshotLoader != null) {
             try {
                 snapshot = snapshotLoader.load().orElse(null);
             } catch (UnsupportedOperationException ignored) {
+                snapshot = latestSnapshotFromFileSystem();
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
