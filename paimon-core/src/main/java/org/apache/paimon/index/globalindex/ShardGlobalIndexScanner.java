@@ -55,7 +55,8 @@ public class ShardGlobalIndexScanner implements Closeable {
     public ShardGlobalIndexScanner(
             FileStoreTable fileStoreTable,
             BinaryRow partition,
-            long shardId,
+            long rowRangeStart,
+            long rowRangeEnd,
             List<IndexManifestEntry> entries) {
         this.fileStoreTable = fileStoreTable;
         FileIO fileIO = fileStoreTable.fileIO();
@@ -82,9 +83,18 @@ public class ShardGlobalIndexScanner implements Closeable {
                 entries.stream()
                         .allMatch(
                                 m ->
-                                        m.indexFile().getShard() != null
-                                                && m.indexFile().getShard() == shardId),
-                "All index files must belong to shard " + shardId);
+                                        m.indexFile().rowRangeStart() != null
+                                                && m.indexFile().rowRangeEnd() != null
+                                                && RangeUtils.intersect(
+                                                        rowRangeStart,
+                                                        rowRangeEnd,
+                                                        m.indexFile().rowRangeStart(),
+                                                        m.indexFile().rowRangeEnd())),
+                "All index files must have an intersection with row range ["
+                        + rowRangeStart
+                        + ", "
+                        + rowRangeEnd
+                        + ")");
     }
 
     public GlobalIndexResult scan(Predicate predicate) {

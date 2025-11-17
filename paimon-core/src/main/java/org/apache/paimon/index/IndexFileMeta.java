@@ -60,10 +60,16 @@ public class IndexFileMeta {
                                     6,
                                     "_GLOBAL_INDEX",
                                     new RowType(
-                                            false,
+                                            true,
                                             Arrays.asList(
-                                                    new DataField(0, "_ROW_RANGE_START", new BigIntType(true)),
-                                                    new DataField(1, "_ROW_RANGE_END", new BigIntType(true)),
+                                                    new DataField(
+                                                            0,
+                                                            "_ROW_RANGE_START",
+                                                            new BigIntType(true)),
+                                                    new DataField(
+                                                            1,
+                                                            "_ROW_RANGE_END",
+                                                            new BigIntType(true)),
                                                     new DataField(
                                                             2,
                                                             "_INDEX_FIELD_ID",
@@ -78,8 +84,8 @@ public class IndexFileMeta {
     private final long fileSize;
     private final long rowCount;
 
-    @Nullable private final Long rowRangeStart;
-    @Nullable private final Long rowRangeEnd;
+    @Nullable private final Long rowRangeStart; // include
+    @Nullable private final Long rowRangeEnd; // exclude
     @Nullable private final Integer indexFieldId;
     @Nullable private final byte[] indexMeta;
 
@@ -98,7 +104,17 @@ public class IndexFileMeta {
             long rowCount,
             @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
             @Nullable String externalPath) {
-        this(indexType, fileName, fileSize, rowCount, dvRanges, externalPath, null, null, null);
+        this(
+                indexType,
+                fileName,
+                fileSize,
+                rowCount,
+                dvRanges,
+                externalPath,
+                null,
+                null,
+                null,
+                null);
     }
 
     public IndexFileMeta(
@@ -106,10 +122,21 @@ public class IndexFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
-            @Nullable Long shard,
+            @Nullable Long rowRangeStart,
+            @Nullable Long rowRangeEnd,
             @Nullable Integer indexFieldId,
             @Nullable byte[] indexMeta) {
-        this(indexType, fileName, fileSize, rowCount, null, null, shard, indexFieldId, indexMeta);
+        this(
+                indexType,
+                fileName,
+                fileSize,
+                rowCount,
+                null,
+                null,
+                rowRangeStart,
+                rowRangeEnd,
+                indexFieldId,
+                indexMeta);
     }
 
     public IndexFileMeta(
@@ -119,7 +146,8 @@ public class IndexFileMeta {
             long rowCount,
             @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
             @Nullable String externalPath,
-            @Nullable Integer shard,
+            @Nullable Long rowRangeStart,
+            @Nullable Long rowRangeEnd,
             @Nullable Integer indexFieldId,
             @Nullable byte[] indexMeta) {
         this.indexType = indexType;
@@ -128,7 +156,8 @@ public class IndexFileMeta {
         this.rowCount = rowCount;
         this.dvRanges = dvRanges;
         this.externalPath = externalPath;
-        this.shard = shard;
+        this.rowRangeStart = rowRangeStart;
+        this.rowRangeEnd = rowRangeEnd;
         this.indexFieldId = indexFieldId;
         this.indexMeta = indexMeta;
     }
@@ -137,8 +166,14 @@ public class IndexFileMeta {
         return indexType;
     }
 
-    public Integer getShard() {
-        return shard;
+    @Nullable
+    public Long rowRangeStart() {
+        return rowRangeStart;
+    }
+
+    @Nullable
+    public Long rowRangeEnd() {
+        return rowRangeEnd;
     }
 
     public Integer indexFieldId() {

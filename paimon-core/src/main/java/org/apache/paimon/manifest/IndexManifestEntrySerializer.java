@@ -44,6 +44,12 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
     @Override
     public InternalRow convertTo(IndexManifestEntry record) {
         IndexFileMeta indexFile = record.indexFile();
+        InternalRow globalIndexRow =
+                GenericRow.of(
+                        indexFile.rowRangeStart(),
+                        indexFile.rowRangeEnd(),
+                        indexFile.indexFieldId(),
+                        indexFile.indexMeta());
         return GenericRow.of(
                 record.kind().toByteValue(),
                 serializeBinaryRow(record.partition()),
@@ -54,15 +60,25 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                 indexFile.rowCount(),
                 dvMetasToRowArrayData(indexFile.dvRanges()),
                 indexFile.externalPath(),
-                record.indexFile().getShard(),
-                record.indexFile().indexFieldId(),
-                record.indexFile().indexMeta());
+                globalIndexRow);
     }
 
     @Override
     public IndexManifestEntry convertFrom(int version, InternalRow row) {
         if (version != 1) {
             throw new UnsupportedOperationException("Unsupported version: " + version);
+        }
+
+        Long rowRangeStart = null;
+        Long rowRangeEnd = null;
+        Integer indexFieldId = null;
+        byte[] indexMeta = null;
+        if (!row.isNullAt(9)) {
+            InternalRow globalIndexRow = row.getRow(9, 4);
+            rowRangeStart = globalIndexRow.isNullAt(0) ? null : globalIndexRow.getLong(0);
+            rowRangeEnd = globalIndexRow.isNullAt(1) ? null : globalIndexRow.getLong(1);
+            indexFieldId = globalIndexRow.isNullAt(2) ? null : globalIndexRow.getInt(2);
+            indexMeta = globalIndexRow.isNullAt(3) ? null : globalIndexRow.getBinary(3);
         }
 
         return new IndexManifestEntry(
@@ -76,8 +92,9 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                         row.getLong(6),
                         row.isNullAt(7) ? null : rowArrayDataToDvMetas(row.getArray(7)),
                         row.isNullAt(8) ? null : row.getString(8).toString(),
-                        row.isNullAt(9) ? null : row.getInt(9),
-                        row.isNullAt(10) ? null : row.getInt(10),
-                        row.isNullAt(11) ? null : row.getBinary(11)));
+                        rowRangeStart,
+                        rowRangeEnd,
+                        indexFieldId,
+                        indexMeta));
     }
 }

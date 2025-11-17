@@ -19,6 +19,7 @@
 package org.apache.paimon.index.globalindex;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.utils.Range;
 
 import java.util.Set;
 
@@ -29,9 +30,9 @@ public interface GlobalIndexScanBuilder {
 
     GlobalIndexScanBuilder withPartition(BinaryRow binaryRow);
 
-    GlobalIndexScanBuilder withShard(int shardId);
+    GlobalIndexScanBuilder withRowRange(Range rowRange);
 
     ShardGlobalIndexScanner build();
 
-    Set<Integer> shardList();
+    Set<Range> shardList();
 }

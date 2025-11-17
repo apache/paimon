@@ -56,6 +56,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
@@ -724,7 +725,8 @@ public class DataEvolutionTableTest extends TableTestBase {
                             fileName,
                             fileSize,
                             count,
-                            0,
+                            0L,
+                            count,
                             indexField.id(),
                             meta));
         }
@@ -786,10 +788,10 @@ public class DataEvolutionTableTest extends TableTestBase {
 
     private List<Long> globalIndexScan(FileStoreTable table, Predicate predicate) throws Exception {
         GlobalIndexScanBuilder indexScanBuilder = table.newIndexScanBuilder();
-        Set<Integer> shards = indexScanBuilder.shardList();
+        Set<Range> ranges = indexScanBuilder.shardList();
         GlobalIndexResult globalFileIndexResult = GlobalIndexResult.NONE;
-        for (int i = 0; i < shards.size(); i++) {
-            try (ShardGlobalIndexScanner scanner = indexScanBuilder.withShard(i).build()) {
+        for (Range range : ranges) {
+            try (ShardGlobalIndexScanner scanner = indexScanBuilder.withRowRange(range).build()) {
                 GlobalIndexResult globalIndexResult = scanner.scan(predicate);
                 globalFileIndexResult = globalFileIndexResult.or(globalIndexResult);
                 if (globalFileIndexResult == GlobalIndexResult.NONE) {

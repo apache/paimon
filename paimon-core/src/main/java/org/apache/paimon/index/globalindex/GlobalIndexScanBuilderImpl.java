@@ -23,6 +23,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
 
 import java.util.List;
 import java.util.Objects;
@@ -36,7 +37,8 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
 
     private Long snapshotId;
     private BinaryRow partition;
-    private Integer shardId;
+    private Long rowRangeStart;
+    private Long rowRangeEnd;
 
     public GlobalIndexScanBuilderImpl(FileStoreTable fileStoreTable) {
         this.fileStoreTable = fileStoreTable;
@@ -55,22 +57,34 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
     }
 
     @Override
-    public GlobalIndexScanBuilder withShard(int shardId) {
-        this.shardId = shardId;
+    public GlobalIndexScanBuilder withRowRange(Range rowRange) {
+        this.rowRangeStart = rowRange.getStart();
+        this.rowRangeEnd = rowRange.getEnd();
         return this;
     }
 
     @Override
     public ShardGlobalIndexScanner build() {
-        Objects.requireNonNull(shardId, "shardId must not be null");
+        Objects.requireNonNull(rowRangeStart, "rowRangeStart must not be null");
+        Objects.requireNonNull(rowRangeEnd, "rowRangeEnd must not be null");
         List<IndexManifestEntry> entries = scan();
-        return new ShardGlobalIndexScanner(fileStoreTable, partition, shardId, entries);
+        return new ShardGlobalIndexScanner(
+                fileStoreTable, partition, rowRangeStart, rowRangeEnd, entries);
     }
 
     @Override
-    public Set<Integer> shardList() {
+    public Set<Range> shardList() {
         return scan().stream()
-                .map(entry -> entry.indexFile().getShard())
+                .map(
+                        entry -> {
+                            Long start = entry.indexFile().rowRangeStart();
+                            Long end = entry.indexFile().rowRangeEnd();
+                            if (start == null || end == null) {
+                                return null;
+                            }
+                            return Range.of(start, end);
+                        })
+                .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
     }
 
@@ -84,8 +98,15 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
                             return false;
                         }
                     }
-                    if (shardId != null) {
-                        if (!Objects.equals(entry.indexFile().getShard(), shardId)) {
+                    if (rowRangeStart != null && rowRangeEnd != null) {
+                        Long entryStart = entry.indexFile().rowRangeStart();
+                        Long entryEnd = entry.indexFile().rowRangeEnd();
+                        if (entryStart == null || entryEnd == null) {
+                            return false;
+                        }
+
+                        if (!RangeUtils.intersect(
+                                entryStart, entryEnd, rowRangeStart, rowRangeEnd)) {
                             return false;
                         }
                     }

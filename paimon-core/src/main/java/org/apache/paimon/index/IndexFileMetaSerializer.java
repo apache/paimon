@@ -39,6 +39,13 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
 
     @Override
     public InternalRow toRow(IndexFileMeta record) {
+        InternalRow globalIndexRow =
+                GenericRow.of(
+                        record.rowRangeStart(),
+                        record.rowRangeEnd(),
+                        record.indexFieldId(),
+                        record.indexMeta());
+
         return GenericRow.of(
                 fromString(record.indexType()),
                 fromString(record.fileName()),
@@ -46,13 +53,22 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 record.rowCount(),
                 dvMetasToRowArrayData(record.dvRanges()),
                 fromString(record.externalPath()),
-                record.getShard(),
-                record.indexFieldId(),
-                record.indexMeta());
+                globalIndexRow);
     }
 
     @Override
     public IndexFileMeta fromRow(InternalRow row) {
+        Long rowRangeStart = null;
+        Long rowRangeEnd = null;
+        Integer indexFieldId = null;
+        byte[] indexMeta = null;
+        if (!row.isNullAt(6)) {
+            InternalRow globalIndexRow = row.getRow(6, 4);
+            rowRangeStart = globalIndexRow.isNullAt(0) ? null : globalIndexRow.getLong(0);
+            rowRangeEnd = globalIndexRow.isNullAt(1) ? null : globalIndexRow.getLong(1);
+            indexFieldId = globalIndexRow.isNullAt(2) ? null : globalIndexRow.getInt(2);
+            indexMeta = globalIndexRow.isNullAt(3) ? null : globalIndexRow.getBinary(3);
+        }
         return new IndexFileMeta(
                 row.getString(0).toString(),
                 row.getString(1).toString(),
@@ -60,9 +76,10 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 row.getLong(3),
                 row.isNullAt(4) ? null : rowArrayDataToDvMetas(row.getArray(4)),
                 row.isNullAt(5) ? null : row.getString(5).toString(),
-                row.isNullAt(6) ? null : row.getInt(6),
-                row.isNullAt(7) ? null : row.getInt(7),
-                row.isNullAt(8) ? null : row.getBinary(8));
+                rowRangeStart,
+                rowRangeEnd,
+                indexFieldId,
+                indexMeta);
     }
 
     public static InternalArray dvMetasToRowArrayData(
