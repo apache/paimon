@@ -219,7 +219,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
             int version, DataInputView view) {
         if (version >= 11) {
             return () -> indexEntrySerializer.deserializeList(view);
-        } else if (version == 10) {
+        } else if (version >= 9) {
             if (indexEntryV3Deserializer == null) {
                 indexEntryV3Deserializer = new IndexFileMetaV3Deserializer();
             }
