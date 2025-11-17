@@ -18,10 +18,11 @@
 
 package org.apache.paimon.utils;
 
+import java.io.Serializable;
 import java.util.Iterator;
 
 /** Define a range with start (include) and end (exclude). */
-public class Range {
+public class Range implements Serializable {
 
     private final long start;
     private final long end;

@@ -20,8 +20,14 @@ package org.apache.paimon.index.globalindex;
 
 import org.apache.paimon.utils.Range;
 
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 
 /** Result of a global index query. */
@@ -106,6 +112,42 @@ public interface GlobalIndexResult {
     boolean empty();
 
     Iterator<Range> results();
+
+    default void serializeToBytes(DataOutput dataOutput) throws IOException {
+        if (this == ALL) {
+            dataOutput.write(0);
+        } else if (this == NONE) {
+            dataOutput.write(1);
+        } else {
+            dataOutput.write(2);
+        }
+        List<Range> ranges = new ArrayList<>();
+        results().forEachRemaining(ranges::add);
+        dataOutput.write(ranges.size());
+
+        for (Range range : ranges) {
+            dataOutput.writeLong(range.getStart());
+            dataOutput.writeLong(range.getEnd());
+        }
+    }
+
+    static GlobalIndexResult deserializeFromBytes(DataInput dataInput) throws IOException {
+        int type = dataInput.readInt();
+        if (type == 0) {
+            return ALL;
+        } else if (type == 1) {
+            return NONE;
+        }
+
+        int size = dataInput.readInt();
+        Set<Range> ranges = new HashSet<>();
+        for (int i = 0; i < size; i++) {
+            long start = dataInput.readLong();
+            long end = dataInput.readLong();
+            ranges.add(new Range(start, end));
+        }
+        return wrap(ranges);
+    }
 
     static GlobalIndexResult wrap(final Set<Range> results) {
         return new GlobalIndexResult() {
