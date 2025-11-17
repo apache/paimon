@@ -1185,6 +1185,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to enable the remote file for lookup.");
 
+    public static final ConfigOption<Integer> LOOKUP_REMOTE_LEVEL_THRESHOLD =
+            key("lookup.remote-file.level-threshold")
+                    .intType()
+                    .defaultValue(Integer.MIN_VALUE)
+                    .withDescription(
+                            "Level threshold of lookup to generate remote lookup files. "
+                                    + "Level files below this threshold will not generate remote lookup files.");
+
     public static final ConfigOption<Integer> READ_BATCH_SIZE =
             key("read.batch-size")
                     .intType()
@@ -2512,6 +2520,10 @@ public class CoreOptions implements Serializable {
 
     public boolean lookupRemoteFileEnabled() {
         return options.get(LOOKUP_REMOTE_FILE_ENABLED);
+    }
+
+    public int lookupRemoteLevelThreshold() {
+        return options.get(LOOKUP_REMOTE_LEVEL_THRESHOLD);
     }
 
     public double lookupCacheHighPrioPoolRatio() {

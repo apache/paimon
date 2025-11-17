@@ -49,6 +49,7 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
     private final DataFilePathFactory pathFactory;
     private final TableSchema schema;
     private final LookupLevels<T> lookupLevels;
+    private final int levelThreshold;
     private final SchemaManager schemaManager;
     private final Map<Long, RowType> schemaRowTypes;
 
@@ -57,17 +58,23 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
             DataFilePathFactory pathFactory,
             TableSchema schema,
             LookupLevels<T> lookupLevels,
-            SchemaManager schemaManager) {
+            SchemaManager schemaManager,
+            int levelThreshold) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.schema = schema;
         this.lookupLevels = lookupLevels;
+        this.levelThreshold = levelThreshold;
         this.lookupLevels.setRemoteFileDownloader(this);
         this.schemaManager = schemaManager;
         this.schemaRowTypes = new HashMap<>();
     }
 
     public DataFileMeta genRemoteLookupFile(DataFileMeta file) throws IOException {
+        if (file.level() < levelThreshold) {
+            return file;
+        }
+
         String remoteSstName = lookupLevels.remoteSstName(file.fileName());
         if (file.extraFiles().contains(remoteSstName)) {
             // ignore existed

@@ -53,8 +53,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link LookupTable} with deletion vectors. */
-public class DeletionVectorsTableTest extends TableTestBase {
+/** Test for {@link LookupTable} with remote files. */
+public class LookupRemoteFileTableTest extends TableTestBase {
 
     @TempDir java.nio.file.Path tempDir;
     private IOManager ioManager;
@@ -79,7 +79,7 @@ public class DeletionVectorsTableTest extends TableTestBase {
         innerTestRemoteFile(true, true);
     }
 
-    public void innerTestRemoteFile(boolean schemaEvolution, boolean notCompatible)
+    private void innerTestRemoteFile(boolean schemaEvolution, boolean notCompatible)
             throws Exception {
         Options options = new Options();
         options.set(CoreOptions.BUCKET, 1);
@@ -182,5 +182,63 @@ public class DeletionVectorsTableTest extends TableTestBase {
                         GenericRow.of(3, 1),
                         GenericRow.of(4, 1),
                         GenericRow.of(5, 1));
+    }
+
+    @Test
+    public void testRemoteFileLevelThreshold() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        options.set(CoreOptions.LOOKUP_REMOTE_FILE_ENABLED, true);
+        options.set(CoreOptions.LOOKUP_REMOTE_LEVEL_THRESHOLD, 5);
+        Identifier identifier = new Identifier("default", "t");
+        Schema schema =
+                new Schema(
+                        RowType.of(new IntType(), new IntType()).getFields(),
+                        Collections.emptyList(),
+                        Collections.singletonList("f0"),
+                        options.toMap(),
+                        null);
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+
+        // first write
+        try (BatchTableWrite write = writeBuilder.newWrite().withIOManager(ioManager);
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 1));
+            write.write(GenericRow.of(2, 1));
+            write.write(GenericRow.of(3, 1));
+            commit.commit(write.prepareCommit());
+        }
+
+        // second write
+        try (BatchTableWrite write = writeBuilder.newWrite().withIOManager(ioManager);
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 1));
+            write.write(GenericRow.of(4, 1));
+            write.write(GenericRow.of(5, 1));
+            commit.commit(write.prepareCommit());
+        }
+
+        // third write generate level 4
+        table = table.copy(Collections.singletonMap(CoreOptions.COMPACTION_SIZE_RATIO.key(), "0"));
+        writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite().withIOManager(ioManager);
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 2, 2));
+            write.write(GenericRow.of(2, 2, 2));
+            commit.commit(write.prepareCommit());
+        }
+
+        // assert level threshold
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+        List<DataFileMeta> files = ((DataSplit) splits.get(0)).dataFiles();
+        DataFileMeta level5 = files.stream().filter(f -> f.level() == 5).findFirst().get();
+        DataFileMeta level4 = files.stream().filter(f -> f.level() == 4).findFirst().get();
+        assertThat(level5.extraFiles()).hasSize(1);
+        assertThat(level4.extraFiles()).hasSize(0);
     }
 }
