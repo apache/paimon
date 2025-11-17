@@ -39,8 +39,6 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
 
   protected val paimonHiveCatalogName: String = "paimon_hive"
 
-  protected val paimonSyncHiveCatalogName: String = "paimon_sync_hive"
-
   protected val hiveDbName: String = "test_hive"
 
   val hiveUri: String = PaimonHiveTestBase.hiveUri

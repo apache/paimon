@@ -18,8 +18,9 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.catalog.{DelegateCatalog, Identifier}
 import org.apache.paimon.fs.Path
+import org.apache.paimon.hive.HiveCatalog
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.utils.CompressUtils
@@ -48,15 +49,23 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
   test("Format table: check partition sync") {
     val tableName = "t"
     withTable(tableName) {
-      sql(s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (`ds` bigint)")
-      sql(s"INSERT INTO $tableName VALUES (1, 2023)")
-      checkAnswer(sql(s"SELECT * FROM $tableName"), Seq(Row(1, 2023)))
-      checkAnswer(sql(s"show partitions `$tableName`"), Nil)
+      val hiveCatalog =
+        paimonCatalog.asInstanceOf[DelegateCatalog].wrapped().asInstanceOf[HiveCatalog]
       sql(
-        s"Alter table $tableName SET TBLPROPERTIES ('format-table.commit-hive-sync-url'='$hiveUri')")
-      sql(s"INSERT INTO $tableName VALUES (1, 2024)")
-      checkAnswer(sql(s"SELECT * FROM $tableName where ds = 2024"), Seq(Row(1, 2024)))
-      checkAnswer(sql(s"show partitions `$tableName`"), Seq(Row(2024)))
+        s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (`ds` bigint) TBLPROPERTIES ('metastore.partitioned-table'='true')")
+      sql(s"INSERT INTO $tableName VALUES (1, 2023)")
+      var ds = 2023L
+      checkAnswer(sql(s"SELECT * FROM $tableName"), Seq(Row(1, ds)))
+      var partitions = hiveCatalog.listPartitionsFromHms(Identifier.create(hiveDbName, tableName))
+      assert(partitions.size == 0)
+      sql(s"DROP TABLE $tableName")
+      sql(
+        s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (`ds` bigint) TBLPROPERTIES ('format-table.commit-hive-sync-url'='$hiveUri', 'metastore.partitioned-table'='true')")
+      ds = 2024L
+      sql(s"INSERT INTO $tableName VALUES (1, $ds)")
+      checkAnswer(sql(s"SELECT * FROM $tableName"), Seq(Row(1, ds)))
+      partitions = hiveCatalog.listPartitionsFromHms(Identifier.create(hiveDbName, tableName))
+      assert(partitions.get(0).getValues.get(0).equals(ds.toString))
     }
   }
 
