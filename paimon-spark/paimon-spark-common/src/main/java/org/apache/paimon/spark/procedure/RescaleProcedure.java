@@ -23,15 +23,13 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionUtils;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
+import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.StringUtils;
 
@@ -39,8 +37,6 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.catalyst.InternalRow;
-import org.apache.spark.sql.catalyst.expressions.Expression;
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
@@ -143,31 +139,12 @@ public class RescaleProcedure extends BaseProcedure {
                     fileStoreTable = fileStoreTable.copy(dynamicOptions);
 
                     DataSourceV2Relation relation = createRelation(tableIdent);
-                    Expression condition = null;
-                    if (!StringUtils.isNullOrWhitespaceOnly(finalWhere)) {
-                        condition = ExpressionUtils.resolveFilter(spark(), relation, finalWhere);
-                        checkArgument(
-                                ExpressionUtils.isValidPredicate(
-                                        spark(),
-                                        condition,
-                                        table.partitionKeys().toArray(new String[0])),
-                                "Only partition predicate is supported, your predicate is %s, but partition keys are %s",
-                                condition,
-                                table.partitionKeys());
-                    }
-
-                    RowType partitionType = fileStoreTable.schema().logicalPartitionType();
-                    Predicate partitionFilter =
-                            condition == null
-                                    ? null
-                                    : ExpressionUtils.convertConditionToPaimonPredicate(
-                                                    condition,
-                                                    ((LogicalPlan) relation).output(),
-                                                    partitionType,
-                                                    false)
-                                            .getOrElse(null);
                     PartitionPredicate partitionPredicate =
-                            PartitionPredicate.fromPredicate(partitionType, partitionFilter);
+                            SparkProcedureUtils.convertToPartitionPredicate(
+                                    finalWhere,
+                                    fileStoreTable.schema().logicalPartitionType(),
+                                    spark(),
+                                    relation);
 
                     int finalBucketNum;
                     if (bucketNum == null) {

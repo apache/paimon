@@ -32,7 +32,7 @@ import java.util.{Arrays, Collections, Map => JMap}
 import scala.collection.JavaConverters._
 
 /** Test rescale procedure. See [[RescaleProcedure]]. */
-abstract class RescaleProcedureTestBase extends PaimonSparkTestBase {
+abstract class RescaleProcedureTest extends PaimonSparkTestBase {
 
   test("Paimon Procedure: rescale basic functionality") {
     withTable("T") {
