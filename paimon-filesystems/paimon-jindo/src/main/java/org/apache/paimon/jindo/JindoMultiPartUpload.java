@@ -35,7 +35,8 @@ import java.nio.channels.FileChannel;
 import java.util.List;
 
 /** Provides the multipart upload by Jindo. */
-public class JindoMultiPartUpload implements MultiPartUploadStore<JdoObjectPart, String> {
+public class JindoMultiPartUpload
+        implements MultiPartUploadStore<SerializableJdoObjectPart, String> {
 
     private final JindoMpuStore mpuStore;
     private final Path workingDirectory;
@@ -64,12 +65,16 @@ public class JindoMultiPartUpload implements MultiPartUploadStore<JdoObjectPart,
     public String completeMultipartUpload(
             String objectName,
             String uploadId,
-            List<JdoObjectPart> partETags,
+            List<SerializableJdoObjectPart> partETags,
             long numBytesInParts) {
         try {
             JdoObjectPartList partList =
                     new com.aliyun.jindodata.api.spec.protos.JdoObjectPartList();
-            partList.setParts(partETags.toArray(new JdoObjectPart[0]));
+            JdoObjectPart[] jdoObjectParts = new JdoObjectPart[partETags.size()];
+            for (int i = 0; i < partETags.size(); i++) {
+                jdoObjectParts[i] = partETags.get(i).toJdoObjectPart();
+            }
+            partList.setParts(jdoObjectParts);
             mpuStore.commitMultiPartUpload(new Path(objectName), uploadId, partList);
             return uploadId;
         } catch (Exception e) {
@@ -78,7 +83,7 @@ public class JindoMultiPartUpload implements MultiPartUploadStore<JdoObjectPart,
     }
 
     @Override
-    public JdoObjectPart uploadPart(
+    public SerializableJdoObjectPart uploadPart(
             String objectName, String uploadId, int partNumber, File file, int byteLength)
             throws IOException {
         try {
@@ -92,7 +97,7 @@ public class JindoMultiPartUpload implements MultiPartUploadStore<JdoObjectPart,
 
             JdoMpuUploadPartReply result =
                     mpuStore.uploadPart(new Path(objectName), uploadId, partNumber, buffer);
-            return result.getPartInfo();
+            return new SerializableJdoObjectPart(result.getPartInfo());
         } catch (Exception e) {
             throw new IOException("Failed to upload part " + partNumber + " for: " + objectName, e);
         }
