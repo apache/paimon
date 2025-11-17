@@ -718,6 +718,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Whether to enable the remote file for lookup.</td>
         </tr>
         <tr>
+            <td><h5>lookup.remote-file.level-threshold</h5></td>
+            <td style="word-wrap: break-word;">-2147483648</td>
+            <td>Integer</td>
+            <td>Level threshold of lookup to generate remote lookup files. Level files below this threshold will not generate remote lookup files.</td>
+        </tr>
+        <tr>
             <td><h5>manifest.compression</h5></td>
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>

@@ -381,7 +381,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                                 keyReaderFactory.pathFactory(),
                                 keyReaderFactory.schema(),
                                 lookupLevels,
-                                schemaManager);
+                                schemaManager,
+                                options.lookupRemoteLevelThreshold());
             }
             return new LookupMergeTreeCompactRewriter(
                     maxLevel,
