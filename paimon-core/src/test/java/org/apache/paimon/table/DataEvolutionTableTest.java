@@ -787,11 +787,11 @@ public class DataEvolutionTableTest extends TableTestBase {
     private List<Long> globalIndexScan(FileStoreTable table, Predicate predicate) throws Exception {
         GlobalIndexScanBuilder indexScanBuilder = table.newIndexScanBuilder();
         Set<Integer> shards = indexScanBuilder.shardList();
-        GlobalIndexResult globalFileIndexResult = GlobalIndexResult.ALL;
+        GlobalIndexResult globalFileIndexResult = GlobalIndexResult.NONE;
         for (int i = 0; i < shards.size(); i++) {
             try (ShardGlobalIndexScanner scanner = indexScanBuilder.withShard(i).build()) {
                 GlobalIndexResult globalIndexResult = scanner.scan(predicate);
-                globalFileIndexResult = globalFileIndexResult.and(globalIndexResult);
+                globalFileIndexResult = globalFileIndexResult.or(globalIndexResult);
                 if (globalFileIndexResult == GlobalIndexResult.NONE) {
                     break;
                 }
