@@ -43,8 +43,7 @@ public class RowIdPredicateVisitor implements PredicateVisitor<Set<Long>> {
     public Set<Long> visit(LeafPredicate predicate) {
         if (ROW_ID.name().equals(predicate.fieldName())) {
             LeafFunction function = predicate.function();
-            // _ROW_ID is always not null, so we can push down IsNull as an empty set.
-            if (function instanceof Equal || function instanceof In || function instanceof IsNull) {
+            if (function instanceof Equal || function instanceof In) {
                 HashSet<Long> rowIds = new HashSet<>();
                 for (Object literal : predicate.literals()) {
                     rowIds.add((Long) literal);
