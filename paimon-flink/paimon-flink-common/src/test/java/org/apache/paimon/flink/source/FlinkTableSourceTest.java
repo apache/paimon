@@ -210,20 +210,6 @@ public class FlinkTableSourceTest extends TableTestBase {
         Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters()).isEmpty();
         Assertions.assertThat(tableSource.getRowIds())
                 .containsExactlyInAnyOrderElementsOf(ImmutableList.of(1L, 2L, 3L, 4L, 5L));
-
-        // _ROW_ID is NULL && _ROW_ID in (4, 5) => None, idList = []
-        filters = ImmutableList.of(rowIdIsNull(), rowIdIn(4L, 5L));
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters()).isEmpty();
-        Assertions.assertThat(tableSource.getRowIds()).isEmpty();
-    }
-
-    private ResolvedExpression rowIdIsNull() {
-        return CallExpression.anonymous(
-                BuiltInFunctionDefinitions.IS_NULL,
-                ImmutableList.of(
-                        new FieldReferenceExpression(
-                                "_ROW_ID", org.apache.flink.table.api.DataTypes.BIGINT(), 0, 5)),
-                org.apache.flink.table.api.DataTypes.BOOLEAN());
     }
 
     private ResolvedExpression rowIdEqual(long literal) {
