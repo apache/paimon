@@ -300,6 +300,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             scanMetrics.reportScan(
                     new ScanStats(
                             scanDuration,
+                            snapshot == null ? 0 : snapshot.id(),
                             manifests.size(),
                             allDataFiles - result.size(),
                             result.size()));

@@ -46,6 +46,7 @@ public class ScanMetricsTest {
                 .containsExactlyInAnyOrder(
                         ScanMetrics.LAST_SCAN_DURATION,
                         ScanMetrics.SCAN_DURATION,
+                        ScanMetrics.LAST_SCANNED_SNAPSHOT_ID,
                         ScanMetrics.LAST_SCANNED_MANIFESTS,
                         ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES,
                         ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES,
@@ -66,6 +67,8 @@ public class ScanMetricsTest {
                 (Gauge<Long>) registeredGenericMetrics.get(ScanMetrics.LAST_SCAN_DURATION);
         Histogram scanDuration =
                 (Histogram) registeredGenericMetrics.get(ScanMetrics.SCAN_DURATION);
+        Gauge<Long> lastScannedSnapshotId =
+                (Gauge<Long>) registeredGenericMetrics.get(ScanMetrics.LAST_SCANNED_SNAPSHOT_ID);
         Gauge<Long> lastScannedManifests =
                 (Gauge<Long>) registeredGenericMetrics.get(ScanMetrics.LAST_SCANNED_MANIFESTS);
         Gauge<Long> lastScanSkippedTableFiles =
@@ -76,6 +79,7 @@ public class ScanMetricsTest {
                         registeredGenericMetrics.get(ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES);
 
         assertThat(lastScanDuration.getValue()).isEqualTo(0);
+        assertThat(lastScannedSnapshotId.getValue()).isEqualTo(0);
         assertThat(scanDuration.getCount()).isEqualTo(0);
         assertThat(scanDuration.getStatistics().size()).isEqualTo(0);
         assertThat(lastScannedManifests.getValue()).isEqualTo(0);
@@ -88,6 +92,7 @@ public class ScanMetricsTest {
         // generic metrics value updated
         assertThat(lastScanDuration.getValue()).isEqualTo(200);
         assertThat(scanDuration.getCount()).isEqualTo(1);
+        assertThat(lastScannedSnapshotId.getValue()).isEqualTo(1);
         assertThat(scanDuration.getStatistics().size()).isEqualTo(1);
         assertThat(scanDuration.getStatistics().getValues()[0]).isEqualTo(200L);
         assertThat(scanDuration.getStatistics().getMin()).isEqualTo(200);
@@ -105,6 +110,7 @@ public class ScanMetricsTest {
         // generic metrics value updated
         assertThat(lastScanDuration.getValue()).isEqualTo(500);
         assertThat(scanDuration.getCount()).isEqualTo(2);
+        assertThat(lastScannedSnapshotId.getValue()).isEqualTo(2L);
         assertThat(scanDuration.getStatistics().size()).isEqualTo(2);
         assertThat(scanDuration.getStatistics().getValues()[1]).isEqualTo(500L);
         assertThat(scanDuration.getStatistics().getMin()).isEqualTo(200);
@@ -118,12 +124,12 @@ public class ScanMetricsTest {
     }
 
     private void reportOnce(ScanMetrics scanMetrics) {
-        ScanStats scanStats = new ScanStats(200, 20, 25, 10);
+        ScanStats scanStats = new ScanStats(200, 1L, 20, 25, 10);
         scanMetrics.reportScan(scanStats);
     }
 
     private void reportAgain(ScanMetrics scanMetrics) {
-        ScanStats scanStats = new ScanStats(500, 22, 30, 8);
+        ScanStats scanStats = new ScanStats(500, 2L, 22, 30, 8);
         scanMetrics.reportScan(scanStats);
     }
 

@@ -57,24 +57,6 @@ abstract class PaimonBaseScan(
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
-  val latestSnapshot: Option[Snapshot] = table.latestSnapshot()
-
-  val currentSnapshot: Option[Snapshot] =
-    table match {
-      case dataTable: DataTable =>
-        try {
-          TimeTravelUtil
-            .tryTravelToSnapshot(
-              coreOptions.toConfiguration,
-              dataTable.snapshotManager(),
-              dataTable.tagManager())
-            .orElse(latestSnapshot)
-        } catch {
-          case _: Exception => None
-        }
-      case _ => None
-    }
-
   lazy val statistics: Optional[stats.Statistics] = table.statistics()
 
   private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
@@ -131,6 +113,7 @@ abstract class PaimonBaseScan(
       PaimonSplitSizeMetric(),
       PaimonAvgSplitSizeMetric(),
       PaimonPlanningDurationMetric(),
+      PaimonScannedSnapshotIdMetric(),
       PaimonScannedManifestsMetric(),
       PaimonSkippedTableFilesMetric(),
       PaimonResultedTableFilesMetric()
@@ -160,19 +143,7 @@ abstract class PaimonBaseScan(
       ""
     }
 
-    val latestSnapshotIdStr = if (latestSnapshot.nonEmpty) {
-      s", latestSnapshotId: [${latestSnapshot.get.id}]"
-    } else {
-      ""
-    }
-
-    val currentSnapshotIdStr = if (currentSnapshot.nonEmpty) {
-      s", currentSnapshotId: [${currentSnapshot.get.id}]"
-    } else {
-      ""
-    }
-
-    s"PaimonScan: [${table.name}]" + latestSnapshotIdStr + currentSnapshotIdStr +
+    s"PaimonScan: [${table.name}]" +
       pushedFiltersStr + reservedFiltersStr + pushedTopNFilterStr +
       pushDownLimit.map(limit => s", Limit: [$limit]").getOrElse("")
   }

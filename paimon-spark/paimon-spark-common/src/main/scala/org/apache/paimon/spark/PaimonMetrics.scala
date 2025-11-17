@@ -29,6 +29,7 @@ object PaimonMetrics {
   val SPLIT_SIZE = "splitSize"
   val AVG_SPLIT_SIZE = "avgSplitSize"
   val PLANNING_DURATION = "planningDuration"
+  val SCANNED_SNAPSHOT_ID = "scannedSnapshotId"
   val SCANNED_MANIFESTS = "scannedManifests"
   val SKIPPED_TABLE_FILES = "skippedTableFiles"
   val RESULTED_TABLE_FILES = "resultedTableFiles"
@@ -138,6 +139,15 @@ case class PaimonPlanningDurationMetric() extends PaimonSumMetric {
 
 case class PaimonPlanningDurationTaskMetric(value: Long) extends PaimonTaskMetric {
   override def name(): String = PaimonMetrics.PLANNING_DURATION
+}
+
+case class PaimonScannedSnapshotIdMetric() extends PaimonSumMetric {
+  override def name(): String = PaimonMetrics.SCANNED_SNAPSHOT_ID
+  override def description(): String = "scanned snapshot id"
+}
+
+case class PaimonScannedSnapshotIdTaskMetric(value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.SCANNED_SNAPSHOT_ID
 }
 
 case class PaimonScannedManifestsMetric() extends PaimonSumMetric {

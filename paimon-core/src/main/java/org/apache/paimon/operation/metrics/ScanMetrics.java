@@ -30,6 +30,7 @@ public class ScanMetrics {
     public static final String GROUP_NAME = "scan";
     public static final String LAST_SCAN_DURATION = "lastScanDuration";
     public static final String SCAN_DURATION = "scanDuration";
+    public static final String LAST_SCANNED_SNAPSHOT_ID = "lastScannedSnapshotId";
     public static final String LAST_SCANNED_MANIFESTS = "lastScannedManifests";
     public static final String LAST_SCAN_SKIPPED_TABLE_FILES = "lastScanSkippedTableFiles";
     public static final String LAST_SCAN_RESULTED_TABLE_FILES = "lastScanResultedTableFiles";
@@ -52,6 +53,9 @@ public class ScanMetrics {
         durationHistogram = metricGroup.histogram(SCAN_DURATION, HISTOGRAM_WINDOW_SIZE);
         cacheMetrics = new CacheMetrics();
         dvMetaCacheMetrics = new CacheMetrics();
+        metricGroup.gauge(
+                LAST_SCANNED_SNAPSHOT_ID,
+                () -> latestScan == null ? 0L : latestScan.getScannedSnapshotId());
         metricGroup.gauge(
                 LAST_SCANNED_MANIFESTS,
                 () -> latestScan == null ? 0L : latestScan.getScannedManifests());
