@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.BoundedTwoInputOperator;
 import org.apache.paimon.flink.utils.OrphanFilesCleanUtil;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -341,26 +342,30 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
 
         usedFiles = usedFiles.union(usedManifestFiles);
         DataStream<Tuple2<String, Long>> candidates =
-                env.fromCollection(Collections.singletonList(1), TypeInformation.of(Integer.class))
+                env.fromCollection(tableIdentifiers, TypeInformation.of(Identifier.class))
                         .process(
-                                new ProcessFunction<Integer, Tuple2<String, Long>>() {
+                                new ProcessFunction<Identifier, Tuple2<String, Long>>() {
                                     @Override
                                     public void processElement(
-                                            Integer i,
-                                            ProcessFunction<Integer, Tuple2<String, Long>>.Context
+                                            Identifier identifier,
+                                            ProcessFunction<Identifier, Tuple2<String, Long>>
+                                                            .Context
                                                     ctx,
                                             Collector<Tuple2<String, Long>> out) {
-                                        // Process all tables sequentially in a single thread
-                                        for (Identifier identifier : tableIdentifiers) {
-                                            if (cleanerMap.containsKey(buildTableKey(identifier))) {
-                                                cleanerMap
-                                                        .get(buildTableKey(identifier))
-                                                        .listPaimonFilesForTable(out);
-                                            }
+                                        LOG.info(
+                                                "Processing table {} in subtask {}",
+                                                identifier,
+                                                RuntimeContextUtils.getIndexOfThisSubtask(
+                                                        getRuntimeContext()));
+
+                                        if (cleanerMap.containsKey(buildTableKey(identifier))) {
+                                            cleanerMap
+                                                    .get(buildTableKey(identifier))
+                                                    .listPaimonFilesForTable(out);
                                         }
                                     }
                                 })
-                        .setParallelism(1);
+                        .setParallelism(Objects.nonNull(parallelism) ? parallelism : 1);
 
         DataStream<CleanOrphanFilesResult> deleted =
                 usedFiles
