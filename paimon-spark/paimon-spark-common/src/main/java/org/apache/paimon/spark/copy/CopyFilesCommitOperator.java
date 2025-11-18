@@ -21,6 +21,8 @@ package org.apache.paimon.spark.copy;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.migrate.FileMetaUtils;
@@ -32,7 +34,9 @@ import org.apache.paimon.utils.SerializationUtils;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.sql.SparkSession;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -41,32 +45,84 @@ public class CopyFilesCommitOperator extends CopyFilesOperator {
 
     private DataFileMetaSerializer dataFileSerializer;
 
+    private IndexFileMetaSerializer indexFileSerializer;
+
     public CopyFilesCommitOperator(
             SparkSession spark, Catalog sourceCatalog, Catalog targetCatalog) {
         super(spark, sourceCatalog, targetCatalog);
         this.dataFileSerializer = new DataFileMetaSerializer();
+        this.indexFileSerializer = new IndexFileMetaSerializer();
     }
 
     public void execute(
-            Identifier targetIdentifier, JavaPairRDD<byte[], byte[]> dataFileMetaPairRdd)
+            Identifier targetIdentifier,
+            JavaPairRDD<byte[], byte[]> dataFileMetaPairRdd,
+            JavaPairRDD<byte[], byte[]> indexFileMetaPairRdd)
             throws Exception {
         FileStoreTable targetTable = (FileStoreTable) targetCatalog.getTable(targetIdentifier);
-        Map<byte[], Iterable<byte[]>> dataFileMetaMap =
-                dataFileMetaPairRdd.groupByKey().collectAsMap();
+
+        // deserialize data file meta
+        Map<BinaryRow, List<DataFileMeta>> dataFileMetaMap =
+                deserializeDataFileMeta(dataFileMetaPairRdd);
+
+        // deserialize index file meta
+        Map<BinaryRow, List<IndexFileMeta>> indexFileMetaMap =
+                deserializeIndexFileMeta(indexFileMetaPairRdd);
+
+        // construct commit messages
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (Map.Entry<byte[], Iterable<byte[]>> entry : dataFileMetaMap.entrySet()) {
-            BinaryRow partition = SerializationUtils.deserializeBinaryRow(entry.getKey());
-            List<DataFileMeta> dataFileMetas = new ArrayList<>();
-            for (byte[] bytes : entry.getValue()) {
-                dataFileMetas.add(dataFileSerializer.deserializeFromBytes(bytes));
-            }
+        for (BinaryRow partition : dataFileMetaMap.keySet()) {
+            List<DataFileMeta> dataFileMetas = dataFileMetaMap.get(partition);
+            List<IndexFileMeta> indexFileMetas =
+                    indexFileMetaMap.getOrDefault(partition, new ArrayList<>());
             commitMessages.add(
                     FileMetaUtils.createCommitMessage(
-                            partition, targetTable.coreOptions().bucket(), dataFileMetas));
+                            partition,
+                            targetTable.coreOptions().bucket(),
+                            dataFileMetas,
+                            indexFileMetas));
         }
         try (BatchTableCommit commit =
                 targetTable.newBatchWriteBuilder().withOverwrite().newCommit()) {
             commit.commit(commitMessages);
         }
+    }
+
+    private Map<BinaryRow, List<DataFileMeta>> deserializeDataFileMeta(
+            JavaPairRDD<byte[], byte[]> dataFileMetaPairRdd) throws IOException {
+        Map<BinaryRow, List<DataFileMeta>> result = new HashMap<>();
+        if (dataFileMetaPairRdd == null) {
+            return result;
+        }
+        Map<byte[], Iterable<byte[]>> dataFileMetaByteMap =
+                dataFileMetaPairRdd.groupByKey().collectAsMap();
+        for (Map.Entry<byte[], Iterable<byte[]>> entry : dataFileMetaByteMap.entrySet()) {
+            BinaryRow partition = SerializationUtils.deserializeBinaryRow(entry.getKey());
+            List<DataFileMeta> dataFileMetas = new ArrayList<>();
+            for (byte[] bytes : entry.getValue()) {
+                dataFileMetas.add(dataFileSerializer.deserializeFromBytes(bytes));
+            }
+            result.put(partition, dataFileMetas);
+        }
+        return result;
+    }
+
+    private Map<BinaryRow, List<IndexFileMeta>> deserializeIndexFileMeta(
+            JavaPairRDD<byte[], byte[]> indexFileMetaPairRdd) throws IOException {
+        Map<BinaryRow, List<IndexFileMeta>> result = new HashMap<>();
+        if (indexFileMetaPairRdd == null) {
+            return result;
+        }
+        Map<byte[], Iterable<byte[]>> indexFileMetaByteMap =
+                indexFileMetaPairRdd.groupByKey().collectAsMap();
+        for (Map.Entry<byte[], Iterable<byte[]>> entry : indexFileMetaByteMap.entrySet()) {
+            BinaryRow partition = SerializationUtils.deserializeBinaryRow(entry.getKey());
+            List<IndexFileMeta> indexFileMetas = new ArrayList<>();
+            for (byte[] bytes : entry.getValue()) {
+                indexFileMetas.add(indexFileSerializer.deserializeFromBytes(bytes));
+            }
+            result.put(partition, indexFileMetas);
+        }
+        return result;
     }
 }

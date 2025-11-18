@@ -22,16 +22,15 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.io.DataFileMetaSerializer;
-import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMetaSerializer;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SerializationUtils;
 
-import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.FlatMapFunction;
@@ -44,10 +43,11 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-/** List data files. */
-public class ListDataFilesOperator extends CopyFilesOperator {
+/** List index files. */
+public class ListIndexFilesOperator extends CopyFilesOperator {
 
-    public ListDataFilesOperator(SparkSession spark, Catalog sourceCatalog, Catalog targetCatalog) {
+    public ListIndexFilesOperator(
+            SparkSession spark, Catalog sourceCatalog, Catalog targetCatalog) {
         super(spark, sourceCatalog, targetCatalog);
     }
 
@@ -65,18 +65,19 @@ public class ListDataFilesOperator extends CopyFilesOperator {
         JavaRDD<CopyDataFileInfo> dataFilesJavaRdd =
                 javaSparkContext
                         .parallelize(manifestFiles, readParallelism)
-                        .mapPartitions(new ManifestFileProcesser(sourceTable, partitionPredicate));
+                        .mapPartitions(
+                                new IndexManifestFileProcesser(sourceTable, partitionPredicate));
         return dataFilesJavaRdd;
     }
 
     /** Process manifest files. */
-    public static class ManifestFileProcesser
+    public static class IndexManifestFileProcesser
             implements FlatMapFunction<Iterator<CopyFileInfo>, CopyDataFileInfo> {
 
         private final FileStoreTable sourceTable;
         @Nullable private final PartitionPredicate partitionPredicate;
 
-        public ManifestFileProcesser(
+        public IndexManifestFileProcesser(
                 FileStoreTable sourceTable, @Nullable PartitionPredicate partitionPredicate) {
             this.sourceTable = sourceTable;
             this.partitionPredicate = partitionPredicate;
@@ -85,49 +86,41 @@ public class ListDataFilesOperator extends CopyFilesOperator {
         @Override
         public Iterator<CopyDataFileInfo> call(Iterator<CopyFileInfo> manifestFileIterator)
                 throws Exception {
-            List<CopyDataFileInfo> dataFiles = new ArrayList<>();
+            List<CopyDataFileInfo> indexFiles = new ArrayList<>();
             FileStore<?> sourceStore = sourceTable.store();
-            ManifestFile sourceManifestFile = sourceStore.manifestFileFactory().create();
-            DataFileMetaSerializer dataFileSerializer = new DataFileMetaSerializer();
+            IndexFileHandler indexFileHandler = sourceStore.newIndexFileHandler();
+            IndexFileMetaSerializer indexFileSerializer = new IndexFileMetaSerializer();
             while (manifestFileIterator.hasNext()) {
                 CopyFileInfo manifestFileCopyFileInfo = manifestFileIterator.next();
                 Path sourcePath = new Path(manifestFileCopyFileInfo.sourceFilePath());
-                List<ManifestEntry> manifestEntries =
-                        sourceManifestFile.readWithIOException(sourcePath.getName());
-                for (ManifestEntry manifestEntry : manifestEntries) {
+                List<IndexManifestEntry> indexManifestEntries =
+                        indexFileHandler.readManifestWithIOException(sourcePath.getName());
+                for (IndexManifestEntry manifestEntry : indexManifestEntries) {
                     if (partitionPredicate == null
                             || partitionPredicate.test(manifestEntry.partition())) {
-                        CopyDataFileInfo dataFile =
-                                pickDataFiles(
-                                        manifestEntry,
-                                        sourceStore.pathFactory(),
-                                        dataFileSerializer);
-                        dataFiles.add(dataFile);
+                        CopyDataFileInfo indexFile =
+                                pickIndexFiles(
+                                        manifestEntry, indexFileHandler, indexFileSerializer);
+                        indexFiles.add(indexFile);
                     }
                 }
             }
-            return dataFiles.iterator();
+            return indexFiles.iterator();
         }
 
-        private CopyDataFileInfo pickDataFiles(
-                ManifestEntry manifestEntry,
-                FileStorePathFactory fileStorePathFactory,
-                DataFileMetaSerializer dataFileSerializer)
+        private CopyDataFileInfo pickIndexFiles(
+                IndexManifestEntry indexManifestEntry,
+                IndexFileHandler indexFileHandler,
+                IndexFileMetaSerializer indexFileSerializer)
                 throws IOException {
-            Path dataFilePath =
-                    fileStorePathFactory
-                            .createDataFilePathFactory(
-                                    manifestEntry.partition(), manifestEntry.bucket())
-                            .toPath(manifestEntry);
-            Path relativeBucketPath =
-                    fileStorePathFactory.relativeBucketPath(
-                            manifestEntry.partition(), manifestEntry.bucket());
-            Path relativeTablePath = new Path("/" + relativeBucketPath, dataFilePath.getName());
+            Path indexFilePath = indexFileHandler.filePath(indexManifestEntry);
+            Path relativePath =
+                    CopyFilesUtil.getPathExcludeTableRoot(indexFilePath, sourceTable.location());
             return new CopyDataFileInfo(
-                    dataFilePath.toString(),
-                    relativeTablePath.toString(),
-                    SerializationUtils.serializeBinaryRow(manifestEntry.partition()),
-                    dataFileSerializer.serializeToBytes(manifestEntry.file()));
+                    indexFilePath.toString(),
+                    relativePath.toString(),
+                    SerializationUtils.serializeBinaryRow(indexManifestEntry.partition()),
+                    indexFileSerializer.serializeToBytes(indexManifestEntry.indexFile()));
         }
     }
 }

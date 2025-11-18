@@ -47,6 +47,9 @@ public class CopyDataFilesOperator extends CopyFilesOperator {
             Identifier targetIdentifier,
             JavaRDD<CopyDataFileInfo> dataFiles)
             throws Exception {
+        if (dataFiles == null) {
+            return null;
+        }
         FileStoreTable sourceTable = (FileStoreTable) sourceCatalog.getTable(sourceIdentifier);
         FileStoreTable targetTable = (FileStoreTable) targetCatalog.getTable(targetIdentifier);
         int readParallelism = SparkProcedureUtils.readParallelism(spark);
