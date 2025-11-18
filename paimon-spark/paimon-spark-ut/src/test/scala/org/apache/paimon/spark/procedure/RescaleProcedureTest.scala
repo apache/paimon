@@ -68,9 +68,7 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
 
       // Rescale with explicit bucket_num
       spark.sql("ALTER TABLE T SET TBLPROPERTIES ('bucket' = '4')")
-      checkAnswer(
-        spark.sql("CALL sys.rescale(table => 'T', bucket_num => 4)"),
-        Row(true) :: Nil)
+      checkAnswer(spark.sql("CALL sys.rescale(table => 'T', bucket_num => 4)"), Row(true) :: Nil)
       Assertions.assertThat(getBucketCount(loadTable("T"))).isEqualTo(4)
     }
   }

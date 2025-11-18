@@ -20,7 +20,6 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
@@ -48,7 +47,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -140,22 +138,13 @@ public class RescaleProcedure extends BaseProcedure {
                                     spark(),
                                     relation);
 
-                    int finalBucketNum;
                     if (bucketNum == null) {
                         checkArgument(
                                 fileStoreTable.coreOptions().bucket() != BucketMode.POSTPONE_BUCKET,
                                 "When rescaling postpone bucket tables, you must provide the resulting bucket number.");
-                        finalBucketNum =
-                                currentBucketNum(fileStoreTable, snapshot, partitionPredicate);
-                    } else {
-                        finalBucketNum = bucketNum;
                     }
 
-                    execute(
-                            fileStoreTable,
-                            finalBucketNum,
-                            partitionPredicate,
-                            tableIdent);
+                    execute(fileStoreTable, bucketNum, partitionPredicate, tableIdent);
 
                     InternalRow internalRow = newInternalRow(true);
                     return new InternalRow[] {internalRow};
@@ -164,7 +153,7 @@ public class RescaleProcedure extends BaseProcedure {
 
     private void execute(
             FileStoreTable table,
-            int bucketNum,
+            @Nullable Integer bucketNum,
             PartitionPredicate partitionPredicate,
             Identifier tableIdent) {
         DataSourceV2Relation relation = createRelation(tableIdent);
@@ -187,25 +176,14 @@ public class RescaleProcedure extends BaseProcedure {
                                 dataSplits.toArray(new DataSplit[0]), relation));
 
         Map<String, String> bucketOptions = new HashMap<>(table.options());
-        bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(bucketNum));
+        if (bucketNum != null) {
+            bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(bucketNum));
+        }
         FileStoreTable rescaledTable = table.copy(table.schema().copy(bucketOptions));
 
         PaimonSparkWriter writer = PaimonSparkWriter.apply(rescaledTable);
         writer.writeBuilder().withOverwrite();
         writer.commit(writer.write(datasetForRead));
-    }
-
-    private int currentBucketNum(
-            FileStoreTable table, Snapshot snapshot, PartitionPredicate partitionPredicate) {
-        SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshot);
-        if (partitionPredicate != null) {
-            snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);
-        }
-        Iterator<ManifestEntry> it = snapshotReader.onlyReadRealBuckets().readFileIterator();
-        checkArgument(
-                it.hasNext(),
-                "The specified partition does not have any data files. No need to rescale.");
-        return it.next().totalBuckets();
     }
 
     private boolean blank(InternalRow args, int index) {
