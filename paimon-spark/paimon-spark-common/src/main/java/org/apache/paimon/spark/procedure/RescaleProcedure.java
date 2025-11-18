@@ -61,7 +61,7 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  * Rescale procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.rescale(table => 'databaseName.tableName', [bucket_num => 16], [partitions => 'dt=20250217,hh=08;dt=20250218,hh=08'], [where => 'dt>20250217'], [scan_parallelism => 8], [sink_parallelism => 16])
+ *  CALL sys.rescale(table => 'databaseName.tableName', [bucket_num => 16], [partitions => 'dt=20250217,hh=08;dt=20250218,hh=08'], [where => 'dt>20250217'])
  * </code></pre>
  */
 public class RescaleProcedure extends BaseProcedure {
@@ -74,8 +74,6 @@ public class RescaleProcedure extends BaseProcedure {
                 ProcedureParameter.optional("bucket_num", IntegerType),
                 ProcedureParameter.optional("partitions", StringType),
                 ProcedureParameter.optional("where", StringType),
-                ProcedureParameter.optional("scan_parallelism", IntegerType),
-                ProcedureParameter.optional("sink_parallelism", IntegerType),
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -104,8 +102,6 @@ public class RescaleProcedure extends BaseProcedure {
         Integer bucketNum = args.isNullAt(1) ? null : args.getInt(1);
         String partitions = blank(args, 2) ? null : args.getString(2);
         String where = blank(args, 3) ? null : args.getString(3);
-        Integer scanParallelism = args.isNullAt(4) ? null : args.getInt(4);
-        Integer sinkParallelism = args.isNullAt(5) ? null : args.getInt(5);
 
         checkArgument(
                 partitions == null || where == null,
@@ -155,15 +151,10 @@ public class RescaleProcedure extends BaseProcedure {
                         finalBucketNum = bucketNum;
                     }
 
-                    int finalScanParallelism =
-                            scanParallelism == null ? finalBucketNum : scanParallelism;
-
                     execute(
                             fileStoreTable,
                             finalBucketNum,
                             partitionPredicate,
-                            finalScanParallelism,
-                            sinkParallelism,
                             tableIdent);
 
                     InternalRow internalRow = newInternalRow(true);
@@ -175,8 +166,6 @@ public class RescaleProcedure extends BaseProcedure {
             FileStoreTable table,
             int bucketNum,
             PartitionPredicate partitionPredicate,
-            int scanParallelism,
-            @Nullable Integer sinkParallelism,
             Identifier tableIdent) {
         DataSourceV2Relation relation = createRelation(tableIdent);
 
@@ -197,19 +186,13 @@ public class RescaleProcedure extends BaseProcedure {
                         ScanPlanHelper$.MODULE$.createNewScanPlan(
                                 dataSplits.toArray(new DataSplit[0]), relation));
 
-        Dataset<Row> datasetForWrite = datasetForRead.repartition(scanParallelism);
-
         Map<String, String> bucketOptions = new HashMap<>(table.options());
         bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(bucketNum));
         FileStoreTable rescaledTable = table.copy(table.schema().copy(bucketOptions));
 
-        int finalSinkParallelism = sinkParallelism == null ? bucketNum : sinkParallelism;
-
         PaimonSparkWriter writer = PaimonSparkWriter.apply(rescaledTable);
-        // Use dynamic partition overwrite
         writer.writeBuilder().withOverwrite();
-        datasetForWrite = datasetForWrite.repartition(finalSinkParallelism);
-        writer.commit(writer.write(datasetForWrite));
+        writer.commit(writer.write(datasetForRead));
     }
 
     private int currentBucketNum(

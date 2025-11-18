@@ -66,11 +66,10 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
       checkAnswer(spark.sql("CALL sys.rescale(table => 'T')"), Row(true) :: Nil)
       Assertions.assertThat(getBucketCount(loadTable("T"))).isEqualTo(3)
 
-      // Rescale with scan_parallelism and sink_parallelism
+      // Rescale with explicit bucket_num
       spark.sql("ALTER TABLE T SET TBLPROPERTIES ('bucket' = '4')")
       checkAnswer(
-        spark.sql(
-          "CALL sys.rescale(table => 'T', bucket_num => 4, scan_parallelism => 3, sink_parallelism => 5)"),
+        spark.sql("CALL sys.rescale(table => 'T', bucket_num => 4)"),
         Row(true) :: Nil)
       Assertions.assertThat(getBucketCount(loadTable("T"))).isEqualTo(4)
     }
