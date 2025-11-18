@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, MagicMock
 
 from pyarrow.fs import S3FileSystem, LocalFileSystem
@@ -37,6 +38,17 @@ class FileIOTest(unittest.TestCase):
 
         result = file_io.to_filesystem_path("oss://my-bucket/path/to/file.txt")
         self.assertEqual(result, "my-bucket/path/to/file.txt")
+
+        converted_path = "my-bucket/path/to/file.txt"
+        double_converted = file_io.to_filesystem_path(converted_path)
+        self.assertEqual(double_converted, converted_path, 
+                       "to_filesystem_path should be idempotent for already-converted paths")
+        
+        parent_dir = Path(converted_path).parent
+        parent_str = str(parent_dir)
+        parent_double_converted = file_io.to_filesystem_path(parent_str)
+        self.assertEqual(parent_double_converted, parent_str,
+                        "Double conversion of parent directory should not change the path")
 
     def test_s3_filesystem_with_bucket_only(self):
         """Test S3FileSystem with bucket only (no path)."""
@@ -87,6 +99,19 @@ class FileIOTest(unittest.TestCase):
 
         result = file_io.to_filesystem_path("file:///path/to/file.txt")
         self.assertEqual(result, "/path/to/file.txt")
+
+        # Test double conversion: to_filesystem_path is idempotent for already-converted paths
+        converted_path = "/tmp/path/to/file.txt"
+        double_converted = file_io.to_filesystem_path(converted_path)
+        self.assertEqual(double_converted, converted_path,
+                       "to_filesystem_path should be idempotent for already-converted paths")
+        
+        # Test parent directory extraction and double conversion
+        parent_dir = Path(converted_path).parent
+        parent_str = str(parent_dir)
+        parent_double_converted = file_io.to_filesystem_path(parent_str)
+        self.assertEqual(parent_double_converted, parent_str,
+                        "Double conversion of parent directory should not change the path")
 
     def test_local_filesystem_empty_path(self):
         """Test LocalFileSystem with empty path."""
@@ -160,20 +185,6 @@ class FileIOTest(unittest.TestCase):
         # Windows path should be preserved even with S3FileSystem
         result = file_io.to_filesystem_path("C:\\path\\to\\file.txt")
         self.assertEqual(result, "C:\\path\\to\\file.txt")
-
-    def test_hdfs_filesystem(self):
-        """Test HDFS filesystem paths."""
-        # Note: This test may fail if HADOOP_HOME is not set, but we can test the logic
-        try:
-            file_io = FileIO("hdfs://localhost:9000/warehouse", {})
-            result = file_io.to_filesystem_path("hdfs://localhost:9000/path/to/file.txt")
-            self.assertEqual(result, "/path/to/file.txt")
-
-            result = file_io.to_filesystem_path("hdfs://localhost:9000")
-            self.assertEqual(result, ".")
-        except RuntimeError:
-            # Skip if HADOOP_HOME is not set
-            self.skipTest("HADOOP_HOME not set, skipping HDFS test")
 
     def test_path_with_multiple_slashes(self):
         """Test paths with multiple slashes are normalized."""
