@@ -44,6 +44,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
 
@@ -263,6 +264,13 @@ public class RESTTokenFileIO implements FileIO {
      */
     public RESTToken validToken() {
         tryToRefreshToken();
-        return token;
+        String dlfOssEndpoint = catalogContext.options().get(DLF_OSS_ENDPOINT.key());
+        if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
+            Map<String, String> newOptions = new HashMap<>(token.token());
+            newOptions.put("fs.oss.endpoint", dlfOssEndpoint);
+            return new RESTToken(newOptions, token.expireAtMillis());
+        } else {
+            return token;
+        }
     }
 }
