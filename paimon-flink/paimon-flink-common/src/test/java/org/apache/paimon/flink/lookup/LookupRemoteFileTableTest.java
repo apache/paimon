@@ -96,6 +96,7 @@ public class LookupRemoteFileTableTest extends TableTestBase {
         catalog.createTable(identifier, schema, false);
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        LocalFileIO fileIO = LocalFileIO.create();
 
         // first write
         try (BatchTableWrite write = writeBuilder.newWrite().withIOManager(ioManager);
@@ -122,12 +123,18 @@ public class LookupRemoteFileTableTest extends TableTestBase {
         DataSplit firstSplit = (DataSplit) splits.get(0);
         DataFileMeta firstFile = firstSplit.dataFiles().get(0);
         List<String> extraFiles = firstFile.extraFiles();
-        assertThat(extraFiles.get(0)).endsWith(".position.v1.lookup");
+        String extraFile = extraFiles.get(0);
+        // data-410685c7-4cc2-47d7-9dec-393f6cfe9d64-0.parquet.115.position.v1.lookup
+        assertThat(extraFile).endsWith(".position.v1.lookup");
+        long lookupFileSize =
+                fileIO.getFileSize(
+                        new Path(new Path(tempPath.toUri()), "default.db/t/bucket-0/" + extraFile));
+        String[] split = extraFile.split("\\.");
+        assertThat(split[split.length - 4]).isEqualTo(String.valueOf(lookupFileSize));
 
         // third write with lookup but no data file
 
         // delete file first
-        LocalFileIO fileIO = LocalFileIO.create();
         Path firstPath =
                 table.store()
                         .pathFactory()
