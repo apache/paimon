@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex.wrap;
 
 import org.apache.paimon.fileindex.FileIndexWriter;
+import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 
@@ -26,6 +27,7 @@ import java.io.OutputStream;
 import java.util.Collections;
 import java.util.List;
 
+/** A {@link GlobalIndexReader} wrapper for {@link FileIndexWriter}. */
 public class FileIndexWriterWrapper implements GlobalIndexWriter {
 
     private final GlobalIndexFileWriter fileWriter;

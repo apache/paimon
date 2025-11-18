@@ -22,6 +22,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
+/** Index writer for global index. */
 public interface GlobalIndexWriter {
 
     void write(Object key);
