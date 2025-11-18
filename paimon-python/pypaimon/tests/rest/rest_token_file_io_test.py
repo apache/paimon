@@ -62,8 +62,8 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
             # Verify file was created at the correct location (without scheme)
             expected_path = f"{self.temp_dir}/subdir/test.txt"
-            self.assertTrue(os.path.exists(expected_path), 
-                          f"File should be created at {expected_path}")
+            self.assertTrue(os.path.exists(expected_path),
+                            f"File should be created at {expected_path}")
 
             # Verify content
             with open(expected_path, 'rb') as f:
@@ -90,8 +90,8 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 stream.write(b"test")
 
             # Verify parent directory was created
-            self.assertTrue(os.path.exists(parent_dir), 
-                          f"Parent directory should be created at {parent_dir}")
+            self.assertTrue(os.path.exists(parent_dir),
+                            f"Parent directory should be created at {parent_dir}")
             self.assertTrue(os.path.exists(f"{parent_dir}/test.txt"))
 
     def test_new_output_stream_behavior_matches_parent(self):
@@ -172,7 +172,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
                 # Verify file was created at the expected location (without scheme)
                 self.assertTrue(os.path.exists(expected_fs_path),
-                              f"File should be created at {expected_fs_path} for URI {uri_path}")
+                                f"File should be created at {expected_fs_path} for URI {uri_path}")
 
                 # Clean up for next test
                 os.remove(expected_fs_path)
@@ -186,4 +186,3 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
