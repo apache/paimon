@@ -16,14 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
-
-import org.apache.paimon.fs.SeekableInputStream;
+package org.apache.paimon.globalindex.io;
 
 import java.io.IOException;
+import java.io.OutputStream;
 
-/** File reader for global index. */
-public interface GlobalFileReader {
+public interface GlobalIndexFileWriter {
 
-    SeekableInputStream create(String fileName) throws IOException;
+    String newFileName(String prefix);
+
+    OutputStream newOutputStream(String fileName) throws IOException;
 }
