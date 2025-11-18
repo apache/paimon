@@ -46,7 +46,8 @@ class RESTTokenFileIO(FileIO):
         return super()._initialize_oss_fs(path)
 
     def new_output_stream(self, path: str):
-        return self.filesystem.open_output_stream(path)
+        # Call parent class method to ensure path conversion and parent directory creation
+        return super().new_output_stream(path)
 
     def try_to_refresh_token(self):
         if self.should_refresh():

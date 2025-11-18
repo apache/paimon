@@ -17,7 +17,6 @@
 ################################################################################
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, MagicMock
 
 from pyarrow.fs import S3FileSystem, LocalFileSystem
 
@@ -41,14 +40,14 @@ class FileIOTest(unittest.TestCase):
 
         converted_path = "my-bucket/path/to/file.txt"
         double_converted = file_io.to_filesystem_path(converted_path)
-        self.assertEqual(double_converted, converted_path, 
-                       "to_filesystem_path should be idempotent for already-converted paths")
-        
+        self.assertEqual(double_converted, converted_path,
+                         "to_filesystem_path should be idempotent for already-converted paths")
+
         parent_dir = Path(converted_path).parent
         parent_str = str(parent_dir)
         parent_double_converted = file_io.to_filesystem_path(parent_str)
         self.assertEqual(parent_double_converted, parent_str,
-                        "Double conversion of parent directory should not change the path")
+                         "Double conversion of parent directory should not change the path")
 
     def test_s3_filesystem_with_bucket_only(self):
         """Test S3FileSystem with bucket only (no path)."""
@@ -104,14 +103,14 @@ class FileIOTest(unittest.TestCase):
         converted_path = "/tmp/path/to/file.txt"
         double_converted = file_io.to_filesystem_path(converted_path)
         self.assertEqual(double_converted, converted_path,
-                       "to_filesystem_path should be idempotent for already-converted paths")
-        
+                         "to_filesystem_path should be idempotent for already-converted paths")
+
         # Test parent directory extraction and double conversion
         parent_dir = Path(converted_path).parent
         parent_str = str(parent_dir)
         parent_double_converted = file_io.to_filesystem_path(parent_str)
         self.assertEqual(parent_double_converted, parent_str,
-                        "Double conversion of parent directory should not change the path")
+                         "Double conversion of parent directory should not change the path")
 
     def test_local_filesystem_empty_path(self):
         """Test LocalFileSystem with empty path."""

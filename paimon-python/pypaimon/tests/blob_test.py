@@ -549,21 +549,12 @@ class BlobEndToEndTest(unittest.TestCase):
 
     @staticmethod
     def _to_url(path):
-        """Convert Path to string for FileIO methods.
-        
-        For absolute paths (Unix /path or Windows C:/path), uses file:/// (three slashes)
-        to comply with RFC 8089 file URI specification.
-        For relative paths, uses file:// (two slashes).
-        """
         if isinstance(path, Path):
             path_str = str(path)
             # Check if it's an absolute path
             # Unix: starts with /, Windows: has drive letter (C:, D:, etc.)
             is_absolute = os.path.isabs(path_str) or (len(path_str) >= 2 and path_str[1] == ':')
             if is_absolute:
-                # Absolute path: use file:/// (three slashes per RFC 8089)
-                # For Unix paths starting with /, we get file:////path which is wrong
-                # So we need to handle it differently
                 if path_str.startswith('/'):
                     # Unix absolute path: file:///path (three slashes total)
                     return f"file://{path_str}"
