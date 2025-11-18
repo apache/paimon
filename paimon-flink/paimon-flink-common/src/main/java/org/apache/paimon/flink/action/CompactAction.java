@@ -159,8 +159,7 @@ public class CompactAction extends TableActionBase {
             if (fileStoreTable.coreOptions().clusteringIncrementalEnabled()) {
                 return buildForIncrementalClustering(env, fileStoreTable, isStreaming);
             } else {
-                buildForAppendTableCompact(env, fileStoreTable, isStreaming);
-                return true;
+                return buildForAppendTableCompact(env, fileStoreTable, isStreaming);
             }
         } else {
             buildForBucketedTableCompact(env, fileStoreTable, isStreaming);
@@ -204,7 +203,7 @@ public class CompactAction extends TableActionBase {
         sinkBuilder.withInput(source).build();
     }
 
-    protected void buildForAppendTableCompact(
+    protected boolean buildForAppendTableCompact(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
             throws Exception {
         AppendTableCompactBuilder builder =
@@ -212,7 +211,10 @@ public class CompactAction extends TableActionBase {
         builder.withPartitionPredicate(getPartitionPredicate());
         builder.withContinuousMode(isStreaming);
         builder.withPartitionIdleTime(partitionIdleTime);
-        builder.build();
+        return builder.build(
+                forceStartFlinkJob,
+                table.coreOptions().appendCompactionPerTaskDataSize().getBytes(),
+                table.coreOptions().appendCompactionMaxParallelism());
     }
 
     protected boolean buildForIncrementalClustering(

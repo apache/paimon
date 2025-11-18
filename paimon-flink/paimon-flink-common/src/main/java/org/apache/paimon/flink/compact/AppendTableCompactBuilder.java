@@ -36,6 +36,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 
@@ -87,7 +88,7 @@ public class AppendTableCompactBuilder {
         this.partitionIdleTime = partitionIdleTime;
     }
 
-    public void build() {
+    public boolean build(boolean forceStartFlinkJob, long perTaskDataSize, int maxParallelism) {
         DataStreamSource<AppendCompactTask> source;
         Integer parallelism;
         if (isContinuous) {
@@ -103,8 +104,20 @@ public class AppendTableCompactBuilder {
             AppendCompactCoordinator compactionCoordinator =
                     new AppendCompactCoordinator(table, false, partitionPredicate);
             List<AppendCompactTask> tasks = compactionCoordinator.run();
+
+            if (tasks.isEmpty()) {
+                if (forceStartFlinkJob) {
+                    env.fromSequence(0, 0)
+                            .name("Nothing to Compact Source")
+                            .sinkTo(new DiscardingSink<>());
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+
             source = env.fromData(tasks, new CompactionTaskTypeInfo());
-            parallelism = estimateParallelism(tasks);
+            parallelism = estimateParallelism(tasks, perTaskDataSize, maxParallelism);
         }
 
         if (isContinuous) {
@@ -129,6 +142,7 @@ public class AppendTableCompactBuilder {
 
         // from source, construct the full flink job
         sinkFromSource(source, parallelism);
+        return true;
     }
 
     private Map<BinaryRow, Long> getPartitionInfo(FileStoreTable table) {
@@ -139,22 +153,21 @@ public class AppendTableCompactBuilder {
                                 PartitionEntry::partition, PartitionEntry::lastFileCreationTime));
     }
 
-    private int estimateParallelism(List<AppendCompactTask> tasks) {
+    private int estimateParallelism(
+            List<AppendCompactTask> tasks, long perTaskDataSize, int maxParallelism) {
         long fileSize =
                 tasks.stream()
                         .flatMap(task -> task.compactBefore().stream())
-                        .map(DataFileMeta::fileSize)
-                        .mapToLong(Long::longValue)
+                        .mapToLong(DataFileMeta::fileSize)
                         .sum();
-        // one parallelism per 30KB
-        int estimated = (int) (fileSize / (30 * 1024));
+        int estimated = (int) (fileSize / perTaskDataSize);
         if (estimated < 0) {
             // overflow
-            return 64;
+            return maxParallelism;
         } else if (estimated == 0) {
             return 1;
         } else {
-            return Math.min(estimated, 64);
+            return Math.min(estimated, maxParallelism);
         }
     }
 

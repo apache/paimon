@@ -2076,6 +2076,19 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to write the data into fixed bucket for batch writing a postpone bucket table.");
 
+    public static final ConfigOption<MemorySize> APPEND_COMPACTION_PER_TASK_DATA_SIZE =
+            key("append.compaction.per-subtask.data-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(1024))
+                    .withDescription(
+                            "The data size processed by single parallelism of append table compaction.");
+
+    public static final ConfigOption<Integer> APPEND_COMPACTION_MAX_PARALLELISM =
+            key("append.compaction.max-parallelism")
+                    .intType()
+                    .defaultValue(64)
+                    .withDescription("The max parallelism of append table compaction.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3214,6 +3227,14 @@ public class CoreOptions implements Serializable {
 
     public boolean postponeBatchWriteFixedBucket() {
         return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET);
+    }
+
+    public MemorySize appendCompactionPerTaskDataSize() {
+        return options.get(APPEND_COMPACTION_PER_TASK_DATA_SIZE);
+    }
+
+    public int appendCompactionMaxParallelism() {
+        return options.get(APPEND_COMPACTION_MAX_PARALLELISM);
     }
 
     /** Specifies the merge engine for table with primary key. */
