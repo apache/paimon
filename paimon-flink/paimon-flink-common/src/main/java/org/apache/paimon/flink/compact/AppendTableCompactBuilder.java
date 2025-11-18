@@ -18,11 +18,14 @@
 
 package org.apache.paimon.flink.compact;
 
+import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.AppendTableCompactSink;
+import org.apache.paimon.flink.sink.CompactionTaskTypeInfo;
 import org.apache.paimon.flink.source.AppendTableCompactSource;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -85,8 +88,25 @@ public class AppendTableCompactBuilder {
     }
 
     public void build() {
-        // build source from UnawareSourceFunction
-        DataStreamSource<AppendCompactTask> source = buildSource();
+        DataStreamSource<AppendCompactTask> source;
+        Integer parallelism;
+        if (isContinuous) {
+            long scanInterval = table.coreOptions().continuousDiscoveryInterval().toMillis();
+            AppendTableCompactSource appendTableCompactSource =
+                    new AppendTableCompactSource(
+                            table, isContinuous, scanInterval, partitionPredicate);
+            source =
+                    AppendTableCompactSource.buildSource(
+                            env, appendTableCompactSource, tableIdentifier);
+            parallelism = null;
+        } else {
+            AppendCompactCoordinator compactionCoordinator =
+                    new AppendCompactCoordinator(table, false, partitionPredicate);
+            List<AppendCompactTask> tasks = compactionCoordinator.run();
+            source = env.fromData(tasks, new CompactionTaskTypeInfo());
+            parallelism = estimateParallelism(tasks);
+        }
+
         if (isContinuous) {
             Preconditions.checkArgument(
                     partitionIdleTime == null, "Streaming mode does not support partitionIdleTime");
@@ -108,7 +128,7 @@ public class AppendTableCompactBuilder {
         }
 
         // from source, construct the full flink job
-        sinkFromSource(source);
+        sinkFromSource(source, parallelism);
     }
 
     private Map<BinaryRow, Long> getPartitionInfo(FileStoreTable table) {
@@ -119,23 +139,34 @@ public class AppendTableCompactBuilder {
                                 PartitionEntry::partition, PartitionEntry::lastFileCreationTime));
     }
 
-    private DataStreamSource<AppendCompactTask> buildSource() {
-
-        long scanInterval = table.coreOptions().continuousDiscoveryInterval().toMillis();
-        AppendTableCompactSource source =
-                new AppendTableCompactSource(table, isContinuous, scanInterval, partitionPredicate);
-
-        return AppendTableCompactSource.buildSource(env, source, tableIdentifier);
+    private int estimateParallelism(List<AppendCompactTask> tasks) {
+        long fileSize =
+                tasks.stream()
+                        .flatMap(task -> task.compactBefore().stream())
+                        .map(DataFileMeta::fileSize)
+                        .mapToLong(Long::longValue)
+                        .sum();
+        // one parallelism per 30KB
+        int estimated = (int) (fileSize / (30 * 1024));
+        if (estimated < 0) {
+            // overflow
+            return 64;
+        } else if (estimated == 0) {
+            return 1;
+        } else {
+            return Math.min(estimated, 64);
+        }
     }
 
-    private void sinkFromSource(DataStreamSource<AppendCompactTask> input) {
-        DataStream<AppendCompactTask> rebalanced = rebalanceInput(input);
+    private void sinkFromSource(
+            DataStreamSource<AppendCompactTask> input, @Nullable Integer parallelism) {
+        DataStream<AppendCompactTask> rebalanced = rebalanceInput(input, parallelism);
 
         AppendTableCompactSink.sink(table, rebalanced);
     }
 
     private DataStream<AppendCompactTask> rebalanceInput(
-            DataStreamSource<AppendCompactTask> input) {
+            DataStreamSource<AppendCompactTask> input, @Nullable Integer parallelism) {
         Options conf = Options.fromMap(table.options());
         Integer compactionWorkerParallelism =
                 conf.get(FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM);
@@ -147,7 +178,16 @@ public class AppendTableCompactBuilder {
         } else {
             // cause source function for unaware-bucket table compaction has only one parallelism,
             // we need to set to default parallelism by hand.
-            transformation.setParallelism(env.getParallelism());
+            if (parallelism == null) {
+                transformation.setParallelism(env.getParallelism());
+            } else {
+                int envParallelism = env.getParallelism();
+                if (envParallelism <= 0) {
+                    transformation.setParallelism(parallelism);
+                } else {
+                    transformation.setParallelism(Math.min(parallelism, envParallelism));
+                }
+            }
         }
         return new DataStream<>(env, transformation);
     }
