@@ -302,7 +302,7 @@ class DataBlobWriter(DataWriter):
             delete_row_count=0,
             file_source=0,
             value_stats_cols=self.normal_column_names,
-            file_path=str(file_path),
+            file_path=file_path,
             write_cols=self.write_cols)
 
     def _validate_consistency(self, normal_meta: DataFileMeta, blob_metas: List[DataFileMeta]):
