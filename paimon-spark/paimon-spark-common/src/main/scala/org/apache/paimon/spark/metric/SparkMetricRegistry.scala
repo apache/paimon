@@ -46,6 +46,8 @@ case class SparkMetricRegistry() extends MetricRegistry {
         val metrics = group.getMetrics
         Array(
           PaimonPlanningDurationTaskMetric(gauge[Long](metrics, ScanMetrics.LAST_SCAN_DURATION)),
+          PaimonScannedSnapshotIdTaskMetric(
+            gauge[Long](metrics, ScanMetrics.LAST_SCANNED_SNAPSHOT_ID)),
           PaimonScannedManifestsTaskMetric(
             gauge[Long](metrics, ScanMetrics.LAST_SCANNED_MANIFESTS)),
           PaimonSkippedTableFilesTaskMetric(
