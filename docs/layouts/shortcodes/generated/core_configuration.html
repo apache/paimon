@@ -39,6 +39,18 @@ under the License.
             <td>If true, it disables altering column type from null to not null. Default is true. Users can disable this option to explicitly convert null column type to not null.</td>
         </tr>
         <tr>
+            <td><h5>append.compaction.max-parallelism</h5></td>
+            <td style="word-wrap: break-word;">64</td>
+            <td>Integer</td>
+            <td>The max parallelism of append table compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>append.compaction.per-subtask.data-size</h5></td>
+            <td style="word-wrap: break-word;">1 gb</td>
+            <td>MemorySize</td>
+            <td>The data size processed by single parallelism of append table compaction.</td>
+        </tr>
+        <tr>
             <td><h5>async-file-write</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
