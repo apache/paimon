@@ -124,7 +124,7 @@ public class LookupRemoteFileTableTest extends TableTestBase {
         DataFileMeta firstFile = firstSplit.dataFiles().get(0);
         List<String> extraFiles = firstFile.extraFiles();
         String extraFile = extraFiles.get(0);
-        // e5ef8245-8f73-42cb-a13b-91d7c5c150fd-0.115.position.v1.lookup
+        // data-410685c7-4cc2-47d7-9dec-393f6cfe9d64-0.parquet.115.position.v1.lookup
         assertThat(extraFile).endsWith(".position.v1.lookup");
         long lookupFileSize =
                 fileIO.getFileSize(

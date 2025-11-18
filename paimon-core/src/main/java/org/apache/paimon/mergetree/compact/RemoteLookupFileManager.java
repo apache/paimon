@@ -42,8 +42,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /** Manager to manage remote files for lookup. */
 public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
@@ -55,8 +53,6 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
     private final int levelThreshold;
     private final SchemaManager schemaManager;
     private final Map<Long, RowType> schemaRowTypes;
-    private final String uuid;
-    private final AtomicInteger pathCount;
 
     public RemoteLookupFileManager(
             FileIO fileIO,
@@ -73,8 +69,6 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
         this.lookupLevels.setRemoteFileDownloader(this);
         this.schemaManager = schemaManager;
         this.schemaRowTypes = new HashMap<>();
-        this.uuid = UUID.randomUUID().toString();
-        this.pathCount = new AtomicInteger(0);
     }
 
     public DataFileMeta genRemoteLookupFile(DataFileMeta file) throws IOException {
@@ -89,7 +83,7 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
 
         LookupFile lookupFile = lookupLevels.createLookupFile(file);
         long length = lookupFile.localFile().length();
-        String remoteSstName = newRemoteSstName(length);
+        String remoteSstName = newRemoteSstName(file, length);
         Path sstFile = remoteSstPath(file, remoteSstName);
         try (FileInputStream is = new FileInputStream(lookupFile.localFile());
                 PositionOutputStream os = fileIO.newOutputStream(sstFile, false)) {
@@ -135,13 +129,8 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
                 .findFirst();
     }
 
-    private String newRemoteSstName(long length) {
-        return uuid
-                + "-"
-                + pathCount.getAndIncrement()
-                + "."
-                + length
-                + lookupLevels.remoteSstSuffix();
+    private String newRemoteSstName(DataFileMeta file, long length) {
+        return file.fileName() + "." + length + lookupLevels.remoteSstSuffix();
     }
 
     private Path remoteSstPath(DataFileMeta file, String remoteSstName) {
