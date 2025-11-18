@@ -1959,6 +1959,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable incremental clustering.");
 
+    public static final ConfigOption<MemorySize> CLUSTERING_PER_TASK_DATA_SIZE =
+            key("clustering.per-subtask.data-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(1024))
+                    .withDescription("The data size processed by single parallelism.");
+
     public static final ConfigOption<Integer> CLUSTERING_HISTORY_PARTITION_LIMIT =
             key("clustering.history-partition.limit")
                     .intType()
@@ -3135,6 +3141,10 @@ public class CoreOptions implements Serializable {
 
     public boolean clusteringIncrementalEnabled() {
         return options.get(CLUSTERING_INCREMENTAL);
+    }
+
+    public MemorySize clusteringPerTaskDataSize() {
+        return options.get(CLUSTERING_PER_TASK_DATA_SIZE);
     }
 
     public Duration clusteringHistoryPartitionIdleTime() {
