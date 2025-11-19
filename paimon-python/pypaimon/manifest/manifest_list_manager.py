@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-import os
 
 from io import BytesIO
 from typing import List
@@ -37,7 +36,8 @@ class ManifestListManager:
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
-        self.manifest_path = os.path.join(table.table_path, "manifest")
+        manifest_path = table.table_path.rstrip('/')
+        self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = self.table.file_io
 
     def read_all(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
@@ -54,7 +54,7 @@ class ManifestListManager:
     def read(self, manifest_list_name: str) -> List[ManifestFileMeta]:
         manifest_files = []
 
-        manifest_list_path = os.path.join(self.manifest_path, manifest_list_name)
+        manifest_list_path = f"{self.manifest_path}/{manifest_list_name}"
         with self.file_io.new_input_stream(manifest_list_path) as input_stream:
             avro_bytes = input_stream.read()
         buffer = BytesIO(avro_bytes)
@@ -102,7 +102,7 @@ class ManifestListManager:
             }
             avro_records.append(avro_record)
 
-        list_path = os.path.join(self.manifest_path, file_name)
+        list_path = f"{self.manifest_path}/{file_name}"
         try:
             buffer = BytesIO()
             fastavro.writer(buffer, MANIFEST_FILE_META_SCHEMA, avro_records)

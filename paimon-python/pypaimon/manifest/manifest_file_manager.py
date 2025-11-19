@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-import os
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from typing import List
@@ -39,7 +38,8 @@ class ManifestFileManager:
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
-        self.manifest_path = os.path.join(table.table_path, "manifest")
+        manifest_path = table.table_path.rstrip('/')
+        self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = table.file_io
         self.partition_keys_fields = self.table.partition_keys_fields
         self.primary_keys_fields = self.table.primary_keys_fields
@@ -70,7 +70,7 @@ class ManifestFileManager:
         return final_entries
 
     def read(self, manifest_file_name: str, manifest_entry_filter=None, drop_stats=True) -> List[ManifestEntry]:
-        manifest_file_path = os.path.join(self.manifest_path, manifest_file_name)
+        manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"
 
         entries = []
         with self.file_io.new_input_stream(manifest_file_path) as input_stream:
@@ -189,7 +189,7 @@ class ManifestFileManager:
             }
             avro_records.append(avro_record)
 
-        manifest_path = os.path.join(self.manifest_path, file_name)
+        manifest_path = f"{self.manifest_path}/{file_name}"
         try:
             buffer = BytesIO()
             fastavro.writer(buffer, MANIFEST_ENTRY_SCHEMA, avro_records)

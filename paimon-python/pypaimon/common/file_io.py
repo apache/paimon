@@ -127,11 +127,11 @@ class FileIO:
             raise RuntimeError("HADOOP_CONF_DIR environment variable is not set.")
 
         hadoop_home = os.environ.get("HADOOP_HOME")
-        native_lib_path = os.path.join(hadoop_home, "lib", "native")
+        native_lib_path = f"{hadoop_home}/lib/native"
         os.environ['LD_LIBRARY_PATH'] = f"{native_lib_path}:{os.environ.get('LD_LIBRARY_PATH', '')}"
 
         class_paths = subprocess.run(
-            [os.path.join(hadoop_home, 'bin', 'hadoop'), 'classpath', '--glob'],
+            [f'{hadoop_home}/bin/hadoop', 'classpath', '--glob'],
             capture_output=True,
             text=True,
             check=True
@@ -302,7 +302,7 @@ class FileIO:
             if file_info.type == pyarrow.fs.FileType.File:
                 source_file = file_info.path
                 file_name = source_file.split('/')[-1]
-                target_file = os.path.join(target_directory, file_name) if target_directory else file_name
+                target_file = f"{target_directory.rstrip('/')}/{file_name}" if target_directory else file_name
                 self.copy_file(source_file, target_file, overwrite)
 
     def read_overwritten_file_utf8(self, path: str) -> Optional[str]:

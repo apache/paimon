@@ -16,7 +16,6 @@
 # limitations under the License.
 #################################################################################
 
-import os
 from typing import List, Optional, Union
 
 from pypaimon.catalog.catalog import Catalog
@@ -108,11 +107,12 @@ class FileSystemCatalog(Catalog):
         return table_schema
 
     def get_database_path(self, name) -> str:
-        return os.path.join(self.warehouse, f"{name}{Catalog.DB_SUFFIX}")
+        warehouse = self.warehouse.rstrip('/')
+        return f"{warehouse}/{name}{Catalog.DB_SUFFIX}"
 
     def get_table_path(self, identifier: Identifier) -> str:
         db_path = self.get_database_path(identifier.get_database_name())
-        return os.path.join(db_path, identifier.get_table_name())
+        return f"{db_path}/{identifier.get_table_name()}"
 
     def commit_snapshot(
             self,

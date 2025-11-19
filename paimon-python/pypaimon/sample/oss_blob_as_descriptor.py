@@ -17,7 +17,6 @@
 ################################################################################
 
 import logging
-import os
 import pyarrow as pa
 
 from pypaimon.catalog.catalog_factory import CatalogFactory
@@ -58,7 +57,7 @@ def oss_blob_as_descriptor():
     table = catalog.get_table("test_db.blob_uri_scheme_test")
 
     # Create external blob file in OSS
-    external_blob_uri = os.path.join(warehouse, "external_blob_scheme_test.bin")
+    external_blob_uri = f"{warehouse.rstrip('/')}/external_blob_scheme_test.bin"
     blob_content = b'This is external blob data'
 
     with table.file_io.new_output_stream(external_blob_uri) as out_stream:

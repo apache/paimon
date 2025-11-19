@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-import os
 from typing import Optional
 
 from pypaimon.common.file_io import FileIO
@@ -31,8 +30,9 @@ class SnapshotManager:
 
         self.table: FileStoreTable = table
         self.file_io: FileIO = self.table.file_io
-        self.snapshot_dir = os.path.join(self.table.table_path, "snapshot")
-        self.latest_file = os.path.join(self.snapshot_dir, "LATEST")
+        snapshot_path = self.table.table_path.rstrip('/')
+        self.snapshot_dir = f"{snapshot_path}/snapshot"
+        self.latest_file = f"{self.snapshot_dir}/LATEST"
 
     def get_latest_snapshot(self) -> Optional[Snapshot]:
         if not self.file_io.exists(self.latest_file):
@@ -41,7 +41,7 @@ class SnapshotManager:
         latest_content = self.file_io.read_file_utf8(self.latest_file)
         latest_snapshot_id = int(latest_content.strip())
 
-        snapshot_file = os.path.join(self.snapshot_dir, f"snapshot-{latest_snapshot_id}")
+        snapshot_file = f"{self.snapshot_dir}/snapshot-{latest_snapshot_id}"
         if not self.file_io.exists(snapshot_file):
             return None
 
@@ -58,10 +58,10 @@ class SnapshotManager:
         Returns:
             Path to the snapshot file
         """
-        return os.path.join(self.snapshot_dir, f"snapshot-{snapshot_id}")
+        return f"{self.snapshot_dir}/snapshot-{snapshot_id}"
 
     def try_get_earliest_snapshot(self) -> Optional[Snapshot]:
-        earliest_file = os.path.join(self.snapshot_dir, "EARLIEST")
+        earliest_file = f"{self.snapshot_dir}/EARLIEST"
         if self.file_io.exists(earliest_file):
             earliest_content = self.file_io.read_file_utf8(earliest_file)
             earliest_snapshot_id = int(earliest_content.strip())
