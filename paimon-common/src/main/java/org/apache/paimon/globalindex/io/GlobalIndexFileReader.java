@@ -25,5 +25,5 @@ import java.io.IOException;
 /** File reader for global index. */
 public interface GlobalIndexFileReader {
 
-    SeekableInputStream create(String fileName) throws IOException;
+    SeekableInputStream getInputStream(String fileName) throws IOException;
 }

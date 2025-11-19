@@ -32,10 +32,13 @@ public class FileIndexWriterWrapper implements GlobalIndexWriter {
 
     private final GlobalIndexFileWriter fileWriter;
     private final FileIndexWriter writer;
+    private final String indexType;
 
-    public FileIndexWriterWrapper(GlobalIndexFileWriter fileWriter, FileIndexWriter writer) {
+    public FileIndexWriterWrapper(
+            GlobalIndexFileWriter fileWriter, FileIndexWriter writer, String indexType) {
         this.fileWriter = fileWriter;
         this.writer = writer;
+        this.indexType = indexType;
     }
 
     @Override
@@ -45,7 +48,7 @@ public class FileIndexWriterWrapper implements GlobalIndexWriter {
 
     @Override
     public List<ResultEntry> finish() {
-        String fileName = fileWriter.newFileName("global-index");
+        String fileName = fileWriter.newFileName(indexType);
         try (OutputStream outputStream = fileWriter.newOutputStream(fileName)) {
             outputStream.write(writer.serializedBytes());
         } catch (Exception e) {

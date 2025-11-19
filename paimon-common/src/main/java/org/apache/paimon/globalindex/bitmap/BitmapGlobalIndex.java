@@ -52,14 +52,15 @@ public class BitmapGlobalIndex implements GlobalIndexer {
     @Override
     public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException {
         FileIndexWriter writer = index.createWriter();
-        return new FileIndexWriterWrapper(fileWriter, writer);
+        return new FileIndexWriterWrapper(
+                fileWriter, writer, BitmapGlobalIndexerFactory.IDENTIFIER);
     }
 
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexMeta> files) throws IOException {
         checkArgument(files.size() == 1);
         GlobalIndexMeta indexMeta = files.get(0);
-        SeekableInputStream input = fileReader.create(indexMeta.fileName());
+        SeekableInputStream input = fileReader.getInputStream(indexMeta.fileName());
         FileIndexReader reader = index.createReader(input, 0, (int) indexMeta.fileSize());
         return new FileIndexReaderWrapper(
                 reader, r -> toGlobalResult(indexMeta.rowIdRange(), r), input);
