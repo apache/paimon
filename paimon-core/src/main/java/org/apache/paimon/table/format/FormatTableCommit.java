@@ -21,6 +21,7 @@ package org.apache.paimon.table.format;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
@@ -150,8 +151,28 @@ public class FormatTableCommit implements BatchTableCommit {
             }
             for (Map<String, String> partitionSpec : partitionSpecs) {
                 if (hiveCatalog != null) {
-                    hiveCatalog.createPartitions(
-                            tableIdentifier, Collections.singletonList(partitionSpec));
+                    try {
+                        if (hiveCatalog instanceof DelegateCatalog) {
+                            hiveCatalog = ((DelegateCatalog) hiveCatalog).wrapped();
+                        }
+                        java.lang.reflect.Method method =
+                                hiveCatalog
+                                        .getClass()
+                                        .getDeclaredMethod(
+                                                "createPartitionsUtil",
+                                                Identifier.class,
+                                                List.class,
+                                                boolean.class);
+                        method.setAccessible(true);
+                        method.invoke(
+                                hiveCatalog,
+                                tableIdentifier,
+                                Collections.singletonList(partitionSpec),
+                                formatTablePartitionOnlyValueInPath);
+                    } catch (Exception ex) {
+                        throw new RuntimeException(
+                                "Failed to invoke createPartitionsUtil via reflection", ex);
+                    }
                 }
             }
 
