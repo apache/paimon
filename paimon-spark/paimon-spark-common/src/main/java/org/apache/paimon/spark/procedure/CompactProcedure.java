@@ -20,7 +20,6 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.OrderType;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
@@ -54,7 +53,6 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -90,7 +88,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -183,7 +180,7 @@ public class CompactProcedure extends BaseProcedure {
         checkArgument(
                 partitions == null || where == null,
                 "partitions and where cannot be used together.");
-        String finalWhere = partitions != null ? toWhere(partitions) : where;
+        String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : where;
         return modifyPaimonTable(
                 tableIdent,
                 t -> {
@@ -642,23 +639,6 @@ public class CompactProcedure extends BaseProcedure {
                                 Collectors.collectingAndThen(
                                         Collectors.toList(),
                                         list -> list.toArray(new DataSplit[0]))));
-    }
-
-    @VisibleForTesting
-    static String toWhere(String partitions) {
-        List<Map<String, String>> maps = ParameterUtils.getPartitions(partitions.split(";"));
-
-        return maps.stream()
-                .map(
-                        a ->
-                                a.entrySet().stream()
-                                        .map(entry -> entry.getKey() + "=" + entry.getValue())
-                                        .reduce((s0, s1) -> s0 + " AND " + s1))
-                .filter(Optional::isPresent)
-                .map(Optional::get)
-                .map(a -> "(" + a + ")")
-                .reduce((a, b) -> a + " OR " + b)
-                .orElse(null);
     }
 
     public static ProcedureBuilder builder() {
