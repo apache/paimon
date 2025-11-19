@@ -168,6 +168,11 @@ public abstract class ActionBase implements Action, Serializable {
         return catalogOptions.toMap();
     }
 
+    @VisibleForTesting
+    public StreamExecutionEnvironment getEnv() {
+        return env;
+    }
+
     @Override
     public void run() throws Exception {
         if (LocalAction.class.isAssignableFrom(this.getClass())) {

@@ -98,6 +98,10 @@ public class CompactAction extends TableActionBase {
 
     protected Boolean fullCompaction;
 
+    @Nullable protected Long unawareAppendPerTaskDataSize = null;
+    @Nullable protected Integer bucketedAppendPerTaskBuckets = null;
+    @Nullable protected Integer appendMaxParallelism = null;
+
     public CompactAction(
             String database,
             String tableName,
@@ -139,6 +143,21 @@ public class CompactAction extends TableActionBase {
 
     public CompactAction withFullCompaction(Boolean fullCompaction) {
         this.fullCompaction = fullCompaction;
+        return this;
+    }
+
+    public CompactAction withUnawareAppendPerTaskDataSize(long unawareAppendPerTaskDataSize) {
+        this.unawareAppendPerTaskDataSize = unawareAppendPerTaskDataSize;
+        return this;
+    }
+
+    public CompactAction withBucketedAppendPerTaskBuckets(int bucketedAppendPerTaskBuckets) {
+        this.bucketedAppendPerTaskBuckets = bucketedAppendPerTaskBuckets;
+        return this;
+    }
+
+    public CompactAction withAppendMaxParallelism(int appendMaxParallelism) {
+        this.appendMaxParallelism = appendMaxParallelism;
         return this;
     }
 
@@ -200,7 +219,10 @@ public class CompactAction extends TableActionBase {
                         .withContinuousMode(isStreaming)
                         .withPartitionIdleTime(partitionIdleTime)
                         .build();
-        sinkBuilder.withInput(source).build();
+        sinkBuilder
+                .withInput(source)
+                .withAppendParallelismSetting(bucketedAppendPerTaskBuckets, appendMaxParallelism)
+                .build();
     }
 
     protected boolean buildForAppendTableCompact(
@@ -211,10 +233,8 @@ public class CompactAction extends TableActionBase {
         builder.withPartitionPredicate(getPartitionPredicate());
         builder.withContinuousMode(isStreaming);
         builder.withPartitionIdleTime(partitionIdleTime);
-        return builder.build(
-                forceStartFlinkJob,
-                table.coreOptions().appendCompactionPerTaskDataSize().getBytes(),
-                table.coreOptions().appendCompactionMaxParallelism());
+        builder.withParallelismSetting(unawareAppendPerTaskDataSize, appendMaxParallelism);
+        return builder.build(forceStartFlinkJob);
     }
 
     protected boolean buildForIncrementalClustering(

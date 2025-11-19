@@ -26,6 +26,8 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.table.data.RowData;
 
+import javax.annotation.Nullable;
+
 import java.util.Optional;
 
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
@@ -39,6 +41,9 @@ public class CompactorSinkBuilder {
 
     private final boolean fullCompaction;
 
+    @Nullable private Integer bucketedAppendPerTaskBuckets = null;
+    @Nullable private Integer appendMaxParallelism = null;
+
     public CompactorSinkBuilder(FileStoreTable table, boolean fullCompaction) {
         this.table = table;
         this.fullCompaction = fullCompaction;
@@ -46,6 +51,14 @@ public class CompactorSinkBuilder {
 
     public CompactorSinkBuilder withInput(DataStream<RowData> input) {
         this.input = input;
+        return this;
+    }
+
+    public CompactorSinkBuilder withAppendParallelismSetting(
+            @Nullable Integer bucketedAppendPerTaskBuckets,
+            @Nullable Integer appendMaxParallelism) {
+        this.bucketedAppendPerTaskBuckets = bucketedAppendPerTaskBuckets;
+        this.appendMaxParallelism = appendMaxParallelism;
         return this;
     }
 
@@ -66,6 +79,20 @@ public class CompactorSinkBuilder {
                                 table.options().get(FlinkConnectorOptions.SINK_PARALLELISM.key()))
                         .map(Integer::valueOf)
                         .orElse(null);
+        if (table.primaryKeys().isEmpty()) {
+            int buckets = table.schema().numBuckets();
+            if (parallelism == null) {
+                parallelism = buckets;
+            }
+
+            if (bucketedAppendPerTaskBuckets != null) {
+                parallelism = parallelism / bucketedAppendPerTaskBuckets;
+            }
+
+            if (appendMaxParallelism != null) {
+                parallelism = Math.min(parallelism, appendMaxParallelism);
+            }
+        }
         DataStream<RowData> partitioned =
                 partition(input, new BucketsRowChannelComputer(), parallelism);
         return new CompactorSink(table, fullCompaction).sinkFrom(partitioned);

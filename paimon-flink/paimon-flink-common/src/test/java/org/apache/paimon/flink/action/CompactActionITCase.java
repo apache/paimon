@@ -35,6 +35,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -625,6 +626,90 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                                         "--order_by",
                                         "dt,hh"))
                 .hasMessage("sort compact do not support 'partition_idle_time'.");
+    }
+
+    @Test
+    public void testSetUnawareAppendParallelism() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+
+        prepareTable(
+                Collections.singletonList("dt"),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                tableOptions);
+
+        for (int i = 0; i < 100; i++) {
+            writeData(rowData(i, i * 100, 15, BinaryString.fromString("20251101")));
+        }
+
+        for (int i = 0; i < 100; i++) {
+            writeData(rowData(i, i * 100, 15, BinaryString.fromString("20251102")));
+        }
+
+        CompactAction action =
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--unaware_append_per_task_data_size",
+                        "10B",
+                        "--append_max_parallelism",
+                        "2");
+        action.withStreamExecutionEnvironment(
+                        streamExecutionEnvironmentBuilder().parallelism(-1).batchMode().build())
+                .build();
+        StreamExecutionEnvironment env = action.getEnv();
+        List<Transformation<?>> transformations = env.getTransformations();
+        Transformation<?> write = transformations.get(0);
+        assertThat(write.getName()).isEqualTo("Writer : " + tableName);
+        assertThat(write.getParallelism()).isEqualTo(2);
+    }
+
+    @Test
+    public void testSetBucketedAppendParallelism() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(CoreOptions.BUCKET.key(), "16");
+
+        prepareTable(
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.singletonList("k"),
+                tableOptions);
+
+        for (int i = 0; i < 100; i++) {
+            writeData(rowData(i, i * 100, 15, BinaryString.fromString("20251101")));
+        }
+
+        CompactAction action =
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--bucketed_append_per_task_buckets",
+                        "4",
+                        "--append_max_parallelism",
+                        "16");
+        action.withStreamExecutionEnvironment(
+                        streamExecutionEnvironmentBuilder().parallelism(-1).batchMode().build())
+                .build();
+        StreamExecutionEnvironment env = action.getEnv();
+        List<Transformation<?>> transformations = env.getTransformations();
+        Transformation<?> write = transformations.get(0);
+        assertThat(write.getName()).isEqualTo("Writer : " + tableName);
+        assertThat(write.getParallelism()).isEqualTo(4);
     }
 
     private void runAction(boolean isStreaming) throws Exception {

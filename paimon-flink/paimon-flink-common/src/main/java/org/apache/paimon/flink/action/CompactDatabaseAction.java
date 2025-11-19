@@ -283,10 +283,7 @@ public class CompactDatabaseAction extends ActionBase {
 
         unawareBucketCompactionTopoBuilder.withContinuousMode(isStreaming);
         unawareBucketCompactionTopoBuilder.withPartitionIdleTime(partitionIdleTime);
-        unawareBucketCompactionTopoBuilder.build(
-                forceStartFlinkJob,
-                table.coreOptions().appendCompactionPerTaskDataSize().getBytes(),
-                table.coreOptions().appendCompactionMaxParallelism());
+        unawareBucketCompactionTopoBuilder.build(forceStartFlinkJob);
     }
 
     @Override

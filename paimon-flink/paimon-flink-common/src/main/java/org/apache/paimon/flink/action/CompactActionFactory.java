@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.TimeUtils;
 
@@ -36,6 +37,12 @@ public class CompactActionFactory implements ActionFactory {
     private static final String WHERE = "where";
 
     private static final String PARTITION_IDLE_TIME = "partition_idle_time";
+
+    private static final String UNAWARE_APPEND_PER_TASK_DATA_SIZE =
+            "unaware_append_per_task_data_size";
+    private static final String BUCKETED_APPEND_PER_TASK_BUCKETS =
+            "bucketed_append_per_task_buckets";
+    private static final String APPEND_MAX_PARALLELISM = "append_max_parallelism";
 
     @Override
     public String identifier() {
@@ -77,6 +84,20 @@ public class CompactActionFactory implements ActionFactory {
             action.withWhereSql(params.get(WHERE));
         }
 
+        if (params.has(UNAWARE_APPEND_PER_TASK_DATA_SIZE)) {
+            action.withUnawareAppendPerTaskDataSize(
+                    MemorySize.parseBytes(params.get(UNAWARE_APPEND_PER_TASK_DATA_SIZE)));
+        }
+
+        if (params.has(BUCKETED_APPEND_PER_TASK_BUCKETS)) {
+            action.withBucketedAppendPerTaskBuckets(
+                    Integer.parseInt(params.get(BUCKETED_APPEND_PER_TASK_BUCKETS)));
+        }
+
+        if (params.has(APPEND_MAX_PARALLELISM)) {
+            action.withAppendMaxParallelism(Integer.parseInt(params.get(APPEND_MAX_PARALLELISM)));
+        }
+
         return Optional.of(action);
     }
 
@@ -107,7 +128,9 @@ public class CompactActionFactory implements ActionFactory {
                         + "[--table_conf <key>=<value>] \n"
                         + "[--order_by <order_columns>] \n"
                         + "[--partition_idle_time <partition_idle_time>] \n"
-                        + "[--compact_strategy <compact_strategy>]");
+                        + "[--compact_strategy <compact_strategy>] \n"
+                        + "[--append_per_task_data_size <append_per_task_data_size>] \n"
+                        + "[--append_max_parallelism <append_max_parallelism>] \n");
         System.out.println(
                 "  compact --warehouse s3://path/to/warehouse --database <database_name> "
                         + "--table <table_name> [--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]]");
