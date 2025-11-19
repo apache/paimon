@@ -40,6 +40,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import scala.Tuple2;
+
 /** Commit operator for copy files. */
 public class CopyFilesCommitOperator extends CopyFilesOperator {
 
@@ -94,15 +96,12 @@ public class CopyFilesCommitOperator extends CopyFilesOperator {
         if (dataFileMetaPairRdd == null) {
             return result;
         }
-        Map<byte[], Iterable<byte[]>> dataFileMetaByteMap =
-                dataFileMetaPairRdd.groupByKey().collectAsMap();
-        for (Map.Entry<byte[], Iterable<byte[]>> entry : dataFileMetaByteMap.entrySet()) {
-            BinaryRow partition = SerializationUtils.deserializeBinaryRow(entry.getKey());
-            List<DataFileMeta> dataFileMetas = new ArrayList<>();
-            for (byte[] bytes : entry.getValue()) {
-                dataFileMetas.add(dataFileSerializer.deserializeFromBytes(bytes));
-            }
-            result.put(partition, dataFileMetas);
+        List<Tuple2<byte[], byte[]>> dataFileMetaByteList = dataFileMetaPairRdd.collect();
+        for (Tuple2<byte[], byte[]> tuple : dataFileMetaByteList) {
+            BinaryRow partition = SerializationUtils.deserializeBinaryRow(tuple._1());
+            List<DataFileMeta> fileMetas =
+                    result.computeIfAbsent(partition, k -> new ArrayList<>());
+            fileMetas.add(dataFileSerializer.deserializeFromBytes(tuple._2()));
         }
         return result;
     }
@@ -113,15 +112,12 @@ public class CopyFilesCommitOperator extends CopyFilesOperator {
         if (indexFileMetaPairRdd == null) {
             return result;
         }
-        Map<byte[], Iterable<byte[]>> indexFileMetaByteMap =
-                indexFileMetaPairRdd.groupByKey().collectAsMap();
-        for (Map.Entry<byte[], Iterable<byte[]>> entry : indexFileMetaByteMap.entrySet()) {
-            BinaryRow partition = SerializationUtils.deserializeBinaryRow(entry.getKey());
-            List<IndexFileMeta> indexFileMetas = new ArrayList<>();
-            for (byte[] bytes : entry.getValue()) {
-                indexFileMetas.add(indexFileSerializer.deserializeFromBytes(bytes));
-            }
-            result.put(partition, indexFileMetas);
+        List<Tuple2<byte[], byte[]>> indexFileMetaByteList = indexFileMetaPairRdd.collect();
+        for (Tuple2<byte[], byte[]> tuple : indexFileMetaByteList) {
+            BinaryRow partition = SerializationUtils.deserializeBinaryRow(tuple._1());
+            List<IndexFileMeta> fileMetas =
+                    result.computeIfAbsent(partition, k -> new ArrayList<>());
+            fileMetas.add(indexFileSerializer.deserializeFromBytes(tuple._2()));
         }
         return result;
     }

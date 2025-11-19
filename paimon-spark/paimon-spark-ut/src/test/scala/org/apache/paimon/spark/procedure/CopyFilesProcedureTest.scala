@@ -26,17 +26,18 @@ import java.util.concurrent.ThreadLocalRandom
 
 class CopyFilesProcedureTest extends PaimonSparkTestBase {
 
-  private val random = ThreadLocalRandom.current().nextInt(10000);
-
   test("Paimon copy files procedure: append table") {
+    val random = ThreadLocalRandom.current().nextInt(100000);
     withTable(s"tbl$random") {
       sql(s"""
              |CREATE TABLE tbl$random (k INT, v STRING)
              |""".stripMargin)
 
-      sql(s"INSERT INTO tbl$random VALUES (1, 'a'), (2, 'b')")
+      sql(s"INSERT INTO tbl$random VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+      sql(s"INSERT INTO tbl$random VALUES (4, 'd'), (5, 'e'), (6, 'f')")
+
       checkAnswer(
-        sql(s"CALL sys.copy(source_table => 'tbl$random', target_table => 'target_tbl$random'"),
+        sql(s"CALL sys.copy(source_table => 'tbl$random', target_table => 'target_tbl$random')"),
         Row(true) :: Nil
       )
 
@@ -49,6 +50,7 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
   }
 
   test("Paimon copy files procedure: partitioned append table") {
+    val random = ThreadLocalRandom.current().nextInt(100000);
     withTable(s"tbl$random") {
       sql(s"""
              |CREATE TABLE tbl$random (k INT, v STRING, dt STRING, hh INT)
@@ -69,6 +71,7 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
   }
 
   test("Paimon copy files procedure: partitioned append table with partition filter") {
+    val random = ThreadLocalRandom.current().nextInt(100000);
     withTable(s"tbl$random") {
       sql(s"""
              |CREATE TABLE tbl$random (k INT, v STRING, dt STRING, hh INT)
@@ -90,6 +93,7 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
   }
 
   test("Paimon copy files procedure: pk table") {
+    val random = ThreadLocalRandom.current().nextInt(100000);
     withTable(s"tbl$random") {
       sql(s"""
              |CREATE TABLE tbl$random (k INT, v STRING, dt STRING, hh INT)
