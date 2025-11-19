@@ -104,6 +104,7 @@ public class CompactAction extends TableActionBase {
             Map<String, String> catalogConfig,
             Map<String, String> tableConf) {
         super(database, tableName, catalogConfig);
+        this.forceStartFlinkJob = true;
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -245,7 +246,7 @@ public class CompactAction extends TableActionBase {
                         table.coreOptions().legacyPartitionName());
 
         long perSubtaskDataSize = table.coreOptions().clusteringPerTaskDataSize().getBytes();
-        LOGGER.info("{} is {} bytes.", CLUSTERING_PER_TASK_DATA_SIZE, perSubtaskDataSize);
+        LOGGER.info("{} is {} bytes.", CLUSTERING_PER_TASK_DATA_SIZE.key(), perSubtaskDataSize);
 
         // 1. pick cluster files for each partition
         Map<BinaryRow, CompactUnit> compactUnits =
