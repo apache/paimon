@@ -40,8 +40,10 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
@@ -58,6 +60,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
@@ -185,16 +188,25 @@ public class PartitionsTable implements ReadonlyTable {
             List<PartitionEntry> partitions =
                     fileStoreTable.newScan().withLevelFilter(level -> true).listPartitionEntries();
 
-            @SuppressWarnings("unchecked")
-            CastExecutor<InternalRow, BinaryString> partitionCastExecutor =
-                    (CastExecutor<InternalRow, BinaryString>)
-                            CastExecutors.resolveToString(
-                                    fileStoreTable.schema().logicalPartitionType());
+            List<DataType> fieldTypes =
+                    fileStoreTable.schema().logicalPartitionType().getFieldTypes();
+            InternalRow.FieldGetter[] fieldGetters =
+                    InternalRowUtils.createFieldGetters(fieldTypes);
+            List<CastExecutor> castExecutors =
+                    fieldTypes.stream()
+                            .map(CastExecutors::resolveToString)
+                            .collect(Collectors.toList());
 
             // sorted by partition
             Iterator<InternalRow> iterator =
                     partitions.stream()
-                            .map(partitionEntry -> toRow(partitionEntry, partitionCastExecutor))
+                            .map(
+                                    partitionEntry ->
+                                            toRow(
+                                                    partitionEntry,
+                                                    fileStoreTable.partitionKeys(),
+                                                    castExecutors,
+                                                    fieldGetters))
                             .sorted(Comparator.comparing(row -> row.getString(0)))
                             .iterator();
 
@@ -211,9 +223,27 @@ public class PartitionsTable implements ReadonlyTable {
 
         private InternalRow toRow(
                 PartitionEntry entry,
-                CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
+                List<String> partitionKeys,
+                List<CastExecutor> castExecutors,
+                InternalRow.FieldGetter[] fieldGetters) {
+            StringBuilder partitionStringBuilder = new StringBuilder();
+
+            for (int i = 0; i < partitionKeys.size(); i++) {
+                if (i > 0) {
+                    partitionStringBuilder.append("/");
+                }
+                partitionStringBuilder
+                        .append(partitionKeys.get(i))
+                        .append("=")
+                        .append(
+                                castExecutors
+                                        .get(i)
+                                        .cast(fieldGetters[i].getFieldOrNull(entry.partition()))
+                                        .toString());
+            }
+
             return GenericRow.of(
-                    partitionCastExecutor.cast(entry.partition()),
+                    BinaryString.fromString(partitionStringBuilder.toString()),
                     entry.recordCount(),
                     entry.fileSizeInBytes(),
                     entry.fileCount(),

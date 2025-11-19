@@ -1023,7 +1023,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", table);
         List<Row> result =
                 sql("SELECT `partition`, record_count, file_count FROM %s$partitions", table);
-        assertThat(result).containsExactlyInAnyOrder(Row.of("{1}", 2L, 2L), Row.of("{2}", 3L, 2L));
+        assertThat(result).containsExactlyInAnyOrder(Row.of("p=1", 2L, 2L), Row.of("p=2", 3L, 2L));
 
         // assert new files in partition
         sql("INSERT INTO %s VALUES (3, 4, 4, 'S3'), (1, 3, 2, 'S4')", table);
@@ -1035,10 +1035,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 table));
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        Row.of("{1}", 3L, 3L),
-                        Row.of("{2}", 4L, 3L),
-                        Row.of("{3}", 1L, 1L),
-                        Row.of("{4}", 1L, 1L));
+                        Row.of("p=1", 3L, 3L),
+                        Row.of("p=2", 4L, 3L),
+                        Row.of("p=3", 1L, 1L),
+                        Row.of("p=4", 1L, 1L));
 
         // assert delete partitions
         sql("ALTER TABLE %s DROP PARTITION (p = 2)", table);
@@ -1049,7 +1049,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 table));
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        Row.of("{1}", 3L, 3L), Row.of("{3}", 1L, 1L), Row.of("{4}", 1L, 1L));
+                        Row.of("p=1", 3L, 3L), Row.of("p=3", 1L, 1L), Row.of("p=4", 1L, 1L));
 
         // add new file to p 2
         sql("INSERT INTO %s VALUES (1, 2, 2, 'S1')", table);
@@ -1060,10 +1060,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 table));
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        Row.of("{1}", 3L, 3L),
-                        Row.of("{2}", 1L, 1L),
-                        Row.of("{3}", 1L, 1L),
-                        Row.of("{4}", 1L, 1L));
+                        Row.of("p=1", 3L, 3L),
+                        Row.of("p=2", 1L, 1L),
+                        Row.of("p=3", 1L, 1L),
+                        Row.of("p=4", 1L, 1L));
     }
 
     @Test
