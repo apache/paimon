@@ -65,6 +65,10 @@ public abstract class TableActionBase extends ActionBase {
         return executeInternal(transformations, sinkIdentifierNames);
     }
 
+    public Table table() {
+        return table;
+    }
+
     /**
      * Invoke {@code TableEnvironmentImpl#executeInternal(List<Transformation<?>>, List<String>)}
      * from a {@link StreamTableEnvironment} instance through reflecting.
