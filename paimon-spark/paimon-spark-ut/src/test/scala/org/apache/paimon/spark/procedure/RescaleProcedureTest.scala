@@ -26,12 +26,11 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions
 
-import java.util
 import java.util.{Arrays, Collections, Map => JMap}
 
 import scala.collection.JavaConverters._
 
-/** Test rescale procedure. See [[RescaleProcedure]]. */
+/** Tests for the rescale procedure. See [[RescaleProcedure]]. */
 class RescaleProcedureTest extends PaimonSparkTestBase {
 
   test("Paimon Procedure: rescale basic functionality") {
@@ -57,9 +56,7 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
       Assertions.assertThat(getBucketCount(reloadedTable)).isEqualTo(4)
 
       val afterData = spark.sql("SELECT * FROM T ORDER BY id").collect()
-      val initialDataList = new util.ArrayList[Row]()
-      initialData.foreach(initialDataList.add)
-      Assertions.assertThat(afterData).containsExactlyElementsOf(initialDataList)
+      Assertions.assertThat(afterData).containsExactlyElementsOf(Arrays.asList(initialData: _*))
 
       // Rescale without bucket_num (use current bucket)
       spark.sql("ALTER TABLE T SET TBLPROPERTIES ('bucket' = '3')")
@@ -70,6 +67,20 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
       spark.sql("ALTER TABLE T SET TBLPROPERTIES ('bucket' = '4')")
       checkAnswer(spark.sql("CALL sys.rescale(table => 'T', bucket_num => 4)"), Row(true) :: Nil)
       Assertions.assertThat(getBucketCount(loadTable("T"))).isEqualTo(4)
+
+      // Decrease bucket count (4 -> 2)
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('bucket' = '2')")
+      checkAnswer(spark.sql("CALL sys.rescale(table => 'T', bucket_num => 2)"), Row(true) :: Nil)
+      val reloadedTableAfterDecrease = loadTable("T")
+      Assertions.assertThat(getBucketCount(reloadedTableAfterDecrease)).isEqualTo(2)
+      reloadedTableAfterDecrease.newSnapshotReader.read.dataSplits.asScala.toList.foreach(
+        split => Assertions.assertThat(split.bucket()).isLessThan(2))
+
+      // Verify data integrity after bucket decrease
+      val afterDecreaseData = spark.sql("SELECT * FROM T ORDER BY id").collect()
+      Assertions
+        .assertThat(afterDecreaseData)
+        .containsExactlyElementsOf(Arrays.asList(initialData: _*))
     }
   }
 
@@ -131,9 +142,113 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
       Assertions.assertThat(lastSnapshotId(loadTable("T"))).isEqualTo(snapshotBeforeEmpty)
 
       val afterData = spark.sql("SELECT * FROM T ORDER BY id").collect()
-      val initialDataList = new util.ArrayList[Row]()
-      initialData.foreach(initialDataList.add)
-      Assertions.assertThat(afterData).containsExactlyElementsOf(initialDataList)
+      Assertions.assertThat(afterData).containsExactlyElementsOf(Arrays.asList(initialData: _*))
+    }
+  }
+
+  test("Paimon Procedure: rescale with where clause") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
+                   |TBLPROPERTIES ('primary-key'='id, dt, hh', 'bucket'='2')
+                   |PARTITIONED BY (dt, hh)
+                   |""".stripMargin)
+
+      val table = loadTable("T")
+      spark.sql(s"INSERT INTO T VALUES (1, 'a', '2024-01-01', 0), (2, 'b', '2024-01-01', 0)")
+      spark.sql(s"INSERT INTO T VALUES (3, 'c', '2024-01-01', 1), (4, 'd', '2024-01-01', 1)")
+      spark.sql(s"INSERT INTO T VALUES (5, 'e', '2024-01-02', 0), (6, 'f', '2024-01-02', 1)")
+
+      val initialData = spark.sql("SELECT * FROM T ORDER BY id").collect()
+      val initialSnapshotId = lastSnapshotId(table)
+
+      // Test 1: Rescale with where clause using single partition column
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('bucket' = '4')")
+      checkAnswer(
+        spark.sql(
+          "CALL sys.rescale(table => 'T', bucket_num => 4, where => 'dt = \"2024-01-01\"')"),
+        Row(true) :: Nil)
+
+      val reloadedTable = loadTable("T")
+      Assertions.assertThat(lastSnapshotCommand(reloadedTable)).isEqualTo(CommitKind.OVERWRITE)
+      Assertions.assertThat(lastSnapshotId(reloadedTable)).isGreaterThan(initialSnapshotId)
+
+      // Test 2: Rescale with where clause using multiple partition columns
+      val snapshotBeforeTest2 = lastSnapshotId(reloadedTable)
+      checkAnswer(
+        spark.sql(
+          "CALL sys.rescale(table => 'T', bucket_num => 4, where => 'dt = \"2024-01-01\" AND hh >= 1')"),
+        Row(true) :: Nil)
+
+      val reloadedTable2 = loadTable("T")
+      Assertions.assertThat(lastSnapshotCommand(reloadedTable2)).isEqualTo(CommitKind.OVERWRITE)
+      Assertions.assertThat(lastSnapshotId(reloadedTable2)).isGreaterThan(snapshotBeforeTest2)
+
+      // Verify data integrity
+      val afterData = spark.sql("SELECT * FROM T ORDER BY id").collect()
+      Assertions.assertThat(afterData).containsExactlyElementsOf(Arrays.asList(initialData: _*))
+    }
+  }
+
+  test("Paimon Procedure: rescale with ALTER TABLE and write validation") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (f0 INT)
+                   |TBLPROPERTIES ('bucket'='2', 'bucket-key'='f0')
+                   |""".stripMargin)
+
+      val table = loadTable("T")
+
+      spark.sql(s"INSERT INTO T VALUES (1), (2), (3), (4), (5)")
+
+      val snapshot = lastSnapshotId(table)
+      Assertions.assertThat(snapshot).isGreaterThanOrEqualTo(0)
+
+      val initialBuckets = getBucketCount(table)
+      Assertions.assertThat(initialBuckets).isEqualTo(2)
+
+      val initialData = spark.sql("SELECT * FROM T ORDER BY f0").collect()
+      Assertions.assertThat(initialData.length).isEqualTo(5)
+
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('bucket' = '4')")
+
+      val reloadedTable = loadTable("T")
+      val newBuckets = getBucketCount(reloadedTable)
+      Assertions.assertThat(newBuckets).isEqualTo(4)
+
+      val afterAlterData = spark.sql("SELECT * FROM T ORDER BY f0").collect()
+      val initialDataList = Arrays.asList(initialData: _*)
+      Assertions.assertThat(afterAlterData).containsExactlyElementsOf(initialDataList)
+
+      val writeError = intercept[org.apache.spark.SparkException] {
+        spark.sql("INSERT INTO T VALUES (6)")
+      }
+      val errorMessage = Option(writeError.getMessage).getOrElse("")
+      val causeMessage =
+        Option(writeError.getCause).flatMap(c => Option(c.getMessage)).getOrElse("")
+      val expectedMessage =
+        "Try to write table with a new bucket num 4, but the previous bucket num is 2"
+      val fullMessage = Seq(errorMessage, causeMessage).filter(_.nonEmpty).mkString(" ")
+      Assertions
+        .assertThat(fullMessage)
+        .contains(expectedMessage)
+
+      checkAnswer(spark.sql("CALL sys.rescale(table => 'T', bucket_num => 4)"), Row(true) :: Nil)
+
+      val finalTable = loadTable("T")
+      val finalSnapshot = lastSnapshotId(finalTable)
+      Assertions.assertThat(finalSnapshot).isGreaterThan(snapshot)
+      Assertions.assertThat(lastSnapshotCommand(finalTable)).isEqualTo(CommitKind.OVERWRITE)
+
+      val finalBuckets = getBucketCount(finalTable)
+      Assertions.assertThat(finalBuckets).isEqualTo(4)
+
+      val afterRescaleData = spark.sql("SELECT * FROM T ORDER BY f0").collect()
+      Assertions.assertThat(afterRescaleData).containsExactlyElementsOf(initialDataList)
+
+      spark.sql("INSERT INTO T VALUES (6)")
+      val finalData = spark.sql("SELECT * FROM T ORDER BY f0").collect()
+      Assertions.assertThat(finalData.length).isEqualTo(6)
     }
   }
 
@@ -189,146 +304,6 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
       assert(intercept[IllegalArgumentException] {
         spark.sql("CALL sys.rescale(table => 'T4', bucket_num => 4, where => 'id = 1')")
       }.getMessage.contains("Only partition predicate is supported"))
-    }
-  }
-
-  test("Paimon Procedure: rescale bucket count changes") {
-    // Increase bucket count
-    withTable("T1") {
-      spark.sql(s"""
-                   |CREATE TABLE T1 (id INT, value STRING)
-                   |TBLPROPERTIES ('primary-key'='id', 'bucket'='2')
-                   |""".stripMargin)
-      loadTable("T1")
-      spark.sql(s"INSERT INTO T1 VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e')")
-      spark.sql("ALTER TABLE T1 SET TBLPROPERTIES ('bucket' = '4')")
-      checkAnswer(spark.sql("CALL sys.rescale(table => 'T1', bucket_num => 4)"), Row(true) :: Nil)
-      Assertions.assertThat(getBucketCount(loadTable("T1"))).isEqualTo(4)
-    }
-
-    // Decrease bucket count
-    withTable("T2") {
-      spark.sql(s"""
-                   |CREATE TABLE T2 (id INT, value STRING)
-                   |TBLPROPERTIES ('primary-key'='id', 'bucket'='4')
-                   |""".stripMargin)
-      loadTable("T2")
-      spark.sql(
-        s"INSERT INTO T2 VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e'), (6, 'f'), (7, 'g'), (8, 'h')")
-      spark.sql("ALTER TABLE T2 SET TBLPROPERTIES ('bucket' = '2')")
-      checkAnswer(spark.sql("CALL sys.rescale(table => 'T2', bucket_num => 2)"), Row(true) :: Nil)
-      val reloadedTable2 = loadTable("T2")
-      Assertions.assertThat(getBucketCount(reloadedTable2)).isEqualTo(2)
-      reloadedTable2.newSnapshotReader.read.dataSplits.asScala.toList.foreach(
-        split => Assertions.assertThat(split.bucket()).isLessThan(2))
-    }
-  }
-
-  test("Paimon Procedure: rescale with where clause") {
-    withTable("T") {
-      spark.sql(s"""
-                   |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
-                   |TBLPROPERTIES ('primary-key'='id, dt, hh', 'bucket'='2')
-                   |PARTITIONED BY (dt, hh)
-                   |""".stripMargin)
-
-      val table = loadTable("T")
-      spark.sql(s"INSERT INTO T VALUES (1, 'a', '2024-01-01', 0), (2, 'b', '2024-01-01', 0)")
-      spark.sql(s"INSERT INTO T VALUES (3, 'c', '2024-01-01', 1), (4, 'd', '2024-01-01', 1)")
-      spark.sql(s"INSERT INTO T VALUES (5, 'e', '2024-01-02', 0), (6, 'f', '2024-01-02', 1)")
-
-      val initialData = spark.sql("SELECT * FROM T ORDER BY id").collect()
-      val initialSnapshotId = lastSnapshotId(table)
-
-      // Test 1: Rescale with where clause using single partition column
-      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('bucket' = '4')")
-      checkAnswer(
-        spark.sql(
-          "CALL sys.rescale(table => 'T', bucket_num => 4, where => 'dt = \"2024-01-01\"')"),
-        Row(true) :: Nil)
-
-      val reloadedTable = loadTable("T")
-      Assertions.assertThat(lastSnapshotCommand(reloadedTable)).isEqualTo(CommitKind.OVERWRITE)
-      Assertions.assertThat(lastSnapshotId(reloadedTable)).isGreaterThan(initialSnapshotId)
-
-      // Test 2: Rescale with where clause using multiple partition columns
-      val snapshotBeforeTest2 = lastSnapshotId(reloadedTable)
-      checkAnswer(
-        spark.sql(
-          "CALL sys.rescale(table => 'T', bucket_num => 4, where => 'dt = \"2024-01-01\" AND hh >= 1')"),
-        Row(true) :: Nil)
-
-      val reloadedTable2 = loadTable("T")
-      Assertions.assertThat(lastSnapshotCommand(reloadedTable2)).isEqualTo(CommitKind.OVERWRITE)
-      Assertions.assertThat(lastSnapshotId(reloadedTable2)).isGreaterThan(snapshotBeforeTest2)
-
-      // Verify data integrity
-      val afterData = spark.sql("SELECT * FROM T ORDER BY id").collect()
-      val initialDataList = new util.ArrayList[Row]()
-      initialData.foreach(initialDataList.add)
-      Assertions.assertThat(afterData).containsExactlyElementsOf(initialDataList)
-    }
-  }
-
-  test("Paimon Procedure: rescale with ALTER TABLE and write validation") {
-    withTable("T") {
-      spark.sql(s"""
-                   |CREATE TABLE T (f0 INT)
-                   |TBLPROPERTIES ('bucket'='2', 'bucket-key'='f0')
-                   |""".stripMargin)
-
-      val table = loadTable("T")
-
-      spark.sql(s"INSERT INTO T VALUES (1), (2), (3), (4), (5)")
-
-      val snapshot = lastSnapshotId(table)
-      Assertions.assertThat(snapshot).isGreaterThanOrEqualTo(0)
-
-      val initialBuckets = getBucketCount(table)
-      Assertions.assertThat(initialBuckets).isEqualTo(2)
-
-      val initialData = spark.sql("SELECT * FROM T ORDER BY f0").collect()
-      Assertions.assertThat(initialData.length).isEqualTo(5)
-
-      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('bucket' = '4')")
-
-      val reloadedTable = loadTable("T")
-      val newBuckets = getBucketCount(reloadedTable)
-      Assertions.assertThat(newBuckets).isEqualTo(4)
-
-      val afterAlterData = spark.sql("SELECT * FROM T ORDER BY f0").collect()
-      val initialDataList = Arrays.asList(initialData: _*)
-      Assertions.assertThat(afterAlterData).containsExactlyElementsOf(initialDataList)
-
-      val writeError = intercept[org.apache.spark.SparkException] {
-        spark.sql("INSERT INTO T VALUES (6)")
-      }
-      val errorMessage = writeError.getMessage
-      val cause = writeError.getCause
-      val causeMessage = if (cause != null && cause.getMessage != null) cause.getMessage else ""
-      val expectedMessage =
-        "Try to write table with a new bucket num 4, but the previous bucket num is 2"
-      val fullMessage = errorMessage + " " + causeMessage
-      Assertions
-        .assertThat(fullMessage)
-        .contains(expectedMessage)
-
-      checkAnswer(spark.sql("CALL sys.rescale(table => 'T', bucket_num => 4)"), Row(true) :: Nil)
-
-      val finalTable = loadTable("T")
-      val finalSnapshot = lastSnapshotId(finalTable)
-      Assertions.assertThat(finalSnapshot).isGreaterThan(snapshot)
-      Assertions.assertThat(lastSnapshotCommand(finalTable)).isEqualTo(CommitKind.OVERWRITE)
-
-      val finalBuckets = getBucketCount(finalTable)
-      Assertions.assertThat(finalBuckets).isEqualTo(4)
-
-      val afterRescaleData = spark.sql("SELECT * FROM T ORDER BY f0").collect()
-      Assertions.assertThat(afterRescaleData).containsExactlyElementsOf(initialDataList)
-
-      spark.sql("INSERT INTO T VALUES (6)")
-      val finalData = spark.sql("SELECT * FROM T ORDER BY f0").collect()
-      Assertions.assertThat(finalData.length).isEqualTo(6)
     }
   }
 

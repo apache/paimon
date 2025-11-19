@@ -117,7 +117,7 @@ public class RescaleProcedure extends BaseProcedure {
                         throw new IllegalArgumentException(
                                 "Table "
                                         + table.fullName()
-                                        + " has no snapshot. No need to rescale.");
+                                        + " has no snapshot, no need to rescale.");
                     }
                     Snapshot snapshot = optionalSnapshot.get();
 
