@@ -20,7 +20,6 @@ package org.apache.paimon.flink.pipeline.cdc.source;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
@@ -52,6 +51,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.disk.IOManagerImpl.splitPaths;
+import static org.apache.paimon.flink.pipeline.cdc.util.CDCUtils.createCatalog;
 
 /** The {@link Source} that integrates with Flink CDC framework. */
 public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, CDCCheckpoint> {
@@ -111,7 +111,7 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
         FileStoreSourceReaderMetrics sourceReaderMetrics =
                 new FileStoreSourceReaderMetrics(metricGroup);
 
-        Catalog catalog = CatalogFactory.createCatalog(catalogContext);
+        Catalog catalog = createCatalog(catalogContext);
         TableReadManager tableReadManager = new TableReadManager(catalog, ioManager, metricGroup);
         return new CDCSourceReader(context, sourceReaderMetrics, ioManager, tableReadManager);
     }

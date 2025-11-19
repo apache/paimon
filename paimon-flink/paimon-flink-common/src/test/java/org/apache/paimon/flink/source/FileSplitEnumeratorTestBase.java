@@ -93,7 +93,7 @@ public abstract class FileSplitEnumeratorTestBase<SplitT extends FileStoreSource
                 .build();
     }
 
-    /** JavaDoc. */
+    /** A mock {@link StreamTableScan} that can manually specify generated plans. */
     protected static class MockScan implements StreamTableScan {
 
         private final TreeMap<Long, Plan> results;
@@ -159,7 +159,10 @@ public abstract class FileSplitEnumeratorTestBase<SplitT extends FileStoreSource
         }
     }
 
-    /** JavaDoc. */
+    /**
+     * A {@link TestingSplitEnumeratorContext} that supports manually controlling asynchronous
+     * calls.
+     */
     protected static class TestingAsyncSplitEnumeratorContext<SplitT extends SourceSplit>
             extends TestingSplitEnumeratorContext<SplitT> {
 

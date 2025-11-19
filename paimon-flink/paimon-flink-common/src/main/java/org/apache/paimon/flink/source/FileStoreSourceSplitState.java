@@ -51,4 +51,14 @@ public final class FileStoreSourceSplitState {
     public FileStoreSourceSplit toSourceSplit() {
         return split.updateWithRecordsToSkip(recordsToSkip);
     }
+
+    @Override
+    public String toString() {
+        return "FileStoreSourceSplitState{"
+                + "split="
+                + split
+                + ", recordsToSkip="
+                + recordsToSkip
+                + '}';
+    }
 }

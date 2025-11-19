@@ -20,12 +20,14 @@ package org.apache.paimon.flink.pipeline.cdc.source;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.flink.pipeline.cdc.schema.CDCMetadataAccessor;
 
 import org.apache.flink.cdc.common.configuration.Configuration;
 import org.apache.flink.cdc.common.source.DataSource;
 import org.apache.flink.cdc.common.source.EventSourceProvider;
 import org.apache.flink.cdc.common.source.MetadataAccessor;
+
+import static org.apache.paimon.flink.pipeline.cdc.util.CDCUtils.createCatalog;
 
 /** The {@link DataSource} for cdc source. */
 public class CDCDataSource implements DataSource {
@@ -46,7 +48,7 @@ public class CDCDataSource implements DataSource {
     @Override
     public MetadataAccessor getMetadataAccessor() {
         if (catalog == null) {
-            catalog = CatalogFactory.createCatalog(catalogContext);
+            catalog = createCatalog(catalogContext);
         }
         return new CDCMetadataAccessor(catalog);
     }

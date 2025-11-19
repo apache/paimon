@@ -29,6 +29,8 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.cdc.common.event.Event;
 import org.apache.flink.connector.base.source.reader.SingleThreadMultiplexSourceReaderBase;
 import org.apache.flink.connector.file.src.reader.BulkFormat.RecordIterator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
@@ -39,6 +41,7 @@ public class CDCSourceReader
                 Event,
                 TableAwareFileStoreSourceSplit,
                 FileStoreSourceSplitState> {
+    private static final Logger LOG = LoggerFactory.getLogger(CDCSourceReader.class);
 
     private final IOManager ioManager;
 
@@ -77,12 +80,14 @@ public class CDCSourceReader
 
     @Override
     protected FileStoreSourceSplitState initializedState(TableAwareFileStoreSourceSplit split) {
+        LOG.info("Initializing split {}", split);
         return new FileStoreSourceSplitState(split);
     }
 
     @Override
     protected TableAwareFileStoreSourceSplit toSplitType(
             String splitId, FileStoreSourceSplitState splitState) {
+        LOG.info("Converting split state {} with id {} to split", splitState, splitId);
         return (TableAwareFileStoreSourceSplit) splitState.toSourceSplit();
     }
 

@@ -72,12 +72,20 @@ Pipeline Connector Options
 
 {{< generated/cdc_configuration >}}
 
+Catalog Options
+----------------
+
+Apart from the pipeline connector options described above, in the CDC yaml file you can also configure options that 
+starts with `catalog.properties.`. For example, `catalog.properties.warehouse` or `catalog.properties.metastore`. Such 
+options will have their prefix removed and the rest be regarded as catalog options. Please refer to the 
+[Configurations]({{< ref "maintenance/configurations" >}}) section for catalog options available.
+
 Usage Notes
 --------
 
 * Data updates for primary key tables (-U, +U) will be replaced with -D and +I.
 * Does not support dropping tables. If you need to drop a table from the Paimon warehouse, please restart the Flink CDC job after performing the drop operation. When the job restarts, it will stop reading data from the dropped table, and the target table in the external system will remain unchanged from its state before the job was stopped.
-* Data from the same table will be consumed by the same Flink source task. If the amount of data varies significantly across different tables, performance bottlenecks caused by data skew may be observed in Flink CDC jobs.
+* Data from the same table will be consumed by the same Flink source subtask. If the amount of data varies significantly across different tables, performance bottlenecks caused by data skew may be observed in Flink CDC jobs.
 
 Data Type Mapping
 ----------------

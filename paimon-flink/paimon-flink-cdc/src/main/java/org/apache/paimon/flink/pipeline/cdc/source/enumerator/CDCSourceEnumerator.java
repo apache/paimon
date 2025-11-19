@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.pipeline.cdc.source.TableAwareFileStoreSourceSplit;
@@ -68,6 +67,7 @@ import static org.apache.paimon.flink.pipeline.cdc.CDCOptions.DATABASE;
 import static org.apache.paimon.flink.pipeline.cdc.CDCOptions.TABLE;
 import static org.apache.paimon.flink.pipeline.cdc.CDCOptions.TABLE_DISCOVERY_INTERVAL;
 import static org.apache.paimon.flink.pipeline.cdc.CDCOptions.toCDCOption;
+import static org.apache.paimon.flink.pipeline.cdc.util.CDCUtils.createCatalog;
 
 /** {@link SplitEnumerator} for CDC source. */
 public class CDCSourceEnumerator
@@ -106,7 +106,16 @@ public class CDCSourceEnumerator
 
         this.database = cdcConfig.get(toCDCOption(DATABASE));
         this.table = cdcConfig.get(toCDCOption(TABLE));
-        this.catalog = CatalogFactory.createCatalog(catalogContext);
+        this.catalog = createCatalog(catalogContext);
+
+        this.numTablesWithSubtaskAssigned = 0;
+
+        int splitMaxPerTask = catalogContext.options().get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK);
+        this.splitMaxNum = context.currentParallelism() * splitMaxPerTask;
+
+        this.splitAssigner = new CDCSplitAssigner(splitMaxPerTask, context.currentParallelism());
+        this.readersAwaitingSplit = new LinkedHashSet<>();
+        this.splitIdGenerator = new SplitIdGenerator();
 
         if (checkpoint != null) {
             for (Identifier identifier : checkpoint.getCurrentSnapshotIdMap().keySet()) {
@@ -130,20 +139,15 @@ public class CDCSourceEnumerator
                 }
 
                 TableStatus tableStatus = new TableStatus(context, (FileStoreTable) table);
-                tableStatus.restore(checkpoint.getCurrentSnapshotIdMap().get(identifier));
+                long currentSnapshotId = checkpoint.getCurrentSnapshotIdMap().get(identifier);
+                tableStatus.restore(currentSnapshotId);
                 tableStatusMap.put(identifier, tableStatus);
+                LOG.info(
+                        "Restoring state for table {}. Next snapshot id: {}",
+                        identifier,
+                        currentSnapshotId);
             }
-        }
-        this.numTablesWithSubtaskAssigned = 0;
 
-        int splitMaxPerTask = catalogContext.options().get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK);
-        this.splitMaxNum = context.currentParallelism() * splitMaxPerTask;
-
-        this.splitAssigner = new CDCSplitAssigner(splitMaxPerTask, context.currentParallelism());
-        this.readersAwaitingSplit = new LinkedHashSet<>();
-        this.splitIdGenerator = new SplitIdGenerator();
-
-        if (checkpoint != null) {
             addSplits(checkpoint.getSplits());
         }
     }
@@ -346,7 +350,7 @@ public class CDCSourceEnumerator
         if (database == null || database.isEmpty()) {
             Preconditions.checkArgument(
                     table == null || table.isEmpty(),
-                    "Tables should not be specified when databases is not. But tables is specified as "
+                    "Tables should not be specified when databases is null. But tables is specified as "
                             + table);
             // If database parameter is not specified, dynamically scan all databases
             databaseNames = catalog.listDatabases();

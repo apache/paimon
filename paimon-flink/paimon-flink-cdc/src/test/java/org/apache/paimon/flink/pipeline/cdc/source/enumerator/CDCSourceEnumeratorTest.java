@@ -402,7 +402,6 @@ public class CDCSourceEnumeratorTest
         assertThat(checkpoint.getSplits()).containsExactly(splits.get(1));
     }
 
-    /** JavaDoc. */
     private class Builder {
         protected SplitEnumeratorContext<TableAwareFileStoreSourceSplit> context;
         protected Collection<TableAwareFileStoreSourceSplit> initialSplits =
