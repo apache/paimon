@@ -230,7 +230,7 @@ public class RESTTokenFileIO implements FileIO {
                         response.getExpiresAtMillis());
     }
 
-    public Map<String, String> mergeTokenWithCatalogOptions(Map<String, String> token) {
+    private Map<String, String> mergeTokenWithCatalogOptions(Map<String, String> token) {
         Map<String, String> newToken = Maps.newLinkedHashMap(token);
         // DLF OSS endpoint should override the standard OSS endpoint.
         String dlfOssEndpoint = catalogContext.options().get(DLF_OSS_ENDPOINT.key());
