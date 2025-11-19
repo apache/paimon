@@ -206,7 +206,10 @@ public class PartitionsTable implements ReadonlyTable {
                                                     partitionEntry,
                                                     fileStoreTable.partitionKeys(),
                                                     castExecutors,
-                                                    fieldGetters))
+                                                    fieldGetters,
+                                                    fileStoreTable
+                                                            .coreOptions()
+                                                            .partitionDefaultName()))
                             .sorted(Comparator.comparing(row -> row.getString(0)))
                             .iterator();
 
@@ -225,21 +228,26 @@ public class PartitionsTable implements ReadonlyTable {
                 PartitionEntry entry,
                 List<String> partitionKeys,
                 List<CastExecutor> castExecutors,
-                InternalRow.FieldGetter[] fieldGetters) {
+                InternalRow.FieldGetter[] fieldGetters,
+                String defaultPartitionName) {
             StringBuilder partitionStringBuilder = new StringBuilder();
 
             for (int i = 0; i < partitionKeys.size(); i++) {
                 if (i > 0) {
                     partitionStringBuilder.append("/");
                 }
+                Object partitionValue = fieldGetters[i].getFieldOrNull(entry.partition());
+                String partitionValueString =
+                        partitionValue == null
+                                ? defaultPartitionName
+                                : castExecutors
+                                        .get(i)
+                                        .cast(fieldGetters[i].getFieldOrNull(entry.partition()))
+                                        .toString();
                 partitionStringBuilder
                         .append(partitionKeys.get(i))
                         .append("=")
-                        .append(
-                                castExecutors
-                                        .get(i)
-                                        .cast(fieldGetters[i].getFieldOrNull(entry.partition()))
-                                        .toString());
+                        .append(partitionValueString);
             }
 
             return GenericRow.of(
