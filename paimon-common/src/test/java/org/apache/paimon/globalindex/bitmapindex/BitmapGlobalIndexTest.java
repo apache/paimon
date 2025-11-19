@@ -109,7 +109,7 @@ public class BitmapGlobalIndexTest {
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 2, 4));
-        assert reader.visitEqual(fieldRef, BinaryString.fromString("c")).result().isEmpty();
+        assert !reader.visitEqual(fieldRef, BinaryString.fromString("c")).iterator().hasNext();
     }
 
     private void testIntType(int version) throws Exception {
@@ -142,7 +142,7 @@ public class BitmapGlobalIndexTest {
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 1));
 
-        assert reader.visitEqual(fieldRef, 2).result().isEmpty();
+        assert !reader.visitEqual(fieldRef, 2).iterator().hasNext();
     }
 
     private void testBooleanType(int version) throws Exception {
@@ -289,7 +289,7 @@ public class BitmapGlobalIndexTest {
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 3));
-        assert reader.visitEqual(fieldRef, BinaryString.fromString("c")).result().isEmpty();
+        assert !reader.visitEqual(fieldRef, BinaryString.fromString("c")).iterator().hasNext();
     }
 
     private void testAllNull(int version) throws Exception {
@@ -309,6 +309,6 @@ public class BitmapGlobalIndexTest {
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 1, 2));
-        assert reader.visitIsNotNull(fieldRef).result().isEmpty();
+        assert !reader.visitIsNotNull(fieldRef).iterator().hasNext();
     }
 }

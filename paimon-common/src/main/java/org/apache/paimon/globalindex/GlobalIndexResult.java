@@ -18,30 +18,54 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.utils.RoaringBitmap64;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+import java.util.Set;
 
 /**
  * Global index result represents row ids.
  *
  * <p>TODO introduce ranges interface
  */
-public interface GlobalIndexResult {
-
-    RoaringBitmap64 result();
+public interface GlobalIndexResult extends Iterable<Long> {
 
     static GlobalIndexResult createEmpty() {
-        return RoaringBitmap64::new;
+        return () ->
+                new Iterator<Long>() {
+                    @Override
+                    public boolean hasNext() {
+                        return false;
+                    }
+
+                    @Override
+                    public Long next() {
+                        throw new NoSuchElementException();
+                    }
+                };
     }
 
-    default GlobalIndexResult and(GlobalIndexResult globalIndexResult) {
-        RoaringBitmap64 result0 = result();
-        RoaringBitmap64 result1 = globalIndexResult.result();
-        return () -> RoaringBitmap64.and(result0, result1);
+    default GlobalIndexResult and(GlobalIndexResult other) {
+        Set<Long> set = new HashSet<>();
+        this.forEach(set::add);
+
+        Set<Long> result = new HashSet<>();
+        for (Long l : other) {
+            if (set.contains(l)) {
+                result.add(l);
+            }
+        }
+        return wrap(result);
     }
 
-    default GlobalIndexResult or(GlobalIndexResult globalIndexResult) {
-        RoaringBitmap64 result0 = result();
-        RoaringBitmap64 result1 = globalIndexResult.result();
-        return () -> RoaringBitmap64.or(result0, result1);
+    default GlobalIndexResult or(GlobalIndexResult other) {
+        Set<Long> result = new HashSet<>();
+        this.forEach(result::add);
+        other.forEach(result::add);
+        return wrap(result);
+    }
+
+    static GlobalIndexResult wrap(Set<Long> longs) {
+        return longs::iterator;
     }
 }
