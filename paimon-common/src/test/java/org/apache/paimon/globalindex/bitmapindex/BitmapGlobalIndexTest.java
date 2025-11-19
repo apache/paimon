@@ -51,6 +51,7 @@ import java.util.Collections;
 import java.util.UUID;
 import java.util.function.Consumer;
 
+/** Tests for {@link BitmapGlobalIndex}. */
 public class BitmapGlobalIndexTest {
 
     @TempDir private File tempDir;

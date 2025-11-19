@@ -29,6 +29,7 @@ public interface GlobalIndexWriter {
 
     List<ResultEntry> finish();
 
+    /** Write result meta. */
     class ResultEntry {
         private final String fileName;
         @Nullable private final String meta;
