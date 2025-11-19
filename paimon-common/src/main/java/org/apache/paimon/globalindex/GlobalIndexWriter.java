@@ -18,6 +18,8 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.utils.Range;
+
 import javax.annotation.Nullable;
 
 import java.util.List;
@@ -32,23 +34,29 @@ public interface GlobalIndexWriter {
     /** Write result meta. */
     class ResultEntry {
         private final String fileName;
-        @Nullable private final String meta;
+        private final Range rowRange;
+        @Nullable private final byte[] meta;
 
-        public ResultEntry(String fileName, @Nullable String meta) {
+        public ResultEntry(String fileName, @Nullable byte[] meta, Range rowRange) {
             this.fileName = fileName;
             this.meta = meta;
+            this.rowRange = rowRange;
         }
 
         public String fileName() {
             return fileName;
         }
 
-        public String meta() {
+        public Range rowRange() {
+            return rowRange;
+        }
+
+        public byte[] meta() {
             return meta;
         }
 
-        public static ResultEntry of(String fileName, String meta) {
-            return new ResultEntry(fileName, meta);
+        public static ResultEntry of(String fileName, byte[] meta, Range rowRange) {
+            return new ResultEntry(fileName, meta, rowRange);
         }
     }
 }

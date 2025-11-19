@@ -22,6 +22,7 @@ import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.utils.Range;
 
 import java.io.OutputStream;
 import java.util.Collections;
@@ -33,6 +34,7 @@ public class FileIndexWriterWrapper implements GlobalIndexWriter {
     private final GlobalIndexFileWriter fileWriter;
     private final FileIndexWriter writer;
     private final String indexType;
+    private long count = 0;
 
     public FileIndexWriterWrapper(
             GlobalIndexFileWriter fileWriter, FileIndexWriter writer, String indexType) {
@@ -43,17 +45,23 @@ public class FileIndexWriterWrapper implements GlobalIndexWriter {
 
     @Override
     public void write(Object key) {
+        count++;
         writer.write(key);
     }
 
     @Override
     public List<ResultEntry> finish() {
-        String fileName = fileWriter.newFileName(indexType);
-        try (OutputStream outputStream = fileWriter.newOutputStream(fileName)) {
-            outputStream.write(writer.serializedBytes());
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to write global index file: " + fileName, e);
+        if (count > 0) {
+            String fileName = fileWriter.newFileName(indexType);
+            try (OutputStream outputStream = fileWriter.newOutputStream(fileName)) {
+                outputStream.write(writer.serializedBytes());
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to write global index file: " + fileName, e);
+            }
+            return Collections.singletonList(
+                    ResultEntry.of(fileName, null, new Range(0, count - 1)));
+        } else {
+            return Collections.emptyList();
         }
-        return Collections.singletonList(ResultEntry.of(fileName, null));
     }
 }

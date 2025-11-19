@@ -37,6 +37,10 @@ public class Range {
         return to - from + 1;
     }
 
+    public Range addOffset(long offset) {
+        return new Range(from + offset, to + offset);
+    }
+
     public boolean isBefore(Range other) {
         return to < other.from;
     }
