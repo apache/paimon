@@ -494,4 +494,38 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         }
         assertThat(sql("SELECT * FROM T")).containsExactly(Row.of(1, String.valueOf(4)));
     }
+
+    @Test
+    public void testDvWithCrossPartition() {
+        setParallelism(1);
+
+        sql(
+                "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING, dt STRING) "
+                        + "PARTITIONED BY (dt) "
+                        + "WITH ('deletion-vectors.enabled' = 'true', 'dynamic-bucket.target-row-num' = '1')");
+
+        // first write with write-only
+        sql(
+                "INSERT INTO T /*+ OPTIONS('write-only' = 'true') */ VALUES "
+                        + "(1, '1', 'dt'), "
+                        + "(2, '2', 'dt'), "
+                        + "(3, '3', 'dt'), "
+                        + "(4, '4', 'dt'), "
+                        + "(5, '5', 'dt')");
+
+        // second write to test bucket assigner
+        sql("INSERT INTO T VALUES (3, '33', 'dt'), (5, '55', 'dt')");
+
+        // third write to cover all buckets
+        sql("INSERT INTO T VALUES (4, '44', 'dt'), (2, '22', 'dt'), (1, '11', 'dt')");
+
+        // assert
+        assertThat(batchSql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "11", "dt"),
+                        Row.of(2, "22", "dt"),
+                        Row.of(3, "33", "dt"),
+                        Row.of(4, "44", "dt"),
+                        Row.of(5, "55", "dt"));
+    }
 }
