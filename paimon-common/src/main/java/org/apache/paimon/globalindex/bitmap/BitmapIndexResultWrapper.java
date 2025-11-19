@@ -21,8 +21,7 @@ package org.apache.paimon.globalindex.bitmap;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.utils.Range;
-
-import java.util.Iterator;
+import org.apache.paimon.utils.RoaringBitmap64;
 
 import static org.apache.paimon.utils.RoaringBitmap32.bitmapOfRange;
 
@@ -38,23 +37,18 @@ public class BitmapIndexResultWrapper implements GlobalIndexResult {
     }
 
     @Override
-    public Iterator<Long> iterator() {
-        Iterator<Integer> rowIds = result.get().iterator();
-        return new Iterator<Long>() {
-            @Override
-            public boolean hasNext() {
-                return rowIds.hasNext();
-            }
-
-            @Override
-            public Long next() {
-                return rowIds.next() + start;
-            }
-        };
+    public RoaringBitmap64 result() {
+        RoaringBitmap64 roaringBitmap64 = new RoaringBitmap64();
+        result.get().iterator().forEachRemaining(x -> roaringBitmap64.add(start + x));
+        return roaringBitmap64;
     }
 
     public static BitmapIndexResultWrapper fromRange(Range range) {
         return new BitmapIndexResultWrapper(
                 new BitmapIndexResult(() -> bitmapOfRange(0, range.to - range.from)), range.from);
+    }
+
+    public BitmapIndexResult getBitmapIndexResult() {
+        return result;
     }
 }

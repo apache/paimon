@@ -18,28 +18,30 @@
 
 package org.apache.paimon.globalindex;
 
-import java.util.Iterator;
-import java.util.NoSuchElementException;
+import org.apache.paimon.utils.RoaringBitmap64;
 
 /**
  * Global index result represents row ids.
  *
  * <p>TODO introduce ranges interface
  */
-public interface GlobalIndexResult extends Iterable<Long> {
+public interface GlobalIndexResult {
+
+    RoaringBitmap64 result();
 
     static GlobalIndexResult createEmpty() {
-        return () ->
-                new Iterator<Long>() {
-                    @Override
-                    public boolean hasNext() {
-                        return false;
-                    }
+        return RoaringBitmap64::new;
+    }
 
-                    @Override
-                    public Long next() {
-                        throw new NoSuchElementException();
-                    }
-                };
+    default GlobalIndexResult and(GlobalIndexResult globalIndexResult) {
+        RoaringBitmap64 result0 = result();
+        RoaringBitmap64 result1 = globalIndexResult.result();
+        return () -> RoaringBitmap64.and(result0, result1);
+    }
+
+    default GlobalIndexResult or(GlobalIndexResult globalIndexResult) {
+        RoaringBitmap64 result0 = result();
+        RoaringBitmap64 result1 = globalIndexResult.result();
+        return () -> RoaringBitmap64.or(result0, result1);
     }
 }
