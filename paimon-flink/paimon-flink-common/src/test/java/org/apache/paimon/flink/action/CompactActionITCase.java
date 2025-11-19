@@ -634,11 +634,12 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
         tableOptions.put(CoreOptions.BUCKET.key(), "-1");
 
-        prepareTable(
-                Collections.singletonList("dt"),
-                Collections.emptyList(),
-                Collections.emptyList(),
-                tableOptions);
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("dt"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
 
         for (int i = 0; i < 100; i++) {
             writeData(rowData(i, i * 100, 15, BinaryString.fromString("20251101")));
@@ -662,14 +663,17 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                         "10B",
                         "--append_max_parallelism",
                         "2");
-        action.withStreamExecutionEnvironment(
-                        streamExecutionEnvironmentBuilder().parallelism(-1).batchMode().build())
-                .build();
-        StreamExecutionEnvironment env = action.getEnv();
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().parallelism(-1).batchMode().build();
+        action.withStreamExecutionEnvironment(env).build();
         List<Transformation<?>> transformations = env.getTransformations();
         Transformation<?> write = transformations.get(0);
         assertThat(write.getName()).isEqualTo("Writer : " + tableName);
         assertThat(write.getParallelism()).isEqualTo(2);
+        // test job run successfully
+        env.execute();
+        assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
     }
 
     @Test
@@ -678,11 +682,12 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
         tableOptions.put(CoreOptions.BUCKET.key(), "16");
 
-        prepareTable(
-                Collections.emptyList(),
-                Collections.emptyList(),
-                Collections.singletonList("k"),
-                tableOptions);
+        FileStoreTable table =
+                prepareTable(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        tableOptions);
 
         for (int i = 0; i < 100; i++) {
             writeData(rowData(i, i * 100, 15, BinaryString.fromString("20251101")));
@@ -702,14 +707,17 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                         "4",
                         "--append_max_parallelism",
                         "16");
-        action.withStreamExecutionEnvironment(
-                        streamExecutionEnvironmentBuilder().parallelism(-1).batchMode().build())
-                .build();
-        StreamExecutionEnvironment env = action.getEnv();
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().parallelism(-1).batchMode().build();
+        action.withStreamExecutionEnvironment(env).build();
         List<Transformation<?>> transformations = env.getTransformations();
         Transformation<?> write = transformations.get(0);
         assertThat(write.getName()).isEqualTo("Writer : " + tableName);
         assertThat(write.getParallelism()).isEqualTo(4);
+        // test job run successfully
+        env.execute();
+        assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
     }
 
     private void runAction(boolean isStreaming) throws Exception {

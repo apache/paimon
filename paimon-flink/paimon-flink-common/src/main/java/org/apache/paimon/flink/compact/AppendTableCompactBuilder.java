@@ -124,7 +124,7 @@ public class AppendTableCompactBuilder {
                 }
             }
 
-            source = env.fromData(tasks, new CompactionTaskTypeInfo());
+            source = env.fromCollection(tasks, new CompactionTaskTypeInfo());
             estimatedParallelism = estimateParallelism(tasks);
         }
 
