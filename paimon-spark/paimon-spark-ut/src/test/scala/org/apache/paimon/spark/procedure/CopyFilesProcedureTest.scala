@@ -78,7 +78,7 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
       sql(s"INSERT INTO tbl$random VALUES (1, 'a', '2025-08-17', 5), (2, 'b', '2025-10-06', 0)")
       checkAnswer(
         sql(
-          s"CALL sys.copy(source_table => 'tbl$random', target_table => 'target_tbl$random', where => \"dt = '2025-08-17' and hh = 5\""),
+          s"""CALL sys.copy(source_table => 'tbl$random', target_table => 'target_tbl$random', where => "dt = '2025-08-17' and hh = 5")"""),
         Row(true) :: Nil
       )
 
@@ -95,7 +95,7 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
              |CREATE TABLE tbl$random (k INT, v STRING, dt STRING, hh INT)
              |TBLPROPERTIES (
              |  'primary-key' = 'dt,hh,k',
-             |  'bucket' = '-1',
+             |  'bucket' = '-1')
              |PARTITIONED BY (dt, hh)
              |""".stripMargin)
 
