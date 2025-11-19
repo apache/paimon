@@ -105,6 +105,7 @@ import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.OBJECT_TABLE;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1598,6 +1599,25 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testValidToken() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(DLF_OSS_ENDPOINT.key(), "test-endpoint");
+        this.catalog = newRestCatalogWithDataToken(options);
+        Identifier identifier =
+                Identifier.create("test_data_token", "table_for_testing_valid_token");
+        RESTToken expiredDataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 3600_000L);
+        setDataTokenToRestServerForMock(identifier, expiredDataToken);
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+        RESTToken fileDataToken = fileIO.validToken();
+        assertEquals("test-endpoint", fileDataToken.token().get("fs.oss.endpoint"));
+    }
+
+    @Test
     void testRefreshFileIOWhenExpired() throws Exception {
         this.catalog = newRestCatalogWithDataToken();
         Identifier identifier =
@@ -2801,6 +2821,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     protected abstract Catalog newRestCatalogWithDataToken() throws IOException;
+
+    protected abstract Catalog newRestCatalogWithDataToken(Map<String, String> extraOptions)
+            throws IOException;
 
     protected abstract void revokeTablePermission(Identifier identifier);
 

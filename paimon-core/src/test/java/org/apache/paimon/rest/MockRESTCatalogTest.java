@@ -47,6 +47,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -274,6 +275,12 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     @Override
+    protected Catalog newRestCatalogWithDataToken(Map<String, String> extraOptions)
+            throws IOException {
+        return initCatalog(true, extraOptions);
+    }
+
+    @Override
     protected void revokeTablePermission(Identifier identifier) {
         restCatalogServer.addNoPermissionTable(identifier);
     }
@@ -322,6 +329,11 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     private RESTCatalog initCatalog(boolean enableDataToken) throws IOException {
+        return initCatalog(enableDataToken, Collections.emptyMap());
+    }
+
+    private RESTCatalog initCatalog(boolean enableDataToken, Map<String, String> extraOptions)
+            throws IOException {
         String restWarehouse = UUID.randomUUID().toString();
         this.config =
                 new ConfigResponse(
@@ -348,6 +360,9 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                         ? dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME)
                         : dataPath;
         options.set(RESTTestFileIO.DATA_PATH_CONF_KEY, path);
+        for (Map.Entry<String, String> entry : extraOptions.entrySet()) {
+            options.set(entry.getKey(), entry.getValue());
+        }
         return new RESTCatalog(CatalogContext.create(options));
     }
 }
