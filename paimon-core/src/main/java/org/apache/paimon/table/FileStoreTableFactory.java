@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.PATH;
@@ -92,6 +93,9 @@ public class FileStoreTableFactory {
             TableSchema tableSchema,
             Options dynamicOptions,
             CatalogEnvironment catalogEnvironment) {
+        // todo: Perhaps dynamic options should be split into two parts: runtime and metadata.
+        // Metadata options should to be processed now rather than treated as a parameter processed
+        // by org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf, such as spark.paimon.branch.
         FileStoreTable table =
                 createWithoutFallbackBranch(
                         fileIO, tablePath, tableSchema, dynamicOptions, catalogEnvironment);
@@ -137,11 +141,20 @@ public class FileStoreTableFactory {
             Options dynamicOptions,
             CatalogEnvironment catalogEnvironment) {
         FileStoreTable table =
-                tableSchema.primaryKeys().isEmpty()
-                        ? new AppendOnlyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment)
-                        : new PrimaryKeyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment);
+                createFileStoreTable(
+                        fileIO, tablePath, tableSchema, dynamicOptions.toMap(), catalogEnvironment);
         return table.copy(dynamicOptions.toMap());
+    }
+
+    public static AbstractFileStoreTable createFileStoreTable(
+            FileIO fileIO,
+            Path tablePath,
+            TableSchema tableSchema,
+            Map<String, String> dynamicOptions,
+            CatalogEnvironment catalogEnvironment) {
+        if (tableSchema.primaryKeys().isEmpty()) {
+            return new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema, catalogEnvironment);
+        }
+        return new PrimaryKeyFileStoreTable(fileIO, tablePath, tableSchema, catalogEnvironment);
     }
 }
