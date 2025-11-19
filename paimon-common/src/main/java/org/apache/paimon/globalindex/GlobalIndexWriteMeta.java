@@ -21,14 +21,14 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.utils.Range;
 
 /** Index meta for global index. */
-public class GlobalIndexMeta {
+public class GlobalIndexWriteMeta {
 
     private final String fileName;
     private final long fileSize;
     private final Range rowIdRange;
     private final byte[] metadata;
 
-    public GlobalIndexMeta(String fileName, long fileSize, Range rowIdRange, byte[] metadata) {
+    public GlobalIndexWriteMeta(String fileName, long fileSize, Range rowIdRange, byte[] metadata) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.rowIdRange = rowIdRange;

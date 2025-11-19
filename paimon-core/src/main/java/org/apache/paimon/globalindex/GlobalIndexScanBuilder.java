@@ -18,24 +18,21 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
-import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.utils.Range;
 
-import java.io.IOException;
-import java.util.List;
+import java.util.Set;
 
-/** Abstract base class for global indexers. */
-public interface GlobalIndexer {
+/** Builder for scanning global indexes. */
+public interface GlobalIndexScanBuilder {
 
-    GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException;
+    GlobalIndexScanBuilder withSnapshot(long snapshotId);
 
-    GlobalIndexReader createReader(
-            GlobalIndexFileReader fileReader, List<GlobalIndexWriteMeta> files) throws IOException;
+    GlobalIndexScanBuilder withPartition(BinaryRow binaryRow);
 
-    static GlobalIndexer create(String type, DataType dataType, Options options) {
-        GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
-        return globalIndexerFactory.create(dataType, options);
-    }
+    GlobalIndexScanBuilder withRowRange(Range rowRange);
+
+    ShardGlobalIndexScanner build();
+
+    Set<Range> shardList();
 }
