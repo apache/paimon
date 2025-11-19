@@ -57,4 +57,8 @@ public class BitmapIndexResultWrapper implements GlobalIndexResult {
         return new BitmapIndexResultWrapper(
                 new BitmapIndexResult(() -> bitmapOfRange(0, range.to - range.from)), range.from);
     }
+
+    public BitmapIndexResult getBitmapIndexResult() {
+        return result;
+    }
 }
