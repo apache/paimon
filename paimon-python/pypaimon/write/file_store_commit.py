@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 
+import os
 import time
 import uuid
 from pathlib import Path
@@ -166,7 +167,7 @@ class FileStoreCommit:
         if not all(count == 0 for count in partition_null_counts):
             raise RuntimeError("Partition value should not be null")
 
-        manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
+        manifest_file_path = os.path.join(self.manifest_file_manager.manifest_path, new_manifest_file)
         new_manifest_list = ManifestFileMeta(
             file_name=new_manifest_file,
             file_size=self.table.file_io.get_file_size(manifest_file_path),

@@ -15,6 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import os
 import pyarrow as pa
 import pyarrow.compute as pc
 import uuid
@@ -219,19 +220,20 @@ class DataWriter(ABC):
         ))
 
     def _generate_file_path(self, file_name: str) -> str:
-        path_builder = str(self.table.table_path)
+        path_components = [str(self.table.table_path)]
 
         for i, field_name in enumerate(self.table.partition_keys):
-            path_builder = f"{path_builder.rstrip('/')}/{field_name}={str(self.partition[i])}"
+            path_components.append(f"{field_name}={str(self.partition[i])}")
 
         if self.bucket == BucketMode.POSTPONE_BUCKET.value:
             bucket_name = "postpone"
         else:
             bucket_name = str(self.bucket)
 
-        path_builder = f"{path_builder.rstrip('/')}/bucket-{bucket_name}/{file_name}"
+        path_components.append(f"bucket-{bucket_name}")
+        path_components.append(file_name)
 
-        return path_builder
+        return os.path.join(*path_components)
 
     @staticmethod
     def _find_optimal_split_point(data: pa.RecordBatch, target_size: int) -> int:

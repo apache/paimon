@@ -15,6 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import os
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -50,15 +51,16 @@ class DataFileMeta:
     write_cols: Optional[List[str]] = None
 
     # not a schema field, just for internal usage
-    file_path: str = None
+    file_path: Optional[str] = None
 
     def set_file_path(self, table_path: str, partition: GenericRow, bucket: int):
-        path_builder = table_path.rstrip('/')
+        path_components = [table_path]
         partition_dict = partition.to_dict()
         for field_name, field_value in partition_dict.items():
-            path_builder = f"{path_builder}/{field_name}={str(field_value)}"
-        path_builder = f"{path_builder}/bucket-{str(bucket)}/{self.file_name}"
-        self.file_path = path_builder
+            path_components.append(f"{field_name}={str(field_value)}")
+        path_components.append(f"bucket-{str(bucket)}")
+        path_components.append(self.file_name)
+        self.file_path = str(os.path.join(*path_components))
 
     def copy_without_stats(self) -> 'DataFileMeta':
         """Create a new DataFileMeta without value statistics."""
