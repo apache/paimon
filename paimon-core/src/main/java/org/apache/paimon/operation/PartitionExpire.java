@@ -82,7 +82,6 @@ public class PartitionExpire {
         if (!checkInterval.isZero()) {
             rndSeconds = ThreadLocalRandom.current().nextLong(checkInterval.toMillis() / 1000);
         }
-        System.out.println(checkInterval);
         this.lastCheck = LocalDateTime.now().minusSeconds(rndSeconds);
         this.endInputCheckPartitionExpire = endInputCheckPartitionExpire;
         this.maxExpireNum = maxExpireNum;
