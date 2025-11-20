@@ -79,8 +79,9 @@ public class PartitionExpire {
         // Avoid the execution time of stream jobs from being too short and preventing partition
         // expiration
         long rndSeconds = 0;
-        if (!checkInterval.isZero()) {
-            rndSeconds = ThreadLocalRandom.current().nextLong(checkInterval.toMillis() / 1000);
+        long checkIntervalSeconds = checkInterval.toMillis() / 1000;
+        if (checkIntervalSeconds > 0) {
+            rndSeconds = ThreadLocalRandom.current().nextLong(checkIntervalSeconds);
         }
         this.lastCheck = LocalDateTime.now().minusSeconds(rndSeconds);
         this.endInputCheckPartitionExpire = endInputCheckPartitionExpire;
