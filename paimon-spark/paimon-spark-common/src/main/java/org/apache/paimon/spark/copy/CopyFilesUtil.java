@@ -22,11 +22,14 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.PojoDataFileMeta;
 
 import org.apache.commons.io.IOUtils;
 
 import java.io.IOException;
+import java.util.Optional;
 
 /** Utils for copy files. */
 public class CopyFilesUtil {
@@ -44,18 +47,52 @@ public class CopyFilesUtil {
         }
     }
 
-    public static Path getPathExcludeTableRoot(Path absolutePath, Path sourceTableRoot) {
-        String fileAbsolutePath = absolutePath.toUri().toString();
-        String sourceTableRootPath = sourceTableRoot.toString();
+    public static DataFileMeta toNewDataFileMeta(
+            DataFileMeta oldFileMeta, String newFileName, long newSchemaId) {
+        String newExternalPath =
+                externalPathDir(oldFileMeta.externalPath().orElse(null))
+                        .map(dir -> dir + "/" + newFileName)
+                        .orElse(null);
+        return new PojoDataFileMeta(
+                newFileName,
+                oldFileMeta.fileSize(),
+                oldFileMeta.rowCount(),
+                oldFileMeta.minKey(),
+                oldFileMeta.maxKey(),
+                oldFileMeta.keyStats(),
+                oldFileMeta.valueStats(),
+                oldFileMeta.minSequenceNumber(),
+                oldFileMeta.maxSequenceNumber(),
+                newSchemaId,
+                oldFileMeta.level(),
+                oldFileMeta.extraFiles(),
+                oldFileMeta.creationTime(),
+                oldFileMeta.deleteRowCount().orElse(null),
+                oldFileMeta.embeddedIndex(),
+                oldFileMeta.fileSource().orElse(null),
+                oldFileMeta.valueStatsCols(),
+                newExternalPath,
+                oldFileMeta.firstRowId(),
+                oldFileMeta.writeCols());
+    }
 
-        Preconditions.checkState(
-                fileAbsolutePath.startsWith(sourceTableRootPath),
-                "File absolute path does not start with source table root path. This is unexpected. "
-                        + "fileAbsolutePath is: "
-                        + fileAbsolutePath
-                        + ", sourceTableRootPath is: "
-                        + sourceTableRootPath);
+    public static IndexFileMeta toNewIndexFileMeta(IndexFileMeta oldFileMeta, String newFileName) {
+        String newExternalPath =
+                externalPathDir(oldFileMeta.externalPath())
+                        .map(dir -> dir + "/" + newFileName)
+                        .orElse(null);
+        return new IndexFileMeta(
+                oldFileMeta.indexType(),
+                newFileName,
+                oldFileMeta.fileSize(),
+                oldFileMeta.rowCount(),
+                oldFileMeta.dvRanges(),
+                newExternalPath);
+    }
 
-        return new Path(fileAbsolutePath.substring(sourceTableRootPath.length()));
+    public static Optional<String> externalPathDir(String externalPath) {
+        return Optional.ofNullable(externalPath)
+                .map(Path::new)
+                .map(p -> p.getParent().toUri().toString());
     }
 }

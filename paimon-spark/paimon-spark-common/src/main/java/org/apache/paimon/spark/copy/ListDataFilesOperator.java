@@ -76,7 +76,8 @@ public class ListDataFilesOperator extends CopyFilesOperator {
                     pickDataFiles(
                             manifestEntry,
                             sourceTable.store().pathFactory(),
-                            targetTable.store().pathFactory());
+                            targetTable.store().pathFactory(),
+                            targetTable.schema().id());
             dataFiles.add(dataFile);
         }
         return dataFiles;
@@ -85,7 +86,8 @@ public class ListDataFilesOperator extends CopyFilesOperator {
     private CopyFileInfo pickDataFiles(
             ManifestEntry manifestEntry,
             FileStorePathFactory sourceFileStorePathFactory,
-            FileStorePathFactory targetFileStorePathFactory)
+            FileStorePathFactory targetFileStorePathFactory,
+            long newSchemaId)
             throws IOException {
         Path dataFilePath =
                 sourceFileStorePathFactory
@@ -98,7 +100,9 @@ public class ListDataFilesOperator extends CopyFilesOperator {
                                 manifestEntry.partition(), manifestEntry.bucket())
                         .toPath(manifestEntry);
         DataFileMeta fileMeta = manifestEntry.file();
-        DataFileMeta targetFileMeta = fileMeta.rename(targetDataFilePath.getName());
+        DataFileMeta targetFileMeta =
+                CopyFilesUtil.toNewDataFileMeta(
+                        fileMeta, targetDataFilePath.getName(), newSchemaId);
         return new CopyFileInfo(
                 dataFilePath.toString(),
                 targetDataFilePath.toString(),

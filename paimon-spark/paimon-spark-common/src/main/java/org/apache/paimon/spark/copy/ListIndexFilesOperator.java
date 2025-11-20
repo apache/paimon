@@ -87,7 +87,8 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
         Path indexFilePath = sourceIndexFileHandler.filePath(indexManifestEntry);
         Path targetIndexFilePath = targetIndexFileHandler.filePath(indexManifestEntry);
         IndexFileMeta fileMeta = indexManifestEntry.indexFile();
-        IndexFileMeta targetFileMeta = fileMeta.rename(targetIndexFilePath.getName());
+        IndexFileMeta targetFileMeta =
+                CopyFilesUtil.toNewIndexFileMeta(fileMeta, targetIndexFilePath.getName());
         return new CopyFileInfo(
                 indexFilePath.toString(),
                 targetIndexFilePath.toString(),
