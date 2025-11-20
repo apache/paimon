@@ -33,7 +33,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.SchemaEvolutionTableTestBase;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
@@ -50,7 +49,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -96,7 +94,7 @@ public class HiveSplitGeneratorTest {
         jobConf.set(HiveConf.ConfVars.MAPREDMAXSPLITSIZE.varname, "268435456"); // 256MB
         jobConf.set(HiveConf.ConfVars.MAPREDMINSPLITSIZE.varname, "268435456"); // 256MB
 
-        FileStoreTable table = createFileStoreTable(Collections.singletonMap(0L, TABLE_SCHEMA));
+        FileStoreTable table = createFileStoreTable(TABLE_SCHEMA);
 
         List<DataSplit> dataSplits = new ArrayList<>();
         dataSplits.add(newDataSplit(4, 0, 12582912L)); // 12MB
@@ -118,7 +116,7 @@ public class HiveSplitGeneratorTest {
         jobConf.set(HiveConf.ConfVars.MAPREDMAXSPLITSIZE.varname, "268435456");
         jobConf.set(HiveConf.ConfVars.MAPREDMINSPLITSIZE.varname, "268435456");
 
-        FileStoreTable table = createFileStoreTable(Collections.singletonMap(0L, TABLE_SCHEMA));
+        FileStoreTable table = createFileStoreTable(TABLE_SCHEMA);
 
         List<DataSplit> dataSplits = new ArrayList<>();
         dataSplits.add(newDataSplit(4, 0, 12582912L));
@@ -135,11 +133,12 @@ public class HiveSplitGeneratorTest {
         assertThat(totalFiles).isEqualTo(10);
     }
 
-    private FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
-        SchemaManager schemaManager =
-                new SchemaEvolutionTableTestBase.TestingSchemaManager(tablePath, tableSchemas);
+    private FileStoreTable createFileStoreTable(TableSchema tableSchema) throws Exception {
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        schemaManager.commit(tableSchema);
+
         return new AppendOnlyFileStoreTable(
-                fileIO, tablePath, schemaManager.latest().get(), CatalogEnvironment.empty()) {
+                fileIO, tablePath, tableSchema, CatalogEnvironment.empty()) {
 
             @Override
             public SchemaManager schemaManager() {
