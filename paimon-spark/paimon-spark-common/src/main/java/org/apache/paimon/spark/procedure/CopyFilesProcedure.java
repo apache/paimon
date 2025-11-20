@@ -165,7 +165,7 @@ public class CopyFilesProcedure extends BaseProcedure {
         ListIndexFilesOperator listIndexFilesOperator =
                 new ListIndexFilesOperator(spark(), sourcePaimonCatalog, targetPaimonCatalog);
 
-        // 1. create target table and get manifest files
+        // 1. create target table and get latest snapshot
         Snapshot snapshot =
                 copySchemaOperator.execute(sourceTableIdentifier, targetTableIdentifier);
 
@@ -182,7 +182,7 @@ public class CopyFilesProcedure extends BaseProcedure {
         JavaRDD<CopyFileInfo> indexCopeFileInfoRdd =
                 copyDataFilesOperator.execute(
                         sourceTableIdentifier, targetTableIdentifier, indexFilesRdd);
-
+        // 4. commit table
         copyFilesCommitOperator.execute(
                 targetTableIdentifier, dataCopyFileInfoRdd, indexCopeFileInfoRdd);
     }
