@@ -533,7 +533,7 @@ public class CompactProcedure extends BaseProcedure {
             FileStoreTable table, boolean fullCompaction, DataSourceV2Relation relation) {
         IncrementalClusterManager incrementalClusterManager = new IncrementalClusterManager(table);
         Map<BinaryRow, CompactUnit> compactUnits =
-                incrementalClusterManager.prepareForCluster(fullCompaction);
+                incrementalClusterManager.createCompactUnits(fullCompaction);
 
         Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> partitionSplits =
                 incrementalClusterManager.toSplitsAndRewriteDvFiles(compactUnits);

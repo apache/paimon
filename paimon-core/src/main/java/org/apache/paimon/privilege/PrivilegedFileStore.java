@@ -45,6 +45,7 @@ import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -90,6 +91,11 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     @Override
     public RowType partitionType() {
         return wrapped.partitionType();
+    }
+
+    @Override
+    public InternalRowPartitionComputer partitionComputer() {
+        return wrapped.partitionComputer();
     }
 
     @Override
