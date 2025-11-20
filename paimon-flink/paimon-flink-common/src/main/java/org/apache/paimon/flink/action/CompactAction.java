@@ -41,7 +41,6 @@ import org.apache.paimon.flink.sink.RowDataChannelComputer;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -80,7 +79,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.CLUSTERING_PER_TASK_DATA_SIZE;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -245,9 +243,6 @@ public class CompactAction extends TableActionBase {
                         table.partitionKeys().toArray(new String[0]),
                         table.coreOptions().legacyPartitionName());
 
-        long perSubtaskDataSize = table.coreOptions().clusteringPerTaskDataSize().getBytes();
-        LOGGER.info("{} is {} bytes.", CLUSTERING_PER_TASK_DATA_SIZE.key(), perSubtaskDataSize);
-
         // 1. pick cluster files for each partition
         Map<BinaryRow, CompactUnit> compactUnits =
                 incrementalClusterManager.prepareForCluster(fullCompaction);
@@ -281,32 +276,14 @@ public class CompactAction extends TableActionBase {
                     partitionComputer.generatePartValues(partition);
 
             // 2.1 generate source for current partition
-            long partitionFileSize = 0L;
-            int partitionFileCount = 0;
-            for (DataSplit split : splits) {
-                for (DataFileMeta fileMeta : split.dataFiles()) {
-                    partitionFileSize += fileMeta.fileSize();
-                    partitionFileCount++;
-                }
-            }
-            int inferParallelism =
-                    Math.min(
-                            partitionFileCount,
-                            Math.max(1, (int) (partitionFileSize / perSubtaskDataSize)));
-            LOGGER.info(
-                    "For partition {}, the total data size is {} bytes, total file count is {}, infer parallelism is {}.",
-                    partitionSpec,
-                    partitionFileSize,
-                    partitionFileCount,
-                    inferParallelism);
-
-            Integer scanParallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
-            if (scanParallelism == null) {
-                scanParallelism = inferParallelism;
-            }
             Pair<DataStream<RowData>, DataStream<Committable>> sourcePair =
                     IncrementalClusterSplitSource.buildSource(
-                            env, table, partitionSpec, splits, dvCommitMessage, scanParallelism);
+                            env,
+                            table,
+                            partitionSpec,
+                            splits,
+                            dvCommitMessage,
+                            options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
             // 2.2 cluster in partition
             Integer sinkParallelism = options.get(FlinkConnectorOptions.SINK_PARALLELISM);
