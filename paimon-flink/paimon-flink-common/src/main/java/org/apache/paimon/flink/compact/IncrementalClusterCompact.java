@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.cluster.IncrementalClusterSplitSource;
 import org.apache.paimon.flink.cluster.RewriteIncrementalClusterCommittableOperator;
 import org.apache.paimon.flink.sink.Committable;
@@ -52,13 +51,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
+
 /** Compact for incremental clustering. */
 public class IncrementalClusterCompact {
 
-    private final StreamExecutionEnvironment env;
-    private final FileStoreTable table;
-    private final IncrementalClusterManager clusterManager;
-    private final boolean fullCompaction;
+    protected final StreamExecutionEnvironment env;
+    protected final FileStoreTable table;
+    protected final IncrementalClusterManager clusterManager;
+    protected final String commitUser;
+    protected final InternalRowPartitionComputer partitionComputer;
+
+    protected final @Nullable Integer parallelism;
+    protected final int localSampleMagnification;
+    protected final Map<BinaryRow, CompactUnit> compactUnits;
+    protected final Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> compactSplits;
 
     public IncrementalClusterCompact(
             StreamExecutionEnvironment env,
@@ -68,13 +75,11 @@ public class IncrementalClusterCompact {
         this.env = env;
         this.table = table;
         this.clusterManager = new IncrementalClusterManager(table, partitionPredicate);
-        // non-full strategy as default for incremental clustering
-        this.fullCompaction = fullCompaction != null && fullCompaction;
-    }
-
-    public void build() throws Exception {
         Options options = new Options(table.options());
-        int localSampleMagnification = table.coreOptions().getLocalSampleMagnification();
+        this.partitionComputer = table.store().partitionComputer();
+        this.commitUser = CoreOptions.createCommitUser(options);
+        this.parallelism = options.get(SCAN_PARALLELISM);
+        this.localSampleMagnification = table.coreOptions().getLocalSampleMagnification();
         if (localSampleMagnification < 20) {
             throw new IllegalArgumentException(
                     String.format(
@@ -82,91 +87,103 @@ public class IncrementalClusterCompact {
                             CoreOptions.SORT_COMPACTION_SAMPLE_MAGNIFICATION.key(),
                             localSampleMagnification));
         }
+        // non-full strategy as default for incremental clustering
+        this.compactUnits =
+                clusterManager.createCompactUnits(fullCompaction != null && fullCompaction);
+        this.compactSplits = clusterManager.toSplitsAndRewriteDvFiles(compactUnits);
+    }
 
-        // 1. pick cluster files for each partition
-        Map<BinaryRow, CompactUnit> compactUnits =
-                clusterManager.createCompactUnits(fullCompaction);
+    public void build() throws Exception {
         if (compactUnits.isEmpty()) {
             env.fromSequence(0, 0).name("Nothing to Cluster Source").sinkTo(new DiscardingSink<>());
             return;
         }
 
-        Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> partitionSplits =
-                clusterManager.toSplitsAndRewriteDvFiles(compactUnits);
-
-        // 2. read，sort and write in partition
         List<DataStream<Committable>> dataStreams = new ArrayList<>();
-
-        InternalRowPartitionComputer partitionComputer = table.store().partitionComputer();
-        String commitUser = CoreOptions.createCommitUser(options);
         for (Map.Entry<BinaryRow, Pair<List<DataSplit>, CommitMessage>> entry :
-                partitionSplits.entrySet()) {
-            BinaryRow partition = entry.getKey();
-            List<DataSplit> splits = entry.getValue().getKey();
-            CommitMessage dvCommitMessage = entry.getValue().getRight();
-            LinkedHashMap<String, String> partitionSpec =
-                    partitionComputer.generatePartValues(partition);
-
-            // 2.1 generate source for current partition
-            Pair<DataStream<RowData>, DataStream<Committable>> sourcePair =
-                    IncrementalClusterSplitSource.buildSource(
-                            env,
-                            table,
-                            partitionSpec,
-                            splits,
-                            dvCommitMessage,
-                            options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
-
-            // 2.2 cluster in partition
-            Integer sinkParallelism = options.get(FlinkConnectorOptions.SINK_PARALLELISM);
-            if (sinkParallelism == null) {
-                sinkParallelism = sourcePair.getLeft().getParallelism();
-            }
-            TableSortInfo sortInfo =
-                    new TableSortInfo.Builder()
-                            .setSortColumns(clusterManager.clusterKeys())
-                            .setSortStrategy(clusterManager.clusterCurve())
-                            .setSinkParallelism(sinkParallelism)
-                            .setLocalSampleSize(sinkParallelism * localSampleMagnification)
-                            .setGlobalSampleSize(sinkParallelism * 1000)
-                            .setRangeNumber(sinkParallelism * 10)
-                            .build();
-            DataStream<RowData> sorted =
-                    TableSorter.getSorter(env, sourcePair.getLeft(), table, sortInfo).sort();
-
-            // 2.3 write and then reorganize the committable
-            // set parallelism to null, and it'll forward parallelism when doWrite()
-            RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
-            boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
-            DataStream<Committable> written =
-                    sink.doWrite(
-                            FlinkSinkBuilder.mapToInternalRow(
-                                    sorted,
-                                    table.rowType(),
-                                    blobAsDescriptor,
-                                    table.catalogEnvironment().catalogContext()),
-                            commitUser,
-                            null);
-            DataStream<Committable> clusterCommittable =
-                    written.forward()
-                            .transform(
-                                    "Rewrite cluster committable",
-                                    new CommittableTypeInfo(),
-                                    new RewriteIncrementalClusterCommittableOperator(
-                                            table,
-                                            compactUnits.entrySet().stream()
-                                                    .collect(
-                                                            Collectors.toMap(
-                                                                    Map.Entry::getKey,
-                                                                    unit ->
-                                                                            unit.getValue()
-                                                                                    .outputLevel()))))
-                            .setParallelism(written.getParallelism());
-            dataStreams.add(clusterCommittable);
-            dataStreams.add(sourcePair.getRight());
+                compactSplits.entrySet()) {
+            dataStreams.addAll(
+                    buildCompactOperator(
+                            entry.getKey(),
+                            entry.getValue().getKey(),
+                            entry.getValue().getRight(),
+                            parallelism));
         }
 
-        // 3. commit
+        buildCommitOperator(dataStreams);
+    }
+
+    /**
+     * Build for one partition.
+     *
+     * @param parallelism Give the caller the opportunity to set parallelism
+     */
+    protected List<DataStream<Committable>> buildCompactOperator(
+            BinaryRow partition,
+            List<DataSplit> splits,
+            CommitMessage dvCommitMessage,
+            @Nullable Integer parallelism) {
+        LinkedHashMap<String, String> partitionSpec =
+                partitionComputer.generatePartValues(partition);
+
+        // 2.1 generate source for current partition
+        Pair<DataStream<RowData>, DataStream<Committable>> sourcePair =
+                IncrementalClusterSplitSource.buildSource(
+                        env, table, partitionSpec, splits, dvCommitMessage, parallelism);
+
+        // 2.2 cluster in partition
+        Integer sinkParallelism = parallelism;
+        if (sinkParallelism == null) {
+            sinkParallelism = sourcePair.getLeft().getParallelism();
+        }
+        TableSortInfo sortInfo =
+                new TableSortInfo.Builder()
+                        .setSortColumns(clusterManager.clusterKeys())
+                        .setSortStrategy(clusterManager.clusterCurve())
+                        .setSinkParallelism(sinkParallelism)
+                        .setLocalSampleSize(sinkParallelism * localSampleMagnification)
+                        .setGlobalSampleSize(sinkParallelism * 1000)
+                        .setRangeNumber(sinkParallelism * 10)
+                        .build();
+        DataStream<RowData> sorted =
+                TableSorter.getSorter(env, sourcePair.getLeft(), table, sortInfo).sort();
+
+        // 2.3 write and then reorganize the committable
+        // set parallelism to null, and it'll forward parallelism when doWrite()
+        RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
+        boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
+        DataStream<Committable> written =
+                sink.doWrite(
+                        FlinkSinkBuilder.mapToInternalRow(
+                                sorted,
+                                table.rowType(),
+                                blobAsDescriptor,
+                                table.catalogEnvironment().catalogContext()),
+                        commitUser,
+                        null);
+        DataStream<Committable> clusterCommittable =
+                written.forward()
+                        .transform(
+                                "Rewrite cluster committable",
+                                new CommittableTypeInfo(),
+                                new RewriteIncrementalClusterCommittableOperator(
+                                        table,
+                                        compactUnits.entrySet().stream()
+                                                .collect(
+                                                        Collectors.toMap(
+                                                                Map.Entry::getKey,
+                                                                unit ->
+                                                                        unit.getValue()
+                                                                                .outputLevel()))))
+                        .setParallelism(written.getParallelism());
+
+        List<DataStream<Committable>> dataStreams = new ArrayList<>();
+        dataStreams.add(clusterCommittable);
+        dataStreams.add(sourcePair.getRight());
+        return dataStreams;
+    }
+
+    protected void buildCommitOperator(List<DataStream<Committable>> dataStreams) {
         RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
         DataStream<Committable> dataStream = dataStreams.get(0);
         for (int i = 1; i < dataStreams.size(); i++) {
