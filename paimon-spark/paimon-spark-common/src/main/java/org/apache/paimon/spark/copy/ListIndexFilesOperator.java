@@ -18,109 +18,167 @@
 
 package org.apache.paimon.spark.copy;
 
-import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.SerializationUtils;
 
-import org.apache.commons.collections4.CollectionUtils;
-import org.apache.spark.api.java.JavaRDD;
-import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.SparkSession;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** List index files. */
 public class ListIndexFilesOperator extends CopyFilesOperator {
 
+    private final IndexFileMetaSerializer indexFileSerializer;
+
     public ListIndexFilesOperator(
             SparkSession spark, Catalog sourceCatalog, Catalog targetCatalog) {
         super(spark, sourceCatalog, targetCatalog);
+        this.indexFileSerializer = new IndexFileMetaSerializer();
     }
 
-    public JavaRDD<CopyDataFileInfo> execute(
+    public List<CopyFileInfo> execute(
             Identifier sourceIdentifier,
-            List<CopyFileInfo> manifestFiles,
+            Snapshot snapshot,
             @Nullable PartitionPredicate partitionPredicate)
             throws Exception {
-        if (CollectionUtils.isEmpty(manifestFiles)) {
+        if (snapshot == null) {
+            return null;
+        }
+        if (snapshot.indexManifest() == null) {
             return null;
         }
         FileStoreTable sourceTable = (FileStoreTable) sourceCatalog.getTable(sourceIdentifier);
-        JavaSparkContext javaSparkContext = new JavaSparkContext(spark.sparkContext());
-        int readParallelism = SparkProcedureUtils.readParallelism(manifestFiles, spark);
-        JavaRDD<CopyDataFileInfo> dataFilesJavaRdd =
-                javaSparkContext
-                        .parallelize(manifestFiles, readParallelism)
-                        .mapPartitions(
-                                new IndexManifestFileProcesser(sourceTable, partitionPredicate));
-        return dataFilesJavaRdd;
+        List<CopyFileInfo> indexFiles = new ArrayList<>();
+        IndexFileHandler indexFileHandler = sourceTable.store().newIndexFileHandler();
+        List<IndexManifestEntry> indexManifestEntries =
+                readAndMergeIndexEntries(
+                        indexFileHandler, snapshot.indexManifest(), partitionPredicate);
+        for (IndexManifestEntry indexManifestEntry : indexManifestEntries) {
+            CopyFileInfo indexFile =
+                    pickIndexFiles(indexManifestEntry, indexFileHandler, sourceTable.location());
+            indexFiles.add(indexFile);
+        }
+        return indexFiles;
     }
 
-    /** Process manifest files. */
-    public static class IndexManifestFileProcesser
-            implements FlatMapFunction<Iterator<CopyFileInfo>, CopyDataFileInfo> {
+    private CopyFileInfo pickIndexFiles(
+            IndexManifestEntry indexManifestEntry,
+            IndexFileHandler indexFileHandler,
+            Path sourceTableRoot)
+            throws IOException {
+        Path indexFilePath = indexFileHandler.filePath(indexManifestEntry);
+        Path relativePath = CopyFilesUtil.getPathExcludeTableRoot(indexFilePath, sourceTableRoot);
+        return new CopyFileInfo(
+                indexFilePath.toString(),
+                relativePath.toString(),
+                SerializationUtils.serializeBinaryRow(indexManifestEntry.partition()),
+                indexManifestEntry.bucket(),
+                indexFileSerializer.serializeToBytes(indexManifestEntry.indexFile()));
+    }
 
-        private final FileStoreTable sourceTable;
-        @Nullable private final PartitionPredicate partitionPredicate;
+    private List<IndexManifestEntry> readAndMergeIndexEntries(
+            IndexFileHandler indexFileHandler,
+            String indexManifest,
+            @Nullable PartitionPredicate partitionPredicate)
+            throws IOException {
+        List<IndexManifestEntry> indexManifestEntries =
+                indexFileHandler.readManifestWithIOException(indexManifest);
+        Map<IndexManifestEntryIdentifier, IndexManifestEntry> map = new HashMap<>();
+        for (IndexManifestEntry entry : indexManifestEntries) {
+            if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {
+                continue;
+            }
+            IndexManifestEntryIdentifier identifier =
+                    new IndexManifestEntryIdentifier(
+                            entry.partition(), entry.bucket(), entry.indexFile());
+            switch (entry.kind()) {
+                case ADD:
+                    checkState(
+                            !map.containsKey(identifier),
+                            "Trying to add  %s which is already added.",
+                            identifier);
+                    map.put(identifier, entry);
+                    break;
+                case DELETE:
+                    if (map.containsKey(identifier)) {
+                        map.remove(identifier);
+                    } else {
+                        map.put(identifier, entry);
+                    }
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unknown value kind " + entry.kind().name());
+            }
+        }
+        return new ArrayList<>(map.values());
+    }
 
-        public IndexManifestFileProcesser(
-                FileStoreTable sourceTable, @Nullable PartitionPredicate partitionPredicate) {
-            this.sourceTable = sourceTable;
-            this.partitionPredicate = partitionPredicate;
+    class IndexManifestEntryIdentifier {
+        public final BinaryRow partition;
+        public final int bucket;
+        public final IndexFileMeta indexFile;
+
+        /* Cache the hash code for the string */
+        private Integer hash;
+
+        public IndexManifestEntryIdentifier(
+                BinaryRow partition, int bucket, IndexFileMeta indexFile) {
+            this.partition = partition;
+            this.bucket = bucket;
+            this.indexFile = indexFile;
         }
 
         @Override
-        public Iterator<CopyDataFileInfo> call(Iterator<CopyFileInfo> manifestFileIterator)
-                throws Exception {
-            List<CopyDataFileInfo> indexFiles = new ArrayList<>();
-            FileStore<?> sourceStore = sourceTable.store();
-            IndexFileHandler indexFileHandler = sourceStore.newIndexFileHandler();
-            IndexFileMetaSerializer indexFileSerializer = new IndexFileMetaSerializer();
-            while (manifestFileIterator.hasNext()) {
-                CopyFileInfo manifestFileCopyFileInfo = manifestFileIterator.next();
-                Path sourcePath = new Path(manifestFileCopyFileInfo.sourceFilePath());
-                List<IndexManifestEntry> indexManifestEntries =
-                        indexFileHandler.readManifestWithIOException(sourcePath.getName());
-                for (IndexManifestEntry manifestEntry : indexManifestEntries) {
-                    if (partitionPredicate == null
-                            || partitionPredicate.test(manifestEntry.partition())) {
-                        CopyDataFileInfo indexFile =
-                                pickIndexFiles(
-                                        manifestEntry, indexFileHandler, indexFileSerializer);
-                        indexFiles.add(indexFile);
-                    }
-                }
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
             }
-            return indexFiles.iterator();
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            IndexManifestEntryIdentifier identifier = (IndexManifestEntryIdentifier) o;
+            return bucket == identifier.bucket
+                    && Objects.equals(partition, identifier.partition)
+                    && Objects.equals(indexFile, identifier.indexFile);
         }
 
-        private CopyDataFileInfo pickIndexFiles(
-                IndexManifestEntry indexManifestEntry,
-                IndexFileHandler indexFileHandler,
-                IndexFileMetaSerializer indexFileSerializer)
-                throws IOException {
-            Path indexFilePath = indexFileHandler.filePath(indexManifestEntry);
-            Path relativePath =
-                    CopyFilesUtil.getPathExcludeTableRoot(indexFilePath, sourceTable.location());
-            return new CopyDataFileInfo(
-                    indexFilePath.toString(),
-                    relativePath.toString(),
-                    SerializationUtils.serializeBinaryRow(indexManifestEntry.partition()),
-                    indexFileSerializer.serializeToBytes(indexManifestEntry.indexFile()));
+        @Override
+        public int hashCode() {
+            if (hash == null) {
+                hash = Objects.hash(partition, bucket, indexFile);
+            }
+            return hash;
+        }
+
+        @Override
+        public String toString() {
+            return "{partition = "
+                    + partition
+                    + ", bucket="
+                    + bucket
+                    + ", indexFile="
+                    + indexFile
+                    + '}';
         }
     }
 }

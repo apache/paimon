@@ -88,12 +88,4 @@ public class SparkProcedureUtils {
         }
         return readParallelism;
     }
-
-    public static int readParallelism(SparkSession spark) {
-        int sparkParallelism =
-                Math.max(
-                        spark.sparkContext().defaultParallelism(),
-                        spark.sessionState().conf().numShufflePartitions());
-        return sparkParallelism;
-    }
 }

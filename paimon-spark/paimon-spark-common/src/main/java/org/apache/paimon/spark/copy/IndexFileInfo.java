@@ -18,32 +18,33 @@
 
 package org.apache.paimon.spark.copy;
 
-import java.io.Serializable;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.IndexFileMeta;
 
-/** The information of copy data file. */
-public class CopyDataFileInfo extends CopyFileInfo implements Serializable {
+import java.util.List;
 
-    private static final long serialVersionUID = 1L;
+/** IndexFileInfo. */
+public class IndexFileInfo {
 
-    private final byte[] partition;
+    private final BinaryRow partition;
+    private final int bucket;
+    private final List<IndexFileMeta> indexFileMetas;
 
-    private final byte[] dataFileMeta;
-
-    public CopyDataFileInfo(
-            String sourceFilePath,
-            String filePathExcludeTableRoot,
-            byte[] partition,
-            byte[] dataFileMeta) {
-        super(sourceFilePath, filePathExcludeTableRoot);
+    public IndexFileInfo(BinaryRow partition, int bucket, List<IndexFileMeta> indexFileMetas) {
         this.partition = partition;
-        this.dataFileMeta = dataFileMeta;
+        this.bucket = bucket;
+        this.indexFileMetas = indexFileMetas;
     }
 
-    public byte[] partition() {
+    public BinaryRow partition() {
         return partition;
     }
 
-    public byte[] dataFileMeta() {
-        return dataFileMeta;
+    public int bucket() {
+        return bucket;
+    }
+
+    public List<IndexFileMeta> indexFileMetas() {
+        return indexFileMetas;
     }
 }

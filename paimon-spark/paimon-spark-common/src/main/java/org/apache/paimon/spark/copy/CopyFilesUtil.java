@@ -27,8 +27,6 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.commons.io.IOUtils;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 
 /** Utils for copy files. */
 public class CopyFilesUtil {
@@ -44,15 +42,6 @@ public class CopyFilesUtil {
                 PositionOutputStream os = targetFileIO.newOutputStream(targetPath, overwrite)) {
             IOUtils.copy(is, os);
         }
-    }
-
-    public static List<CopyFileInfo> toCopyFileInfos(List<Path> fileList, Path sourceTableRoot) {
-        List<CopyFileInfo> result = new ArrayList<>();
-        for (Path file : fileList) {
-            Path relativePath = getPathExcludeTableRoot(file, sourceTableRoot);
-            result.add(new CopyFileInfo(file.toUri().toString(), relativePath.toString()));
-        }
-        return result;
     }
 
     public static Path getPathExcludeTableRoot(Path absolutePath, Path sourceTableRoot) {

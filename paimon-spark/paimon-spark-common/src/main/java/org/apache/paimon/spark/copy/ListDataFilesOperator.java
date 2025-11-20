@@ -18,23 +18,18 @@
 
 package org.apache.paimon.spark.copy;
 
-import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SerializationUtils;
 
-import org.apache.commons.collections.CollectionUtils;
-import org.apache.spark.api.java.JavaRDD;
-import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.SparkSession;
 
 import javax.annotation.Nullable;
@@ -47,87 +42,60 @@ import java.util.List;
 /** List data files. */
 public class ListDataFilesOperator extends CopyFilesOperator {
 
+    private final DataFileMetaSerializer dataFileSerializer;
+
     public ListDataFilesOperator(SparkSession spark, Catalog sourceCatalog, Catalog targetCatalog) {
         super(spark, sourceCatalog, targetCatalog);
+        this.dataFileSerializer = new DataFileMetaSerializer();
     }
 
-    public JavaRDD<CopyDataFileInfo> execute(
+    public List<CopyFileInfo> execute(
             Identifier sourceIdentifier,
-            List<CopyFileInfo> manifestFiles,
+            @Nullable Snapshot snapshot,
             @Nullable PartitionPredicate partitionPredicate)
             throws Exception {
-        if (CollectionUtils.isEmpty(manifestFiles)) {
+        if (snapshot == null) {
             return null;
         }
         FileStoreTable sourceTable = (FileStoreTable) sourceCatalog.getTable(sourceIdentifier);
-        JavaSparkContext javaSparkContext = new JavaSparkContext(spark.sparkContext());
-        int readParallelism = SparkProcedureUtils.readParallelism(manifestFiles, spark);
-        JavaRDD<CopyDataFileInfo> dataFilesJavaRdd =
-                javaSparkContext
-                        .parallelize(manifestFiles, readParallelism)
-                        .mapPartitions(new ManifestFileProcesser(sourceTable, partitionPredicate));
-        return dataFilesJavaRdd;
+        Iterator<ManifestEntry> manifestEntries =
+                sourceTable
+                        .newSnapshotReader()
+                        .withSnapshot(snapshot)
+                        .withPartitionFilter(partitionPredicate)
+                        .withMode(ScanMode.ALL)
+                        .readFileIterator();
+
+        List<CopyFileInfo> dataFiles = new ArrayList<>();
+        while (manifestEntries.hasNext()) {
+            ManifestEntry manifestEntry = manifestEntries.next();
+            CopyFileInfo dataFile =
+                    pickDataFiles(
+                            manifestEntry,
+                            sourceTable.store().pathFactory(),
+                            sourceTable.location());
+            dataFiles.add(dataFile);
+        }
+        return dataFiles;
     }
 
-    /** Process manifest files. */
-    public static class ManifestFileProcesser
-            implements FlatMapFunction<Iterator<CopyFileInfo>, CopyDataFileInfo> {
-
-        private final FileStoreTable sourceTable;
-        @Nullable private final PartitionPredicate partitionPredicate;
-
-        public ManifestFileProcesser(
-                FileStoreTable sourceTable, @Nullable PartitionPredicate partitionPredicate) {
-            this.sourceTable = sourceTable;
-            this.partitionPredicate = partitionPredicate;
-        }
-
-        @Override
-        public Iterator<CopyDataFileInfo> call(Iterator<CopyFileInfo> manifestFileIterator)
-                throws Exception {
-            List<CopyDataFileInfo> dataFiles = new ArrayList<>();
-            FileStore<?> sourceStore = sourceTable.store();
-            ManifestFile sourceManifestFile = sourceStore.manifestFileFactory().create();
-            DataFileMetaSerializer dataFileSerializer = new DataFileMetaSerializer();
-            while (manifestFileIterator.hasNext()) {
-                CopyFileInfo manifestFileCopyFileInfo = manifestFileIterator.next();
-                Path sourcePath = new Path(manifestFileCopyFileInfo.sourceFilePath());
-                List<ManifestEntry> manifestEntries =
-                        sourceManifestFile.readWithIOException(sourcePath.getName());
-                for (ManifestEntry manifestEntry : manifestEntries) {
-                    if (partitionPredicate == null
-                            || partitionPredicate.test(manifestEntry.partition())) {
-                        CopyDataFileInfo dataFile =
-                                pickDataFiles(
-                                        manifestEntry,
-                                        sourceStore.pathFactory(),
-                                        dataFileSerializer);
-                        dataFiles.add(dataFile);
-                    }
-                }
-            }
-            return dataFiles.iterator();
-        }
-
-        private CopyDataFileInfo pickDataFiles(
-                ManifestEntry manifestEntry,
-                FileStorePathFactory fileStorePathFactory,
-                DataFileMetaSerializer dataFileSerializer)
-                throws IOException {
-            Path dataFilePath =
-                    fileStorePathFactory
-                            .createDataFilePathFactory(
-                                    manifestEntry.partition(), manifestEntry.bucket())
-                            .toPath(manifestEntry);
-            Path relativeBucketPath =
-                    fileStorePathFactory.relativeBucketPath(
-                            manifestEntry.partition(), manifestEntry.bucket());
-            Path relativeTablePath = new Path("/" + relativeBucketPath, dataFilePath.getName());
-            return new CopyDataFileInfo(
-                    dataFilePath.toString(),
-                    relativeTablePath.toString(),
-                    SerializationUtils.serializeBinaryRow(manifestEntry.partition()),
-                    dataFileSerializer.serializeToBytes(manifestEntry.file()));
-        }
+    private CopyFileInfo pickDataFiles(
+            ManifestEntry manifestEntry,
+            FileStorePathFactory fileStorePathFactory,
+            Path sourceTableRoot)
+            throws IOException {
+        Path dataFilePath =
+                fileStorePathFactory
+                        .createDataFilePathFactory(
+                                manifestEntry.partition(), manifestEntry.bucket())
+                        .toPath(manifestEntry);
+        Path relativePath = CopyFilesUtil.getPathExcludeTableRoot(dataFilePath, sourceTableRoot);
+        return new CopyFileInfo(
+                dataFilePath.toString(),
+                relativePath.toString(),
+                SerializationUtils.serializeBinaryRow(manifestEntry.partition()),
+                manifestEntry.bucket(),
+                manifestEntry.totalBuckets(),
+                dataFileSerializer.serializeToBytes(manifestEntry.file()));
     }
 }

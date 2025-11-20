@@ -24,16 +24,15 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.spark.api.java.JavaRDD;
-import org.apache.spark.api.java.function.PairFlatMapFunction;
+import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.SparkSession;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-
-import scala.Tuple2;
 
 /** Copy data files from source table to target table. */
 public class CopyDataFilesOperator extends CopyFilesOperator {
@@ -42,27 +41,25 @@ public class CopyDataFilesOperator extends CopyFilesOperator {
         super(spark, sourceCatalog, targetCatalog);
     }
 
-    public JavaPairRDD<byte[], byte[]> execute(
-            Identifier sourceIdentifier,
-            Identifier targetIdentifier,
-            JavaRDD<CopyDataFileInfo> dataFiles)
+    public JavaRDD<CopyFileInfo> execute(
+            Identifier sourceIdentifier, Identifier targetIdentifier, List<CopyFileInfo> dataFiles)
             throws Exception {
-        if (dataFiles == null) {
+        if (CollectionUtils.isEmpty(dataFiles)) {
             return null;
         }
         FileStoreTable sourceTable = (FileStoreTable) sourceCatalog.getTable(sourceIdentifier);
         FileStoreTable targetTable = (FileStoreTable) targetCatalog.getTable(targetIdentifier);
-        int readParallelism = SparkProcedureUtils.readParallelism(spark);
-        JavaPairRDD<byte[], byte[]> partitionedDataFileMetas =
-                dataFiles
-                        .repartition(readParallelism)
-                        .mapPartitionsToPair(new DataFileProcesser(sourceTable, targetTable));
-        return partitionedDataFileMetas;
+        int readParallelism = SparkProcedureUtils.readParallelism(dataFiles, spark);
+        JavaSparkContext context = JavaSparkContext.fromSparkContext(spark.sparkContext());
+        JavaRDD<CopyFileInfo> copyFileInfoRdd =
+                context.parallelize(dataFiles, readParallelism)
+                        .mapPartitions(new DataFileProcesser(sourceTable, targetTable));
+        return copyFileInfoRdd;
     }
 
     /** Copy data files. */
     public static class DataFileProcesser
-            implements PairFlatMapFunction<Iterator<CopyDataFileInfo>, byte[], byte[]> {
+            implements FlatMapFunction<Iterator<CopyFileInfo>, CopyFileInfo> {
 
         private final FileStoreTable sourceTable;
         private final FileStoreTable targetTable;
@@ -73,18 +70,18 @@ public class CopyDataFilesOperator extends CopyFilesOperator {
         }
 
         @Override
-        public Iterator<Tuple2<byte[], byte[]>> call(Iterator<CopyDataFileInfo> dataFileIterator)
+        public Iterator<CopyFileInfo> call(Iterator<CopyFileInfo> dataFileIterator)
                 throws Exception {
-            List<Tuple2<byte[], byte[]>> result = new ArrayList<>();
+            List<CopyFileInfo> result = new ArrayList<>();
             Path targetTableRootPath = targetTable.location();
             while (dataFileIterator.hasNext()) {
-                CopyDataFileInfo dataFile = dataFileIterator.next();
+                CopyFileInfo dataFile = dataFileIterator.next();
                 String filePathExcludeTableRoot = dataFile.filePathExcludeTableRoot();
                 Path sourcePath = new Path(dataFile.sourceFilePath());
                 Path targetPath = new Path(targetTableRootPath + filePathExcludeTableRoot);
                 CopyFilesUtil.copyFiles(
                         sourceTable.fileIO(), targetTable.fileIO(), sourcePath, targetPath, true);
-                result.add(new Tuple2<>(dataFile.partition(), dataFile.dataFileMeta()));
+                result.add(dataFile);
             }
             return result.iterator();
         }

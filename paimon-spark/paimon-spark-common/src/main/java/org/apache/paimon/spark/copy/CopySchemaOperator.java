@@ -23,10 +23,6 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -40,17 +36,9 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
 
 import org.apache.spark.sql.SparkSession;
 
-import javax.annotation.Nullable;
-
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
-/** Copy schema from source to target. */
+/** Copy schema and get latest snapshot. */
 public class CopySchemaOperator extends CopyFilesOperator {
 
     public static final String INDEX_MANIFEST_FILES_TAG = "index-manifest-files";
@@ -60,8 +48,8 @@ public class CopySchemaOperator extends CopyFilesOperator {
         super(spark, sourceCatalog, targetCatalog);
     }
 
-    public Map<String, List<CopyFileInfo>> execute(
-            Identifier sourceIdentifier, Identifier targetIdentifier) throws Exception {
+    public Snapshot execute(Identifier sourceIdentifier, Identifier targetIdentifier)
+            throws Exception {
         Table originalSourceTable = sourceCatalog.getTable(sourceIdentifier);
         Preconditions.checkState(
                 originalSourceTable instanceof FileStoreTable,
@@ -77,30 +65,10 @@ public class CopySchemaOperator extends CopyFilesOperator {
         FileStoreTable targetTable = (FileStoreTable) targetCatalog.getTable(targetIdentifier);
 
         // 2. get latest snapshot files
-        Map<String, List<CopyFileInfo>> result = new HashMap<>();
-
         FileStore<?> sourceStore = sourceTable.store();
         SnapshotManager sourceSnapshotManager = sourceStore.snapshotManager();
         Snapshot latestSnapshot = sourceSnapshotManager.latestSnapshot();
-        if (latestSnapshot == null) {
-            return result;
-        }
-
-        // 3. pick data manifest files
-        List<Path> dataManifestFilePathList = pickDataManifestFiles(sourceStore, latestSnapshot);
-        List<CopyFileInfo> dataManifestFiles =
-                CopyFilesUtil.toCopyFileInfos(dataManifestFilePathList, sourceTable.location());
-        result.put(DATA_MANIFEST_FILES_TAG, dataManifestFiles);
-
-        // 4. pick index manifest files
-        Path indexManifestFilePath = pickIndexManifestFiles(sourceStore, latestSnapshot);
-        if (indexManifestFilePath != null) {
-            List<CopyFileInfo> indexManifestFiles =
-                    CopyFilesUtil.toCopyFileInfos(
-                            Arrays.asList(indexManifestFilePath), sourceTable.location());
-            result.put(INDEX_MANIFEST_FILES_TAG, indexManifestFiles);
-        }
-        return result;
+        return latestSnapshot;
     }
 
     private static Schema newSchemaFromTableSchema(TableSchema tableSchema) {
@@ -113,31 +81,5 @@ public class CopySchemaOperator extends CopyFilesOperator {
                                 tableSchema.options().entrySet(),
                                 entry -> !Objects.equals(entry.getKey(), CoreOptions.PATH.key()))),
                 tableSchema.comment());
-    }
-
-    private List<Path> pickDataManifestFiles(FileStore<?> store, Snapshot snapshot) {
-        List<Path> result = new ArrayList<>();
-        ManifestList manifestList = store.manifestListFactory().create();
-        List<ManifestFileMeta> manifestFileMetas = manifestList.readAllManifests(snapshot);
-        List<String> manifestFileName =
-                manifestFileMetas.stream()
-                        .map(ManifestFileMeta::fileName)
-                        .collect(Collectors.toList());
-        result.addAll(
-                manifestFileName.stream()
-                        .map(store.pathFactory()::toManifestFilePath)
-                        .collect(Collectors.toList()));
-        return result;
-    }
-
-    @Nullable
-    private Path pickIndexManifestFiles(FileStore<?> store, Snapshot snapshot) {
-        IndexFileHandler indexFileHandler = store.newIndexFileHandler();
-        String indexManifest = snapshot.indexManifest();
-        Path indexManifestPath = null;
-        if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
-            indexManifestPath = indexFileHandler.indexManifestFilePath(indexManifest);
-        }
-        return indexManifestPath;
     }
 }

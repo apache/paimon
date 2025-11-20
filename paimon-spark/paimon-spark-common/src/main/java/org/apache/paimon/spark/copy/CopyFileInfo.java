@@ -20,7 +20,7 @@ package org.apache.paimon.spark.copy;
 
 import java.io.Serializable;
 
-/** The information of copy file. */
+/** The information of copy data file. */
 public class CopyFileInfo implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -29,9 +29,41 @@ public class CopyFileInfo implements Serializable {
 
     private final String filePathExcludeTableRoot;
 
-    public CopyFileInfo(String sourceFilePath, String filePathExcludeTableRoot) {
+    private final byte[] partition;
+
+    private final int bucket;
+
+    private final int totalBuckets;
+
+    private final byte[] dataFileMeta;
+
+    public CopyFileInfo(
+            String sourceFilePath,
+            String filePathExcludeTableRoot,
+            byte[] partition,
+            int bucket,
+            byte[] dataFileMeta) {
         this.sourceFilePath = sourceFilePath;
         this.filePathExcludeTableRoot = filePathExcludeTableRoot;
+        this.partition = partition;
+        this.bucket = bucket;
+        this.totalBuckets = 0;
+        this.dataFileMeta = dataFileMeta;
+    }
+
+    public CopyFileInfo(
+            String sourceFilePath,
+            String filePathExcludeTableRoot,
+            byte[] partition,
+            int bucket,
+            int totalBuckets,
+            byte[] dataFileMeta) {
+        this.sourceFilePath = sourceFilePath;
+        this.filePathExcludeTableRoot = filePathExcludeTableRoot;
+        this.partition = partition;
+        this.bucket = bucket;
+        this.totalBuckets = totalBuckets;
+        this.dataFileMeta = dataFileMeta;
     }
 
     public String sourceFilePath() {
@@ -40,5 +72,21 @@ public class CopyFileInfo implements Serializable {
 
     public String filePathExcludeTableRoot() {
         return filePathExcludeTableRoot;
+    }
+
+    public byte[] partition() {
+        return partition;
+    }
+
+    public int bucket() {
+        return bucket;
+    }
+
+    public int totalBuckets() {
+        return totalBuckets;
+    }
+
+    public byte[] dataFileMeta() {
+        return dataFileMeta;
     }
 }

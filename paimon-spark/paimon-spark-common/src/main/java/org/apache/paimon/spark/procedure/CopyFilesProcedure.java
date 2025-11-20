@@ -18,12 +18,12 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.SparkUtils;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
-import org.apache.paimon.spark.copy.CopyDataFileInfo;
 import org.apache.paimon.spark.copy.CopyDataFilesOperator;
 import org.apache.paimon.spark.copy.CopyFileInfo;
 import org.apache.paimon.spark.copy.CopyFilesCommitOperator;
@@ -36,7 +36,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -51,10 +50,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.List;
-import java.util.Map;
 
-import static org.apache.paimon.spark.copy.CopySchemaOperator.DATA_MANIFEST_FILES_TAG;
-import static org.apache.paimon.spark.copy.CopySchemaOperator.INDEX_MANIFEST_FILES_TAG;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -170,31 +166,25 @@ public class CopyFilesProcedure extends BaseProcedure {
                 new ListIndexFilesOperator(spark(), sourcePaimonCatalog, targetPaimonCatalog);
 
         // 1. create target table and get manifest files
-        Map<String, List<CopyFileInfo>> manifestFiles =
+        Snapshot snapshot =
                 copySchemaOperator.execute(sourceTableIdentifier, targetTableIdentifier);
 
         // 2. list data and index files
-        JavaRDD<CopyDataFileInfo> dataFilesRdd =
-                listDataFilesOperator.execute(
-                        sourceTableIdentifier,
-                        manifestFiles.get(DATA_MANIFEST_FILES_TAG),
-                        partitionPredicate);
-        JavaRDD<CopyDataFileInfo> indexFilesRdd =
-                listIndexFilesOperator.execute(
-                        sourceTableIdentifier,
-                        manifestFiles.get(INDEX_MANIFEST_FILES_TAG),
-                        partitionPredicate);
+        List<CopyFileInfo> dataFilesRdd =
+                listDataFilesOperator.execute(sourceTableIdentifier, snapshot, partitionPredicate);
+        List<CopyFileInfo> indexFilesRdd =
+                listIndexFilesOperator.execute(sourceTableIdentifier, snapshot, partitionPredicate);
 
         // 3. copy data and index files
-        JavaPairRDD<byte[], byte[]> dataFileMetasPairRdd =
+        JavaRDD<CopyFileInfo> dataCopyFileInfoRdd =
                 copyDataFilesOperator.execute(
                         sourceTableIdentifier, targetTableIdentifier, dataFilesRdd);
-        JavaPairRDD<byte[], byte[]> indexFileMetasPairRdd =
+        JavaRDD<CopyFileInfo> indexCopeFileInfoRdd =
                 copyDataFilesOperator.execute(
                         sourceTableIdentifier, targetTableIdentifier, indexFilesRdd);
 
         copyFilesCommitOperator.execute(
-                targetTableIdentifier, dataFileMetasPairRdd, indexFileMetasPairRdd);
+                targetTableIdentifier, dataCopyFileInfoRdd, indexCopeFileInfoRdd);
     }
 
     private PartitionPredicate getPartitionPredicate(

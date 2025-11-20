@@ -98,12 +98,13 @@ public class FileMetaUtils {
 
     public static CommitMessage createCommitMessage(
             BinaryRow partition,
+            int bucket,
             int totalBuckets,
             List<DataFileMeta> dataFileMetas,
             List<IndexFileMeta> indexFileMetas) {
         return new CommitMessageImpl(
                 partition,
-                0,
+                bucket,
                 totalBuckets,
                 new DataIncrement(
                         dataFileMetas,

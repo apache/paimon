@@ -31,7 +31,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.SerializationUtils;
 
-import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.sql.SparkSession;
 
 import java.io.IOException;
@@ -58,29 +58,36 @@ public class CopyFilesCommitOperator extends CopyFilesOperator {
 
     public void execute(
             Identifier targetIdentifier,
-            JavaPairRDD<byte[], byte[]> dataFileMetaPairRdd,
-            JavaPairRDD<byte[], byte[]> indexFileMetaPairRdd)
+            JavaRDD<CopyFileInfo> dataCopyFileInfoRdd,
+            JavaRDD<CopyFileInfo> indexCopyFileInfoRdd)
             throws Exception {
         FileStoreTable targetTable = (FileStoreTable) targetCatalog.getTable(targetIdentifier);
 
         // deserialize data file meta
-        Map<BinaryRow, List<DataFileMeta>> dataFileMetaMap =
-                deserializeDataFileMeta(dataFileMetaPairRdd);
+        Map<Tuple2<BinaryRow, Integer>, DataFileInfo> dataFileMetaMap =
+                deserializeDataFileMeta(dataCopyFileInfoRdd);
 
         // deserialize index file meta
-        Map<BinaryRow, List<IndexFileMeta>> indexFileMetaMap =
-                deserializeIndexFileMeta(indexFileMetaPairRdd);
+        Map<Tuple2<BinaryRow, Integer>, IndexFileInfo> indexFileMetaMap =
+                deserializeIndexFileMeta(indexCopyFileInfoRdd);
 
         // construct commit messages
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (BinaryRow partition : dataFileMetaMap.keySet()) {
-            List<DataFileMeta> dataFileMetas = dataFileMetaMap.get(partition);
-            List<IndexFileMeta> indexFileMetas =
-                    indexFileMetaMap.getOrDefault(partition, new ArrayList<>());
+        for (Map.Entry<Tuple2<BinaryRow, Integer>, DataFileInfo> entry :
+                dataFileMetaMap.entrySet()) {
+            Tuple2<BinaryRow, Integer> partitionAndBucket = entry.getKey();
+            DataFileInfo dataFileInfo = entry.getValue();
+            List<DataFileMeta> dataFileMetas = dataFileInfo.dataFileMetas();
+            List<IndexFileMeta> indexFileMetas = new ArrayList<>();
+            if (indexFileMetaMap.containsKey(partitionAndBucket)) {
+                IndexFileInfo indexFileInfo = indexFileMetaMap.get(partitionAndBucket);
+                indexFileMetas.addAll(indexFileInfo.indexFileMetas());
+            }
             commitMessages.add(
                     FileMetaUtils.createCommitMessage(
-                            partition,
-                            targetTable.coreOptions().bucket(),
+                            partitionAndBucket._1,
+                            partitionAndBucket._2,
+                            dataFileInfo.totalBuckets(),
                             dataFileMetas,
                             indexFileMetas));
         }
@@ -90,34 +97,53 @@ public class CopyFilesCommitOperator extends CopyFilesOperator {
         }
     }
 
-    private Map<BinaryRow, List<DataFileMeta>> deserializeDataFileMeta(
-            JavaPairRDD<byte[], byte[]> dataFileMetaPairRdd) throws IOException {
-        Map<BinaryRow, List<DataFileMeta>> result = new HashMap<>();
-        if (dataFileMetaPairRdd == null) {
+    private Map<Tuple2<BinaryRow, Integer>, DataFileInfo> deserializeDataFileMeta(
+            JavaRDD<CopyFileInfo> copyFileInfoRdd) throws IOException {
+        Map<Tuple2<BinaryRow, Integer>, DataFileInfo> result = new HashMap<>();
+        if (copyFileInfoRdd == null) {
             return result;
         }
-        List<Tuple2<byte[], byte[]>> dataFileMetaByteList = dataFileMetaPairRdd.collect();
-        for (Tuple2<byte[], byte[]> tuple : dataFileMetaByteList) {
-            BinaryRow partition = SerializationUtils.deserializeBinaryRow(tuple._1());
-            List<DataFileMeta> fileMetas =
-                    result.computeIfAbsent(partition, k -> new ArrayList<>());
-            fileMetas.add(dataFileSerializer.deserializeFromBytes(tuple._2()));
+        List<CopyFileInfo> copyFileInfos = copyFileInfoRdd.collect();
+        for (CopyFileInfo copyDataFileInfo : copyFileInfos) {
+            BinaryRow partition =
+                    SerializationUtils.deserializeBinaryRow(copyDataFileInfo.partition());
+            int bucket = copyDataFileInfo.bucket();
+            DataFileInfo dataFileInfo =
+                    result.computeIfAbsent(
+                            new Tuple2<>(partition, bucket),
+                            k ->
+                                    new DataFileInfo(
+                                            partition,
+                                            bucket,
+                                            copyDataFileInfo.totalBuckets(),
+                                            new ArrayList<>()));
+            dataFileInfo
+                    .dataFileMetas()
+                    .add(dataFileSerializer.deserializeFromBytes(copyDataFileInfo.dataFileMeta()));
         }
         return result;
     }
 
-    private Map<BinaryRow, List<IndexFileMeta>> deserializeIndexFileMeta(
-            JavaPairRDD<byte[], byte[]> indexFileMetaPairRdd) throws IOException {
-        Map<BinaryRow, List<IndexFileMeta>> result = new HashMap<>();
-        if (indexFileMetaPairRdd == null) {
+    private Map<Tuple2<BinaryRow, Integer>, IndexFileInfo> deserializeIndexFileMeta(
+            JavaRDD<CopyFileInfo> copyFileInfoRdd) throws IOException {
+        Map<Tuple2<BinaryRow, Integer>, IndexFileInfo> result = new HashMap<>();
+        if (copyFileInfoRdd == null) {
             return result;
         }
-        List<Tuple2<byte[], byte[]>> indexFileMetaByteList = indexFileMetaPairRdd.collect();
-        for (Tuple2<byte[], byte[]> tuple : indexFileMetaByteList) {
-            BinaryRow partition = SerializationUtils.deserializeBinaryRow(tuple._1());
-            List<IndexFileMeta> fileMetas =
-                    result.computeIfAbsent(partition, k -> new ArrayList<>());
-            fileMetas.add(indexFileSerializer.deserializeFromBytes(tuple._2()));
+        List<CopyFileInfo> copyFileInfos = copyFileInfoRdd.collect();
+        for (CopyFileInfo copyIndexFileInfo : copyFileInfos) {
+            BinaryRow partition =
+                    SerializationUtils.deserializeBinaryRow(copyIndexFileInfo.partition());
+            int bucket = copyIndexFileInfo.bucket();
+            IndexFileInfo indexFileInfo =
+                    result.computeIfAbsent(
+                            new Tuple2<>(partition, bucket),
+                            k -> new IndexFileInfo(partition, bucket, new ArrayList<>()));
+            indexFileInfo
+                    .indexFileMetas()
+                    .add(
+                            indexFileSerializer.deserializeFromBytes(
+                                    copyIndexFileInfo.dataFileMeta()));
         }
         return result;
     }
