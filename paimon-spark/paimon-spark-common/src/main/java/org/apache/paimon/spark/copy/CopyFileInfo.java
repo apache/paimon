@@ -27,7 +27,7 @@ public class CopyFileInfo implements Serializable {
 
     private final String sourceFilePath;
 
-    private final String filePathExcludeTableRoot;
+    private final String targetFilePath;
 
     private final byte[] partition;
 
@@ -39,12 +39,12 @@ public class CopyFileInfo implements Serializable {
 
     public CopyFileInfo(
             String sourceFilePath,
-            String filePathExcludeTableRoot,
+            String targetFilePath,
             byte[] partition,
             int bucket,
             byte[] dataFileMeta) {
         this.sourceFilePath = sourceFilePath;
-        this.filePathExcludeTableRoot = filePathExcludeTableRoot;
+        this.targetFilePath = targetFilePath;
         this.partition = partition;
         this.bucket = bucket;
         this.totalBuckets = 0;
@@ -53,13 +53,13 @@ public class CopyFileInfo implements Serializable {
 
     public CopyFileInfo(
             String sourceFilePath,
-            String filePathExcludeTableRoot,
+            String targetFilePath,
             byte[] partition,
             int bucket,
             int totalBuckets,
             byte[] dataFileMeta) {
         this.sourceFilePath = sourceFilePath;
-        this.filePathExcludeTableRoot = filePathExcludeTableRoot;
+        this.targetFilePath = targetFilePath;
         this.partition = partition;
         this.bucket = bucket;
         this.totalBuckets = totalBuckets;
@@ -70,8 +70,8 @@ public class CopyFileInfo implements Serializable {
         return sourceFilePath;
     }
 
-    public String filePathExcludeTableRoot() {
-        return filePathExcludeTableRoot;
+    public String targetFilePath() {
+        return targetFilePath;
     }
 
     public byte[] partition() {

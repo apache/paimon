@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -51,6 +52,7 @@ public class ListDataFilesOperator extends CopyFilesOperator {
 
     public List<CopyFileInfo> execute(
             Identifier sourceIdentifier,
+            Identifier targetIdentifier,
             @Nullable Snapshot snapshot,
             @Nullable PartitionPredicate partitionPredicate)
             throws Exception {
@@ -58,6 +60,7 @@ public class ListDataFilesOperator extends CopyFilesOperator {
             return null;
         }
         FileStoreTable sourceTable = (FileStoreTable) sourceCatalog.getTable(sourceIdentifier);
+        FileStoreTable targetTable = (FileStoreTable) targetCatalog.getTable(targetIdentifier);
         Iterator<ManifestEntry> manifestEntries =
                 sourceTable
                         .newSnapshotReader()
@@ -73,7 +76,7 @@ public class ListDataFilesOperator extends CopyFilesOperator {
                     pickDataFiles(
                             manifestEntry,
                             sourceTable.store().pathFactory(),
-                            sourceTable.location());
+                            targetTable.store().pathFactory());
             dataFiles.add(dataFile);
         }
         return dataFiles;
@@ -81,21 +84,27 @@ public class ListDataFilesOperator extends CopyFilesOperator {
 
     private CopyFileInfo pickDataFiles(
             ManifestEntry manifestEntry,
-            FileStorePathFactory fileStorePathFactory,
-            Path sourceTableRoot)
+            FileStorePathFactory sourceFileStorePathFactory,
+            FileStorePathFactory targetFileStorePathFactory)
             throws IOException {
         Path dataFilePath =
-                fileStorePathFactory
+                sourceFileStorePathFactory
                         .createDataFilePathFactory(
                                 manifestEntry.partition(), manifestEntry.bucket())
                         .toPath(manifestEntry);
-        Path relativePath = CopyFilesUtil.getPathExcludeTableRoot(dataFilePath, sourceTableRoot);
+        Path targetDataFilePath =
+                targetFileStorePathFactory
+                        .createDataFilePathFactory(
+                                manifestEntry.partition(), manifestEntry.bucket())
+                        .toPath(manifestEntry);
+        DataFileMeta fileMeta = manifestEntry.file();
+        DataFileMeta targetFileMeta = fileMeta.rename(targetDataFilePath.getName());
         return new CopyFileInfo(
                 dataFilePath.toString(),
-                relativePath.toString(),
+                targetDataFilePath.toString(),
                 SerializationUtils.serializeBinaryRow(manifestEntry.partition()),
                 manifestEntry.bucket(),
                 manifestEntry.totalBuckets(),
-                dataFileSerializer.serializeToBytes(manifestEntry.file()));
+                dataFileSerializer.serializeToBytes(targetFileMeta));
     }
 }

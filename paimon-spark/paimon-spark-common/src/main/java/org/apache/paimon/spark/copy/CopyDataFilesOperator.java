@@ -73,15 +73,13 @@ public class CopyDataFilesOperator extends CopyFilesOperator {
         public Iterator<CopyFileInfo> call(Iterator<CopyFileInfo> dataFileIterator)
                 throws Exception {
             List<CopyFileInfo> result = new ArrayList<>();
-            Path targetTableRootPath = targetTable.location();
             while (dataFileIterator.hasNext()) {
-                CopyFileInfo dataFile = dataFileIterator.next();
-                String filePathExcludeTableRoot = dataFile.filePathExcludeTableRoot();
-                Path sourcePath = new Path(dataFile.sourceFilePath());
-                Path targetPath = new Path(targetTableRootPath + filePathExcludeTableRoot);
+                CopyFileInfo file = dataFileIterator.next();
+                Path sourcePath = new Path(file.sourceFilePath());
+                Path targetPath = new Path(file.targetFilePath());
                 CopyFilesUtil.copyFiles(
                         sourceTable.fileIO(), targetTable.fileIO(), sourcePath, targetPath, true);
-                result.add(dataFile);
+                result.add(file);
             }
             return result.iterator();
         }

@@ -20,6 +20,7 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -30,6 +31,7 @@ import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
@@ -147,5 +149,17 @@ public class IndexFileMeta {
                 + ", externalPath='"
                 + externalPath
                 + '}';
+    }
+
+    public IndexFileMeta rename(String newFileName) {
+        String newExternalPath = externalPathDir().map(dir -> dir + "/" + newFileName).orElse(null);
+        return new IndexFileMeta(
+                indexType, newFileName, fileSize, rowCount, dvRanges, newExternalPath);
+    }
+
+    public Optional<String> externalPathDir() {
+        return Optional.ofNullable(externalPath)
+                .map(Path::new)
+                .map(p -> p.getParent().toUri().toString());
     }
 }

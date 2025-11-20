@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -50,6 +51,7 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
 
     public List<CopyFileInfo> execute(
             Identifier sourceIdentifier,
+            Identifier targetIdentifier,
             Snapshot snapshot,
             @Nullable PartitionPredicate partitionPredicate)
             throws Exception {
@@ -60,16 +62,17 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
             return null;
         }
         FileStoreTable sourceTable = (FileStoreTable) sourceCatalog.getTable(sourceIdentifier);
+        FileStoreTable targetTable = (FileStoreTable) targetCatalog.getTable(targetIdentifier);
         List<CopyFileInfo> indexFiles = new ArrayList<>();
-        IndexFileHandler indexFileHandler = sourceTable.store().newIndexFileHandler();
+        IndexFileHandler sourceIndexHandler = sourceTable.store().newIndexFileHandler();
+        IndexFileHandler targetIndexHandler = targetTable.store().newIndexFileHandler();
         List<IndexManifestEntry> indexManifestEntries =
-                indexFileHandler.readManifestWithIOException(snapshot.indexManifest());
+                sourceIndexHandler.readManifestWithIOException(snapshot.indexManifest());
         for (IndexManifestEntry indexManifestEntry : indexManifestEntries) {
             if (partitionPredicate == null
                     || partitionPredicate.test(indexManifestEntry.partition())) {
                 CopyFileInfo indexFile =
-                        pickIndexFiles(
-                                indexManifestEntry, indexFileHandler, sourceTable.location());
+                        pickIndexFiles(indexManifestEntry, sourceIndexHandler, targetIndexHandler);
                 indexFiles.add(indexFile);
             }
         }
@@ -78,16 +81,18 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
 
     private CopyFileInfo pickIndexFiles(
             IndexManifestEntry indexManifestEntry,
-            IndexFileHandler indexFileHandler,
-            Path sourceTableRoot)
+            IndexFileHandler sourceIndexFileHandler,
+            IndexFileHandler targetIndexFileHandler)
             throws IOException {
-        Path indexFilePath = indexFileHandler.filePath(indexManifestEntry);
-        Path relativePath = CopyFilesUtil.getPathExcludeTableRoot(indexFilePath, sourceTableRoot);
+        Path indexFilePath = sourceIndexFileHandler.filePath(indexManifestEntry);
+        Path targetIndexFilePath = targetIndexFileHandler.filePath(indexManifestEntry);
+        IndexFileMeta fileMeta = indexManifestEntry.indexFile();
+        IndexFileMeta targetFileMeta = fileMeta.rename(targetIndexFilePath.getName());
         return new CopyFileInfo(
                 indexFilePath.toString(),
-                relativePath.toString(),
+                targetIndexFilePath.toString(),
                 SerializationUtils.serializeBinaryRow(indexManifestEntry.partition()),
                 indexManifestEntry.bucket(),
-                indexFileSerializer.serializeToBytes(indexManifestEntry.indexFile()));
+                indexFileSerializer.serializeToBytes(targetFileMeta));
     }
 }
