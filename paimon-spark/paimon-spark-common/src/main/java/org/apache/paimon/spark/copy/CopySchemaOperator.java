@@ -27,6 +27,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -35,14 +36,19 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
 
 import org.apache.spark.sql.SparkSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
+
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Copy schema and get latest snapshot. */
 public class CopySchemaOperator extends CopyFilesOperator {
 
-    public static final String INDEX_MANIFEST_FILES_TAG = "index-manifest-files";
-    public static final String DATA_MANIFEST_FILES_TAG = "data-manifest-files";
+    private static final Logger LOG = LoggerFactory.getLogger(CopySchemaOperator.class);
 
     public CopySchemaOperator(SparkSession spark, Catalog sourceCatalog, Catalog targetCatalog) {
         super(spark, sourceCatalog, targetCatalog);
@@ -60,9 +66,23 @@ public class CopySchemaOperator extends CopyFilesOperator {
 
         // 1. create target table
         targetCatalog.createDatabase(targetIdentifier.getDatabaseName(), true);
-        targetCatalog.createTable(
-                targetIdentifier, newSchemaFromTableSchema(sourceTable.schema()), false);
-        FileStoreTable targetTable = (FileStoreTable) targetCatalog.getTable(targetIdentifier);
+
+        try {
+            Table existedTable = targetCatalog.getTable(targetIdentifier);
+            Preconditions.checkState(
+                    existedTable instanceof FileStoreTable,
+                    String.format(
+                            "existed paimon table '%s' is not a FileStoreTable, but a %s",
+                            targetIdentifier, existedTable.getClass().getName()));
+            checkCompatible(sourceTable, (FileStoreTable) existedTable);
+
+            LOG.info("paimon table '{}' already exists, use it as target table.", targetIdentifier);
+        } catch (Catalog.TableNotExistException e) {
+            LOG.info("create target paimon table '{}'.", targetIdentifier);
+
+            targetCatalog.createTable(
+                    targetIdentifier, newSchemaFromTableSchema(sourceTable.schema()), false);
+        }
 
         // 2. get latest snapshot files
         FileStore<?> sourceStore = sourceTable.store();
@@ -81,5 +101,46 @@ public class CopySchemaOperator extends CopyFilesOperator {
                                 tableSchema.options().entrySet(),
                                 entry -> !Objects.equals(entry.getKey(), CoreOptions.PATH.key()))),
                 tableSchema.comment());
+    }
+
+    private void checkCompatible(FileStoreTable sourceTable, FileStoreTable existedTable) {
+        Schema sourceSchema = sourceTable.schema().toSchema();
+        Schema existedSchema = existedTable.schema().toSchema();
+
+        // check bucket
+        checkState(
+                sourceTable.coreOptions().bucket() == existedTable.coreOptions().bucket(),
+                "source table bucket is not compatible with existed paimon table bucket.");
+
+        // check format
+        checkState(
+                Objects.equals(
+                        sourceTable.coreOptions().formatType(),
+                        existedTable.coreOptions().formatType()),
+                "source table format is not compatible with existed paimon table format.");
+
+        // check primary keys
+        List<String> sourcePrimaryKeys = sourceSchema.primaryKeys();
+        List<String> existedPrimaryKeys = existedSchema.primaryKeys();
+        checkState(
+                sourcePrimaryKeys.size() == existedPrimaryKeys.size()
+                        && new HashSet<>(existedPrimaryKeys).containsAll(sourcePrimaryKeys),
+                "source table primary keys is not compatible with existed paimon table primary keys.");
+
+        // check partition keys
+        List<String> sourcePartitionFields = sourceSchema.partitionKeys();
+        List<String> existedPartitionFields = existedSchema.partitionKeys();
+        checkState(
+                sourcePartitionFields.size() == existedPartitionFields.size()
+                        && new HashSet<>(existedPartitionFields).containsAll(sourcePartitionFields),
+                "source table partition keys is not compatible with existed paimon table partition keys.");
+
+        // check all fields
+        List<DataField> sourceFields = sourceSchema.fields();
+        List<DataField> existedFields = existedSchema.fields();
+        checkState(
+                existedFields.size() >= sourceFields.size()
+                        && new HashSet<>(existedPartitionFields).containsAll(sourcePartitionFields),
+                "source table fields is not compatible with existed paimon table fields.");
     }
 }

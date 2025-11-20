@@ -116,4 +116,94 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
 
     }
   }
+
+  test("Paimon copy files procedure: schema change") {
+    val random = ThreadLocalRandom.current().nextInt(100000);
+    withTable(s"tbl$random") {
+      // source table
+      sql(s"""
+             |CREATE TABLE tbl$random (k INT, v STRING, dt STRING, hh INT)
+             |PARTITIONED BY (dt, hh)
+             |""".stripMargin)
+      sql(s"INSERT INTO tbl$random VALUES (1, 'a', '2025-08-17', 5), (2, 'b', '2025-10-06', 0)")
+
+      sql(s"""
+             |ALTER TABLE tbl$random
+             |DROP COLUMN v
+             |""".stripMargin)
+
+      checkAnswer(
+        sql(s"CALL sys.copy(source_table => 'tbl$random', target_table => 'target_tbl$random')"),
+        Row(true) :: Nil
+      )
+
+      checkAnswer(
+        sql(s"SELECT * FROM target_tbl$random"),
+        sql(s"SELECT * FROM tbl$random")
+      )
+
+    }
+  }
+
+  test("Paimon copy files procedure: copy to existed table") {
+    val random = ThreadLocalRandom.current().nextInt(100000);
+    withTable(s"tbl$random") {
+      // source table
+      sql(s"""
+             |CREATE TABLE tbl$random (k INT, v STRING, dt STRING, hh INT)
+             |PARTITIONED BY (dt, hh)
+             |""".stripMargin)
+      sql(s"INSERT INTO tbl$random VALUES (1, 'a', '2025-08-17', 5), (2, 'b', '2025-10-06', 0)")
+
+      // target table
+      sql(s"""
+             |CREATE TABLE target_tbl$random (k INT, v STRING, v2 STRING, dt STRING, hh INT)
+             |PARTITIONED BY (dt, hh)
+             |""".stripMargin)
+      // partition should overwrite
+      sql(
+        s"INSERT INTO target_tbl$random VALUES (3, 'c', 'c1', '2025-08-17', 5), (4, 'd', 'd1', '2025-08-17', 6)")
+
+      checkAnswer(
+        sql(s"CALL sys.copy(source_table => 'tbl$random', target_table => 'target_tbl$random')"),
+        Row(true) :: Nil
+      )
+
+      checkAnswer(
+        sql(s"SELECT * FROM target_tbl$random WHERE dt = '2025-08-17' and hh = 5"),
+        Row(1, "a", null, "2025-08-17", 5)
+      )
+
+      checkAnswer(
+        sql(s"SELECT * FROM target_tbl$random WHERE dt = '2025-10-06' and hh = 0"),
+        Row(2, "b", null, "2025-10-06", 0)
+      )
+
+      checkAnswer(
+        sql(s"SELECT * FROM target_tbl$random WHERE dt = '2025-08-17' and hh = 6"),
+        Row(4, "d", "d1", "2025-08-17", 6)
+      )
+    }
+  }
+
+  test("Paimon copy files procedure: copy to existed compatible table") {
+    val random = ThreadLocalRandom.current().nextInt(100000);
+    withTable(s"tbl$random") {
+      // source table
+      sql(s"""
+             |CREATE TABLE tbl$random (k INT, v STRING, dt STRING, hh INT)
+             |PARTITIONED BY (dt, hh)
+             |""".stripMargin)
+
+      // target table
+      sql(s"""
+             |CREATE TABLE target_tbl$random (id INT, dt STRING, hh INT)
+             |PARTITIONED BY (dt, hh)
+             |""".stripMargin)
+
+      assertThrows[RuntimeException] {
+        sql(s"CALL sys.copy(source_table => 'tbl$random', target_table => 'target_tbl$random')")
+      }
+    }
+  }
 }
