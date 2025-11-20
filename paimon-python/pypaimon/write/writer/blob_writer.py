@@ -42,7 +42,7 @@ class BlobWriter(AppendOnlyDataWriter):
         self.blob_column = blob_column
 
         options = self.table.options
-        self.blob_target_file_size = CoreOptions.get_blob_target_file_size(options)
+        self.blob_target_file_size = CoreOptions.blob_target_file_size(options)
 
         self.current_writer: Optional[BlobFileWriter] = None
         self.current_file_path: Optional[str] = None
@@ -99,7 +99,10 @@ class BlobWriter(AppendOnlyDataWriter):
         self.file_count += 1  # Increment counter for next file
         file_path = self._generate_file_path(file_name)
         self.current_file_path = file_path
-        self.current_writer = BlobFileWriter(self.file_io, file_path, self.blob_as_descriptor)
+        # Get the appropriate FileIO instance for the path
+        # If using external paths with different scheme, create a new FileIO instance
+        file_io_to_use = self._get_file_io_for_path(file_path)
+        self.current_writer = BlobFileWriter(file_io_to_use, file_path, self.blob_as_descriptor)
 
     def rolling_file(self, force_check: bool = False) -> bool:
         if self.current_writer is None:
@@ -117,7 +120,13 @@ class BlobWriter(AppendOnlyDataWriter):
         file_name = self.current_file_path.split('/')[-1]
         row_count = self.current_writer.row_count
 
-        self._add_file_metadata(file_name, self.current_file_path, row_count, file_size)
+        # Determine if this is an external path
+        is_external_path = self.external_path_provider is not None
+        external_path_str = str(self.current_file_path) if is_external_path else None
+
+        self._add_file_metadata(file_name, self.current_file_path, row_count, file_size, external_path_str)
+
+        # Clean up: reset current_writer and current_file_path
 
         self.current_writer = None
         self.current_file_path = None
@@ -138,13 +147,20 @@ class BlobWriter(AppendOnlyDataWriter):
         self.file_count += 1
         file_path = self._generate_file_path(file_name)
 
-        # Write blob file (parent class already supports blob format)
-        self.file_io.write_blob(file_path, data, self.blob_as_descriptor)
+        # Get the appropriate FileIO instance for the path
+        # If using external paths with different scheme, create a new FileIO instance
+        file_io_to_use = self._get_file_io_for_path(file_path)
 
-        file_size = self.file_io.get_file_size(file_path)
+        # Write blob file (parent class already supports blob format)
+        file_io_to_use.write_blob(file_path, data, self.blob_as_descriptor)
+
+        file_size = file_io_to_use.get_file_size(file_path)
+
+        is_external_path = self.external_path_provider is not None
+        external_path_str = str(file_path) if is_external_path else None
 
         # Reuse _add_file_metadata for consistency (blob table is append-only, no primary keys)
-        self._add_file_metadata(file_name, file_path, data, file_size)
+        self._add_file_metadata(file_name, file_path, data, file_size, external_path_str)
 
     def _add_file_metadata(self, file_name: str, file_path: str, data_or_row_count, file_size: int):
         """Add file metadata to committed_files."""
@@ -200,7 +216,7 @@ class BlobWriter(AppendOnlyDataWriter):
             delete_row_count=0,
             file_source=0,  # FileSource.APPEND = 0
             value_stats_cols=None,
-            external_path=None,
+            external_path=external_path,
             first_row_id=None,
             write_cols=self.write_cols,
             file_path=file_path,

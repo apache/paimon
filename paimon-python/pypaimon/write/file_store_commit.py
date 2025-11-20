@@ -166,10 +166,19 @@ class FileStoreCommit:
         if not all(count == 0 for count in partition_null_counts):
             raise RuntimeError("Partition value should not be null")
 
+
         manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
         new_manifest_list = ManifestFileMeta(
             file_name=new_manifest_file,
             file_size=self.table.file_io.get_file_size(manifest_file_path),
+
+
+
+
+
+
+
+
             num_added_files=added_file_count,
             num_deleted_files=deleted_file_count,
             partition_stats=SimpleStats(
@@ -227,14 +236,51 @@ class FileStoreCommit:
                 raise RuntimeError(f"Failed to commit snapshot {new_snapshot_id}")
 
     def abort(self, commit_messages: List[CommitMessage]):
+        """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
         for message in commit_messages:
             for file in message.new_files:
                 try:
-                    file_path_obj = Path(file.file_path)
-                    if file_path_obj.exists():
-                        file_path_obj.unlink()
+                    # Use external_path if available (contains full URL scheme), otherwise use file_path
+                    path_to_delete = file.external_path if file.external_path else file.file_path
+                    if path_to_delete:
+                        file_io_to_use = self._get_file_io_for_path(path_to_delete)
+                        file_io_to_use.delete_quietly(Path(path_to_delete))
                 except Exception as e:
-                    print(f"Warning: Failed to clean up file {file.file_path}: {e}")
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    path_to_delete = file.external_path if file.external_path else file.file_path
+                    logger.warning(f"Failed to clean up file {path_to_delete} during abort: {e}")
+
+    def _get_file_io_for_path(self, path_str: str) -> 'FileIO':
+        from urllib.parse import urlparse
+        from pypaimon.common.file_io import FileIO
+
+        parsed = urlparse(path_str)
+        path_scheme = parsed.scheme
+
+        # If no scheme or scheme matches warehouse, use existing file_io
+        if not path_scheme:
+            return self.table.file_io
+
+        # Check if path scheme matches warehouse scheme
+        warehouse_path_str = str(self.table.table_path)
+        supported_schemes = ('file://', 's3://', 's3a://', 's3n://', 'oss://', 'hdfs://', 'viewfs://')
+        if warehouse_path_str.startswith(supported_schemes):
+            warehouse_url = warehouse_path_str
+        else:
+            warehouse_url = f"file://{warehouse_path_str}"
+        warehouse_parsed = urlparse(warehouse_url)
+        warehouse_scheme = warehouse_parsed.scheme or 'file'
+
+        # Normalize schemes for comparison
+        s3_schemes = {'s3', 's3a', 's3n', 'oss'}
+        path_is_s3 = path_scheme in s3_schemes
+        warehouse_is_s3 = warehouse_scheme in s3_schemes
+
+        if path_scheme == warehouse_scheme or (path_is_s3 and warehouse_is_s3):
+            return self.table.file_io
+
+        return FileIO(path_str, self.table.file_io.properties)
 
     def close(self):
         """Close the FileStoreCommit and release resources."""
