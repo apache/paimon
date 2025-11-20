@@ -130,11 +130,6 @@ public class PartitionExpire {
     }
 
     @VisibleForTesting
-    LocalDateTime lastCheck() {
-        return lastCheck;
-    }
-
-    @VisibleForTesting
     void setLastCheck(LocalDateTime time) {
         lastCheck = time;
     }
