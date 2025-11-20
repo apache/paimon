@@ -43,7 +43,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.manifest.ManifestEntry.recordCount;
 
-/** Action to remove the orphan data files and metadata files. */
+/** Action to remove the un-existing manifest file. */
 public class RemoveUnexistingManifestsAction extends ActionBase {
 
     private static final Logger LOG =
