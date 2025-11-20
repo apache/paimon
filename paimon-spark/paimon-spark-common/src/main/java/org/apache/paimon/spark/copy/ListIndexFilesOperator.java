@@ -44,7 +44,9 @@ import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** List index files. */
+/**
+ * List index files.
+ */
 public class ListIndexFilesOperator extends CopyFilesOperator {
 
     private final IndexFileMetaSerializer indexFileSerializer;
@@ -70,12 +72,13 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
         List<CopyFileInfo> indexFiles = new ArrayList<>();
         IndexFileHandler indexFileHandler = sourceTable.store().newIndexFileHandler();
         List<IndexManifestEntry> indexManifestEntries =
-                readAndMergeIndexEntries(
-                        indexFileHandler, snapshot.indexManifest(), partitionPredicate);
+                indexFileHandler.readManifestWithIOException(snapshot.indexManifest());
         for (IndexManifestEntry indexManifestEntry : indexManifestEntries) {
-            CopyFileInfo indexFile =
-                    pickIndexFiles(indexManifestEntry, indexFileHandler, sourceTable.location());
-            indexFiles.add(indexFile);
+            if (partitionPredicate == null || partitionPredicate.test(indexManifestEntry.partition())) {
+                CopyFileInfo indexFile =
+                        pickIndexFiles(indexManifestEntry, indexFileHandler, sourceTable.location());
+                indexFiles.add(indexFile);
+            }
         }
         return indexFiles;
     }
@@ -93,92 +96,5 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
                 SerializationUtils.serializeBinaryRow(indexManifestEntry.partition()),
                 indexManifestEntry.bucket(),
                 indexFileSerializer.serializeToBytes(indexManifestEntry.indexFile()));
-    }
-
-    private List<IndexManifestEntry> readAndMergeIndexEntries(
-            IndexFileHandler indexFileHandler,
-            String indexManifest,
-            @Nullable PartitionPredicate partitionPredicate)
-            throws IOException {
-        List<IndexManifestEntry> indexManifestEntries =
-                indexFileHandler.readManifestWithIOException(indexManifest);
-        Map<IndexManifestEntryIdentifier, IndexManifestEntry> map = new HashMap<>();
-        for (IndexManifestEntry entry : indexManifestEntries) {
-            if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {
-                continue;
-            }
-            IndexManifestEntryIdentifier identifier =
-                    new IndexManifestEntryIdentifier(
-                            entry.partition(), entry.bucket(), entry.indexFile());
-            switch (entry.kind()) {
-                case ADD:
-                    checkState(
-                            !map.containsKey(identifier),
-                            "Trying to add  %s which is already added.",
-                            identifier);
-                    map.put(identifier, entry);
-                    break;
-                case DELETE:
-                    if (map.containsKey(identifier)) {
-                        map.remove(identifier);
-                    } else {
-                        map.put(identifier, entry);
-                    }
-                    break;
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unknown value kind " + entry.kind().name());
-            }
-        }
-        return new ArrayList<>(map.values());
-    }
-
-    class IndexManifestEntryIdentifier {
-        public final BinaryRow partition;
-        public final int bucket;
-        public final IndexFileMeta indexFile;
-
-        /* Cache the hash code for the string */
-        private Integer hash;
-
-        public IndexManifestEntryIdentifier(
-                BinaryRow partition, int bucket, IndexFileMeta indexFile) {
-            this.partition = partition;
-            this.bucket = bucket;
-            this.indexFile = indexFile;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            IndexManifestEntryIdentifier identifier = (IndexManifestEntryIdentifier) o;
-            return bucket == identifier.bucket
-                    && Objects.equals(partition, identifier.partition)
-                    && Objects.equals(indexFile, identifier.indexFile);
-        }
-
-        @Override
-        public int hashCode() {
-            if (hash == null) {
-                hash = Objects.hash(partition, bucket, indexFile);
-            }
-            return hash;
-        }
-
-        @Override
-        public String toString() {
-            return "{partition = "
-                    + partition
-                    + ", bucket="
-                    + bucket
-                    + ", indexFile="
-                    + indexFile
-                    + '}';
-        }
     }
 }
