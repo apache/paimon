@@ -1007,12 +1007,20 @@ public class CoreOptions implements Serializable {
                             "Whether only overwrite dynamic partition when overwriting a partitioned table with "
                                     + "dynamic partition columns. Works only when the table has partition keys.");
 
-    public static final ConfigOption<PartitionExpireStrategy> PARTITION_EXPIRATION_STRATEGY =
+    public static final ConfigOption<String> PARTITION_EXPIRATION_STRATEGY =
             key("partition.expiration-strategy")
-                    .enumType(PartitionExpireStrategy.class)
-                    .defaultValue(PartitionExpireStrategy.VALUES_TIME)
+                    .stringType()
+                    .defaultValue("values-time")
                     .withDescription(
-                            "The strategy determines how to extract the partition time and compare it with the current time.");
+                            Description.builder()
+                                    .text(
+                                            "The strategy determines how to extract the partition time and compare it with the current time.")
+                                    .list(
+                                            text(
+                                                    "\"values-time\": This strategy compares the time extracted from the partition value with the current time."),
+                                            text(
+                                                    "\"update-time\": This strategy compares the last update time of the partition with the current time."))
+                                    .build());
 
     public static final ConfigOption<Duration> PARTITION_EXPIRATION_TIME =
             key("partition.expiration-time")
@@ -2848,7 +2856,7 @@ public class CoreOptions implements Serializable {
                 .orElse(options.get(PARTITION_EXPIRATION_MAX_NUM));
     }
 
-    public PartitionExpireStrategy partitionExpireStrategy() {
+    public String partitionExpireStrategy() {
         return options.get(PARTITION_EXPIRATION_STRATEGY);
     }
 
@@ -3787,38 +3795,6 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         ConsumerMode(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
-
-    /** Specifies the expiration strategy for partition expiration. */
-    public enum PartitionExpireStrategy implements DescribedEnum {
-        VALUES_TIME(
-                "values-time",
-                "This strategy compares the time extracted from the partition value with the current time."),
-
-        UPDATE_TIME(
-                "update-time",
-                "This strategy compares the last update time of the partition with the current time."),
-
-        CUSTOM("custom", "This strategy use custom class to expire partitions.");
-
-        private final String value;
-
-        private final String description;
-
-        PartitionExpireStrategy(String value, String description) {
             this.value = value;
             this.description = description;
         }
