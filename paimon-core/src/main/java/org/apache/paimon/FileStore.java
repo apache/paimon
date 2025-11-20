@@ -41,6 +41,7 @@ import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -66,6 +67,8 @@ public interface FileStore<T> {
     ChangelogManager changelogManager();
 
     RowType partitionType();
+
+    InternalRowPartitionComputer partitionComputer();
 
     CoreOptions options();
 
