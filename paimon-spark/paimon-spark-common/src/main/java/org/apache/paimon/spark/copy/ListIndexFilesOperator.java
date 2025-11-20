@@ -21,10 +21,8 @@ package org.apache.paimon.spark.copy;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -37,16 +35,9 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 
-import static org.apache.paimon.utils.Preconditions.checkState;
-
-/**
- * List index files.
- */
+/** List index files. */
 public class ListIndexFilesOperator extends CopyFilesOperator {
 
     private final IndexFileMetaSerializer indexFileSerializer;
@@ -74,9 +65,11 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
         List<IndexManifestEntry> indexManifestEntries =
                 indexFileHandler.readManifestWithIOException(snapshot.indexManifest());
         for (IndexManifestEntry indexManifestEntry : indexManifestEntries) {
-            if (partitionPredicate == null || partitionPredicate.test(indexManifestEntry.partition())) {
+            if (partitionPredicate == null
+                    || partitionPredicate.test(indexManifestEntry.partition())) {
                 CopyFileInfo indexFile =
-                        pickIndexFiles(indexManifestEntry, indexFileHandler, sourceTable.location());
+                        pickIndexFiles(
+                                indexManifestEntry, indexFileHandler, sourceTable.location());
                 indexFiles.add(indexFile);
             }
         }
