@@ -91,7 +91,8 @@ public class RemoveUnexistingManifestsActionITCase extends ActionITCaseBase {
         FileStorePathFactory pathFactory = table.store().pathFactory();
         List<ManifestFileMeta> manifestFileMetas =
                 table.store()
-                        .newManifestsReader()
+                        .newScan()
+                        .manifestsReader()
                         .read(snapshotManager.latestSnapshot(), ScanMode.ALL)
                         .allManifests;
         Path path = pathFactory.toManifestFilePath(manifestFileMetas.get(1).fileName());
@@ -175,7 +176,8 @@ public class RemoveUnexistingManifestsActionITCase extends ActionITCaseBase {
         FileStorePathFactory pathFactory = table.store().pathFactory();
         List<ManifestFileMeta> manifestFileMetas =
                 table.store()
-                        .newManifestsReader()
+                        .newScan()
+                        .manifestsReader()
                         .read(snapshotManager.latestSnapshot(), ScanMode.ALL)
                         .allManifests;
         Path path = pathFactory.toManifestFilePath(manifestFileMetas.get(1).fileName());
