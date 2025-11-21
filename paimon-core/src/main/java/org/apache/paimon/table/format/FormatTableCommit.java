@@ -40,6 +40,7 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -121,7 +122,9 @@ public class FormatTableCommit implements BatchTableCommit {
                                 staticPartitions,
                                 formatTablePartitionOnlyValueInPath,
                                 partitionKeys);
-                partitionSpecs.add(staticPartitions);
+                if (staticPartitions.size() == partitionKeys.size()) {
+                    partitionSpecs.add(staticPartitions);
+                }
                 if (overwrite) {
                     deletePreviousDataFile(partitionPath);
                 }
@@ -155,23 +158,15 @@ public class FormatTableCommit implements BatchTableCommit {
                         if (hiveCatalog instanceof DelegateCatalog) {
                             hiveCatalog = ((DelegateCatalog) hiveCatalog).wrapped();
                         }
-                        java.lang.reflect.Method method =
-                                hiveCatalog
-                                        .getClass()
-                                        .getDeclaredMethod(
-                                                "createPartitionsUtil",
-                                                Identifier.class,
-                                                List.class,
-                                                boolean.class);
-                        method.setAccessible(true);
-                        method.invoke(
+                        Method hiveCreatePartitionsInHmsMethod =
+                                getHiveCreatePartitionsInHmsMethod();
+                        hiveCreatePartitionsInHmsMethod.invoke(
                                 hiveCatalog,
                                 tableIdentifier,
                                 Collections.singletonList(partitionSpec),
                                 formatTablePartitionOnlyValueInPath);
                     } catch (Exception ex) {
-                        throw new RuntimeException(
-                                "Failed to invoke createPartitionsUtil via reflection", ex);
+                        throw new RuntimeException("Failed to sync partition to hms", ex);
                     }
                 }
             }
@@ -180,6 +175,19 @@ public class FormatTableCommit implements BatchTableCommit {
             this.abort(commitMessages);
             throw new RuntimeException(e);
         }
+    }
+
+    private Method getHiveCreatePartitionsInHmsMethod() throws NoSuchMethodException {
+        Method hiveCreatePartitionsInHmsMethod =
+                hiveCatalog
+                        .getClass()
+                        .getDeclaredMethod(
+                                "createPartitionsUtil",
+                                Identifier.class,
+                                List.class,
+                                boolean.class);
+        hiveCreatePartitionsInHmsMethod.setAccessible(true);
+        return hiveCreatePartitionsInHmsMethod;
     }
 
     private LinkedHashMap<String, String> extractPartitionSpecFromPath(
