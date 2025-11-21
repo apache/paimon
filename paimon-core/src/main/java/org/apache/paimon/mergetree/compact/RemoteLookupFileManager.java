@@ -32,6 +32,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
 
 import org.apache.commons.io.IOUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -45,6 +47,8 @@ import java.util.Optional;
 
 /** Manager to manage remote files for lookup. */
 public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
+
+    private static final Logger LOG = LoggerFactory.getLogger(RemoteLookupFileManager.class);
 
     private final FileIO fileIO;
     private final DataFilePathFactory pathFactory;
@@ -110,17 +114,19 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
         }
 
         Optional<String> remoteSst = remoteSst(dataFile);
-        if (remoteSst.isPresent()) {
-            Path remoteSstPath = remoteSstPath(dataFile, remoteSst.get());
-            try (SeekableInputStream is = fileIO.newInputStream(remoteSstPath);
-                    FileOutputStream os = new FileOutputStream(localFile)) {
-                IOUtils.copy(is, os);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            return true;
+        if (!remoteSst.isPresent()) {
+            return false;
         }
-        return false;
+
+        Path remoteSstPath = remoteSstPath(dataFile, remoteSst.get());
+        try (SeekableInputStream is = fileIO.newInputStream(remoteSstPath);
+                FileOutputStream os = new FileOutputStream(localFile)) {
+            IOUtils.copy(is, os);
+            return true;
+        } catch (Exception e) {
+            LOG.warn("Failed to download remote lookup file {}, skipping.", remoteSstPath, e);
+            return false;
+        }
     }
 
     private Optional<String> remoteSst(DataFileMeta file) {
