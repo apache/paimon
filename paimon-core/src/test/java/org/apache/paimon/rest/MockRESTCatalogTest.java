@@ -340,17 +340,12 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     private RESTCatalog initCatalog(boolean enableDataToken) throws IOException {
-        return initCatalogUtil(
-                enableDataToken,
-                Collections.emptyMap(),
-                "table-default-key",
-                "table-default-value");
+        return initCatalogUtil(enableDataToken, Collections.emptyMap(), null, null);
     }
 
     private RESTCatalog initCatalog(boolean enableDataToken, Map<String, String> extraOptions)
             throws IOException {
-        return initCatalogUtil(
-                enableDataToken, extraOptions, "table-default-key", "table-default-value");
+        return initCatalogUtil(enableDataToken, extraOptions, null, null);
     }
 
     private RESTCatalog initCatalogWithDefaultTableOption(String key, String value)
@@ -359,11 +354,14 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     private RESTCatalog initCatalogUtil(
-            boolean enableDataToken, Map<String, String> extraOptions, String key, String value)
+            boolean enableDataToken,
+            Map<String, String> extraOptions,
+            String createTableDefaultKey,
+            String createTableDefaultValue)
             throws IOException {
         String restWarehouse = UUID.randomUUID().toString();
-        this.config =
-                new ConfigResponse(
+        Map<String, String> defaultConf =
+                new HashMap<>(
                         ImmutableMap.of(
                                 RESTCatalogInternalOptions.PREFIX.key(),
                                 "paimon",
@@ -372,10 +370,12 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                                 RESTTokenFileIO.DATA_TOKEN_ENABLED.key(),
                                 enableDataToken + "",
                                 CatalogOptions.WAREHOUSE.key(),
-                                restWarehouse,
-                                TABLE_DEFAULT_OPTION_PREFIX + key,
-                                value),
-                        ImmutableMap.of());
+                                restWarehouse));
+        if (createTableDefaultKey != null) {
+            defaultConf.put(
+                    TABLE_DEFAULT_OPTION_PREFIX + createTableDefaultKey, createTableDefaultValue);
+        }
+        this.config = new ConfigResponse(defaultConf, ImmutableMap.of());
         restCatalogServer =
                 new RESTCatalogServer(dataPath, this.authProvider, this.config, restWarehouse);
         restCatalogServer.start();
