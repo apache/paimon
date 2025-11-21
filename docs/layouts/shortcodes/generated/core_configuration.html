@@ -183,12 +183,6 @@ under the License.
             <td>Whether enable incremental clustering.</td>
         </tr>
         <tr>
-            <td><h5>clustering.per-subtask.data-size</h5></td>
-            <td style="word-wrap: break-word;">1 gb</td>
-            <td>MemorySize</td>
-            <td>The data size processed by single parallelism.</td>
-        </tr>
-        <tr>
             <td><h5>clustering.strategy</h5></td>
             <td style="word-wrap: break-word;">"auto"</td>
             <td>String</td>
@@ -901,9 +895,9 @@ This config option does not affect the default filesystem metastore.</td>
         </tr>
         <tr>
             <td><h5>partition.expiration-strategy</h5></td>
-            <td style="word-wrap: break-word;">values-time</td>
-            <td><p>Enum</p></td>
-            <td>The strategy determines how to extract the partition time and compare it with the current time.<br /><br />Possible values:<ul><li>"values-time": This strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": This strategy compares the last update time of the partition with the current time.</li><li>"custom": This strategy use custom class to expire partitions.</li></ul></td>
+            <td style="word-wrap: break-word;">"values-time"</td>
+            <td>String</td>
+            <td>The strategy determines how to extract the partition time and compare it with the current time.<ul><li>"values-time": This strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": This strategy compares the last update time of the partition with the current time.</li></ul></td>
         </tr>
         <tr>
             <td><h5>partition.expiration-time</h5></td>

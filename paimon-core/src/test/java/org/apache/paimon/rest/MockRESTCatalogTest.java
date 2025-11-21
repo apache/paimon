@@ -47,6 +47,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -285,6 +286,12 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     @Override
+    protected Catalog newRestCatalogWithDataToken(Map<String, String> extraOptions)
+            throws IOException {
+        return initCatalog(true, extraOptions);
+    }
+
+    @Override
     protected void revokeTablePermission(Identifier identifier) {
         restCatalogServer.addNoPermissionTable(identifier);
     }
@@ -333,15 +340,26 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     private RESTCatalog initCatalog(boolean enableDataToken) throws IOException {
-        return initCatalogUtil(enableDataToken, "table-default-key", "table-default-value");
+        return initCatalogUtil(
+                enableDataToken,
+                Collections.emptyMap(),
+                "table-default-key",
+                "table-default-value");
+    }
+
+    private RESTCatalog initCatalog(boolean enableDataToken, Map<String, String> extraOptions)
+            throws IOException {
+        return initCatalogUtil(
+                enableDataToken, extraOptions, "table-default-key", "table-default-value");
     }
 
     private RESTCatalog initCatalogWithDefaultTableOption(String key, String value)
             throws IOException {
-        return initCatalogUtil(false, key, value);
+        return initCatalogUtil(false, Collections.emptyMap(), key, value);
     }
 
-    private RESTCatalog initCatalogUtil(boolean enableDataToken, String key, String value)
+    private RESTCatalog initCatalogUtil(
+            boolean enableDataToken, Map<String, String> extraOptions, String key, String value)
             throws IOException {
         String restWarehouse = UUID.randomUUID().toString();
         this.config =
@@ -371,6 +389,9 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                         ? dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME)
                         : dataPath;
         options.set(RESTTestFileIO.DATA_PATH_CONF_KEY, path);
+        for (Map.Entry<String, String> entry : extraOptions.entrySet()) {
+            options.set(entry.getKey(), entry.getValue());
+        }
         return new RESTCatalog(CatalogContext.create(options));
     }
 }

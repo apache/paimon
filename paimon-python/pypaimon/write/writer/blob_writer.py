@@ -19,7 +19,6 @@
 import logging
 import uuid
 import pyarrow as pa
-from pathlib import Path
 from typing import Optional, Tuple
 
 from pypaimon.common.core_options import CoreOptions
@@ -46,7 +45,7 @@ class BlobWriter(AppendOnlyDataWriter):
         self.blob_target_file_size = CoreOptions.get_blob_target_file_size(options)
 
         self.current_writer: Optional[BlobFileWriter] = None
-        self.current_file_path: Optional[Path] = None
+        self.current_file_path: Optional[str] = None
         self.record_count = 0
 
         self.file_uuid = str(uuid.uuid4())
@@ -115,7 +114,7 @@ class BlobWriter(AppendOnlyDataWriter):
             return
 
         file_size = self.current_writer.close()
-        file_name = self.current_file_path.name
+        file_name = self.current_file_path.split('/')[-1]
         row_count = self.current_writer.row_count
 
         self._add_file_metadata(file_name, self.current_file_path, row_count, file_size)
@@ -147,7 +146,7 @@ class BlobWriter(AppendOnlyDataWriter):
         # Reuse _add_file_metadata for consistency (blob table is append-only, no primary keys)
         self._add_file_metadata(file_name, file_path, data, file_size)
 
-    def _add_file_metadata(self, file_name: str, file_path: Path, data_or_row_count, file_size: int):
+    def _add_file_metadata(self, file_name: str, file_path: str, data_or_row_count, file_size: int):
         """Add file metadata to committed_files."""
         from datetime import datetime
         from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -204,7 +203,7 @@ class BlobWriter(AppendOnlyDataWriter):
             external_path=None,
             first_row_id=None,
             write_cols=self.write_cols,
-            file_path=str(file_path),
+            file_path=file_path,
         ))
 
     def prepare_commit(self):

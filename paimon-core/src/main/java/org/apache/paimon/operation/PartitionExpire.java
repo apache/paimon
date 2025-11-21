@@ -39,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 /** Expire partitions. */
@@ -56,8 +57,8 @@ public class PartitionExpire {
     private LocalDateTime lastCheck;
     private final PartitionExpireStrategy strategy;
     private final boolean endInputCheckPartitionExpire;
-    private int maxExpireNum;
-    private int expireBatchSize;
+    private final int maxExpireNum;
+    private final int expireBatchSize;
 
     public PartitionExpire(
             Duration expirationTime,
@@ -75,7 +76,14 @@ public class PartitionExpire {
         this.scan = scan;
         this.commit = commit;
         this.partitionHandler = partitionHandler;
-        this.lastCheck = LocalDateTime.now();
+        // Avoid the execution time of stream jobs from being too short and preventing partition
+        // expiration
+        long rndSeconds = 0;
+        long checkIntervalSeconds = checkInterval.toMillis() / 1000;
+        if (checkIntervalSeconds > 0) {
+            rndSeconds = ThreadLocalRandom.current().nextLong(checkIntervalSeconds);
+        }
+        this.lastCheck = LocalDateTime.now().minusSeconds(rndSeconds);
         this.endInputCheckPartitionExpire = endInputCheckPartitionExpire;
         this.maxExpireNum = maxExpireNum;
         this.expireBatchSize = expireBatchSize;

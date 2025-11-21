@@ -31,6 +31,7 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.types.variant.Variant;
 import org.apache.flink.types.variant.VariantBuilder;
 import org.junit.jupiter.api.Test;
@@ -40,12 +41,14 @@ import org.junit.jupiter.api.condition.EnabledIf;
 import javax.annotation.Nonnull;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
+import static org.apache.flink.types.RowUtils.createRowWithNamedPositions;
 import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
@@ -1258,6 +1261,41 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         Row.of(builder.object().add("a", builder.of((byte) 1)).build()),
                         Row.of(builder.object().add("a", builder.of((byte) 2)).build()),
                         Row.of(builder.of("hello")));
+    }
+
+    @Test
+    @EnabledIf("isFlink2_1OrAbove")
+    void testReadWriteShreddingVariant() {
+        sql(
+                "CREATE TABLE t (v VARIANT) WITH ("
+                        + "'parquet.variant.shreddingSchema' =\n"
+                        + "'{\"type\":\"ROW\",\"fields\":["
+                        + "   {\"name\":\"v\",\"type\":"
+                        + "       {\"type\":\"ROW\",\"fields\":["
+                        + "           {\"name\":\"age\",\"type\":\"INT\"},"
+                        + "           {\"name\":\"city\",\"type\":\"STRING\"}]"
+                        + "       }"
+                        + "   }]"
+                        + "}'"
+                        + ")");
+
+        sql(
+                "INSERT INTO t SELECT PARSE_JSON(s) FROM (VALUES ('{\"age\":27,\"city\":\"Beijing\"}')) AS T(s)");
+
+        List<Row> rows = sql("SELECT * FROM t");
+
+        VariantBuilder builder = Variant.newBuilder();
+        Variant expectedVariant =
+                builder.object()
+                        .add("age", builder.of((byte) 27))
+                        .add("city", builder.of("Beijing"))
+                        .build();
+        LinkedHashMap<String, Integer> positionByNames = new LinkedHashMap<>();
+        positionByNames.put("v", 0);
+        Row expectedRow =
+                createRowWithNamedPositions(
+                        RowKind.INSERT, new Object[] {expectedVariant}, positionByNames);
+        assertThat(rows).containsExactlyInAnyOrder(expectedRow);
     }
 
     private void innerTestReadOptimizedTableAndCheckData(String insertTableName) {

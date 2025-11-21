@@ -16,14 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.spark.copy;
 
-import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.catalog.Catalog;
 
-import java.io.IOException;
+import org.apache.spark.sql.SparkSession;
 
-/** File reader for global index. */
-public interface GlobalFileReader {
+/** Base class for copy files. */
+public abstract class CopyFilesOperator {
 
-    SeekableInputStream create(String fileName) throws IOException;
+    protected final SparkSession spark;
+    protected final Catalog sourceCatalog;
+    protected final Catalog targetCatalog;
+
+    public CopyFilesOperator(SparkSession spark, Catalog sourceCatalog, Catalog targetCatalog) {
+        this.spark = spark;
+        this.sourceCatalog = sourceCatalog;
+        this.targetCatalog = targetCatalog;
+    }
 }

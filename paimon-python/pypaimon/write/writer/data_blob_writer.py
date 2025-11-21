@@ -19,7 +19,6 @@
 import logging
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import List, Optional, Tuple
 
 import pyarrow as pa
@@ -262,7 +261,7 @@ class DataBlobWriter(DataWriter):
         # Generate metadata
         return self._create_data_file_meta(file_name, file_path, data)
 
-    def _create_data_file_meta(self, file_name: str, file_path: Path, data: pa.Table) -> DataFileMeta:
+    def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table) -> DataFileMeta:
         # Column stats (only for normal columns)
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
@@ -303,7 +302,7 @@ class DataBlobWriter(DataWriter):
             delete_row_count=0,
             file_source=0,
             value_stats_cols=self.normal_column_names,
-            file_path=str(file_path),
+            file_path=file_path,
             write_cols=self.write_cols)
 
     def _validate_consistency(self, normal_meta: DataFileMeta, blob_metas: List[DataFileMeta]):

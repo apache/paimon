@@ -18,7 +18,6 @@
 
 import io
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse, ParseResult
 
@@ -42,12 +41,11 @@ class UriReader(ABC):
     def get_file_path(cls, uri: str):
         parsed_uri = urlparse(uri)
         if parsed_uri.scheme == 'file':
-            path = Path(parsed_uri.path)
+            return parsed_uri.path
         elif parsed_uri.scheme and parsed_uri.scheme != '':
-            path = Path(parsed_uri.netloc + parsed_uri.path)
+            return f"{parsed_uri.netloc}{parsed_uri.path}"
         else:
-            path = Path(uri)
-        return path
+            return uri
 
     @abstractmethod
     def new_input_stream(self, uri: str):
@@ -61,8 +59,7 @@ class FileUriReader(UriReader):
 
     def new_input_stream(self, uri: str):
         try:
-            path = self.get_file_path(uri)
-            return self._file_io.new_input_stream(path)
+            return self._file_io.new_input_stream(uri)
         except Exception as e:
             raise IOError(f"Failed to read file {uri}: {e}")
 

@@ -18,7 +18,6 @@
 
 import unittest
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -41,7 +40,7 @@ class TestFileStoreCommit(unittest.TestCase):
         self.mock_table = Mock()
         self.mock_table.partition_keys = ['dt', 'region']
         self.mock_table.current_branch.return_value = 'main'
-        self.mock_table.table_path = Path('/test/table/path')
+        self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
 
         # Mock snapshot commit

@@ -123,7 +123,7 @@ public class IncrementalClusterManager {
                         specifiedPartitions);
     }
 
-    public Map<BinaryRow, CompactUnit> prepareForCluster(boolean fullCompaction) {
+    public Map<BinaryRow, CompactUnit> createCompactUnits(boolean fullCompaction) {
         // 1. construct LSM structure for each partition
         Map<BinaryRow, List<LevelSortedRun>> partitionLevels = constructLevels();
         logForPartitionLevel(partitionLevels, partitionComputer);

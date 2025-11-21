@@ -165,19 +165,22 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Snapshot latestSnapshot() {
+        Snapshot snapshot;
         if (snapshotLoader != null) {
             try {
-                Snapshot snapshot = snapshotLoader.load().orElse(null);
-                if (snapshot != null && cache != null) {
-                    cache.put(snapshotPath(snapshot.id()), snapshot);
-                }
-                return snapshot;
+                snapshot = snapshotLoader.load().orElse(null);
             } catch (UnsupportedOperationException ignored) {
+                snapshot = latestSnapshotFromFileSystem();
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
+        } else {
+            snapshot = latestSnapshotFromFileSystem();
         }
-        return latestSnapshotFromFileSystem();
+        if (snapshot != null && cache != null) {
+            cache.put(snapshotPath(snapshot.id()), snapshot);
+        }
+        return snapshot;
     }
 
     public @Nullable Snapshot latestSnapshotFromFileSystem() {

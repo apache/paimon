@@ -20,14 +20,19 @@ package org.apache.paimon.globalindex.bitmap;
 
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
+import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.globalindex.GlobalFileReader;
 import org.apache.paimon.globalindex.GlobalIndexMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
+import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.globalindex.wrap.FileIndexReaderWrapper;
+import org.apache.paimon.globalindex.wrap.FileIndexWriterWrapper;
 import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
@@ -36,7 +41,7 @@ import java.util.List;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Bitmap global index. */
-public class BitmapGlobalIndex {
+public class BitmapGlobalIndex implements GlobalIndexer {
 
     private final BitmapFileIndex index;
 
@@ -44,11 +49,18 @@ public class BitmapGlobalIndex {
         this.index = index;
     }
 
-    public GlobalIndexReader createReader(GlobalFileReader fileReader, List<GlobalIndexMeta> files)
-            throws IOException {
+    @Override
+    public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException {
+        FileIndexWriter writer = index.createWriter();
+        return new FileIndexWriterWrapper(
+                fileWriter, writer, BitmapGlobalIndexerFactory.IDENTIFIER);
+    }
+
+    public GlobalIndexReader createReader(
+            GlobalIndexFileReader fileReader, List<GlobalIndexMeta> files) throws IOException {
         checkArgument(files.size() == 1);
         GlobalIndexMeta indexMeta = files.get(0);
-        SeekableInputStream input = fileReader.create(indexMeta.fileName());
+        SeekableInputStream input = fileReader.getInputStream(indexMeta.fileName());
         FileIndexReader reader = index.createReader(input, 0, (int) indexMeta.fileSize());
         return new FileIndexReaderWrapper(
                 reader, r -> toGlobalResult(indexMeta.rowIdRange(), r), input);

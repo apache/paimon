@@ -21,6 +21,7 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.DataSplit
 
@@ -591,7 +592,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
   test("Paimon test: toWhere method in CompactProcedure") {
     val conditions = "f0=0,f1=0,f2=0;f0=1,f1=1,f2=1;f0=1,f1=2,f2=2;f3=3"
 
-    val where = CompactProcedure.toWhere(conditions)
+    val where = SparkProcedureUtils.toWhere(conditions)
     val whereExpected =
       "(f0=0 AND f1=0 AND f2=0) OR (f0=1 AND f1=1 AND f2=1) OR (f0=1 AND f1=2 AND f2=2) OR (f3=3)"
 
@@ -1136,6 +1137,40 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
           }
       }
     }
+  }
+
+  test("Paimon Procedure: cluster for partitioned table with partition filter") {
+    sql(
+      """
+        |CREATE TABLE T (a INT, b INT, pt INT)
+        |PARTITIONED BY (pt)
+        |TBLPROPERTIES (
+        |  'bucket'='-1', 'num-levels'='6', 'num-sorted-run.compaction-trigger'='2',
+        |  'clustering.columns'='a,b', 'clustering.strategy'='zorder', 'clustering.incremental' = 'true'
+        |)
+        |""".stripMargin)
+
+    sql("INSERT INTO T VALUES (0, 0, 0), (0, 0, 1)")
+    sql("INSERT INTO T VALUES (0, 1, 0), (0, 1, 1)")
+    sql("INSERT INTO T VALUES (0, 2, 0), (0, 2, 1)")
+    sql("INSERT INTO T VALUES (1, 0, 0), (1, 0, 1)")
+    sql("INSERT INTO T VALUES (1, 1, 0), (1, 1, 1)")
+    sql("INSERT INTO T VALUES (1, 2, 0), (1, 2, 1)")
+    sql("INSERT INTO T VALUES (2, 0, 0), (2, 0, 1)")
+    sql("INSERT INTO T VALUES (2, 1, 0), (2, 1, 1)")
+    sql("INSERT INTO T VALUES (2, 2, 0), (2, 2, 1)")
+
+    sql("CALL sys.compact(table => 'T', where => 'pt = 0')")
+    checkAnswer(
+      sql("select distinct partition, level from `T$files` order by partition"),
+      Seq(Row("{0}", 5), Row("{1}", 0))
+    )
+
+    sql("CALL sys.compact(table => 'T', where => 'pt = 1')")
+    checkAnswer(
+      sql("select distinct partition, level from `T$files` order by partition"),
+      Seq(Row("{0}", 5), Row("{1}", 5))
+    )
   }
 
   test("Paimon Procedure: cluster with deletion vectors") {
