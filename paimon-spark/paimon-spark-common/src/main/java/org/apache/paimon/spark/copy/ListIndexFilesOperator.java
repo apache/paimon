@@ -28,6 +28,7 @@ import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.spark.sql.SparkSession;
@@ -65,14 +66,15 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
         FileStoreTable targetTable = (FileStoreTable) targetCatalog.getTable(targetIdentifier);
         List<CopyFileInfo> indexFiles = new ArrayList<>();
         IndexFileHandler sourceIndexHandler = sourceTable.store().newIndexFileHandler();
-        IndexFileHandler targetIndexHandler = targetTable.store().newIndexFileHandler();
+        FileStorePathFactory targetFileStorePathFactory = targetTable.store().pathFactory();
         List<IndexManifestEntry> indexManifestEntries =
                 sourceIndexHandler.readManifestWithIOException(snapshot.indexManifest());
         for (IndexManifestEntry indexManifestEntry : indexManifestEntries) {
             if (partitionPredicate == null
                     || partitionPredicate.test(indexManifestEntry.partition())) {
                 CopyFileInfo indexFile =
-                        pickIndexFiles(indexManifestEntry, sourceIndexHandler, targetIndexHandler);
+                        pickIndexFiles(
+                                indexManifestEntry, sourceIndexHandler, targetFileStorePathFactory);
                 indexFiles.add(indexFile);
             }
         }
@@ -82,10 +84,14 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
     private CopyFileInfo pickIndexFiles(
             IndexManifestEntry indexManifestEntry,
             IndexFileHandler sourceIndexFileHandler,
-            IndexFileHandler targetIndexFileHandler)
+            FileStorePathFactory targetFileStorePathFactory)
             throws IOException {
         Path indexFilePath = sourceIndexFileHandler.filePath(indexManifestEntry);
-        Path targetIndexFilePath = targetIndexFileHandler.filePath(indexManifestEntry);
+        Path targetIndexFilePath =
+                targetFileStorePathFactory
+                        .indexFileFactory(
+                                indexManifestEntry.partition(), indexManifestEntry.bucket())
+                        .newPath();
         IndexFileMeta fileMeta = indexManifestEntry.indexFile();
         IndexFileMeta targetFileMeta =
                 CopyFilesUtil.toNewIndexFileMeta(fileMeta, targetIndexFilePath.getName());

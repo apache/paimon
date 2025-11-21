@@ -98,7 +98,7 @@ public class ListDataFilesOperator extends CopyFilesOperator {
                 targetFileStorePathFactory
                         .createDataFilePathFactory(
                                 manifestEntry.partition(), manifestEntry.bucket())
-                        .toPath(manifestEntry);
+                        .newPath();
         DataFileMeta fileMeta = manifestEntry.file();
         DataFileMeta targetFileMeta =
                 CopyFilesUtil.toNewDataFileMeta(

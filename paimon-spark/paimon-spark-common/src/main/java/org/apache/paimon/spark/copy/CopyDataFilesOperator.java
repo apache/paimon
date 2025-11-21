@@ -78,7 +78,7 @@ public class CopyDataFilesOperator extends CopyFilesOperator {
                 Path sourcePath = new Path(file.sourceFilePath());
                 Path targetPath = new Path(file.targetFilePath());
                 CopyFilesUtil.copyFiles(
-                        sourceTable.fileIO(), targetTable.fileIO(), sourcePath, targetPath, true);
+                        sourceTable.fileIO(), targetTable.fileIO(), sourcePath, targetPath, false);
                 result.add(file);
             }
             return result.iterator();

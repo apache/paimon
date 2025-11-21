@@ -45,6 +45,16 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
         sql(s"SELECT * FROM target_tbl$random"),
         sql(s"SELECT * FROM tbl$random")
       )
+
+      checkAnswer(
+        sql(s"CALL sys.copy(source_table => 'tbl$random', target_table => 'target_tbl$random')"),
+        Row(true) :: Nil
+      )
+
+      checkAnswer(
+        sql(s"SELECT * FROM target_tbl$random"),
+        sql(s"SELECT * FROM tbl$random")
+      )
     }
   }
 
@@ -57,6 +67,16 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
              |""".stripMargin)
 
       sql(s"INSERT INTO tbl$random VALUES (1, 'a', '2025-08-17', 5), (2, 'b', '2025-10-06', 0)")
+      checkAnswer(
+        sql(s"CALL sys.copy(source_table => 'tbl$random', target_table => 'target_tbl$random')"),
+        Row(true) :: Nil
+      )
+
+      checkAnswer(
+        sql(s"SELECT * FROM target_tbl$random"),
+        sql(s"SELECT * FROM tbl$random")
+      )
+
       checkAnswer(
         sql(s"CALL sys.copy(source_table => 'tbl$random', target_table => 'target_tbl$random')"),
         Row(true) :: Nil
