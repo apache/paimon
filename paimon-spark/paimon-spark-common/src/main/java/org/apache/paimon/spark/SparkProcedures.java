@@ -23,6 +23,7 @@ import org.apache.paimon.spark.procedure.AlterViewDialectProcedure;
 import org.apache.paimon.spark.procedure.ClearConsumersProcedure;
 import org.apache.paimon.spark.procedure.CompactManifestProcedure;
 import org.apache.paimon.spark.procedure.CompactProcedure;
+import org.apache.paimon.spark.procedure.CopyFilesProcedure;
 import org.apache.paimon.spark.procedure.CreateBranchProcedure;
 import org.apache.paimon.spark.procedure.CreateFunctionProcedure;
 import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
@@ -113,6 +114,7 @@ public class SparkProcedures {
         procedureBuilders.put(
                 "trigger_tag_automatic_creation", TriggerTagAutomaticCreationProcedure::builder);
         procedureBuilders.put("rewrite_file_index", RewriteFileIndexProcedure::builder);
+        procedureBuilders.put("copy", CopyFilesProcedure::builder);
         return procedureBuilders.build();
     }
 }

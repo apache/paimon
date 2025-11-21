@@ -28,6 +28,7 @@ import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -91,6 +92,26 @@ public class FileMetaUtils {
                 0,
                 totalBuckets,
                 new DataIncrement(dataFileMetas, Collections.emptyList(), Collections.emptyList()),
+                new CompactIncrement(
+                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList()));
+    }
+
+    public static CommitMessage createCommitMessage(
+            BinaryRow partition,
+            int bucket,
+            int totalBuckets,
+            List<DataFileMeta> dataFileMetas,
+            List<IndexFileMeta> indexFileMetas) {
+        return new CommitMessageImpl(
+                partition,
+                bucket,
+                totalBuckets,
+                new DataIncrement(
+                        dataFileMetas,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        indexFileMetas,
+                        Collections.emptyList()),
                 new CompactIncrement(
                         Collections.emptyList(), Collections.emptyList(), Collections.emptyList()));
     }
