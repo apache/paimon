@@ -18,7 +18,7 @@
 
 package org.apache.paimon.vfs.hadoop;
 
-import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogHadoopContext;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.rest.RESTCatalog;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
@@ -107,7 +107,7 @@ public class MockRestVirtualFileSystemTest extends VirtualFileSystemTest {
                         ? dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME)
                         : dataPath;
         options.set(RESTTestFileIO.DATA_PATH_CONF_KEY, path);
-        return new RESTCatalog(CatalogContext.create(options));
+        return new RESTCatalog(CatalogHadoopContext.create(options));
     }
 
     protected void initFs() throws Exception {

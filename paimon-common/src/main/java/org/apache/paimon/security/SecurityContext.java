@@ -20,6 +20,7 @@ package org.apache.paimon.security;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.HadoopAware;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.HadoopUtils;
 
@@ -48,7 +49,12 @@ public class SecurityContext {
 
     /** Installs security configuration by {@link CatalogContext}. */
     public static void install(CatalogContext catalogContext) throws Exception {
-        install(catalogContext.options(), catalogContext.hadoopConf());
+        if (!(catalogContext instanceof HadoopAware)) {
+            throw new IllegalArgumentException(
+                    "SecurityContext requires a HadoopAware context, but got: "
+                            + catalogContext.getClass().getName());
+        }
+        install(catalogContext.options(), ((HadoopAware) catalogContext).hadoopConf());
     }
 
     private static void install(Options options, Configuration configuration) throws Exception {
