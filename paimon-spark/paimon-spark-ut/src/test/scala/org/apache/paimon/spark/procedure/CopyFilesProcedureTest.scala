@@ -156,12 +156,12 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
 
       // target table
       sql(s"""
-             |CREATE TABLE target_tbl$random (k INT, v STRING, v2 STRING, dt STRING, hh INT)
+             |CREATE TABLE target_tbl$random (k INT, v STRING, dt STRING, hh INT, v2 STRING)
              |PARTITIONED BY (dt, hh)
              |""".stripMargin)
       // partition should overwrite
       sql(
-        s"INSERT INTO target_tbl$random VALUES (3, 'c', 'c1', '2025-08-17', 5), (4, 'd', 'd1', '2025-08-17', 6)")
+        s"INSERT INTO target_tbl$random VALUES (3, 'c', '2025-08-17', 5, 'c1'), (4, 'd', '2025-08-17', 6, 'd1')")
 
       checkAnswer(
         sql(s"CALL sys.copy(source_table => 'tbl$random', target_table => 'target_tbl$random')"),
@@ -170,17 +170,17 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
 
       checkAnswer(
         sql(s"SELECT * FROM target_tbl$random WHERE dt = '2025-08-17' and hh = 5"),
-        Row(1, "a", null, "2025-08-17", 5)
+        Row(1, "a", "2025-08-17", 5, null)
       )
 
       checkAnswer(
         sql(s"SELECT * FROM target_tbl$random WHERE dt = '2025-10-06' and hh = 0"),
-        Row(2, "b", null, "2025-10-06", 0)
+        Row(2, "b", "2025-10-06", 0, null)
       )
 
       checkAnswer(
         sql(s"SELECT * FROM target_tbl$random WHERE dt = '2025-08-17' and hh = 6"),
-        Row(4, "d", "d1", "2025-08-17", 6)
+        Row(4, "d", "2025-08-17", 6, "d1")
       )
     }
   }
@@ -196,7 +196,7 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
 
       // target table
       sql(s"""
-             |CREATE TABLE target_tbl$random (id INT, dt STRING, hh INT)
+             |CREATE TABLE target_tbl$random (k INT, v2 STRING, dt STRING, hh INT)
              |PARTITIONED BY (dt, hh)
              |""".stripMargin)
 

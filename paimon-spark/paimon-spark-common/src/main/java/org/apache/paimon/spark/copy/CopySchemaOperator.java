@@ -140,7 +140,7 @@ public class CopySchemaOperator extends CopyFilesOperator {
         List<DataField> existedFields = existedSchema.fields();
         checkState(
                 existedFields.size() >= sourceFields.size()
-                        && new HashSet<>(existedPartitionFields).containsAll(sourcePartitionFields),
+                        && new HashSet<>(existedFields).containsAll(sourceFields),
                 "source table fields is not compatible with existed paimon table fields.");
     }
 }
