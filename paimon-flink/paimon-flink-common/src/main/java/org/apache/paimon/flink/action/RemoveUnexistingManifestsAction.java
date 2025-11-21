@@ -104,8 +104,13 @@ public class RemoveUnexistingManifestsAction extends ActionBase implements Local
         try (FileStoreCommitImpl fileStoreCommit =
                 (FileStoreCommitImpl)
                         table.store().newCommit("Repair-table-" + UUID.randomUUID(), table)) {
-            fileStoreCommit.replaceManifestList(
-                    latest, totalRecordCount, baseManifestList, deltaManifestList);
+            boolean result =
+                    fileStoreCommit.replaceManifestList(
+                            latest, totalRecordCount, baseManifestList, deltaManifestList);
+            if (!result) {
+                throw new RuntimeException(
+                        "Failed, snapshot conflict, maybe multiple jobs is running to commit snapshots.");
+            }
         }
     }
 }
