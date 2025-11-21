@@ -20,12 +20,12 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ScanMode;
@@ -44,7 +44,7 @@ import java.util.UUID;
 import static org.apache.paimon.manifest.ManifestEntry.recordCount;
 
 /** Action to remove the un-existing manifest file. */
-public class RemoveUnexistingManifestsAction extends ActionBase {
+public class RemoveUnexistingManifestsAction extends ActionBase implements LocalAction {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(RemoveUnexistingManifestsAction.class);
@@ -60,7 +60,7 @@ public class RemoveUnexistingManifestsAction extends ActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         Identifier identifier = new Identifier(databaseName, tableName);
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         FileIO fileIO = table.fileIO();
@@ -101,35 +101,11 @@ public class RemoveUnexistingManifestsAction extends ActionBase {
         Pair<String, Long> baseManifestList = manifestList.write(existingManifestFiles);
         Pair<String, Long> deltaManifestList = manifestList.write(Collections.emptyList());
 
-        Snapshot newSnapshot =
-                new Snapshot(
-                        latest.id() + 1,
-                        latest.schemaId(),
-                        baseManifestList.getLeft(),
-                        baseManifestList.getRight(),
-                        deltaManifestList.getKey(),
-                        deltaManifestList.getRight(),
-                        null,
-                        null,
-                        latest.indexManifest(),
-                        "Repair-table-" + UUID.randomUUID(),
-                        Long.MAX_VALUE,
-                        Snapshot.CommitKind.OVERWRITE,
-                        System.currentTimeMillis(),
-                        latest.logOffsets(),
-                        totalRecordCount,
-                        0L,
-                        0L,
-                        latest.watermark(),
-                        latest.statistics(),
-                        // if empty properties, just set to null
-                        latest.properties(),
-                        latest.nextRowId());
-
-        try (SnapshotCommit snapshotCommit =
-                table.catalogEnvironment().snapshotCommit(table.snapshotManager())) {
-            snapshotCommit.commit(
-                    newSnapshot, table.coreOptions().branch(), Collections.emptyList());
+        try (FileStoreCommitImpl fileStoreCommit =
+                (FileStoreCommitImpl)
+                        table.store().newCommit("Repair-table-" + UUID.randomUUID(), table)) {
+            fileStoreCommit.replaceManifestList(
+                    latest, totalRecordCount, baseManifestList, deltaManifestList);
         }
     }
 }
