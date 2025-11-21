@@ -30,6 +30,7 @@ import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
 
@@ -90,6 +91,8 @@ public interface FileStoreScan {
     FileStoreScan keepStats();
 
     FileStoreScan withRowIds(List<Long> indices);
+
+    FileStoreScan withReadType(RowType readType);
 
     @Nullable
     Integer parallelism();

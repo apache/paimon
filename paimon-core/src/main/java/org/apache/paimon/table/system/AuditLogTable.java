@@ -432,6 +432,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withReadType(RowType readType) {
+            wrapped.withReadType(readType);
+            return this;
+        }
+
+        @Override
         public Plan read() {
             return wrapped.read();
         }

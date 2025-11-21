@@ -119,6 +119,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public InnerTableScan withReadType(@Nullable RowType readType) {
         this.readType = readType;
+        snapshotReader.withReadType(readType);
         return this;
     }
 

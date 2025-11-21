@@ -646,6 +646,37 @@ public class DataEvolutionTableTest extends TableTestBase {
                     i.getAndIncrement();
                 });
         assertThat(i.get()).isEqualTo(2);
+
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            write1.write(GenericRow.of(BinaryString.fromString("a2")));
+            write1.write(GenericRow.of(BinaryString.fromString("b2")));
+
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, 0L);
+            commit.commit(commitables);
+        }
+
+        List<Long> rowIds10 = Collections.singletonList(0L);
+        List<Split> split10 = readBuilder.withRowIds(rowIds10).newScan().plan().splits();
+
+        // without projection， all datafiles needed to assemble a row should be scanned out
+        List<DataFileMeta> fileMetas10 = ((DataSplit) split10.get(0)).dataFiles();
+        assertThat(fileMetas10.size()).isEqualTo(2);
+
+        List<Long> rowIds11 = Collections.singletonList(0L);
+        List<Split> split11 =
+                readBuilder
+                        .withRowIds(rowIds11)
+                        .withProjection(new int[] {0})
+                        .newScan()
+                        .plan()
+                        .splits();
+
+        // with projection, irrelevant datafiles should be filtered
+        List<DataFileMeta> fileMetas11 = ((DataSplit) split11.get(0)).dataFiles();
+        assertThat(fileMetas11.size()).isEqualTo(1);
     }
 
     @Test

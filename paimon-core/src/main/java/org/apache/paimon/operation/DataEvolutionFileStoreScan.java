@@ -33,8 +33,11 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
+
+import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -50,6 +53,7 @@ import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     private boolean dropStats = false;
+    @Nullable private RowType readType;
 
     public DataEvolutionFileStoreScan(
             ManifestsReader manifestsReader,
@@ -119,6 +123,14 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             }
         }
         return false;
+    }
+
+    @Override
+    public FileStoreScan withReadType(RowType readType) {
+        if (readType != null && !readType.getFields().isEmpty()) {
+            this.readType = readType;
+        }
+        return this;
     }
 
     @Override
@@ -239,19 +251,36 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
+        DataFileMeta file = entry.file();
+
+        if (readType != null) {
+            boolean containsReadCol = false;
+            RowType fileType =
+                    scanTableSchema(file.schemaId()).project(file.writeCols()).logicalRowType();
+            for (String field : readType.getFieldNames()) {
+                if (fileType.containsField(field)) {
+                    containsReadCol = true;
+                    break;
+                }
+            }
+            if (!containsReadCol) {
+                return false;
+            }
+        }
+
         // If indices is null, all entries should be kept
         if (this.rowIdList == null) {
             return true;
         }
 
         // If entry.firstRowId does not exist, keep the entry
-        Long firstRowId = entry.file().firstRowId();
+        Long firstRowId = file.firstRowId();
         if (firstRowId == null) {
             return true;
         }
 
         // Check if any value in indices is in the range [firstRowId, firstRowId + rowCount)
-        long rowCount = entry.file().rowCount();
+        long rowCount = file.rowCount();
         long endRowId = firstRowId + rowCount;
 
         for (Long index : this.rowIdList) {
