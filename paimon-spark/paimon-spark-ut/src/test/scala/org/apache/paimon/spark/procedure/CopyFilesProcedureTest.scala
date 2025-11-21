@@ -45,7 +45,6 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
         sql(s"SELECT * FROM target_tbl$random"),
         sql(s"SELECT * FROM tbl$random")
       )
-
     }
   }
 
