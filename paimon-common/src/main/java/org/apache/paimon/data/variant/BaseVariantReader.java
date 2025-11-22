@@ -156,11 +156,6 @@ public class BaseVariantReader {
         }
     }
 
-    public static BaseVariantReader create(
-            @Nullable VariantSchema schema, DataType targetType, VariantCastArgs castArgs) {
-        return create(schema, targetType, castArgs, false);
-    }
-
     /**
      * Read variant values into a Paimon row type. It reads unshredded fields (fields that are not
      * in the typed object) from the `value`, and reads the shredded fields from the object
@@ -202,7 +197,7 @@ public class BaseVariantReader {
                     VariantSchema fieldSchema = schema.objectSchema[inputIdx].schema();
                     fieldReaders[i] =
                             BaseVariantReader.create(
-                                    fieldSchema, targetFields.get(i).type(), castArgs);
+                                    fieldSchema, targetFields.get(i).type(), castArgs, false);
                 } else {
                     fieldReaders[i] = null;
                 }
@@ -284,7 +279,7 @@ public class BaseVariantReader {
             if (schema.arraySchema != null) {
                 this.elementReader =
                         BaseVariantReader.create(
-                                schema.arraySchema, targetType.getElementType(), castArgs);
+                                schema.arraySchema, targetType.getElementType(), castArgs, false);
             } else {
                 this.elementReader = null;
             }
@@ -339,7 +334,7 @@ public class BaseVariantReader {
                     VariantSchema.ObjectField fieldInfo = schema.objectSchema[i];
                     this.valueReaders[i] =
                             BaseVariantReader.create(
-                                    fieldInfo.schema(), targetType.getValueType(), castArgs);
+                                    fieldInfo.schema(), targetType.getValueType(), castArgs, false);
                     this.shreddedFieldNames[i] = BinaryString.fromString(fieldInfo.fieldName());
                 }
             } else {
@@ -477,7 +472,7 @@ public class BaseVariantReader {
                 }
             }
 
-            int typedValueIdx = 1;
+            int typedValueIdx = schema.typedIdx;
 
             if (row.isNullAt(typedValueIdx)) {
                 return null;
@@ -511,7 +506,7 @@ public class BaseVariantReader {
             } else {
                 throw new UnsupportedOperationException("Unsupported scalar type: " + scalaType);
             }
-            if (scalaType.equals(targetType)) {
+            if (noNeedCast) {
                 return i;
             }
             try {

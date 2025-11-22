@@ -38,4 +38,9 @@ public class VariantCastArgs {
     public ZoneId zoneId() {
         return zoneId;
     }
+
+    @Override
+    public String toString() {
+        return "VariantCastArgs{" + "failOnError=" + failOnError + ", zoneId=" + zoneId + '}';
+    }
 }
