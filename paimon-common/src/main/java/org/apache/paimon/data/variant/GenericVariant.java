@@ -138,11 +138,6 @@ public final class GenericVariant implements Variant, Serializable {
         }
     }
 
-    @Override
-    public String toJson() {
-        return toJson(ZoneOffset.UTC);
-    }
-
     // Stringify the variant in JSON format.
     // Throw `MALFORMED_VARIANT` if the variant is malformed.
     @Override

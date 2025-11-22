@@ -21,6 +21,7 @@ package org.apache.paimon.data.variant;
 import org.apache.paimon.types.DataType;
 
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 
 /**
  * A Variant represents a type that contain one of: 1) Primitive: A type and corresponding value
@@ -47,7 +48,9 @@ public interface Variant {
     byte[] value();
 
     /** Parses the variant to json. */
-    String toJson();
+    default String toJson() {
+        return toJson(ZoneOffset.UTC);
+    }
 
     /** Parses the variant to json with zoneId. */
     String toJson(ZoneId zoneId);
