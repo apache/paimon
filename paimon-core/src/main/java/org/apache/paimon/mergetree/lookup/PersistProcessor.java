@@ -37,6 +37,7 @@ public interface PersistProcessor<T> {
 
     T readFromDisk(InternalRow key, int level, byte[] valueBytes, String fileName);
 
+    /** Factory to create {@link PersistProcessor}. */
     interface Factory<T> {
 
         String identifier();
