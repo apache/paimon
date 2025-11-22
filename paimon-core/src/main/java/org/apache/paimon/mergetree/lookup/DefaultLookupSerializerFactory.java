@@ -42,7 +42,7 @@ public class DefaultLookupSerializerFactory implements LookupSerializerFactory {
 
     @Override
     public Function<byte[], InternalRow> createDeserializer(
-            @Nullable RowType fileSchema, RowType currentSchema) {
+            RowType currentSchema, @Nullable RowType fileSchema) {
         if (fileSchema != null && !fileSchema.equalsIgnoreNullable(currentSchema)) {
             throw new UnsupportedOperationException();
         }

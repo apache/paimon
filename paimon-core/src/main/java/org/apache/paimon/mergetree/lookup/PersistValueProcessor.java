@@ -76,7 +76,7 @@ public class PersistValueProcessor implements PersistProcessor<KeyValue> {
                     LookupSerializerFactory serializerFactory, @Nullable RowType fileSchema) {
                 return new PersistValueProcessor(
                         serializerFactory.createSerializer(valueType),
-                        serializerFactory.createDeserializer(fileSchema, valueType));
+                        serializerFactory.createDeserializer(valueType, fileSchema));
             }
         };
     }

@@ -108,7 +108,7 @@ public class PersistPositionProcessor implements PersistProcessor<PositionedKeyV
                     LookupSerializerFactory serializerFactory, @Nullable RowType fileSchema) {
                 return new PersistPositionProcessor(
                         serializerFactory.createSerializer(valueType),
-                        serializerFactory.createDeserializer(fileSchema, valueType),
+                        serializerFactory.createDeserializer(valueType, fileSchema),
                         persistValue);
             }
         };
