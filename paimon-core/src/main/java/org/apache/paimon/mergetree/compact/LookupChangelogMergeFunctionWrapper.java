@@ -23,7 +23,7 @@ import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.lookup.LookupStrategy;
-import org.apache.paimon.mergetree.LookupLevels.PositionedKeyValue;
+import org.apache.paimon.mergetree.lookup.PositionedKeyValue;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.UserDefinedSeqComparator;

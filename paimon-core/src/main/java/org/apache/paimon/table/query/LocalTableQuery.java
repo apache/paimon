@@ -36,6 +36,8 @@ import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
+import org.apache.paimon.mergetree.lookup.LookupSerializerFactory;
+import org.apache.paimon.mergetree.lookup.PersistValueProcessor;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -135,13 +137,16 @@ public class LocalTableQuery implements TableQuery {
                             options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
         }
 
+        RowType readValueType = readerFactoryBuilder.readValueType();
         LookupLevels<KeyValue> lookupLevels =
                 new LookupLevels<>(
+                        schemaId -> readValueType,
+                        0L,
                         levels,
                         keyComparatorSupplier.get(),
                         readerFactoryBuilder.keyType(),
-                        new LookupLevels.PersistValueProcessor(
-                                readerFactoryBuilder.readValueType()),
+                        PersistValueProcessor.factory(readValueType),
+                        LookupSerializerFactory.INSTANCE.get(),
                         file -> {
                             RecordReader<KeyValue> reader = factory.createRecordReader(file);
                             if (cacheRowFilter != null) {
