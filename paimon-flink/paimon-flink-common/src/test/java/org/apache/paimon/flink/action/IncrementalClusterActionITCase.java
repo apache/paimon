@@ -683,35 +683,6 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         assertThat(splits.get(0).deletionFiles().get().get(0)).isNull();
     }
 
-    @Test
-    public void testClusterWithInferParallelism() throws Exception {
-        Map<String, String> options = commonOptions();
-        options.remove("scan.parallelism");
-        options.remove("sink.parallelism");
-        options.put(CoreOptions.CLUSTERING_PER_TASK_DATA_SIZE.key(), "50kb");
-        FileStoreTable table = createTable(null, options);
-
-        BinaryString randomStr = BinaryString.fromString(randomString(150));
-        List<CommitMessage> messages = new ArrayList<>();
-
-        // first write, generate 100 files, total size 173kb
-        for (int i = 0; i < 10; i++) {
-            for (int j = 0; j < 10; j++) {
-                messages.addAll(write(GenericRow.of(i, j, randomStr, 0)));
-            }
-        }
-        commit(messages);
-        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0, 1});
-
-        // first cluster
-        runAction(Collections.emptyList());
-        checkSnapshot(table);
-        List<Split> splits = readBuilder.newScan().plan().splits();
-        assertThat(splits.size()).isEqualTo(1);
-        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(3);
-        assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
-    }
-
     protected FileStoreTable createTable(String partitionKeys) throws Exception {
         return createTable(partitionKeys, commonOptions());
     }
@@ -774,31 +745,6 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         options.put("scan.parallelism", "1");
         options.put("sink.parallelism", "1");
         return options;
-    }
-
-    private static Schema schema(
-            String partitionKeys, int sinkParallelism, Map<String, String> options) {
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.column("a", DataTypes.INT());
-        schemaBuilder.column("b", DataTypes.INT());
-        schemaBuilder.column("c", DataTypes.STRING());
-        schemaBuilder.column("pt", DataTypes.INT());
-        schemaBuilder.option("bucket", "-1");
-        schemaBuilder.option("num-levels", "6");
-        schemaBuilder.option("num-sorted-run.compaction-trigger", "2");
-        schemaBuilder.option("scan.plan-sort-partition", "true");
-        schemaBuilder.option("clustering.columns", "a,b");
-        schemaBuilder.option("clustering.strategy", "zorder");
-        schemaBuilder.option("clustering.incremental", "true");
-        schemaBuilder.option("scan.parallelism", "1");
-        schemaBuilder.option("sink.parallelism", String.valueOf(sinkParallelism));
-        for (String key : options.keySet()) {
-            schemaBuilder.option(key, options.get(key));
-        }
-        if (!StringUtils.isNullOrWhitespaceOnly(partitionKeys)) {
-            schemaBuilder.partitionKeys(partitionKeys);
-        }
-        return schemaBuilder.build();
     }
 
     private static String randomString(int length) {

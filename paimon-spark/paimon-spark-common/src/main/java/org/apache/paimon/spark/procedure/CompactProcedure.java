@@ -268,7 +268,8 @@ public class CompactProcedure extends BaseProcedure {
                     break;
                 case BUCKET_UNAWARE:
                     if (clusterIncrementalEnabled) {
-                        clusterIncrementalUnAwareBucketTable(table, fullCompact, relation);
+                        clusterIncrementalUnAwareBucketTable(
+                                table, partitionPredicate, fullCompact, relation);
                     } else {
                         compactUnAwareBucketTable(
                                 table, partitionPredicate, partitionIdleTime, javaSparkContext);
@@ -530,10 +531,14 @@ public class CompactProcedure extends BaseProcedure {
     }
 
     private void clusterIncrementalUnAwareBucketTable(
-            FileStoreTable table, boolean fullCompaction, DataSourceV2Relation relation) {
-        IncrementalClusterManager incrementalClusterManager = new IncrementalClusterManager(table);
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            boolean fullCompaction,
+            DataSourceV2Relation relation) {
+        IncrementalClusterManager incrementalClusterManager =
+                new IncrementalClusterManager(table, partitionPredicate);
         Map<BinaryRow, CompactUnit> compactUnits =
-                incrementalClusterManager.prepareForCluster(fullCompaction);
+                incrementalClusterManager.createCompactUnits(fullCompaction);
 
         Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> partitionSplits =
                 incrementalClusterManager.toSplitsAndRewriteDvFiles(compactUnits);

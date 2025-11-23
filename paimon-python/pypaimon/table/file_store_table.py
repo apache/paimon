@@ -16,7 +16,6 @@
 # limitations under the License.
 ################################################################################
 
-from pathlib import Path
 from typing import Optional
 
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
@@ -37,7 +36,7 @@ from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
 
 
 class FileStoreTable(Table):
-    def __init__(self, file_io: FileIO, identifier: Identifier, table_path: Path,
+    def __init__(self, file_io: FileIO, identifier: Identifier, table_path: str,
                  table_schema: TableSchema, catalog_environment: Optional[CatalogEnvironment] = None):
         self.file_io = file_io
         self.identifier = identifier

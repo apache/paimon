@@ -1237,6 +1237,39 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return new SuccessResult();
     }
 
+    public boolean replaceManifestList(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList) {
+        Snapshot newSnapshot =
+                new Snapshot(
+                        latest.id() + 1,
+                        latest.schemaId(),
+                        baseManifestList.getLeft(),
+                        baseManifestList.getRight(),
+                        deltaManifestList.getKey(),
+                        deltaManifestList.getRight(),
+                        null,
+                        null,
+                        latest.indexManifest(),
+                        commitUser,
+                        Long.MAX_VALUE,
+                        CommitKind.OVERWRITE,
+                        System.currentTimeMillis(),
+                        latest.logOffsets(),
+                        totalRecordCount,
+                        0L,
+                        0L,
+                        latest.watermark(),
+                        latest.statistics(),
+                        // if empty properties, just set to null
+                        latest.properties(),
+                        latest.nextRowId());
+
+        return commitSnapshotImpl(newSnapshot, Collections.emptyList());
+    }
+
     private long assignRowTrackingMeta(
             long firstRowIdStart,
             List<ManifestEntry> deltaFiles,

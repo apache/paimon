@@ -1059,6 +1059,13 @@ class DataBlobWriterTest(unittest.TestCase):
         uri_reader = uri_reader_factory.create(new_blob_descriptor.uri)
         blob = Blob.from_descriptor(uri_reader, new_blob_descriptor)
 
+        blob_descriptor_from_blob = blob.to_descriptor()
+        self.assertEqual(
+            blob_descriptor_from_blob.uri,
+            new_blob_descriptor.uri,
+            f"URI should be preserved. Expected: {new_blob_descriptor.uri}, Got: {blob_descriptor_from_blob.uri}"
+        )
+
         # Verify the blob data matches the original
         self.assertEqual(blob.to_data(), blob_data, "Blob data should match original")
 

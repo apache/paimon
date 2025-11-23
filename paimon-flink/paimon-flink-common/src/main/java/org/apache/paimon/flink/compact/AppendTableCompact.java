@@ -54,7 +54,7 @@ import java.util.stream.Collectors;
  * snapshot. We need to enable checkpoint for this compaction job, checkpoint will trigger committer
  * stage to commit all the compacted files.
  */
-public class AppendTableCompactBuilder {
+public class AppendTableCompact {
 
     private final transient StreamExecutionEnvironment env;
     private final String tableIdentifier;
@@ -65,7 +65,7 @@ public class AppendTableCompactBuilder {
     @Nullable private PartitionPredicate partitionPredicate;
     @Nullable private Duration partitionIdleTime = null;
 
-    public AppendTableCompactBuilder(
+    public AppendTableCompact(
             StreamExecutionEnvironment env, String tableIdentifier, FileStoreTable table) {
         this.env = env;
         this.tableIdentifier = tableIdentifier;
@@ -120,7 +120,6 @@ public class AppendTableCompactBuilder {
     }
 
     private DataStreamSource<AppendCompactTask> buildSource() {
-
         long scanInterval = table.coreOptions().continuousDiscoveryInterval().toMillis();
         AppendTableCompactSource source =
                 new AppendTableCompactSource(table, isContinuous, scanInterval, partitionPredicate);

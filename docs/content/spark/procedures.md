@@ -463,5 +463,18 @@ This section introduce all available spark procedures about paimon.
          CALL sys.rewrite_file_index(table => "t", where => "day = '2025-08-17'")<br/>
       </td>
    </tr>
+   <tr>
+      <td>copy</td>
+      <td>
+         copy table files. Arguments:
+            <li>source_table: the source table identifier. Cannot be empty.</li>
+            <li>target_table: the target table identifier. Cannot be empty.</li>
+            <li>where: partition predicate. Left empty for all partitions.</li>
+      </td>
+      <td>
+         CALL sys.copy(source_table => "t1", target_table => "t1_copy")<br/>
+         CALL sys.copy(source_table => "t1", target_table => "t1_copy", where => "day = '2025-08-17'")<br/>
+      </td>
+   </tr>
    </tbody>
 </table>

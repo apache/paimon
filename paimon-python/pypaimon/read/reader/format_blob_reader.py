@@ -16,7 +16,6 @@
 # limitations under the License.
 ################################################################################
 import struct
-from pathlib import Path
 from typing import List, Optional, Any, Iterator
 
 import pyarrow as pa
@@ -42,7 +41,7 @@ class FormatBlobReader(RecordBatchReader):
         self._blob_as_descriptor = blob_as_descriptor
 
         # Get file size
-        self._file_size = file_io.get_file_size(Path(file_path))
+        self._file_size = file_io.get_file_size(file_path)
 
         # Initialize the low-level blob format reader
         self.file_path = file_path
@@ -124,7 +123,7 @@ class FormatBlobReader(RecordBatchReader):
         self._blob_iterator = None
 
     def _read_index(self) -> None:
-        with self._file_io.new_input_stream(Path(self.file_path)) as f:
+        with self._file_io.new_input_stream(self.file_path) as f:
             # Seek to header: last 5 bytes
             f.seek(self._file_size - 5)
             header = f.read(5)

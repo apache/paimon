@@ -46,6 +46,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Map;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
@@ -65,6 +66,7 @@ public class RESTTokenFileIO implements FileIO {
     private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
                     .maximumSize(1000)
+                    .expireAfterAccess(10, TimeUnit.HOURS)
                     .removalListener(
                             (ignored, value, cause) -> IOUtils.closeQuietly((FileIO) value))
                     .scheduler(
