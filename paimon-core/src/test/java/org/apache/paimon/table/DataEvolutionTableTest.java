@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.DataEvolutionFileReader;
@@ -441,7 +442,8 @@ public class DataEvolutionTableTest extends TableTestBase {
     public void innerTestWithRowIds(boolean compactManifests) throws Exception {
         createTableDefault();
         Schema schema = schemaDefault();
-        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
 
         // Write first batch of data with firstRowId = 0
         RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
@@ -481,9 +483,31 @@ public class DataEvolutionTableTest extends TableTestBase {
             try (BatchTableCommit commit = builder.newCommit()) {
                 commit.compactManifests();
             }
+
+            List<ManifestFileMeta> manifests =
+                    table.store()
+                            .manifestListFactory()
+                            .create()
+                            .readDataManifests(table.latestSnapshot().get());
+            assertThat(manifests.size()).isEqualTo(1);
+            assertThat(manifests.get(0).minRowId()).isEqualTo(0);
+            assertThat(manifests.get(0).maxRowId()).isEqualTo(5);
+        } else {
+            List<ManifestFileMeta> manifests =
+                    table.store()
+                            .manifestListFactory()
+                            .create()
+                            .readDataManifests(table.latestSnapshot().get());
+            assertThat(manifests.size()).isEqualTo(3);
+            assertThat(manifests.get(0).minRowId()).isEqualTo(0);
+            assertThat(manifests.get(0).maxRowId()).isEqualTo(1);
+            assertThat(manifests.get(1).minRowId()).isEqualTo(2);
+            assertThat(manifests.get(1).maxRowId()).isEqualTo(3);
+            assertThat(manifests.get(2).minRowId()).isEqualTo(4);
+            assertThat(manifests.get(2).maxRowId()).isEqualTo(5);
         }
 
-        ReadBuilder readBuilder = getTableDefault().newReadBuilder();
+        ReadBuilder readBuilder = table.newReadBuilder();
 
         // Test 1: Filter by row IDs that exist in the first file (0, 1)
         List<Long> rowIds1 = Arrays.asList(0L, 1L);

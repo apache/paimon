@@ -36,6 +36,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Equal;
@@ -193,6 +194,22 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                                 .newBatchWriteBuilder()
                                 .newWriteSelector())
                 .isEmpty();
+    }
+
+    @Test
+    public void testMinMaxRowIdNull() throws Exception {
+        writeData();
+        FileStoreTable table = createFileStoreTable();
+        List<ManifestFileMeta> manifests =
+                table.store()
+                        .manifestListFactory()
+                        .create()
+                        .readDataManifests(table.latestSnapshot().get());
+        assertThat(manifests.size()).isGreaterThan(0);
+        for (ManifestFileMeta manifest : manifests) {
+            assertThat(manifest.minRowId()).isNull();
+            assertThat(manifest.maxRowId()).isNull();
+        }
     }
 
     @Test
