@@ -31,6 +31,7 @@ import org.apache.paimon.types.VarCharType;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.utils.InternalRowUtils.createNullCheckingFieldGetter;
@@ -40,19 +41,45 @@ import static org.apache.paimon.utils.TypeUtils.castFromString;
 /** PartitionComputer for {@link InternalRow}. */
 public class InternalRowPartitionComputer {
 
-    protected final String defaultPartValue;
     protected final String[] partitionColumns;
     protected final FieldGetter[] partitionFieldGetters;
     protected final CastExecutor[] partitionCastExecutors;
     protected final List<DataType> types;
     protected final boolean legacyPartitionName;
+    protected final Function<String, String> defaultPartValMapping;
 
+    /** Preserve the original partition value, even when it is null or an empty string. */
+    public static InternalRowPartitionComputer preserveNullOrEmptyValue(
+            RowType rowType, String[] partitionColumns, boolean legacyPartitionName) {
+        return new InternalRowPartitionComputer(
+                Function.identity(), rowType, partitionColumns, legacyPartitionName);
+    }
+
+    /** Replace null or empty string partition value with {@code defaultValue}. */
+    public static InternalRowPartitionComputer withDefaultValue(
+            String defaultValue,
+            RowType rowType,
+            String[] partitionColumns,
+            boolean legacyPartitionName) {
+        return new InternalRowPartitionComputer(
+                s -> defaultValue, rowType, partitionColumns, legacyPartitionName);
+    }
+
+    /** @deprecated use {@link InternalRowPartitionComputer#withDefaultValue} */
     public InternalRowPartitionComputer(
             String defaultPartValue,
             RowType rowType,
             String[] partitionColumns,
             boolean legacyPartitionName) {
-        this.defaultPartValue = defaultPartValue;
+        this(s -> defaultPartValue, rowType, partitionColumns, legacyPartitionName);
+    }
+
+    private InternalRowPartitionComputer(
+            Function<String, String> defaultPartValMapping,
+            RowType rowType,
+            String[] partitionColumns,
+            boolean legacyPartitionName) {
+        this.defaultPartValMapping = defaultPartValMapping;
         this.partitionColumns = partitionColumns;
         this.types = rowType.getFieldTypes();
         this.legacyPartitionName = legacyPartitionName;
@@ -84,7 +111,7 @@ public class InternalRowPartitionComputer {
                 }
             }
             if (StringUtils.isNullOrWhitespaceOnly(partitionValue)) {
-                partitionValue = defaultPartValue;
+                partitionValue = defaultPartValMapping.apply(partitionValue);
             }
             partSpec.put(partitionColumns[i], partitionValue);
         }

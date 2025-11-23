@@ -471,4 +471,17 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
       assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.COMPACT))
     }
   }
+
+  test("Paimon delete: partition value is empty or null") {
+    withTable("t") {
+      sql(s"CREATE TABLE t (pt STRING, data STRING) PARTITIONED BY (pt)")
+      sql("INSERT INTO t VALUES('', 'a'), (null, 'b'), ('3', 'c')")
+
+      sql("DELETE FROM t WHERE pt = ''")
+      checkAnswer(sql("SELECT * FROM t ORDER BY data"), Seq(Row(null, "b"), Row("3", "c")))
+
+      sql("DELETE FROM t WHERE pt IS NULL")
+      checkAnswer(sql("SELECT * FROM t ORDER BY data"), Seq(Row("3", "c")))
+    }
+  }
 }

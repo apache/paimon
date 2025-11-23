@@ -214,4 +214,19 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
       Row("dt=20240601") :: Nil
     )
   }
+
+  test("Paimon Partition Management: partition values are null or empty string") {
+    spark.sql(s"""
+                 |CREATE TABLE T (pt STRING, data STRING)
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
+
+    sql("INSERT INTO t VALUES('', 'a'), (null, 'b'), ('3', 'c')")
+
+    sql("ALTER TABLE t DROP PARTITION (pt = '')")
+    checkAnswer(sql("SELECT * FROM t ORDER BY data"), Seq(Row(null, "b"), Row("3", "c")))
+
+    sql("ALTER TABLE t DROP PARTITION (pt = null)")
+    checkAnswer(sql("SELECT * FROM t ORDER BY data"), Seq(Row("3", "c")))
+  }
 }
