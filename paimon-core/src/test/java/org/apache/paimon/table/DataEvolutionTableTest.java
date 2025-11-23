@@ -429,7 +429,16 @@ public class DataEvolutionTableTest extends TableTestBase {
     }
 
     @Test
-    public void testWithRowIds() throws Exception {
+    public void testWithRowIdsFilterManifestEntries() throws Exception {
+        innerTestWithRowIds(true);
+    }
+
+    @Test
+    public void testWithRowIdsFilterManifests() throws Exception {
+        innerTestWithRowIds(false);
+    }
+
+    public void innerTestWithRowIds(boolean compactManifests) throws Exception {
         createTableDefault();
         Schema schema = schemaDefault();
         BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
@@ -466,6 +475,12 @@ public class DataEvolutionTableTest extends TableTestBase {
             List<CommitMessage> commitables = write0.prepareCommit();
             setFirstRowId(commitables, 4L);
             commit.commit(commitables);
+        }
+
+        if (compactManifests) {
+            try (BatchTableCommit commit = builder.newCommit()) {
+                commit.compactManifests();
+            }
         }
 
         ReadBuilder readBuilder = getTableDefault().newReadBuilder();

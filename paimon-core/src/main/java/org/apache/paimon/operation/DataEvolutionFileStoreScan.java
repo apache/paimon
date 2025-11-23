@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.DataEvolutionArray;
 import org.apache.paimon.reader.DataEvolutionRow;
@@ -34,8 +35,6 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
-
-import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -51,7 +50,6 @@ import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     private boolean dropStats = false;
-    @Nullable private List<Long> indices;
 
     public DataEvolutionFileStoreScan(
             ManifestsReader manifestsReader,
@@ -74,29 +72,57 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     @Override
     public FileStoreScan dropStats() {
+        // overwrite to keep stats here
+        // TODO refactor this hacky
         this.dropStats = true;
         return this;
     }
 
     @Override
     public FileStoreScan keepStats() {
+        // overwrite to keep stats here
+        // TODO refactor this hacky
         this.dropStats = false;
         return this;
     }
 
+    @Override
     public DataEvolutionFileStoreScan withFilter(Predicate predicate) {
+        // overwrite to keep all filter here
+        // TODO refactor this hacky
         this.inputFilter = predicate;
         return this;
     }
 
     @Override
-    public FileStoreScan withRowIds(List<Long> indices) {
-        this.indices = indices;
-        return this;
+    protected List<ManifestFileMeta> postFilterManifests(List<ManifestFileMeta> manifests) {
+        if (rowIdList == null || rowIdList.isEmpty()) {
+            return manifests;
+        }
+        return manifests.stream().filter(this::filterManifestByRowIds).collect(Collectors.toList());
+    }
+
+    private boolean filterManifestByRowIds(ManifestFileMeta manifest) {
+        if (rowIdList == null || rowIdList.isEmpty()) {
+            return true;
+        }
+
+        Long min = manifest.minRowId();
+        Long max = manifest.maxRowId();
+        if (min == null || max == null) {
+            return true;
+        }
+
+        for (long rowId : rowIdList) {
+            if (rowId >= min && rowId <= max) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
-    protected List<ManifestEntry> postFilter(List<ManifestEntry> entries) {
+    protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
         if (inputFilter == null) {
             return entries;
         }
@@ -214,7 +240,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
         // If indices is null, all entries should be kept
-        if (this.indices == null) {
+        if (this.rowIdList == null) {
             return true;
         }
 
@@ -228,7 +254,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         long rowCount = entry.file().rowCount();
         long endRowId = firstRowId + rowCount;
 
-        for (Long index : this.indices) {
+        for (Long index : this.rowIdList) {
             if (index >= firstRowId && index < endRowId) {
                 return true;
             }
