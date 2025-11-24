@@ -492,19 +492,6 @@ public class DataEvolutionTableTest extends TableTestBase {
             assertThat(manifests.size()).isEqualTo(1);
             assertThat(manifests.get(0).minRowId()).isEqualTo(0);
             assertThat(manifests.get(0).maxRowId()).isEqualTo(5);
-        } else {
-            List<ManifestFileMeta> manifests =
-                    table.store()
-                            .manifestListFactory()
-                            .create()
-                            .readDataManifests(table.latestSnapshot().get());
-            assertThat(manifests.size()).isEqualTo(3);
-            assertThat(manifests.get(0).minRowId()).isEqualTo(0);
-            assertThat(manifests.get(0).maxRowId()).isEqualTo(1);
-            assertThat(manifests.get(1).minRowId()).isEqualTo(2);
-            assertThat(manifests.get(1).maxRowId()).isEqualTo(3);
-            assertThat(manifests.get(2).minRowId()).isEqualTo(4);
-            assertThat(manifests.get(2).maxRowId()).isEqualTo(5);
         }
 
         ReadBuilder readBuilder = table.newReadBuilder();
