@@ -52,15 +52,15 @@ public class GlobalIndexEvaluator implements Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(GlobalIndexEvaluator.class);
 
     private final Function<Integer, Collection<GlobalIndexReader>> readersFunction;
-    private final Map<String, DataField> fieldColumnToId;
+    private final Map<String, DataField> fieldNameToField;
     private final Map<Integer, Collection<GlobalIndexReader>> indexReadersCache = new HashMap<>();
 
     public GlobalIndexEvaluator(
             Function<Integer, Collection<GlobalIndexReader>> readersFunction, RowType rowType) {
         this.readersFunction = readersFunction;
-        this.fieldColumnToId = new HashMap<>();
+        this.fieldNameToField = new HashMap<>();
         for (DataField dataField : rowType.getFields()) {
-            fieldColumnToId.put(dataField.name(), dataField);
+            fieldNameToField.put(dataField.name(), dataField);
         }
     }
 
@@ -70,7 +70,7 @@ public class GlobalIndexEvaluator implements Closeable {
         }
         Set<Integer> requiredFieldIds = getRequiredFieldIds(predicate);
         requiredFieldIds.forEach(id -> indexReadersCache.computeIfAbsent(id, readersFunction));
-        return new FileIndexPredicateTest(fieldColumnToId, indexReadersCache).test(predicate);
+        return new FileIndexPredicateTest(fieldNameToField, indexReadersCache).test(predicate);
     }
 
     public void close() {
@@ -95,7 +95,7 @@ public class GlobalIndexEvaluator implements Closeable {
                     @Override
                     public Set<Integer> visit(LeafPredicate predicate) {
                         return Collections.singleton(
-                                fieldColumnToId.get(predicate.fieldName()).id());
+                                fieldNameToField.get(predicate.fieldName()).id());
                     }
 
                     @Override
@@ -111,7 +111,7 @@ public class GlobalIndexEvaluator implements Closeable {
                     @Override
                     public Set<Integer> visit(TransformPredicate predicate) {
                         return predicate.fieldNames().stream()
-                                .map(f -> fieldColumnToId.get(f).id())
+                                .map(f -> fieldNameToField.get(f).id())
                                 .collect(Collectors.toSet());
                     }
                 });
