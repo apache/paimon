@@ -38,6 +38,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
@@ -241,6 +242,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withRowIds(List<Long> rowIdList) {
         this.rowIdList = rowIdList;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withReadType(RowType readType) {
         return this;
     }
 
