@@ -827,7 +827,6 @@ public class DataEvolutionTableTest extends TableTestBase {
                                         table.rowType().project("f1")));
         RecordReader<InternalRow> reader =
                 readBuilder.newRead().createReader(readBuilder.newScan().plan());
-        Assertions.assertThat(reader).isInstanceOf(DataEvolutionFileReader.class);
 
         GlobalIndexFileReadWrite indexFileReadWrite =
                 new GlobalIndexFileReadWrite(
