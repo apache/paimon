@@ -640,6 +640,79 @@ public class DataEvolutionTableTest extends TableTestBase {
     }
 
     @Test
+    public void testWithRowIdsFilterManifestsNonExistFile() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+
+        // Write first batch of data with firstRowId = 0
+        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            write0.write(GenericRow.of(1, BinaryString.fromString("a")));
+            write0.write(GenericRow.of(2, BinaryString.fromString("b")));
+
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write0.prepareCommit();
+            setFirstRowId(commitables, 0L);
+            commit.commit(commitables);
+        }
+
+        // Write second batch of data with firstRowId = 2
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            write0.write(GenericRow.of(3, BinaryString.fromString("c")));
+            write0.write(GenericRow.of(4, BinaryString.fromString("d")));
+
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write0.prepareCommit();
+            setFirstRowId(commitables, 2L);
+            commit.commit(commitables);
+        }
+
+        // Write third batch of data with firstRowId = 4
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            write0.write(GenericRow.of(5, BinaryString.fromString("e")));
+            write0.write(GenericRow.of(6, BinaryString.fromString("f")));
+
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write0.prepareCommit();
+            setFirstRowId(commitables, 4L);
+            commit.commit(commitables);
+        }
+
+        // assert manifest row id min max
+        List<ManifestFileMeta> manifests =
+                table.store()
+                        .manifestListFactory()
+                        .create()
+                        .readDataManifests(table.latestSnapshot().get());
+        assertThat(manifests.size()).isEqualTo(3);
+        assertThat(manifests.get(0).minRowId()).isEqualTo(0);
+        assertThat(manifests.get(0).maxRowId()).isEqualTo(1);
+        assertThat(manifests.get(1).minRowId()).isEqualTo(2);
+        assertThat(manifests.get(1).maxRowId()).isEqualTo(3);
+        assertThat(manifests.get(2).minRowId()).isEqualTo(4);
+        assertThat(manifests.get(2).maxRowId()).isEqualTo(5);
+
+        // delete last manifest file, should never read it
+        table.store().manifestFileFactory().create().delete(manifests.get(2).fileName());
+
+        // assert file
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Long> rowIds = Arrays.asList(0L, 3L);
+        List<Split> splits = readBuilder.withRowIds(rowIds).newScan().plan().splits();
+        assertThat(splits.size()).isEqualTo(1);
+        DataSplit dataSplit = (DataSplit) splits.get(0);
+        assertThat(dataSplit.dataFiles().size()).isEqualTo(2);
+        DataFileMeta file1 = dataSplit.dataFiles().get(0);
+        assertThat(file1.firstRowId()).isEqualTo(0L);
+        assertThat(file1.rowCount()).isEqualTo(2L);
+        DataFileMeta file2 = dataSplit.dataFiles().get(1);
+        assertThat(file2.firstRowId()).isEqualTo(2L);
+        assertThat(file2.rowCount()).isEqualTo(2L);
+    }
+
+    @Test
     public void testNonNullColumn() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
