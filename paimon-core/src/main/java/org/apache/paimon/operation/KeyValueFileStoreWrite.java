@@ -65,6 +65,7 @@ import org.apache.paimon.mergetree.lookup.LookupSerializerFactory;
 import org.apache.paimon.mergetree.lookup.PersistEmptyProcessor;
 import org.apache.paimon.mergetree.lookup.PersistPositionProcessor;
 import org.apache.paimon.mergetree.lookup.PersistProcessor;
+import org.apache.paimon.mergetree.lookup.PersistValueAndPosProcessor;
 import org.apache.paimon.mergetree.lookup.PersistValueProcessor;
 import org.apache.paimon.mergetree.lookup.RemoteLookupFileManager;
 import org.apache.paimon.options.Options;
@@ -360,14 +361,17 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 processorFactory = PersistEmptyProcessor.factory();
                 wrapperFactory = new FirstRowMergeFunctionWrapperFactory();
             } else {
-                processorFactory =
-                        lookupStrategy.deletionVector
-                                ? PersistPositionProcessor.factory(
-                                        valueType,
-                                        lookupStrategy.produceChangelog
-                                                || mergeEngine != DEDUPLICATE
-                                                || !options.sequenceField().isEmpty())
-                                : PersistValueProcessor.factory(valueType);
+                if (lookupStrategy.deletionVector) {
+                    if (lookupStrategy.produceChangelog
+                            || mergeEngine != DEDUPLICATE
+                            || !options.sequenceField().isEmpty()) {
+                        processorFactory = PersistValueAndPosProcessor.factory(valueType);
+                    } else {
+                        processorFactory = PersistPositionProcessor.factory();
+                    }
+                } else {
+                    processorFactory = PersistValueProcessor.factory(valueType);
+                }
                 wrapperFactory =
                         new LookupMergeFunctionWrapperFactory<>(
                                 logDedupEqualSupplier.get(),

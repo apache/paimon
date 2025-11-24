@@ -18,17 +18,13 @@
 
 package org.apache.paimon.mergetree.lookup;
 
-import org.apache.paimon.KeyValue;
+/** File name and row position for DeletionVector. */
+public class FilePosition {
 
-/** {@link KeyValue} with file name and row position for DeletionVector. */
-public class PositionedKeyValue {
-
-    private final KeyValue keyValue;
     private final String fileName;
     private final long rowPosition;
 
-    public PositionedKeyValue(KeyValue keyValue, String fileName, long rowPosition) {
-        this.keyValue = keyValue;
+    public FilePosition(String fileName, long rowPosition) {
         this.fileName = fileName;
         this.rowPosition = rowPosition;
     }
@@ -39,9 +35,5 @@ public class PositionedKeyValue {
 
     public long rowPosition() {
         return rowPosition;
-    }
-
-    public KeyValue keyValue() {
-        return keyValue;
     }
 }

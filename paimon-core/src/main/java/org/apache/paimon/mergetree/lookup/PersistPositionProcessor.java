@@ -20,34 +20,18 @@ package org.apache.paimon.mergetree.lookup;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
 import java.util.Arrays;
-import java.util.function.Function;
 
 import static org.apache.paimon.utils.VarLengthIntUtils.MAX_VAR_LONG_SIZE;
 import static org.apache.paimon.utils.VarLengthIntUtils.decodeLong;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 
-/** A {@link PersistProcessor} to return {@link PositionedKeyValue}. */
-public class PersistPositionProcessor implements PersistProcessor<PositionedKeyValue> {
-
-    private final Function<InternalRow, byte[]> serializer;
-    private final Function<byte[], InternalRow> deserializer;
-    private final boolean persistValue;
-
-    public PersistPositionProcessor(
-            Function<InternalRow, byte[]> serializer,
-            Function<byte[], InternalRow> deserializer,
-            boolean persistValue) {
-        this.serializer = serializer;
-        this.deserializer = deserializer;
-        this.persistValue = persistValue;
-    }
+/** A {@link PersistProcessor} to return {@link FilePosition}. */
+public class PersistPositionProcessor implements PersistProcessor<FilePosition> {
 
     @Override
     public boolean withPosition() {
@@ -61,55 +45,28 @@ public class PersistPositionProcessor implements PersistProcessor<PositionedKeyV
 
     @Override
     public byte[] persistToDisk(KeyValue kv, long rowPosition) {
-        if (persistValue) {
-            byte[] vBytes = serializer.apply(kv.value());
-            byte[] bytes = new byte[vBytes.length + 8 + 8 + 1];
-            MemorySegment segment = MemorySegment.wrap(bytes);
-            segment.put(0, vBytes);
-            segment.putLong(bytes.length - 17, rowPosition);
-            segment.putLong(bytes.length - 9, kv.sequenceNumber());
-            segment.put(bytes.length - 1, kv.valueKind().toByteValue());
-            return bytes;
-        } else {
-            byte[] bytes = new byte[MAX_VAR_LONG_SIZE];
-            int len = encodeLong(bytes, rowPosition);
-            return Arrays.copyOf(bytes, len);
-        }
+        byte[] bytes = new byte[MAX_VAR_LONG_SIZE];
+        int len = encodeLong(bytes, rowPosition);
+        return Arrays.copyOf(bytes, len);
     }
 
     @Override
-    public PositionedKeyValue readFromDisk(
-            InternalRow key, int level, byte[] bytes, String fileName) {
-        if (persistValue) {
-            InternalRow value = deserializer.apply(bytes);
-            MemorySegment segment = MemorySegment.wrap(bytes);
-            long rowPosition = segment.getLong(bytes.length - 17);
-            long sequenceNumber = segment.getLong(bytes.length - 9);
-            RowKind rowKind = RowKind.fromByteValue(bytes[bytes.length - 1]);
-            return new PositionedKeyValue(
-                    new KeyValue().replace(key, sequenceNumber, rowKind, value).setLevel(level),
-                    fileName,
-                    rowPosition);
-        } else {
-            long rowPosition = decodeLong(bytes, 0);
-            return new PositionedKeyValue(null, fileName, rowPosition);
-        }
+    public FilePosition readFromDisk(InternalRow key, int level, byte[] bytes, String fileName) {
+        long rowPosition = decodeLong(bytes, 0);
+        return new FilePosition(fileName, rowPosition);
     }
 
-    public static Factory<PositionedKeyValue> factory(RowType valueType, boolean persistValue) {
-        return new Factory<PositionedKeyValue>() {
+    public static Factory<FilePosition> factory() {
+        return new Factory<FilePosition>() {
             @Override
             public String identifier() {
-                return persistValue ? "position-and-value" : "position";
+                return "position";
             }
 
             @Override
-            public PersistProcessor<PositionedKeyValue> create(
+            public PersistProcessor<FilePosition> create(
                     LookupSerializerFactory serializerFactory, @Nullable RowType fileSchema) {
-                return new PersistPositionProcessor(
-                        serializerFactory.createSerializer(valueType),
-                        serializerFactory.createDeserializer(valueType, fileSchema),
-                        persistValue);
+                return new PersistPositionProcessor();
             }
         };
     }
