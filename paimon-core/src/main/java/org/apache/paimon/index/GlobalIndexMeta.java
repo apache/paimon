@@ -28,7 +28,9 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 
+/** Schema for global index. */
 public class GlobalIndexMeta {
+
     public static final RowType SCHEMA =
             new RowType(
                     true,
