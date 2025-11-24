@@ -26,7 +26,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
@@ -41,20 +41,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Scanner for shard-based global indexes. */
 public class ShardGlobalIndexScanner implements Closeable {
 
-    private final FileStoreTable fileStoreTable;
-    private final GlobalIndexFileReadWrite globalIndexFileInputHelper;
-    private final Map<Integer, Map<String, List<IndexFileMeta>>> indexMetas;
-    private final Map<Integer, DataField> columnIdToDataField;
-
-    private GlobalIndexEvaluator globalIndexEvaluator;
+    private final Options options;
+    private final GlobalIndexEvaluator globalIndexEvaluator;
 
     public ShardGlobalIndexScanner(
             FileStoreTable fileStoreTable,
@@ -62,18 +59,30 @@ public class ShardGlobalIndexScanner implements Closeable {
             long rowRangeStart,
             long rowRangeEnd,
             List<IndexManifestEntry> entries) {
-        this.fileStoreTable = fileStoreTable;
+        this.options = fileStoreTable.coreOptions().toConfiguration();
+        for (IndexManifestEntry entry : entries) {
+            GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
+            checkArgument(
+                    meta != null
+                            && Range.intersect(
+                                    rowRangeStart,
+                                    rowRangeEnd,
+                                    meta.rowRangeStart(),
+                                    meta.rowRangeEnd()),
+                    "All index files must have an intersection with row range ["
+                            + rowRangeStart
+                            + ", "
+                            + rowRangeEnd
+                            + ")");
+        }
+
         FileIO fileIO = fileStoreTable.fileIO();
-        this.globalIndexFileInputHelper =
+        GlobalIndexFileReadWrite indexFileReadWrite =
                 new GlobalIndexFileReadWrite(
                         fileIO,
                         fileStoreTable.store().pathFactory().indexFileFactory(partition, 0));
-        RowType rowType = fileStoreTable.rowType();
-        this.columnIdToDataField = new HashMap<>();
-        for (DataField dataField : rowType.getFields()) {
-            columnIdToDataField.put(dataField.id(), dataField);
-        }
-        this.indexMetas = new HashMap<>();
+
+        Map<Integer, Map<String, List<IndexFileMeta>>> indexMetas = new HashMap<>();
         for (IndexManifestEntry entry : entries) {
             GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
             checkArgument(meta != null, "Global index meta must not be null");
@@ -85,88 +94,60 @@ public class ShardGlobalIndexScanner implements Closeable {
                     .add(entry.indexFile());
         }
 
-        checkArgument(
-                entries.stream()
-                        .allMatch(
-                                m ->
-                                        m.indexFile().globalIndexMeta() != null
-                                                && Range.intersect(
-                                                        rowRangeStart,
-                                                        rowRangeEnd,
-                                                        m.indexFile()
-                                                                .globalIndexMeta()
-                                                                .rowRangeStart(),
-                                                        m.indexFile()
-                                                                .globalIndexMeta()
-                                                                .rowRangeEnd())),
-                "All index files must have an intersection with row range ["
-                        + rowRangeStart
-                        + ", "
-                        + rowRangeEnd
-                        + ")");
+        RowType rowType = fileStoreTable.rowType();
+
+        IntFunction<Collection<GlobalIndexReader>> readersFunction =
+                fieldId ->
+                        createReaders(
+                                indexFileReadWrite,
+                                indexMetas.get(fieldId),
+                                rowType.getField(fieldId).type());
+        this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }
 
     public Optional<GlobalIndexResult> scan(Predicate predicate) {
-        GlobalIndexEvaluator globalIndexPredicate = getGlobalIndexEvaluator();
-        return globalIndexPredicate.evaluate(predicate);
+        return globalIndexEvaluator.evaluate(predicate);
     }
 
-    private GlobalIndexEvaluator getGlobalIndexEvaluator() {
-        if (globalIndexEvaluator == null) {
-            Function<Integer, Collection<GlobalIndexReader>> readerFunction =
-                    fieldId -> {
-                        if (!indexMetas.containsKey(fieldId)) {
-                            return Collections.emptyList();
-                        }
-                        Map<String, List<IndexFileMeta>> indexMetas = this.indexMetas.get(fieldId);
-
-                        Set<GlobalIndexReader> readers = new HashSet<>();
-                        try {
-                            for (Map.Entry<String, List<IndexFileMeta>> entry :
-                                    indexMetas.entrySet()) {
-                                String indexType = entry.getKey();
-                                List<IndexFileMeta> metas = entry.getValue();
-                                GlobalIndexerFactory globalIndexerFactory =
-                                        GlobalIndexerFactoryUtils.load(indexType);
-                                GlobalIndexer globalIndexer =
-                                        globalIndexerFactory.create(
-                                                columnIdToDataField.get(fieldId).type(),
-                                                new Options(fileStoreTable.options()));
-                                readers.add(
-                                        globalIndexer.createReader(
-                                                globalIndexFileInputHelper,
-                                                metas.stream()
-                                                        .map(
-                                                                meta ->
-                                                                        new GlobalIndexIOMeta(
-                                                                                meta.fileName(),
-                                                                                meta.fileSize(),
-                                                                                new Range(
-                                                                                        meta.globalIndexMeta()
-                                                                                                .rowRangeStart(),
-                                                                                        meta.globalIndexMeta()
-                                                                                                .rowRangeEnd()),
-                                                                                meta.globalIndexMeta()
-                                                                                        .indexMeta()))
-                                                        .collect(Collectors.toList())));
-                            }
-                        } catch (IOException e) {
-                            throw new RuntimeException("Failed to create global index reader", e);
-                        }
-
-                        return readers;
-                    };
-
-            globalIndexEvaluator =
-                    new GlobalIndexEvaluator(readerFunction, fileStoreTable.rowType());
+    private Collection<GlobalIndexReader> createReaders(
+            GlobalIndexFileReadWrite indexFileReadWrite,
+            Map<String, List<IndexFileMeta>> indexMetas,
+            DataType fieldType) {
+        if (indexMetas == null) {
+            return Collections.emptyList();
         }
-        return globalIndexEvaluator;
+
+        Set<GlobalIndexReader> readers = new HashSet<>();
+        try {
+            for (Map.Entry<String, List<IndexFileMeta>> entry : indexMetas.entrySet()) {
+                String indexType = entry.getKey();
+                List<IndexFileMeta> metas = entry.getValue();
+                GlobalIndexerFactory globalIndexerFactory =
+                        GlobalIndexerFactoryUtils.load(indexType);
+                GlobalIndexer globalIndexer = globalIndexerFactory.create(fieldType, options);
+                List<GlobalIndexIOMeta> globalMetas =
+                        metas.stream().map(this::toGlobalMeta).collect(Collectors.toList());
+                readers.add(globalIndexer.createReader(indexFileReadWrite, globalMetas));
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to create global index reader", e);
+        }
+
+        return readers;
+    }
+
+    private GlobalIndexIOMeta toGlobalMeta(IndexFileMeta meta) {
+        GlobalIndexMeta globalIndex = meta.globalIndexMeta();
+        checkNotNull(globalIndex);
+        return new GlobalIndexIOMeta(
+                meta.fileName(),
+                meta.fileSize(),
+                new Range(globalIndex.rowRangeStart(), globalIndex.rowRangeEnd()),
+                globalIndex.indexMeta());
     }
 
     @Override
     public void close() throws IOException {
-        if (globalIndexEvaluator != null) {
-            globalIndexEvaluator.close();
-        }
+        globalIndexEvaluator.close();
     }
 }
