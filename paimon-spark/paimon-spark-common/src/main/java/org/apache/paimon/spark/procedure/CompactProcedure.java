@@ -387,8 +387,12 @@ public class CompactProcedure extends BaseProcedure {
             compactionTasks = new ArrayList<>();
         }
         if (partitionIdleTime != null) {
+            SnapshotReader snapshotReader = table.newSnapshotReader();
+            if (partitionPredicate != null) {
+                snapshotReader.withPartitionFilter(partitionPredicate);
+            }
             Map<BinaryRow, Long> partitionInfo =
-                    table.newSnapshotReader().partitionEntries().stream()
+                    snapshotReader.partitionEntries().stream()
                             .collect(
                                     Collectors.toMap(
                                             PartitionEntry::partition,
