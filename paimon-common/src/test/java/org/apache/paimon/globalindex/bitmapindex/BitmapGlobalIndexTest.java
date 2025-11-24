@@ -23,9 +23,9 @@ import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexWriteMeta;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndex;
 import org.apache.paimon.globalindex.bitmap.BitmapIndexResultWrapper;
@@ -251,8 +251,7 @@ public class BitmapGlobalIndexTest {
         GlobalIndexFileReader fileReader =
                 prefix -> fileIO.newInputStream(new Path(tempDir.toString(), prefix));
 
-        GlobalIndexWriteMeta globalIndexMeta =
-                new GlobalIndexWriteMeta(fileName, fileSize, range, null);
+        GlobalIndexIOMeta globalIndexMeta = new GlobalIndexIOMeta(fileName, fileSize, range, null);
 
         return bitmapGlobalIndex.createReader(
                 fileReader, Collections.singletonList(globalIndexMeta));

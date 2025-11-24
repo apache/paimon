@@ -138,7 +138,7 @@ public class ShardGlobalIndexScanner implements Closeable {
                                                 metas.stream()
                                                         .map(
                                                                 meta ->
-                                                                        new GlobalIndexWriteMeta(
+                                                                        new GlobalIndexIOMeta(
                                                                                 meta.fileName(),
                                                                                 meta.fileSize(),
                                                                                 new Range(

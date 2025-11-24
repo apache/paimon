@@ -24,9 +24,9 @@ import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexWriteMeta;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
@@ -57,9 +57,9 @@ public class BitmapGlobalIndex implements GlobalIndexer {
     }
 
     public GlobalIndexReader createReader(
-            GlobalIndexFileReader fileReader, List<GlobalIndexWriteMeta> files) throws IOException {
+            GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
         checkArgument(files.size() == 1);
-        GlobalIndexWriteMeta indexMeta = files.get(0);
+        GlobalIndexIOMeta indexMeta = files.get(0);
         SeekableInputStream input = fileReader.getInputStream(indexMeta.fileName());
         FileIndexReader reader = index.createReader(input, 0, (int) indexMeta.fileSize());
         return new FileIndexReaderWrapper(

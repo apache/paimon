@@ -31,8 +31,8 @@ public interface GlobalIndexer {
 
     GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException;
 
-    GlobalIndexReader createReader(
-            GlobalIndexFileReader fileReader, List<GlobalIndexWriteMeta> files) throws IOException;
+    GlobalIndexReader createReader(GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files)
+            throws IOException;
 
     static GlobalIndexer create(String type, DataType dataType, Options options) {
         GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
