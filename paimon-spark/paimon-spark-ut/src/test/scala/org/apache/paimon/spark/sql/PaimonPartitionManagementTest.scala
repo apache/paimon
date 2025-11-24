@@ -221,12 +221,12 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
                  |PARTITIONED BY (pt)
                  |""".stripMargin)
 
-    sql("INSERT INTO t VALUES('', 'a'), (null, 'b'), ('3', 'c')")
+    sql("INSERT INTO T VALUES('', 'a'), (null, 'b'), ('3', 'c')")
 
-    sql("ALTER TABLE t DROP PARTITION (pt = '')")
-    checkAnswer(sql("SELECT * FROM t ORDER BY data"), Seq(Row(null, "b"), Row("3", "c")))
+    sql("ALTER TABLE T DROP PARTITION (pt = '')")
+    checkAnswer(sql("SELECT * FROM T ORDER BY data"), Seq(Row(null, "b"), Row("3", "c")))
 
-    sql("ALTER TABLE t DROP PARTITION (pt = null)")
-    checkAnswer(sql("SELECT * FROM t ORDER BY data"), Seq(Row("3", "c")))
+    sql("ALTER TABLE T DROP PARTITION (pt = null)")
+    checkAnswer(sql("SELECT * FROM T ORDER BY data"), Seq(Row("3", "c")))
   }
 }

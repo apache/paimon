@@ -473,15 +473,15 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
   }
 
   test("Paimon delete: partition value is empty or null") {
-    withTable("t") {
-      sql(s"CREATE TABLE t (pt STRING, data STRING) PARTITIONED BY (pt)")
-      sql("INSERT INTO t VALUES('', 'a'), (null, 'b'), ('3', 'c')")
+    withTable("T") {
+      sql(s"CREATE TABLE T (pt STRING, data STRING) PARTITIONED BY (pt)")
+      sql("INSERT INTO T VALUES('', 'a'), (null, 'b'), ('3', 'c')")
 
-      sql("DELETE FROM t WHERE pt = ''")
-      checkAnswer(sql("SELECT * FROM t ORDER BY data"), Seq(Row(null, "b"), Row("3", "c")))
+      sql("DELETE FROM T WHERE pt = ''")
+      checkAnswer(sql("SELECT * FROM T ORDER BY data"), Seq(Row(null, "b"), Row("3", "c")))
 
-      sql("DELETE FROM t WHERE pt IS NULL")
-      checkAnswer(sql("SELECT * FROM t ORDER BY data"), Seq(Row("3", "c")))
+      sql("DELETE FROM T WHERE pt IS NULL")
+      checkAnswer(sql("SELECT * FROM T ORDER BY data"), Seq(Row("3", "c")))
     }
   }
 }
