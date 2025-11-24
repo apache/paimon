@@ -2817,7 +2817,11 @@ public class CoreOptions implements Serializable {
 
     public List<String> sequenceField() {
         return options.getOptional(SEQUENCE_FIELD)
-                .map(s -> Arrays.asList(s.split(",")))
+                .map(
+                        s ->
+                                Arrays.stream(s.split(","))
+                                        .map(String::trim)
+                                        .collect(Collectors.toList()))
                 .orElse(Collections.emptyList());
     }
 

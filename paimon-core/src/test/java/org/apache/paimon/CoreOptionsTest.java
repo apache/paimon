@@ -86,4 +86,13 @@ public class CoreOptionsTest {
         conf.set(CoreOptions.LOOKUP_WAIT, false);
         assertThat(options.prepareCommitWaitCompaction()).isFalse();
     }
+
+    @Test
+    public void testSequenceFieldTrim() {
+        Options conf = new Options();
+        conf.set(CoreOptions.SEQUENCE_FIELD, " f1 ,f2 ,  f3  ");
+
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.sequenceField()).containsExactly("f1", "f2", "f3");
+    }
 }
