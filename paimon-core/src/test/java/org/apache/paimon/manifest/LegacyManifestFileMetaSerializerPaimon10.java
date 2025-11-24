@@ -90,6 +90,8 @@ public class LegacyManifestFileMetaSerializerPaimon10
                 null,
                 null,
                 null,
+                null,
+                null,
                 null);
     }
 }

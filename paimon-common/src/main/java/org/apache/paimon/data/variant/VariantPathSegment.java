@@ -26,38 +26,9 @@ import java.util.regex.Pattern;
 /**
  * A path segment for variant get to represent either an object key access or an array index access.
  */
-public class PathSegment {
-    private final String key;
-    private final Integer index;
+public abstract class VariantPathSegment {
 
-    private PathSegment(String key, Integer index) {
-        this.key = key;
-        this.index = index;
-    }
-
-    public static PathSegment createKeySegment(String key) {
-        return new PathSegment(key, null);
-    }
-
-    public static PathSegment createIndexSegment(int index) {
-        return new PathSegment(null, index);
-    }
-
-    public boolean isKey() {
-        return key != null;
-    }
-
-    public boolean isIndex() {
-        return index != null;
-    }
-
-    public String getKey() {
-        return key;
-    }
-
-    public Integer getIndex() {
-        return index;
-    }
+    public VariantPathSegment() {}
 
     private static final Pattern ROOT_PATTERN = Pattern.compile("\\$");
     // Parse index segment like `[123]`.
@@ -66,21 +37,21 @@ public class PathSegment {
     private static final Pattern KEY_PATTERN =
             Pattern.compile("\\.([^.\\[]+)|\\['([^']+)']|\\[\"([^\"]+)\"]");
 
-    public static PathSegment[] parse(String str) {
+    public static VariantPathSegment[] parse(String str) {
         // Validate root
         Matcher rootMatcher = ROOT_PATTERN.matcher(str);
         if (str.isEmpty() || !rootMatcher.find()) {
             throw new IllegalArgumentException("Invalid path: " + str);
         }
 
-        List<PathSegment> segments = new ArrayList<>();
+        List<VariantPathSegment> segments = new ArrayList<>();
         String remaining = str.substring(rootMatcher.end());
         // Parse indexes and keys
         while (!remaining.isEmpty()) {
             Matcher indexMatcher = INDEX_PATTERN.matcher(remaining);
             if (indexMatcher.lookingAt()) {
                 int index = Integer.parseInt(indexMatcher.group(1));
-                segments.add(PathSegment.createIndexSegment(index));
+                segments.add(new ArrayExtraction(index));
                 remaining = remaining.substring(indexMatcher.end());
                 continue;
             }
@@ -89,7 +60,7 @@ public class PathSegment {
             if (keyMatcher.lookingAt()) {
                 for (int i = 1; i <= 3; i++) {
                     if (keyMatcher.group(i) != null) {
-                        segments.add(PathSegment.createKeySegment(keyMatcher.group(i)));
+                        segments.add(new ObjectExtraction(keyMatcher.group(i)));
                         break;
                     }
                 }
@@ -99,6 +70,36 @@ public class PathSegment {
             throw new IllegalArgumentException("Invalid path: " + str);
         }
 
-        return segments.toArray(new PathSegment[0]);
+        return segments.toArray(new VariantPathSegment[0]);
+    }
+
+    /** A path segment for object extraction. */
+    public static class ObjectExtraction extends VariantPathSegment {
+
+        private final String key;
+
+        private ObjectExtraction(String key) {
+            super();
+            this.key = key;
+        }
+
+        public String getKey() {
+            return key;
+        }
+    }
+
+    /** A path segment for array extraction. */
+    public static class ArrayExtraction extends VariantPathSegment {
+
+        private final Integer index;
+
+        public ArrayExtraction(Integer index) {
+            super();
+            this.index = index;
+        }
+
+        public Integer getIndex() {
+            return index;
+        }
     }
 }

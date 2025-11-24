@@ -23,9 +23,13 @@ import org.apache.paimon.fs.Path;
 /** Path factory to create an index path. */
 public interface IndexPathFactory {
 
+    Path toPath(String fileName);
+
     Path newPath();
 
-    Path toPath(IndexFileMeta file);
+    default Path toPath(IndexFileMeta file) {
+        return toPath(file.fileName());
+    }
 
     boolean isExternalPath();
 }

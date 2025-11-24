@@ -89,6 +89,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private ScanMetrics scanMetrics = null;
     private boolean dropStats;
+    @Nullable protected List<Long> rowIdList;
 
     public AbstractFileStoreScan(
             ManifestsReader manifestsReader,
@@ -238,8 +239,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
-    public FileStoreScan withRowIds(List<Long> indices) {
-        // do nothing by default
+    public FileStoreScan withRowIds(List<Long> rowIdList) {
+        this.rowIdList = rowIdList;
         return this;
     }
 
@@ -260,6 +261,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         ManifestsReader.Result manifestsResult = readManifests();
         Snapshot snapshot = manifestsResult.snapshot;
         List<ManifestFileMeta> manifests = manifestsResult.filteredManifests;
+        manifests = postFilterManifests(manifests);
 
         Iterator<ManifestEntry> iterator = readManifestEntries(manifests, false);
         List<ManifestEntry> files = new ArrayList<>();
@@ -267,7 +269,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             files.add(iterator.next());
         }
 
-        files = postFilter(files);
+        files = postFilterManifestEntries(files);
 
         if (wholeBucketFilterEnabled()) {
             // We group files by bucket here, and filter them by the whole bucket filter.
@@ -437,7 +439,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     /** Note: Keep this thread-safe. */
     protected abstract boolean filterByStats(ManifestEntry entry);
 
-    protected abstract List<ManifestEntry> postFilter(List<ManifestEntry> entries);
+    protected List<ManifestFileMeta> postFilterManifests(List<ManifestFileMeta> manifests) {
+        return manifests;
+    }
+
+    protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
+        return entries;
+    }
 
     protected boolean wholeBucketFilterEnabled() {
         return false;

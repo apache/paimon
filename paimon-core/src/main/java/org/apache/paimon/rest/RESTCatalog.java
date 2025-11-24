@@ -111,7 +111,7 @@ public class RESTCatalog implements Catalog {
                         context.preferIO(),
                         context.fallbackIO());
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
-        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(context.options().toMap());
+        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(this.context.options().toMap());
     }
 
     @Override

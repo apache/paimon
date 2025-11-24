@@ -27,6 +27,7 @@ import org.apache.paimon.predicate.FieldRef;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 
 /** A {@link GlobalIndexReader} wrapper for {@link FileIndexReader}. */
@@ -46,68 +47,68 @@ public class FileIndexReaderWrapper implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitIsNotNull(FieldRef fieldRef) {
-        return transform.apply(reader.visitIsNotNull(fieldRef));
+    public Optional<GlobalIndexResult> visitIsNotNull(FieldRef fieldRef) {
+        return Optional.ofNullable(transform.apply(reader.visitIsNotNull(fieldRef)));
     }
 
     @Override
-    public GlobalIndexResult visitIsNull(FieldRef fieldRef) {
-        return transform.apply(reader.visitIsNull(fieldRef));
+    public Optional<GlobalIndexResult> visitIsNull(FieldRef fieldRef) {
+        return Optional.ofNullable(transform.apply(reader.visitIsNull(fieldRef)));
     }
 
     @Override
-    public GlobalIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
-        return transform.apply(reader.visitStartsWith(fieldRef, literal));
+    public Optional<GlobalIndexResult> visitStartsWith(FieldRef fieldRef, Object literal) {
+        return Optional.ofNullable(transform.apply(reader.visitStartsWith(fieldRef, literal)));
     }
 
     @Override
-    public GlobalIndexResult visitEndsWith(FieldRef fieldRef, Object literal) {
-        return transform.apply(reader.visitEndsWith(fieldRef, literal));
+    public Optional<GlobalIndexResult> visitEndsWith(FieldRef fieldRef, Object literal) {
+        return Optional.ofNullable(transform.apply(reader.visitEndsWith(fieldRef, literal)));
     }
 
     @Override
-    public GlobalIndexResult visitContains(FieldRef fieldRef, Object literal) {
-        return transform.apply(reader.visitContains(fieldRef, literal));
+    public Optional<GlobalIndexResult> visitContains(FieldRef fieldRef, Object literal) {
+        return Optional.ofNullable(transform.apply(reader.visitContains(fieldRef, literal)));
     }
 
     @Override
-    public GlobalIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
-        return transform.apply(reader.visitLessThan(fieldRef, literal));
+    public Optional<GlobalIndexResult> visitLessThan(FieldRef fieldRef, Object literal) {
+        return Optional.ofNullable(transform.apply(reader.visitLessThan(fieldRef, literal)));
     }
 
     @Override
-    public GlobalIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        return transform.apply(reader.visitGreaterOrEqual(fieldRef, literal));
+    public Optional<GlobalIndexResult> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+        return Optional.ofNullable(transform.apply(reader.visitGreaterOrEqual(fieldRef, literal)));
     }
 
     @Override
-    public GlobalIndexResult visitNotEqual(FieldRef fieldRef, Object literal) {
-        return transform.apply(reader.visitNotEqual(fieldRef, literal));
+    public Optional<GlobalIndexResult> visitNotEqual(FieldRef fieldRef, Object literal) {
+        return Optional.ofNullable(transform.apply(reader.visitNotEqual(fieldRef, literal)));
     }
 
     @Override
-    public GlobalIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return transform.apply(reader.visitLessOrEqual(fieldRef, literal));
+    public Optional<GlobalIndexResult> visitLessOrEqual(FieldRef fieldRef, Object literal) {
+        return Optional.ofNullable(transform.apply(reader.visitLessOrEqual(fieldRef, literal)));
     }
 
     @Override
-    public GlobalIndexResult visitEqual(FieldRef fieldRef, Object literal) {
-        return transform.apply(reader.visitEqual(fieldRef, literal));
+    public Optional<GlobalIndexResult> visitEqual(FieldRef fieldRef, Object literal) {
+        return Optional.ofNullable(transform.apply(reader.visitEqual(fieldRef, literal)));
     }
 
     @Override
-    public GlobalIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
-        return transform.apply(reader.visitGreaterThan(fieldRef, literal));
+    public Optional<GlobalIndexResult> visitGreaterThan(FieldRef fieldRef, Object literal) {
+        return Optional.ofNullable(transform.apply(reader.visitGreaterThan(fieldRef, literal)));
     }
 
     @Override
-    public GlobalIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
-        return transform.apply(reader.visitIn(fieldRef, literals));
+    public Optional<GlobalIndexResult> visitIn(FieldRef fieldRef, List<Object> literals) {
+        return Optional.ofNullable(transform.apply(reader.visitIn(fieldRef, literals)));
     }
 
     @Override
-    public GlobalIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        return transform.apply(reader.visitNotIn(fieldRef, literals));
+    public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
+        return Optional.ofNullable(transform.apply(reader.visitNotIn(fieldRef, literals)));
     }
 
     @Override

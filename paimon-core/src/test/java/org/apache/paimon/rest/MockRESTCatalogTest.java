@@ -179,13 +179,24 @@ class MockRESTCatalogTest extends RESTCatalogTest {
 
     @Test
     void testCreateTableDefaultOptions() throws Exception {
-        options.set(TABLE_DEFAULT_OPTION_PREFIX + "default-key", "default-value");
+        String catalogConfigKey = "default-key";
+        options.set(TABLE_DEFAULT_OPTION_PREFIX + catalogConfigKey, "default-value");
         RESTCatalog restCatalog = initCatalog(false);
         Identifier identifier = Identifier.create("db1", "new_table_default_options");
         restCatalog.createDatabase(identifier.getDatabaseName(), true);
         restCatalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, true);
         assertEquals(
-                restCatalog.getTable(identifier).options().get("default-key"), "default-value");
+                restCatalog.getTable(identifier).options().get(catalogConfigKey), "default-value");
+        restCatalog.dropTable(identifier, true);
+        restCatalog.dropDatabase(identifier.getDatabaseName(), true, true);
+
+        String catalogConfigInServerKey = "default-key-in-server";
+        restCatalog = initCatalogWithDefaultTableOption(catalogConfigInServerKey, "default-value");
+        restCatalog.createDatabase(identifier.getDatabaseName(), true);
+        restCatalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, true);
+        assertEquals(
+                restCatalog.getTable(identifier).options().get(catalogConfigInServerKey),
+                "default-value");
     }
 
     @Test
@@ -329,14 +340,28 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     private RESTCatalog initCatalog(boolean enableDataToken) throws IOException {
-        return initCatalog(enableDataToken, Collections.emptyMap());
+        return initCatalogUtil(enableDataToken, Collections.emptyMap(), null, null);
     }
 
     private RESTCatalog initCatalog(boolean enableDataToken, Map<String, String> extraOptions)
             throws IOException {
+        return initCatalogUtil(enableDataToken, extraOptions, null, null);
+    }
+
+    private RESTCatalog initCatalogWithDefaultTableOption(String key, String value)
+            throws IOException {
+        return initCatalogUtil(false, Collections.emptyMap(), key, value);
+    }
+
+    private RESTCatalog initCatalogUtil(
+            boolean enableDataToken,
+            Map<String, String> extraOptions,
+            String createTableDefaultKey,
+            String createTableDefaultValue)
+            throws IOException {
         String restWarehouse = UUID.randomUUID().toString();
-        this.config =
-                new ConfigResponse(
+        Map<String, String> defaultConf =
+                new HashMap<>(
                         ImmutableMap.of(
                                 RESTCatalogInternalOptions.PREFIX.key(),
                                 "paimon",
@@ -345,8 +370,12 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                                 RESTTokenFileIO.DATA_TOKEN_ENABLED.key(),
                                 enableDataToken + "",
                                 CatalogOptions.WAREHOUSE.key(),
-                                restWarehouse),
-                        ImmutableMap.of());
+                                restWarehouse));
+        if (createTableDefaultKey != null) {
+            defaultConf.put(
+                    TABLE_DEFAULT_OPTION_PREFIX + createTableDefaultKey, createTableDefaultValue);
+        }
+        this.config = new ConfigResponse(defaultConf, ImmutableMap.of());
         restCatalogServer =
                 new RESTCatalogServer(dataPath, this.authProvider, this.config, restWarehouse);
         restCatalogServer.start();

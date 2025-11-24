@@ -30,7 +30,12 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.ZoneOffset;
 
+import static org.apache.paimon.data.variant.PaimonShreddingUtils.assembleVariant;
+import static org.apache.paimon.data.variant.PaimonShreddingUtils.buildVariantSchema;
+import static org.apache.paimon.data.variant.PaimonShreddingUtils.castShredded;
+import static org.apache.paimon.data.variant.PaimonShreddingUtils.variantShreddingSchema;
 import static org.apache.paimon.types.DataTypesTest.assertThat;
 
 /** Test of {@link GenericVariant}. */
@@ -86,23 +91,51 @@ public class GenericVariantTest {
                         + "}\n";
 
         Variant variant = GenericVariant.fromJson(json);
-        assertThat(variant.variantGet("$.object"))
+
+        VariantCastArgs castArgs = new VariantCastArgs(false, ZoneOffset.UTC);
+        assertThat(variant.variantGet("$.object", DataTypes.STRING(), castArgs))
                 .isEqualTo(
-                        "{\"address\":{\"city\":\"Hangzhou\",\"street\":\"Main St\"},\"age\":2,\"name\":\"Apache Paimon\"}");
-        assertThat(variant.variantGet("$.object.name")).isEqualTo("Apache Paimon");
-        assertThat(variant.variantGet("$.object.address.street")).isEqualTo("Main St");
-        assertThat(variant.variantGet("$[\"object\"]['address'].city")).isEqualTo("Hangzhou");
-        assertThat(variant.variantGet("$.array")).isEqualTo("[1,2,3,4,5]");
-        assertThat(variant.variantGet("$.array[0]")).isEqualTo(1L);
-        assertThat(variant.variantGet("$.array[3]")).isEqualTo(4L);
-        assertThat(variant.variantGet("$.string")).isEqualTo("Hello, World!");
-        assertThat(variant.variantGet("$.long")).isEqualTo(12345678901234L);
-        assertThat(variant.variantGet("$.double"))
+                        BinaryString.fromString(
+                                "{\"address\":{\"city\":\"Hangzhou\",\"street\":\"Main St\"},\"age\":2,\"name\":\"Apache Paimon\"}"));
+        RowType address =
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"street", "city"});
+        assertThat(variant.variantGet("$.object.address", address, castArgs))
+                .isEqualTo(
+                        GenericRow.of(
+                                BinaryString.fromString("Main St"),
+                                BinaryString.fromString("Hangzhou")));
+        assertThat(variant.variantGet("$.object.name", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString("Apache Paimon"));
+        assertThat(variant.variantGet("$.object.address.street", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString("Main St"));
+        assertThat(
+                        variant.variantGet(
+                                "$[\"object\"]['address'].city", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString("Hangzhou"));
+        assertThat(variant.variantGet("$.array", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString("[1,2,3,4,5]"));
+        assertThat(variant.variantGet("$.array", DataTypes.ARRAY(DataTypes.INT()), castArgs))
+                .isEqualTo(new GenericArray(new Integer[] {1, 2, 3, 4, 5}));
+        assertThat(variant.variantGet("$.array[0]", DataTypes.BIGINT(), castArgs)).isEqualTo(1L);
+        assertThat(variant.variantGet("$.array[3]", DataTypes.BIGINT(), castArgs)).isEqualTo(4L);
+        assertThat(variant.variantGet("$.string", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString("Hello, World!"));
+        assertThat(variant.variantGet("$.long", DataTypes.BIGINT(), castArgs))
+                .isEqualTo(12345678901234L);
+        assertThat(variant.variantGet("$.long", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString("12345678901234"));
+        assertThat(variant.variantGet("$.double", DataTypes.DOUBLE(), castArgs))
                 .isEqualTo(1.0123456789012345678901234567890123456789);
-        assertThat(variant.variantGet("$.decimal")).isEqualTo(new BigDecimal("100.99"));
-        assertThat(variant.variantGet("$.boolean1")).isEqualTo(true);
-        assertThat(variant.variantGet("$.boolean2")).isEqualTo(false);
-        assertThat(variant.variantGet("$.nullField")).isNull();
+        assertThat(variant.variantGet("$.decimal", DataTypes.DECIMAL(5, 2), castArgs))
+                .isEqualTo(Decimal.fromBigDecimal(new BigDecimal("100.99"), 5, 2));
+        assertThat(variant.variantGet("$.decimal", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString("100.99"));
+        assertThat(variant.variantGet("$.boolean1", DataTypes.BOOLEAN(), castArgs)).isEqualTo(true);
+        assertThat(variant.variantGet("$.boolean2", DataTypes.BOOLEAN(), castArgs))
+                .isEqualTo(false);
+        assertThat(variant.variantGet("$.nullField", DataTypes.BOOLEAN(), castArgs)).isNull();
     }
 
     @Test
@@ -228,14 +261,14 @@ public class GenericVariantTest {
 
     private void testShreddingResult(
             GenericVariant variant, RowType shreddedType, InternalRow expected) {
-        RowType shreddingSchema = PaimonShreddingUtils.variantShreddingSchema(shreddedType);
-        VariantSchema variantSchema = PaimonShreddingUtils.buildVariantSchema(shreddingSchema);
+        RowType shreddingSchema = variantShreddingSchema(shreddedType);
+        VariantSchema variantSchema = buildVariantSchema(shreddingSchema);
         // test cast shredded
-        InternalRow shredded = PaimonShreddingUtils.castShredded(variant, variantSchema);
+        InternalRow shredded = castShredded(variant, variantSchema);
         assertThat(shredded).isEqualTo(expected);
 
         // test rebuild
-        Variant rebuild = PaimonShreddingUtils.rebuild(shredded, variantSchema);
+        Variant rebuild = assembleVariant(shredded, variantSchema);
         assertThat(variant.toJson()).isEqualTo(rebuild.toJson());
     }
 }

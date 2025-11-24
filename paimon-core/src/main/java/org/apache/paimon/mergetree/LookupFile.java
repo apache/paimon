@@ -49,6 +49,7 @@ public class LookupFile {
 
     private final File localFile;
     private final int level;
+    private final long schemaId;
     private final LookupStoreReader reader;
     private final Runnable callback;
 
@@ -56,15 +57,21 @@ public class LookupFile {
     private long hitCount;
     private boolean isClosed = false;
 
-    public LookupFile(File localFile, int level, LookupStoreReader reader, Runnable callback) {
+    public LookupFile(
+            File localFile, int level, long schemaId, LookupStoreReader reader, Runnable callback) {
         this.localFile = localFile;
         this.level = level;
+        this.schemaId = schemaId;
         this.reader = reader;
         this.callback = callback;
     }
 
     public File localFile() {
         return localFile;
+    }
+
+    public long schemaId() {
+        return schemaId;
     }
 
     @Nullable

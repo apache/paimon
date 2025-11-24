@@ -53,12 +53,15 @@ public class IndexFileMeta {
                                     4,
                                     "_DELETIONS_VECTORS_RANGES",
                                     new ArrayType(true, DeletionVectorMeta.SCHEMA)),
-                            new DataField(5, "_EXTERNAL_PATH", newStringType(true))));
+                            new DataField(5, "_EXTERNAL_PATH", newStringType(true)),
+                            new DataField(6, "_GLOBAL_INDEX", GlobalIndexMeta.SCHEMA)));
 
     private final String indexType;
     private final String fileName;
     private final long fileSize;
     private final long rowCount;
+
+    @Nullable private final GlobalIndexMeta globalIndexMeta;
 
     /**
      * Metadata only used by {@link DeletionVectorsIndexFile}, use LinkedHashMap to ensure that the
@@ -75,16 +78,42 @@ public class IndexFileMeta {
             long rowCount,
             @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
             @Nullable String externalPath) {
+        this(indexType, fileName, fileSize, rowCount, dvRanges, externalPath, null);
+    }
+
+    public IndexFileMeta(
+            String indexType,
+            String fileName,
+            long fileSize,
+            long rowCount,
+            @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
+            @Nullable String externalPath,
+            @Nullable GlobalIndexMeta globalIndexMeta) {
         this.indexType = indexType;
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.rowCount = rowCount;
         this.dvRanges = dvRanges;
         this.externalPath = externalPath;
+        this.globalIndexMeta = globalIndexMeta;
+    }
+
+    public IndexFileMeta(
+            String indexType,
+            String fileName,
+            long fileSize,
+            long rowCount,
+            @Nullable GlobalIndexMeta globalIndexMeta) {
+        this(indexType, fileName, fileSize, rowCount, null, null, globalIndexMeta);
     }
 
     public String indexType() {
         return indexType;
+    }
+
+    @Nullable
+    public GlobalIndexMeta globalIndexMeta() {
+        return globalIndexMeta;
     }
 
     public String fileName() {

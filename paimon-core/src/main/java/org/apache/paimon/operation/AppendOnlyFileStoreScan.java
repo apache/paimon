@@ -33,7 +33,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -120,11 +119,6 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         }
 
         return testFileIndex(entry.file().embeddedIndex(), entry);
-    }
-
-    @Override
-    protected List<ManifestEntry> postFilter(List<ManifestEntry> entries) {
-        return entries;
     }
 
     private boolean testFileIndex(@Nullable byte[] embeddedIndexBytes, ManifestEntry entry) {
