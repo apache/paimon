@@ -44,13 +44,13 @@ public class HashIndexFileTest {
         IndexPathFactory pathFactory =
                 new IndexPathFactory() {
                     @Override
-                    public Path toPath(String fileName) {
-                        return new Path(dir, fileName);
+                    public Path newPath() {
+                        return new Path(dir, UUID.randomUUID().toString());
                     }
 
                     @Override
-                    public Path newPath() {
-                        return new Path(dir, UUID.randomUUID().toString());
+                    public Path toPath(String fileName) {
+                        return new Path(dir, fileName);
                     }
 
                     @Override
