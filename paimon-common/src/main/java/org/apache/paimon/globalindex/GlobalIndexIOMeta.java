@@ -18,24 +18,36 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
-import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.Range;
 
-import java.io.IOException;
-import java.util.List;
+/** Index meta for global index. */
+public class GlobalIndexIOMeta {
 
-/** Abstract base class for global indexers. */
-public interface GlobalIndexer {
+    private final String fileName;
+    private final long fileSize;
+    private final Range rowIdRange;
+    private final byte[] metadata;
 
-    GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException;
+    public GlobalIndexIOMeta(String fileName, long fileSize, Range rowIdRange, byte[] metadata) {
+        this.fileName = fileName;
+        this.fileSize = fileSize;
+        this.rowIdRange = rowIdRange;
+        this.metadata = metadata;
+    }
 
-    GlobalIndexReader createReader(GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files)
-            throws IOException;
+    public String fileName() {
+        return fileName;
+    }
 
-    static GlobalIndexer create(String type, DataType dataType, Options options) {
-        GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
-        return globalIndexerFactory.create(dataType, options);
+    public long fileSize() {
+        return fileSize;
+    }
+
+    public Range rowIdRange() {
+        return rowIdRange;
+    }
+
+    public byte[] metadata() {
+        return metadata;
     }
 }

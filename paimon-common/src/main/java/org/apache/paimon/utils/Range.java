@@ -91,4 +91,10 @@ public class Range {
         }
         return null;
     }
+
+    public static boolean intersect(long start1, long end1, long start2, long end2) {
+        long intersectionStart = Math.max(start1, start2);
+        long intersectionEnd = Math.min(end1, end2);
+        return intersectionStart <= intersectionEnd;
+    }
 }

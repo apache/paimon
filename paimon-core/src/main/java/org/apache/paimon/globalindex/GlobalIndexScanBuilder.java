@@ -18,36 +18,21 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.utils.Range;
 
-/** Index meta for global index. */
-public class GlobalIndexMeta {
+import java.util.Set;
 
-    private final String fileName;
-    private final long fileSize;
-    private final Range rowIdRange;
-    private final byte[] metadata;
+/** Builder for scanning global indexes. */
+public interface GlobalIndexScanBuilder {
 
-    public GlobalIndexMeta(String fileName, long fileSize, Range rowIdRange, byte[] metadata) {
-        this.fileName = fileName;
-        this.fileSize = fileSize;
-        this.rowIdRange = rowIdRange;
-        this.metadata = metadata;
-    }
+    GlobalIndexScanBuilder withSnapshot(long snapshotId);
 
-    public String fileName() {
-        return fileName;
-    }
+    GlobalIndexScanBuilder withPartition(BinaryRow binaryRow);
 
-    public long fileSize() {
-        return fileSize;
-    }
+    GlobalIndexScanBuilder withRowRange(Range rowRange);
 
-    public Range rowIdRange() {
-        return rowIdRange;
-    }
+    ShardGlobalIndexScanner build();
 
-    public byte[] metadata() {
-        return metadata;
-    }
+    Set<Range> shardList();
 }
