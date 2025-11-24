@@ -36,6 +36,8 @@ import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.sort.SortLookupStoreFactory;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.mergetree.lookup.DefaultLookupSerializerFactory;
+import org.apache.paimon.mergetree.lookup.PersistValueProcessor;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -270,10 +272,13 @@ public class LookupLevelsTest {
 
     private LookupLevels<KeyValue> createLookupLevels(Levels levels, MemorySize maxDiskSize) {
         return new LookupLevels<>(
+                schemaId -> rowType,
+                0L,
                 levels,
                 comparator,
                 keyType,
-                new LookupLevels.PersistValueProcessor(rowType),
+                PersistValueProcessor.factory(rowType),
+                new DefaultLookupSerializerFactory(),
                 file -> createReaderFactory().createRecordReader(file),
                 file -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new SortLookupStoreFactory(
