@@ -250,7 +250,10 @@ public class CombinedFlinkOrphanFilesClean implements Serializable {
         DataStream<String> usedFiles =
                 usedManifestFiles
                         .getSideOutput(manifestOutputTag)
-                        .keyBy(tuple2 -> tuple2.f0) // Use Identifier object directly as key
+                        .keyBy(
+                                tuple2 ->
+                                        tuple2.f0) // Group by table identifier to process manifests
+                        // per table
                         .transform(
                                 "datafile-reader",
                                 STRING_TYPE_INFO,

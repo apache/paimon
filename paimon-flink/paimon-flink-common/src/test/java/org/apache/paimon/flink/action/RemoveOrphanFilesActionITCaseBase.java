@@ -102,67 +102,6 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         return new Path(table.location(), orphanFile);
     }
 
-    private List<String> readTableData(FileStoreTable table) throws Exception {
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
-                        new String[] {"k", "v"});
-
-        ReadBuilder readBuilder = table.newReadBuilder();
-        TableScan.Plan plan = readBuilder.newScan().plan();
-        List<String> result =
-                getResultLocal(
-                        readBuilder.newRead(),
-                        plan == null ? Collections.emptyList() : plan.splits(),
-                        rowType);
-        return result;
-    }
-
-    private List<String> getResultLocal(
-            org.apache.paimon.table.source.TableRead read,
-            List<org.apache.paimon.table.source.Split> splits,
-            RowType rowType)
-            throws Exception {
-        try (org.apache.paimon.reader.RecordReader<org.apache.paimon.data.InternalRow>
-                recordReader = read.createReader(splits)) {
-            List<String> result = new ArrayList<>();
-            recordReader.forEachRemaining(
-                    row -> result.add(internalRowToStringLocal(row, rowType)));
-            return result;
-        }
-    }
-
-    /**
-     * Stringify the given {@link InternalRow}. This is a simplified version that handles basic
-     * types. For complex types (Array, Map, Row), it falls back to toString().
-     *
-     * <p>This method is implemented locally to avoid dependency on paimon-common's test-jar, which
-     * may not be available in CI environments.
-     */
-    private String internalRowToStringLocal(org.apache.paimon.data.InternalRow row, RowType type) {
-        StringBuilder build = new StringBuilder();
-        build.append(row.getRowKind().shortString()).append("[");
-        for (int i = 0; i < type.getFieldCount(); i++) {
-            if (i != 0) {
-                build.append(", ");
-            }
-            if (row.isNullAt(i)) {
-                build.append("NULL");
-            } else {
-                org.apache.paimon.data.InternalRow.FieldGetter fieldGetter =
-                        org.apache.paimon.data.InternalRow.createFieldGetter(type.getTypeAt(i), i);
-                Object field = fieldGetter.getFieldOrNull(row);
-                if (field != null) {
-                    build.append(field);
-                } else {
-                    build.append("NULL");
-                }
-            }
-        }
-        build.append("]");
-        return build.toString();
-    }
-
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testRunWithoutException(boolean isNamedArgument) throws Exception {
@@ -597,8 +536,6 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         FileStoreTable branchTable2 = createBranchTable(table, "br2");
         writeToBranch(branchTable2, GenericRow.of(3L, BinaryString.fromString("World"), 30));
 
-        // Create orphan files in both branch snapshot directories
-        // This is key: same table, multiple branches - will trigger bug in
         Path orphanFileBr1 =
                 new Path(table.location(), "branch/branch-br1/snapshot/orphan_file_br1");
         Path orphanFileBr2 =
@@ -919,5 +856,58 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
     protected boolean supportNamedArgument() {
         return true;
+    }
+
+    private List<String> readTableData(FileStoreTable table) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        List<String> result =
+                getResultLocal(
+                        readBuilder.newRead(),
+                        plan == null ? Collections.emptyList() : plan.splits(),
+                        rowType);
+        return result;
+    }
+
+    private List<String> getResultLocal(
+            org.apache.paimon.table.source.TableRead read,
+            List<org.apache.paimon.table.source.Split> splits,
+            RowType rowType)
+            throws Exception {
+        try (org.apache.paimon.reader.RecordReader<org.apache.paimon.data.InternalRow>
+                recordReader = read.createReader(splits)) {
+            List<String> result = new ArrayList<>();
+            recordReader.forEachRemaining(row -> result.add(internalRowToString(row, rowType)));
+            return result;
+        }
+    }
+
+    private String internalRowToString(org.apache.paimon.data.InternalRow row, RowType type) {
+        StringBuilder build = new StringBuilder();
+        build.append(row.getRowKind().shortString()).append("[");
+        for (int i = 0; i < type.getFieldCount(); i++) {
+            if (i != 0) {
+                build.append(", ");
+            }
+            if (row.isNullAt(i)) {
+                build.append("NULL");
+            } else {
+                org.apache.paimon.data.InternalRow.FieldGetter fieldGetter =
+                        org.apache.paimon.data.InternalRow.createFieldGetter(type.getTypeAt(i), i);
+                Object field = fieldGetter.getFieldOrNull(row);
+                if (field != null) {
+                    build.append(field);
+                } else {
+                    build.append("NULL");
+                }
+            }
+        }
+        build.append("]");
+        return build.toString();
     }
 }

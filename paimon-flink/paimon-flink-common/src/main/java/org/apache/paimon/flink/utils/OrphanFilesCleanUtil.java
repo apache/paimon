@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.utils;
 
-import org.apache.paimon.flink.orphan.FlinkOrphanFilesClean;
 import org.apache.paimon.operation.CleanOrphanFilesResult;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -36,7 +35,7 @@ import static org.apache.flink.util.Preconditions.checkState;
 /** Utility class for orphan files clean operations in Flink. */
 public class OrphanFilesCleanUtil {
 
-    protected static final Logger LOG = LoggerFactory.getLogger(FlinkOrphanFilesClean.class);
+    protected static final Logger LOG = LoggerFactory.getLogger(OrphanFilesCleanUtil.class);
 
     public static void configureFlinkEnvironment(
             StreamExecutionEnvironment env, Integer parallelism) {

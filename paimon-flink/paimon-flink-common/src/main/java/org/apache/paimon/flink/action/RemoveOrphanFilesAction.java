@@ -48,7 +48,7 @@ public class RemoveOrphanFilesAction extends ActionBase {
 
     private String olderThan = null;
     private boolean dryRun = false;
-    private MultiTablesSinkMode mode = COMBINED;
+    @Nullable private MultiTablesSinkMode mode;
 
     public RemoveOrphanFilesAction(
             String databaseName,
@@ -104,7 +104,7 @@ public class RemoveOrphanFilesAction extends ActionBase {
                             .map(table -> Identifier.create(databaseName, table))
                             .collect(Collectors.toList());
         }
-        if (COMBINED.equals(mode)) {
+        if (mode == null || COMBINED.equals(mode)) {
             CombinedFlinkOrphanFilesClean.executeDatabaseOrphanFiles(
                     env,
                     catalog,

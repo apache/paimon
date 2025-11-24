@@ -138,10 +138,10 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
 
         System.out.println(
                 "When '--mode combined', multiple tables will be processed within a single DataStream "
-                        + "during job graph construction, instead of creating one dataStream per table. "
+                        + "during job graph construction, instead of creating one DataStream per table. "
                         + "This significantly reduces job graph construction time, when processing "
                         + "thousands of tables (jobs may fail to start within timeout limits). "
-                        + "It also reduces JobGraph complexity and avoids stack over flow issue and resource allocation failures during job running. "
+                        + "It also reduces JobGraph complexity and avoids stack overflow issue and resource allocation failures during job running. "
                         + "When '--mode divided', create one DataStream per table during job graph construction. "
                         + "Default is 'combined'.");
         System.out.println();
