@@ -277,7 +277,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                         newKeyComparator(),
                         bucketMode(),
                         options.deletionVectorsEnabled(),
-                        newIndexFileHandler());
+                        newIndexFileHandler(),
+                        newScan());
         return new FileStoreCommitImpl(
                 snapshotCommit,
                 fileIO,
