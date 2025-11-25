@@ -993,7 +993,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         if (strictModeLastSafeSnapshot != null && strictModeLastSafeSnapshot >= 0) {
             conflictDetection.commitStrictModeCheck(
-                    strictModeLastSafeSnapshot, newSnapshotId, snapshotManager);
+                    strictModeLastSafeSnapshot, newSnapshotId, commitKind, snapshotManager);
             strictModeLastSafeSnapshot = newSnapshotId - 1;
         }
 

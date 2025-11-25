@@ -109,46 +109,50 @@ public class ConflictDetection {
     public void commitStrictModeCheck(
             @Nullable Long strictModeLastSafeSnapshot,
             long newSnapshotId,
+            CommitKind newCommitKind,
             SnapshotManager snapshotManager) {
-        if (strictModeLastSafeSnapshot != null && strictModeLastSafeSnapshot >= 0) {
-            for (long id = strictModeLastSafeSnapshot + 1; id < newSnapshotId; id++) {
-                Snapshot snapshot = snapshotManager.snapshot(id);
-                if (snapshot.commitUser().equals(commitUser)) {
-                    continue;
-                }
-                if (snapshot.commitKind() == CommitKind.COMPACT
-                        || snapshot.commitKind() == CommitKind.OVERWRITE) {
+        if (strictModeLastSafeSnapshot == null || strictModeLastSafeSnapshot < 0) {
+            return;
+        }
+
+        for (long id = strictModeLastSafeSnapshot + 1; id < newSnapshotId; id++) {
+            Snapshot snapshot = snapshotManager.snapshot(id);
+            if (snapshot.commitUser().equals(commitUser)) {
+                continue;
+            }
+            if (snapshot.commitKind() == CommitKind.COMPACT
+                    || snapshot.commitKind() == CommitKind.OVERWRITE) {
+                throw new RuntimeException(
+                        String.format(
+                                "When trying to commit snapshot %d, "
+                                        + "commit user %s has found a %s snapshot (id: %d) by another user %s. "
+                                        + "Giving up committing as %s is set.",
+                                newSnapshotId,
+                                commitUser,
+                                snapshot.commitKind().name(),
+                                id,
+                                snapshot.commitUser(),
+                                CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
+            }
+            if (snapshot.commitKind() == CommitKind.APPEND
+                    && newCommitKind == CommitKind.OVERWRITE) {
+                Iterator<ManifestEntry> entries =
+                        scan.withSnapshot(snapshot)
+                                .withKind(ScanMode.DELTA)
+                                .onlyReadRealBuckets()
+                                .dropStats()
+                                .readFileIterator();
+                if (entries.hasNext()) {
                     throw new RuntimeException(
                             String.format(
                                     "When trying to commit snapshot %d, "
-                                            + "commit user %s has found a %s snapshot (id: %d) by another user %s. "
-                                            + "Giving up committing as %s is set.",
+                                            + "commit user %s has found a APPEND snapshot (id: %d) by another user %s "
+                                            + "which committed files to fixed bucket. Giving up committing as %s is set.",
                                     newSnapshotId,
                                     commitUser,
-                                    snapshot.commitKind().name(),
                                     id,
                                     snapshot.commitUser(),
                                     CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
-                }
-                if (snapshot.commitKind() == CommitKind.APPEND) {
-                    Iterator<ManifestEntry> entries =
-                            scan.withSnapshot(snapshot)
-                                    .withKind(ScanMode.DELTA)
-                                    .onlyReadRealBuckets()
-                                    .dropStats()
-                                    .readFileIterator();
-                    if (entries.hasNext()) {
-                        throw new RuntimeException(
-                                String.format(
-                                        "When trying to commit snapshot %d, "
-                                                + "commit user %s has found a APPEND snapshot (id: %d) by another user %s "
-                                                + "which committed files to fixed bucket. Giving up committing as %s is set.",
-                                        newSnapshotId,
-                                        commitUser,
-                                        id,
-                                        snapshot.commitUser(),
-                                        CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
-                    }
                 }
             }
         }
@@ -527,7 +531,8 @@ public class ConflictDetection {
         if (baseEntries.size() > maxEntry || changes.size() > maxEntry) {
             baseEntriesString =
                     "Base entries are:\n"
-                            + baseEntries.subList(0, Math.min(baseEntries.size(), maxEntry))
+                            + baseEntries
+                                    .subList(0, Math.min(baseEntries.size(), maxEntry))
                                     .stream()
                                     .map(Object::toString)
                                     .collect(Collectors.joining("\n"));
