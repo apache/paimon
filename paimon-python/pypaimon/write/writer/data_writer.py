@@ -162,7 +162,7 @@ class DataWriter(ABC):
         if data.num_rows == 0:
             return
         file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
-        file_path = self._generate_file_path(file_name)
+        file_path = str(self._generate_file_path(file_name))
 
         is_external_path = self.external_path_provider is not None
         if is_external_path:
@@ -255,7 +255,8 @@ class DataWriter(ABC):
             return str(external_path_url)
 
         bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
-        return str(bucket_path / file_name)
+        result = bucket_path / file_name
+        return str(result)
 
     def _get_file_io_for_path(self, path: str) -> 'FileIO':
         """
