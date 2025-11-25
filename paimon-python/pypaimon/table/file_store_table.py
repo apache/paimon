@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Optional
+from typing import List, Optional
 
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.common.core_options import CoreOptions
@@ -157,7 +157,7 @@ class FileStoreTable(Table):
         for key, value in options.items():
             self.options[key] = value
 
-    def _create_external_paths(self) -> List[URL]:
+    def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse
         from urlpath import URL
         from pypaimon.common.core_options import ExternalPathStrategy

@@ -247,19 +247,40 @@ class DataWriter(ABC):
             file_path=file_path,
         ))
 
-<<<<<<< HEAD
     def _generate_file_path(self, file_name: str) -> str:
-        path_builder = str(self.table.table_path)
+        if self.external_path_provider:
+            external_path_url = self.external_path_provider.get_next_external_data_path(file_name)
+            self._current_external_url = external_path_url
+            return str(external_path_url)
 
-        for i, field_name in enumerate(self.table.partition_keys):
-            path_builder = f"{path_builder.rstrip('/')}/{field_name}={str(self.partition[i])}"
+        bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
+        return str(bucket_path / file_name)
 
-        if self.bucket == BucketMode.POSTPONE_BUCKET.value:
-            bucket_name = "postpone"
+    def _get_file_io_for_path(self, path: str) -> 'FileIO':
+        """
+        Get the appropriate FileIO instance for the given path.
+        If the path uses a different scheme than the warehouse, create a new FileIO instance.
+        """
+        from urllib.parse import urlparse
+        from pypaimon.common.file_io import FileIO
+
+        path_str = str(path)
+        parsed = urlparse(path_str)
+        path_scheme = parsed.scheme
+
+        # If no scheme or scheme matches warehouse, use existing file_io
+        if not path_scheme:
+            return self.file_io
+
+        # Check if path scheme matches warehouse scheme
+        warehouse_path_str = str(self.table.table_path)
+        supported_schemes = ('file://', 's3://', 's3a://', 's3n://', 'oss://', 'hdfs://', 'viewfs://')
+        if warehouse_path_str.startswith(supported_schemes):
+            warehouse_url = warehouse_path_str
         else:
-            bucket_name = str(self.bucket)
-
-        path_builder = f"{path_builder.rstrip('/')}/bucket-{bucket_name}/{file_name}"
+            warehouse_url = f"file://{warehouse_path_str}"
+        warehouse_parsed = urlparse(warehouse_url)
+        warehouse_scheme = warehouse_parsed.scheme or 'file'
 
         # Normalize schemes for comparison
         s3_schemes = {'s3', 's3a', 's3n', 'oss'}
@@ -273,15 +294,6 @@ class DataWriter(ABC):
         # Schemes don't match - create a new FileIO instance for the external path
         # Use the same catalog options as the warehouse FileIO
         return FileIO(path_str, self.file_io.properties)
-
-    def _generate_file_path(self, file_name: str) -> Path:
-        if self.external_path_provider:
-            external_path_url = self.external_path_provider.get_next_external_data_path(file_name)
-            self._current_external_url = external_path_url
-            return Path(str(external_path_url))
-
-        bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
-        return Path(str(bucket_path / file_name))
 
     @staticmethod
     def _find_optimal_split_point(data: pa.RecordBatch, target_size: int) -> int:

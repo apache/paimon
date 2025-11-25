@@ -438,7 +438,6 @@ class FileIO:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
 
-<<<<<<< HEAD
     def to_filesystem_path(self, path: str) -> str:
         from pyarrow.fs import S3FileSystem
         import re
