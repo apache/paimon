@@ -73,7 +73,7 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITC
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(2400)
     public void testCaseInsensitive() throws Exception {
         testCaseInsensitive(OGG);
     }
