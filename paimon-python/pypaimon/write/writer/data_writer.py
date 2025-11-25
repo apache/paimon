@@ -34,7 +34,7 @@ from pypaimon.table.row.generic_row import GenericRow
 class DataWriter(ABC):
     """Base class for data writers that handle PyArrow tables directly."""
 
-    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int,
+    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: Dict[str, str] = None,
                  write_cols: Optional[List[str]] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -46,7 +46,7 @@ class DataWriter(ABC):
         self.trimmed_primary_keys_fields = self.table.trimmed_primary_keys_fields
         self.trimmed_primary_keys = self.table.trimmed_primary_keys
 
-        options = self.table.options
+        self.options = options
         self.target_file_size = CoreOptions.target_file_size(options, self.table.is_primary_key_table)
         # POSTPONE_BUCKET uses AVRO format, otherwise default to PARQUET
         default_format = (
@@ -158,7 +158,7 @@ class DataWriter(ABC):
     def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:
             return
-        file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
+        file_name = f"{self.options.get(CoreOptions.DATA_FILE_PREFIX)}-{uuid.uuid4()}-0.{self.file_format}"
         file_path = self._generate_file_path(file_name)
 
         is_external_path = self.external_path_provider is not None

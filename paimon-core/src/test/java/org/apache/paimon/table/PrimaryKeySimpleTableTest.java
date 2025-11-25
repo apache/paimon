@@ -190,6 +190,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
             write.write(rowData(0, 0, 0L));
+            write.write(rowData(1, 1, 1L));
             commit.commit(write.prepareCommit());
         }
 
