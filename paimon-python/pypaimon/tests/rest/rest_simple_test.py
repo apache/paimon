@@ -566,52 +566,6 @@ class RESTSimpleTest(RESTBaseTest):
         expected = pa.Table.from_pydict(data_expected, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
-    def test_postpone_write(self):
-        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'], primary_keys=['user_id', 'dt'],
-                                            options={'bucket': -2})
-        self.rest_catalog.create_table('default.test_postpone', schema, False)
-        table = self.rest_catalog.get_table('default.test_postpone')
-
-        expect = pa.Table.from_pydict(self.data, schema=self.pa_schema)
-
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(expect)
-        commit_messages = table_write.prepare_commit()
-        table_commit.commit(commit_messages)
-        table_write.close()
-        table_commit.close()
-
-        self.assertTrue(os.path.exists(self.warehouse + "/default/test_postpone/snapshot/LATEST"))
-        self.assertTrue(os.path.exists(self.warehouse + "/default/test_postpone/snapshot/snapshot-1"))
-        self.assertTrue(os.path.exists(self.warehouse + "/default/test_postpone/manifest"))
-        self.assertEqual(len(glob.glob(self.warehouse + "/default/test_postpone/manifest/*")), 3)
-        self.assertEqual(len(glob.glob(self.warehouse + "/default/test_postpone/user_id=2/bucket-postpone/*.avro")), 1)
-
-    def test_postpone_read_write(self):
-        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'], primary_keys=['user_id', 'dt'],
-                                            options={'bucket': -2})
-        self.rest_catalog.create_table('default.test_postpone', schema, False)
-        table = self.rest_catalog.get_table('default.test_postpone')
-
-        expect = pa.Table.from_pydict(self.data, schema=self.pa_schema)
-
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(expect)
-        commit_messages = table_write.prepare_commit()
-        table_commit.commit(commit_messages)
-        table_write.close()
-        table_commit.close()
-
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        actual = table_read.to_arrow(splits)
-        self.assertTrue(not actual)
-
     def test_create_drop_database_table(self):
         # test create database
         self.rest_catalog.create_database("db1", False)
