@@ -419,7 +419,7 @@ public class TableCommitTest {
         table = table.copy(newOptions);
         String user2 = UUID.randomUUID().toString();
         TableWriteImpl<?> write2 = table.newWrite(user2);
-        TableCommitImpl commit2 = table.newCommit(user2);
+        TableCommitImpl commit2 = table.newCommit(user2).withOverwrite(Collections.emptyMap());
 
         // by default, first commit is not checked
 
