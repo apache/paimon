@@ -19,9 +19,12 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, TYPE_CHECKING
 
 import pyarrow as pa
+
+if TYPE_CHECKING:
+    from pypaimon.common.file_io import FileIO
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -269,7 +272,8 @@ class DataBlobWriter(DataWriter):
         return self._create_data_file_meta(file_name, file_path, data, file_io_to_use, external_path_str)
 
     def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table, 
-                                file_io_to_use=None, external_path: Optional[str] = None) -> DataFileMeta:
+                                file_io_to_use: Optional['FileIO'] = None, 
+                                external_path: Optional[str] = None) -> DataFileMeta:
         # Column stats (only for normal columns)
         column_stats = {
             field.name: self._get_column_stats(data, field.name)

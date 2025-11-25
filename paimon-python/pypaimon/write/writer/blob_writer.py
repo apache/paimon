@@ -162,7 +162,8 @@ class BlobWriter(AppendOnlyDataWriter):
         # Reuse _add_file_metadata for consistency (blob table is append-only, no primary keys)
         self._add_file_metadata(file_name, file_path, data, file_size, external_path_str)
 
-    def _add_file_metadata(self, file_name: str, file_path: str, data_or_row_count, file_size: int):
+    def _add_file_metadata(self, file_name: str, file_path: str, data_or_row_count, file_size: int, 
+                            external_path: Optional[str] = None):
         """Add file metadata to committed_files."""
         from datetime import datetime
         from pypaimon.manifest.schema.data_file_meta import DataFileMeta
