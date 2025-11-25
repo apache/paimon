@@ -248,8 +248,7 @@ class DataWriter(ABC):
             return external_path
 
         bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
-        result = bucket_path / file_name
-        return str(result)
+        return f"{bucket_path.rstrip('/')}/{file_name}"
 
     @staticmethod
     def _find_optimal_split_point(data: pa.RecordBatch, target_size: int) -> int:

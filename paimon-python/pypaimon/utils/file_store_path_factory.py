@@ -16,7 +16,6 @@
 #  limitations under the License.
 ################################################################################
 from typing import List, Optional, Tuple
-from urlpath import URL
 
 from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.table.bucket_mode import BucketMode
@@ -38,7 +37,7 @@ class FileStorePathFactory:
 
     def __init__(
         self,
-        root: URL,
+        root: str,
         partition_keys: List[str],
         default_part_value: str,
         format_identifier: str,
@@ -51,7 +50,7 @@ class FileStorePathFactory:
         external_paths: Optional[List[str]] = None,
         index_file_in_data_file_dir: bool = False,
     ):
-        self._root = root
+        self._root = root.rstrip('/')
         self.partition_keys = partition_keys
         self.default_part_value = default_part_value
         self.format_identifier = format_identifier
@@ -64,21 +63,21 @@ class FileStorePathFactory:
         self.index_file_in_data_file_dir = index_file_in_data_file_dir
         self.legacy_partition_name = legacy_partition_name
 
-    def root(self) -> URL:
+    def root(self) -> str:
         return self._root
 
-    def manifest_path(self) -> URL:
-        return self._root / self.MANIFEST_PATH
+    def manifest_path(self) -> str:
+        return f"{self._root}/{self.MANIFEST_PATH}"
 
-    def index_path(self) -> URL:
-        return self._root / self.INDEX_PATH
+    def index_path(self) -> str:
+        return f"{self._root}/{self.INDEX_PATH}"
 
-    def statistics_path(self) -> URL:
-        return self._root / self.STATISTICS_PATH
+    def statistics_path(self) -> str:
+        return f"{self._root}/{self.STATISTICS_PATH}"
 
-    def data_file_path(self) -> URL:
+    def data_file_path(self) -> str:
         if self.data_file_path_directory:
-            return self._root / self.data_file_path_directory
+            return f"{self._root}/{self.data_file_path_directory}"
         return self._root
 
     def relative_bucket_path(self, partition: Tuple, bucket: int) -> str:
@@ -102,8 +101,9 @@ class FileStorePathFactory:
 
         return "/".join(relative_parts)
 
-    def bucket_path(self, partition: Tuple, bucket: int) -> URL:
-        return self._root / self.relative_bucket_path(partition, bucket)
+    def bucket_path(self, partition: Tuple, bucket: int) -> str:
+        relative_path = self.relative_bucket_path(partition, bucket)
+        return f"{self._root}/{relative_path}"
 
     def create_external_path_provider(
         self, partition: Tuple, bucket: int

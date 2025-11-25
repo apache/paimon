@@ -72,7 +72,6 @@ class FileStoreTable(Table):
 
     def path_factory(self) -> 'FileStorePathFactory':
         from pypaimon.utils.file_store_path_factory import FileStorePathFactory
-        from urlpath import URL
 
         # Get external paths
         external_paths = self._create_external_paths()
@@ -83,7 +82,7 @@ class FileStoreTable(Table):
         file_compression = CoreOptions.file_compression(self.options)
 
         return FileStorePathFactory(
-            root=URL(str(self.table_path)),
+            root=str(self.table_path),
             partition_keys=self.partition_keys,
             default_part_value="__DEFAULT_PARTITION__",
             format_identifier=format_identifier,
