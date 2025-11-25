@@ -52,6 +52,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -259,7 +260,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     "Committables must be sorted according to identifiers before filtering. This is unexpected.");
         }
 
-        Optional<Snapshot> latestSnapshot = snapshotManager.latestSnapshotOfUser(commitUser);
+        // there is no need to find the latest snapshot for batch commit
+        Optional<Snapshot> latestSnapshot =
+                committables.size() == 1
+                                && committables.get(0).identifier()
+                                        == BatchWriteBuilder.COMMIT_IDENTIFIER
+                        ? Optional.empty()
+                        : snapshotManager.latestSnapshotOfUser(commitUser);
+
         if (latestSnapshot.isPresent()) {
             List<ManifestCommittable> result = new ArrayList<>();
             for (ManifestCommittable committable : committables) {
