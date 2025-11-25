@@ -93,16 +93,18 @@ class SplitRead(ABC):
         _, extension = os.path.splitext(file_path)
         file_format = extension[1:]
 
+        file_io_to_use = self._get_file_io_for_path(file_path)
+
         format_reader: RecordBatchReader
         if file_format == CoreOptions.FILE_FORMAT_AVRO:
-            format_reader = FormatAvroReader(self.table.file_io, file_path, read_file_fields,
+            format_reader = FormatAvroReader(file_io_to_use, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate)
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
             blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
-            format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
+            format_reader = FormatBlobReader(file_io_to_use, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
-            format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path,
+            format_reader = FormatPyArrowReader(file_io_to_use, file_format, file_path,
                                                 read_file_fields, read_arrow_predicate)
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
@@ -115,6 +117,40 @@ class SplitRead(ABC):
         else:
             return DataFileBatchReader(format_reader, index_mapping, partition_info, None,
                                        self.table.table_schema.fields)
+
+    def _get_file_io_for_path(self, path: str) -> 'FileIO':
+        from urllib.parse import urlparse
+        from pypaimon.common.file_io import FileIO
+
+        path_str = str(path)
+        parsed = urlparse(path_str)
+        path_scheme = parsed.scheme
+
+        if path_scheme and len(path_scheme) == 1 and path_scheme.isalpha() and not parsed.netloc:
+            # This is likely a Windows drive letter, not a URI scheme
+            return self.table.file_io
+
+        if not path_scheme:
+            return self.table.file_io
+
+        # Check if path scheme matches warehouse scheme
+        warehouse_path_str = str(self.table.table_path)
+        supported_schemes = ('file://', 's3://', 's3a://', 's3n://', 'oss://', 'hdfs://', 'viewfs://')
+        if warehouse_path_str.startswith(supported_schemes):
+            warehouse_url = warehouse_path_str
+        else:
+            warehouse_url = f"file://{warehouse_path_str}"
+        warehouse_parsed = urlparse(warehouse_url)
+        warehouse_scheme = warehouse_parsed.scheme or 'file'
+
+        s3_schemes = {'s3', 's3a', 's3n', 'oss'}
+        path_is_s3 = path_scheme in s3_schemes
+        warehouse_is_s3 = warehouse_scheme in s3_schemes
+
+        if path_scheme == warehouse_scheme or (path_is_s3 and warehouse_is_s3):
+            return self.table.file_io
+
+        return FileIO(path_str, self.table.file_io.properties)
 
     def _get_fields_and_predicate(self, schema_id: int, read_fields):
         key = (schema_id, tuple(read_fields))
