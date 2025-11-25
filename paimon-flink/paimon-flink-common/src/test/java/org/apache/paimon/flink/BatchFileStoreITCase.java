@@ -456,9 +456,11 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         Map<String, String> expireOptions = new HashMap<>();
         expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
         expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
-        FileStoreTable table = (FileStoreTable) paimonTable(tableName);
+        FileStoreTable table = paimonTable(tableName);
         table.copy(expireOptions).newCommit("").expireSnapshots();
         assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+
+        sql("ALTER TABLE T SET('deletion-vectors.modifiable' = 'true')");
 
         assertThat(
                         batchSql(

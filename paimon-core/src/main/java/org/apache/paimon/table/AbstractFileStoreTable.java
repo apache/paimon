@@ -318,7 +318,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 (k, newValue) -> {
                     String oldValue = oldOptions.get(k);
                     if (!Objects.equals(oldValue, newValue)) {
-                        SchemaManager.checkAlterTableOption(k, oldValue, newValue);
+                        SchemaManager.checkAlterTableOption(oldOptions, k, oldValue, newValue);
                     }
                 });
     }
