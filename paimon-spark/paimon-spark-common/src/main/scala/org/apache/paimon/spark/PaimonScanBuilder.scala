@@ -138,6 +138,7 @@ class PaimonScanBuilder(table: InnerTable)
         table,
         requiredSchema,
         pushedPaimonPredicates,
+        pushedRowIds,
         reservedFilters,
         pushDownLimit,
         pushDownTopN)
