@@ -51,6 +51,7 @@ class CoreOptions(str, Enum):
     TARGET_FILE_SIZE = "target-file-size"
     BLOB_TARGET_FILE_SIZE = "blob.target-file-size"
     DATA_FILE_PREFIX = "data-file.prefix"
+
     # Scan options
     SCAN_FALLBACK_BRANCH = "scan.fallback-branch"
     INCREMENTAL_BETWEEN_TIMESTAMP = "incremental-between-timestamp"
