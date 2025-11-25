@@ -267,7 +267,7 @@ class DataWriter(ABC):
 
         path_str = str(path)
         parsed = urlparse(path_str)
-        path_scheme = parsed.scheme
+        path_scheme = parsed.scheme or ''
 
         if path_scheme and len(path_scheme) == 1 and path_scheme.isalpha() and not parsed.netloc:
             # This is likely a Windows drive letter, not a URI scheme
