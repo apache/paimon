@@ -107,7 +107,6 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CONSUMER_IGNORE_PROGRESS;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
-import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
@@ -1593,12 +1592,12 @@ public abstract class SimpleTableTestBase {
 
     @Test
     public void testDataSplitNotIncludeDvFilesWhenStreamingRead() throws Exception {
-        FileStoreTable table = createFileStoreTable();
-        Map<String, String> options = new HashMap<>();
-        options.put(DELETION_VECTORS_MODIFIABLE.key(), "true");
-        options.put(DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(WRITE_ONLY.key(), "true");
-        table = table.copy(options);
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(DELETION_VECTORS_ENABLED, true);
+                            options.set(WRITE_ONLY, true);
+                        });
 
         try (StreamTableWrite write = table.newWrite(commitUser);
                 StreamTableCommit commit = table.newCommit(commitUser)) {
@@ -1619,12 +1618,12 @@ public abstract class SimpleTableTestBase {
 
     @Test
     public void testDataSplitNotIncludeDvFilesWhenStreamingReadChanges() throws Exception {
-        FileStoreTable table = createFileStoreTable();
-        Map<String, String> options = new HashMap<>();
-        options.put(DELETION_VECTORS_MODIFIABLE.key(), "true");
-        options.put(DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(WRITE_ONLY.key(), "true");
-        table = table.copy(options);
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(DELETION_VECTORS_ENABLED, true);
+                            options.set(WRITE_ONLY, true);
+                        });
 
         try (StreamTableWrite write = table.newWrite(commitUser);
                 StreamTableCommit commit = table.newCommit(commitUser)) {
