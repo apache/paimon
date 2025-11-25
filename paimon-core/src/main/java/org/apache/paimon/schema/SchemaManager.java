@@ -78,6 +78,8 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
 import static org.apache.paimon.CoreOptions.DISTINCT;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.IGNORE_RETRACT;
@@ -297,7 +299,10 @@ public class SchemaManager implements Serializable {
                 SetOption setOption = (SetOption) change;
                 if (hasSnapshots.get()) {
                     checkAlterTableOption(
-                            setOption.key(), oldOptions.get(setOption.key()), setOption.value());
+                            oldOptions,
+                            setOption.key(),
+                            oldOptions.get(setOption.key()),
+                            setOption.value());
                 }
                 newOptions.put(setOption.key(), setOption.value());
             } else if (change instanceof RemoveOption) {
@@ -1072,7 +1077,7 @@ public class SchemaManager implements Serializable {
     }
 
     public static void checkAlterTableOption(
-            String key, @Nullable String oldValue, String newValue) {
+            Map<String, String> options, String key, @Nullable String oldValue, String newValue) {
         if (CoreOptions.IMMUTABLE_OPTIONS.contains(key)) {
             throw new UnsupportedOperationException(
                     String.format("Change '%s' is not supported yet.", key));
@@ -1090,6 +1095,29 @@ public class SchemaManager implements Serializable {
             }
             if (newBucket == -1) {
                 throw new UnsupportedOperationException("Cannot change bucket to -1.");
+            }
+        }
+
+        if (DELETION_VECTORS_ENABLED.key().equals(key)) {
+            boolean dvModifiable =
+                    Boolean.parseBoolean(
+                            options.getOrDefault(
+                                    DELETION_VECTORS_MODIFIABLE.key(),
+                                    DELETION_VECTORS_MODIFIABLE.defaultValue().toString()));
+            if (!dvModifiable) {
+                boolean oldDv =
+                        oldValue == null
+                                ? DELETION_VECTORS_ENABLED.defaultValue()
+                                : Boolean.parseBoolean(oldValue);
+                boolean newDv = Boolean.parseBoolean(newValue);
+
+                if (oldDv != newDv) {
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Cannot change deletion vectors mode from %s to %s. If modifying table deletion-vectors mode without full-compaction, this may result in data duplication. "
+                                            + "If you are confident, you can set table option '%s' = 'true' to allow deletion vectors modification.",
+                                    oldDv, newDv, DELETION_VECTORS_MODIFIABLE.key()));
+                }
             }
         }
     }
