@@ -400,6 +400,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
         // full compact
         sql("CALL sys.compact(`table` => 'default.TT')");
         // disable dv and select
+        sql("ALTER TABLE TT SET('deletion-vectors.modifiable' = 'true')");
         sql("ALTER TABLE TT SET('deletion-vectors.enabled' = 'false')");
         assertThat(sql("SELECT * FROM TT").size()).isEqualTo(5);
     }
