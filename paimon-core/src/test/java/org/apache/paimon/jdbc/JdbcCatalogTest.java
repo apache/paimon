@@ -29,7 +29,11 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewChange;
+import org.apache.paimon.view.ViewImpl;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
@@ -46,6 +50,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -64,7 +73,9 @@ public class JdbcCatalogTest extends CatalogTestBase {
         Map<String, String> properties = Maps.newHashMap();
         properties.put(
                 CatalogOptions.URI.key(),
-                "jdbc:sqlite:file::memory:?ic" + UUID.randomUUID().toString().replace("-", ""));
+                "jdbc:sqlite:file:"
+                        + UUID.randomUUID().toString().replace("-", "")
+                        + "?mode=memory&cache=shared");
 
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "username", "user");
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
@@ -144,6 +155,11 @@ public class JdbcCatalogTest extends CatalogTestBase {
     protected boolean supportsReplaceTable() {
         // jdbc lock interferes with the test data commit; replace path itself works at runtime
         return false;
+    }
+
+    @Override
+    protected boolean supportsView() {
+        return true;
     }
 
     @Test
@@ -339,6 +355,34 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                     }
                                 }
                                 return result;
+                            });
+        } catch (SQLException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String fetchViewSchema(JdbcCatalog jdbcCatalog, String databaseName, String viewName) {
+        try {
+            return JdbcUtils.getViewSchema(
+                    jdbcCatalog.getConnections(),
+                    jdbcCatalog.getCatalogKey(),
+                    databaseName,
+                    viewName);
+        } catch (SQLException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private boolean tableExists(JdbcCatalog jdbcCatalog, String tableName) {
+        try {
+            return jdbcCatalog
+                    .getConnections()
+                    .run(
+                            conn -> {
+                                try (ResultSet rs =
+                                        conn.getMetaData().getTables(null, null, tableName, null)) {
+                                    return rs.next();
+                                }
                             });
         } catch (SQLException | InterruptedException e) {
             throw new RuntimeException(e);
@@ -624,5 +668,197 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                         tableName))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Failed to insert table");
+    }
+
+    @Test
+    public void testViewTableCreatedOnInitialize() {
+        assertThat(tableExists((JdbcCatalog) catalog, JdbcUtils.VIEW_TABLE_NAME)).isTrue();
+    }
+
+    @Test
+    public void testCreateViewStoresViewSchemaWithoutResolvingReferencedTable() throws Exception {
+        String databaseName = "view_schema_db";
+        Identifier identifier = Identifier.create(databaseName, "view_on_missing_table");
+        View view = createView(identifier);
+
+        catalog.createDatabase(databaseName, false);
+        catalog.createView(identifier, view, false);
+
+        String viewSchemaJson =
+                fetchViewSchema((JdbcCatalog) catalog, databaseName, "view_on_missing_table");
+        assertThat(viewSchemaJson).contains("\"query\"").contains("\"SELECT * FROM OTHER_TABLE\"");
+        assertThat(catalog.getView(identifier).query()).isEqualTo("SELECT * FROM OTHER_TABLE");
+    }
+
+    @Test
+    public void testCreateViewStoresCrossDatabaseQueryWithoutResolvingReferencedTable()
+            throws Exception {
+        String databaseName = "cross_database_view_db";
+        Identifier identifier = Identifier.create(databaseName, "view_on_other_database");
+        String query = "SELECT * FROM other_database.missing_table";
+        View baseView = createView(identifier);
+        View view =
+                new ViewImpl(
+                        identifier,
+                        baseView.rowType().getFields(),
+                        query,
+                        baseView.dialects(),
+                        baseView.comment().orElse(null),
+                        baseView.options());
+
+        catalog.createDatabase(databaseName, false);
+        catalog.createView(identifier, view, false);
+
+        String viewSchemaJson =
+                fetchViewSchema((JdbcCatalog) catalog, databaseName, "view_on_other_database");
+        assertThat(viewSchemaJson).contains("\"query\"").contains(query);
+        assertThat(catalog.getView(identifier).query()).isEqualTo(query);
+    }
+
+    @Test
+    public void testDropDatabaseCleansViewMetadata() throws Exception {
+        String databaseName = "drop_view_db";
+        Identifier identifier = Identifier.create(databaseName, "view_name");
+
+        catalog.createDatabase(databaseName, false);
+        catalog.createView(identifier, createView(identifier), false);
+        catalog.dropDatabase(databaseName, false, true);
+
+        assertThat(
+                        fetchViewSchema(
+                                (JdbcCatalog) catalog,
+                                identifier.getDatabaseName(),
+                                identifier.getObjectName()))
+                .isNull();
+    }
+
+    @Test
+    public void testRenameViewAcrossDatabases() throws Exception {
+        String sourceDatabase = "source_view_db";
+        String targetDatabase = "target_view_db";
+        Identifier source = Identifier.create(sourceDatabase, "view_name");
+        Identifier target = Identifier.create(targetDatabase, "view_name");
+
+        catalog.createDatabase(sourceDatabase, false);
+        catalog.createDatabase(targetDatabase, false);
+        catalog.createView(source, createView(source), false);
+
+        catalog.renameView(source, target, false);
+
+        assertThatThrownBy(() -> catalog.getView(source))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
+        assertThat(catalog.getView(target).fullName()).isEqualTo(target.getFullName());
+        assertThat(catalog.listViews(sourceDatabase)).isEmpty();
+        assertThat(catalog.listViews(targetDatabase)).containsExactly("view_name");
+    }
+
+    @Test
+    public void testConcurrentCreateViewOnlyCreatesOneView() throws Exception {
+        String databaseName = "concurrent_view_db";
+        Identifier identifier = Identifier.create(databaseName, "same_view");
+        View view = createView(identifier);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        catalog.createDatabase(databaseName, false);
+        Callable<Boolean> create =
+                () -> {
+                    try {
+                        catalog.createView(identifier, view, false);
+                        return true;
+                    } catch (Catalog.ViewAlreadyExistException e) {
+                        return false;
+                    }
+                };
+
+        try {
+            Future<Boolean> first = executor.submit(create);
+            Future<Boolean> second = executor.submit(create);
+
+            assertThat(ImmutableList.of(first.get(), second.get()))
+                    .containsExactlyInAnyOrder(true, false);
+            assertThat(catalog.listViews(databaseName)).containsExactly("same_view");
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e.getCause());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testAlterView() throws Exception {
+        Identifier identifier = Identifier.create("alter_view_db", "my_view");
+        View view = createView(identifier);
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+
+        assertDoesNotThrow(
+                () ->
+                        catalog.alterView(
+                                identifier,
+                                ImmutableList.of(ViewChange.setOption("k", "v")),
+                                true));
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterView(
+                                        identifier,
+                                        ImmutableList.of(ViewChange.setOption("k", "v")),
+                                        false))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
+
+        catalog.createView(identifier, view, false);
+        catalog.alterView(identifier, ImmutableList.of(ViewChange.setOption("k", "v")), false);
+        assertThat(catalog.getView(identifier).options()).containsEntry("k", "v");
+
+        catalog.alterView(identifier, ImmutableList.of(ViewChange.removeOption("k")), false);
+        assertThat(catalog.getView(identifier).options()).doesNotContainKey("k");
+
+        catalog.alterView(
+                identifier, ImmutableList.of(ViewChange.updateComment("new comment")), false);
+        assertThat(catalog.getView(identifier).comment()).hasValue("new comment");
+
+        catalog.alterView(
+                identifier,
+                ImmutableList.of(ViewChange.addDialect("flink_1", "SELECT * FROM FLINK_TABLE_1")),
+                false);
+        assertThat(catalog.getView(identifier).query("flink_1"))
+                .isEqualTo("SELECT * FROM FLINK_TABLE_1");
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterView(
+                                        identifier,
+                                        ImmutableList.of(
+                                                ViewChange.addDialect(
+                                                        "flink_1", "SELECT * FROM FLINK_TABLE_1")),
+                                        false))
+                .isInstanceOf(Catalog.DialectAlreadyExistException.class);
+
+        catalog.alterView(
+                identifier,
+                ImmutableList.of(
+                        ViewChange.updateDialect("flink_1", "SELECT * FROM FLINK_TABLE_2")),
+                false);
+        assertThat(catalog.getView(identifier).query("flink_1"))
+                .isEqualTo("SELECT * FROM FLINK_TABLE_2");
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterView(
+                                        identifier,
+                                        ImmutableList.of(
+                                                ViewChange.updateDialect(
+                                                        "missing", "SELECT * FROM FLINK_TABLE_2")),
+                                        false))
+                .isInstanceOf(Catalog.DialectNotExistException.class);
+
+        catalog.alterView(identifier, ImmutableList.of(ViewChange.dropDialect("flink_1")), false);
+        assertThat(catalog.getView(identifier).query("flink_1")).isEqualTo(view.query());
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterView(
+                                        identifier,
+                                        ImmutableList.of(ViewChange.dropDialect("missing")),
+                                        false))
+                .isInstanceOf(Catalog.DialectNotExistException.class);
     }
 }
