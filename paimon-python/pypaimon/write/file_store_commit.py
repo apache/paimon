@@ -262,6 +262,10 @@ class FileStoreCommit:
         parsed = urlparse(path_str)
         path_scheme = parsed.scheme
 
+        if path_scheme and len(path_scheme) == 1 and path_scheme.isalpha() and not parsed.netloc:
+            # This is likely a Windows drive letter, not a URI scheme
+            return self.table.file_io
+
         # If no scheme or scheme matches warehouse, use existing file_io
         if not path_scheme:
             return self.table.file_io
