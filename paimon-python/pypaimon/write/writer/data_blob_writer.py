@@ -246,7 +246,7 @@ class DataBlobWriter(DataWriter):
             return None
 
         file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
-        file_path = self._generate_file_path(file_name)
+        file_path = str(self._generate_file_path(file_name))
 
         # Get the appropriate FileIO instance for the path
         # If using external paths with different scheme, create a new FileIO instance
@@ -266,7 +266,10 @@ class DataBlobWriter(DataWriter):
         is_external_path = self.external_path_provider is not None
         external_path_str = str(file_path) if is_external_path else None
 
-    def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table) -> DataFileMeta:
+        return self._create_data_file_meta(file_name, file_path, data, file_io_to_use, external_path_str)
+
+    def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table, 
+                                file_io_to_use=None, external_path: Optional[str] = None) -> DataFileMeta:
         # Column stats (only for normal columns)
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
@@ -282,6 +285,8 @@ class DataBlobWriter(DataWriter):
         max_value_stats = [column_stats[field.name]['max_values'] for field in normal_fields]
         value_null_counts = [column_stats[field.name]['null_counts'] for field in normal_fields]
 
+        min_seq = self.sequence_generator.start
+        max_seq = self.sequence_generator.current
         self.sequence_generator.start = self.sequence_generator.current
 
         # Use the provided file_io_to_use if available, otherwise fall back to self.file_io
@@ -301,8 +306,8 @@ class DataBlobWriter(DataWriter):
                 GenericRow(min_value_stats, normal_fields),
                 GenericRow(max_value_stats, normal_fields),
                 value_null_counts),
-            min_sequence_number=-1,
-            max_sequence_number=-1,
+            min_sequence_number=min_seq,
+            max_sequence_number=max_seq,
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],
