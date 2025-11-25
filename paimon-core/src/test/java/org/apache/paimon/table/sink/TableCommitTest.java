@@ -392,6 +392,7 @@ public class TableCommitTest {
 
         Options options = new Options();
         options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
@@ -409,8 +410,7 @@ public class TableCommitTest {
                         tableSchema,
                         CatalogEnvironment.empty());
         String user1 = UUID.randomUUID().toString();
-        FileStoreTable fixedBucketWriteTable =
-                table.copy(singletonMap(CoreOptions.BUCKET.key(), "1"));
+        FileStoreTable fixedBucketWriteTable = table;
         TableWriteImpl<?> write1 = fixedBucketWriteTable.newWrite(user1);
         TableCommitImpl commit1 = fixedBucketWriteTable.newCommit(user1);
 
@@ -430,33 +430,34 @@ public class TableCommitTest {
         write2.write(GenericRow.of(1, 1L));
         commit2.commit(1, write2.prepareCommit(false, 1));
 
-        // APPEND with fixed bucket files should be checked
+        // APPEND with postpone bucket files should be ignored
+        write1.close();
+        commit1.close();
+        Map<String, String> postponeWriteOptions = new HashMap<>();
+        postponeWriteOptions.put(CoreOptions.BUCKET.key(), "-2");
+        postponeWriteOptions.put(CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET.key(), "false");
+        FileStoreTable postponeWriteTable = fixedBucketWriteTable.copy(postponeWriteOptions);
+        write1 = postponeWriteTable.newWrite(user1);
+        commit1 = postponeWriteTable.newCommit(user1);
         write1.write(GenericRow.of(2, 2L));
         commit1.commit(2, write1.prepareCommit(false, 2));
 
         write2.write(GenericRow.of(3, 3L));
         commit2.commit(2, write2.prepareCommit(false, 2));
 
-        assertThatThrownBy(() -> commit2.commit(2, write2.prepareCommit(false, 2)))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining(
-                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
-
-        // APPEND with postpone bucket files should be ignored
-        Map<String, String> postponeWriteOptions = new HashMap<>();
-        postponeWriteOptions.put(CoreOptions.BUCKET.key(), "-2");
-        postponeWriteOptions.put(CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET.key(), "false");
-        FileStoreTable postponeWriteTable = fixedBucketWriteTable.copy(postponeWriteOptions);
+        // APPEND with fixed bucket files should be checked
         write1.close();
         commit1.close();
-        write1 = postponeWriteTable.newWrite(user1);
-        commit1 = postponeWriteTable.newCommit(user1);
-
+        write1 = fixedBucketWriteTable.newWrite(user1);
+        commit1 = fixedBucketWriteTable.newCommit(user1);
         write1.write(GenericRow.of(4, 4L));
         commit1.commit(3, write1.prepareCommit(true, 3));
 
         write2.write(GenericRow.of(5, 5L));
-        commit2.commit(3, write2.prepareCommit(false, 3));
+        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
     }
 
     @Test
