@@ -265,7 +265,7 @@ class DataBlobWriter(DataWriter):
 
         # Determine if this is an external path
         is_external_path = self.external_path_provider is not None
-        external_path_str = str(file_path) if is_external_path else None
+        external_path_str = file_path if is_external_path else None
 
         return self._create_data_file_meta(file_name, file_path, data, file_io_to_use, external_path_str)
 

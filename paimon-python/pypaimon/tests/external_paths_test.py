@@ -26,7 +26,6 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog import Identifier
 from pypaimon.common.core_options import CoreOptions, ExternalPathStrategy
 from pypaimon.common.external_path_provider import ExternalPathProvider
-from urlpath import URL
 
 
 class ExternalPathProviderTest(unittest.TestCase):
@@ -36,14 +35,14 @@ class ExternalPathProviderTest(unittest.TestCase):
         """Test path selection (round-robin) and path structure with various scenarios."""
         # Test multiple paths with round-robin
         external_paths = [
-            URL("oss://bucket1/external"),
-            URL("oss://bucket2/external"),
-            URL("oss://bucket3/external"),
+            "oss://bucket1/external",
+            "oss://bucket2/external",
+            "oss://bucket3/external",
         ]
-        relative_path = URL("partition=value/bucket-0")
+        relative_path = "partition=value/bucket-0"
         provider = ExternalPathProvider(external_paths, relative_path)
 
-        paths = [str(provider.get_next_external_data_path("file.parquet")) for _ in range(6)]
+        paths = [provider.get_next_external_data_path("file.parquet") for _ in range(6)]
 
         # Verify all buckets are used (2 cycles = 2 times each)
         bucket_counts = {f"bucket{i}": sum(1 for p in paths if f"bucket{i}" in p) for i in [1, 2, 3]}
@@ -57,15 +56,15 @@ class ExternalPathProviderTest(unittest.TestCase):
         self.assertIn("file.parquet", paths[0])
 
         # Test single path
-        single_provider = ExternalPathProvider([URL("oss://bucket/external")], URL("bucket-0"))
-        single_path = str(single_provider.get_next_external_data_path("data.parquet"))
+        single_provider = ExternalPathProvider(["oss://bucket/external"], "bucket-0")
+        single_path = single_provider.get_next_external_data_path("data.parquet")
         self.assertIn("bucket/external", single_path)
         self.assertIn("bucket-0", single_path)
         self.assertIn("data.parquet", single_path)
 
         # Test empty relative path
-        empty_provider = ExternalPathProvider([URL("oss://bucket/external")], URL(""))
-        empty_path = str(empty_provider.get_next_external_data_path("file.parquet"))
+        empty_provider = ExternalPathProvider(["oss://bucket/external"], "")
+        empty_path = empty_provider.get_next_external_data_path("file.parquet")
         self.assertIn("bucket/external", empty_path)
         self.assertIn("file.parquet", empty_path)
 

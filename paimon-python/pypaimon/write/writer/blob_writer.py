@@ -120,7 +120,7 @@ class BlobWriter(AppendOnlyDataWriter):
 
         # Determine if this is an external path
         is_external_path = self.external_path_provider is not None
-        external_path_str = str(self.current_file_path) if is_external_path else None
+        external_path_str = self.current_file_path if is_external_path else None
 
         self._add_file_metadata(file_name, self.current_file_path, row_count, file_size, external_path_str)
 
@@ -153,7 +153,7 @@ class BlobWriter(AppendOnlyDataWriter):
         file_size = file_io_to_use.get_file_size(file_path)
 
         is_external_path = self.external_path_provider is not None
-        external_path_str = str(file_path) if is_external_path else None
+        external_path_str = file_path if is_external_path else None
 
         # Reuse _add_file_metadata for consistency (blob table is append-only, no primary keys)
         self._add_file_metadata(file_name, file_path, data, file_size, external_path_str)

@@ -159,7 +159,6 @@ class FileStoreTable(Table):
 
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse
-        from urlpath import URL
         from pypaimon.common.core_options import ExternalPathStrategy
 
         external_paths_str = CoreOptions.data_file_external_paths(self.options)
@@ -195,7 +194,7 @@ class FileStoreTable(Table):
                 if scheme.lower() != specific_fs.lower():
                     continue  # Skip paths that don't match the specific filesystem
 
-            paths.append(URL(path_string))
+            paths.append(path_string)
 
         if not paths:
             raise ValueError("No valid external paths found after filtering")

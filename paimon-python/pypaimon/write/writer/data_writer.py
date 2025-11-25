@@ -67,8 +67,8 @@ class DataWriter(ABC):
         self.external_path_provider: Optional[ExternalPathProvider] = self.path_factory.create_external_path_provider(
             self.partition, self.bucket
         )
-        # Store the current generated external URL to preserve scheme in metadata
-        self._current_external_url: Optional['URL'] = None
+        # Store the current generated external path to preserve scheme in metadata
+        self._current_external_path: Optional[str] = None
 
     def write(self, data: pa.RecordBatch):
         try:
@@ -164,8 +164,8 @@ class DataWriter(ABC):
 
         is_external_path = self.external_path_provider is not None
         if is_external_path:
-            # Use the stored URL from _generate_file_path to preserve scheme
-            external_path_str = str(self._current_external_url) if self._current_external_url else None
+            # Use the stored external path from _generate_file_path to preserve scheme
+            external_path_str = self._current_external_path if self._current_external_path else None
         else:
             external_path_str = None
 
@@ -246,9 +246,9 @@ class DataWriter(ABC):
 
     def _generate_file_path(self, file_name: str) -> str:
         if self.external_path_provider:
-            external_path_url = self.external_path_provider.get_next_external_data_path(file_name)
-            self._current_external_url = external_path_url
-            return str(external_path_url)
+            external_path = self.external_path_provider.get_next_external_data_path(file_name)
+            self._current_external_path = external_path
+            return external_path
 
         bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
         result = bucket_path / file_name

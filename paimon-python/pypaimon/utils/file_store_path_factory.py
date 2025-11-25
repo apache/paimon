@@ -48,7 +48,7 @@ class FileStorePathFactory:
         file_suffix_include_compression: bool,
         file_compression: str,
         data_file_path_directory: Optional[str] = None,
-        external_paths: Optional[List[URL]] = None,
+        external_paths: Optional[List[str]] = None,
         index_file_in_data_file_dir: bool = False,
     ):
         self._root = root
@@ -81,7 +81,7 @@ class FileStorePathFactory:
             return self._root / self.data_file_path_directory
         return self._root
 
-    def relative_bucket_path(self, partition: Tuple, bucket: int) -> URL:
+    def relative_bucket_path(self, partition: Tuple, bucket: int) -> str:
         bucket_name = str(bucket)
         if bucket == BucketMode.POSTPONE_BUCKET.value:
             bucket_name = "postpone"
@@ -100,7 +100,7 @@ class FileStorePathFactory:
         if self.data_file_path_directory:
             relative_parts = [self.data_file_path_directory] + relative_parts
 
-        return URL("/".join(relative_parts))
+        return "/".join(relative_parts)
 
     def bucket_path(self, partition: Tuple, bucket: int) -> URL:
         return self._root / self.relative_bucket_path(partition, bucket)
