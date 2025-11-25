@@ -246,7 +246,7 @@ class DataBlobWriter(DataWriter):
             return None
 
         file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
-        file_path = str(self._generate_file_path(file_name))
+        file_path = self._generate_file_path(file_name)
 
         # Write file based on format
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
@@ -264,8 +264,8 @@ class DataBlobWriter(DataWriter):
 
         return self._create_data_file_meta(file_name, file_path, data, external_path_str)
 
-    def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table, 
-                                external_path: Optional[str] = None) -> DataFileMeta:
+    def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table,
+                               external_path: Optional[str] = None) -> DataFileMeta:
         # Column stats (only for normal columns)
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
@@ -281,8 +281,6 @@ class DataBlobWriter(DataWriter):
         max_value_stats = [column_stats[field.name]['max_values'] for field in normal_fields]
         value_null_counts = [column_stats[field.name]['null_counts'] for field in normal_fields]
 
-        min_seq = self.sequence_generator.start
-        max_seq = self.sequence_generator.current
         self.sequence_generator.start = self.sequence_generator.current
 
         return DataFileMeta(
@@ -299,8 +297,8 @@ class DataBlobWriter(DataWriter):
                 GenericRow(min_value_stats, normal_fields),
                 GenericRow(max_value_stats, normal_fields),
                 value_null_counts),
-            min_sequence_number=min_seq,
-            max_sequence_number=max_seq,
+            min_sequence_number=-1,
+            max_sequence_number=-1,
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],
@@ -309,7 +307,7 @@ class DataBlobWriter(DataWriter):
             file_source=0,
             value_stats_cols=self.normal_column_names,
             external_path=external_path,
-            file_path=str(file_path),
+            file_path=file_path,
             write_cols=self.write_cols)
 
     def _validate_consistency(self, normal_meta: DataFileMeta, blob_metas: List[DataFileMeta]):

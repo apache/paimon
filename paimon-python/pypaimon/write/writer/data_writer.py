@@ -159,7 +159,7 @@ class DataWriter(ABC):
         if data.num_rows == 0:
             return
         file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
-        file_path = str(self._generate_file_path(file_name))
+        file_path = self._generate_file_path(file_name)
 
         is_external_path = self.external_path_provider is not None
         if is_external_path:
