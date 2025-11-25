@@ -132,8 +132,6 @@ class CoreOptions(str, Enum):
     def file_compression(options: dict) -> str:
         """Get file compression from options, default to 'zstd'."""
         compression = options.get(CoreOptions.FILE_COMPRESSION, "zstd")
-        # Handle case where FILE_COMPRESSION is explicitly set to None
-        # dict.get() returns the stored None value rather than the default
         if compression is None:
             compression = "zstd"
         return compression

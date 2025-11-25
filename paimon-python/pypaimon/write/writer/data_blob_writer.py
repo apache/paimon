@@ -251,8 +251,6 @@ class DataBlobWriter(DataWriter):
         file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
         file_path = str(self._generate_file_path(file_name))
 
-        # Get the appropriate FileIO instance for the path
-        # If using external paths with different scheme, create a new FileIO instance
         file_io_to_use = self._get_file_io_for_path(file_path)
 
         # Write file based on format

@@ -99,8 +99,6 @@ class BlobWriter(AppendOnlyDataWriter):
         self.file_count += 1  # Increment counter for next file
         file_path = self._generate_file_path(file_name)
         self.current_file_path = file_path
-        # Get the appropriate FileIO instance for the path
-        # If using external paths with different scheme, create a new FileIO instance
         file_io_to_use = self._get_file_io_for_path(file_path)
         self.current_writer = BlobFileWriter(file_io_to_use, file_path, self.blob_as_descriptor)
 
@@ -147,8 +145,6 @@ class BlobWriter(AppendOnlyDataWriter):
         self.file_count += 1
         file_path = self._generate_file_path(file_name)
 
-        # Get the appropriate FileIO instance for the path
-        # If using external paths with different scheme, create a new FileIO instance
         file_io_to_use = self._get_file_io_for_path(file_path)
 
         # Write blob file (parent class already supports blob format)

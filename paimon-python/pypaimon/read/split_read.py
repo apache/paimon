@@ -119,38 +119,8 @@ class SplitRead(ABC):
                                        self.table.table_schema.fields)
 
     def _get_file_io_for_path(self, path: str) -> 'FileIO':
-        from urllib.parse import urlparse
-        from pypaimon.common.file_io import FileIO
-
-        path_str = str(path)
-        parsed = urlparse(path_str)
-        path_scheme = parsed.scheme
-
-        if path_scheme and len(path_scheme) == 1 and path_scheme.isalpha() and not parsed.netloc:
-            # This is likely a Windows drive letter, not a URI scheme
-            return self.table.file_io
-
-        if not path_scheme:
-            return self.table.file_io
-
-        # Check if path scheme matches warehouse scheme
-        warehouse_path_str = str(self.table.table_path)
-        supported_schemes = ('file://', 's3://', 's3a://', 's3n://', 'oss://', 'hdfs://', 'viewfs://')
-        if warehouse_path_str.startswith(supported_schemes):
-            warehouse_url = warehouse_path_str
-        else:
-            warehouse_url = f"file://{warehouse_path_str}"
-        warehouse_parsed = urlparse(warehouse_url)
-        warehouse_scheme = warehouse_parsed.scheme or 'file'
-
-        s3_schemes = {'s3', 's3a', 's3n', 'oss'}
-        path_is_s3 = path_scheme in s3_schemes
-        warehouse_is_s3 = warehouse_scheme in s3_schemes
-
-        if path_scheme == warehouse_scheme or (path_is_s3 and warehouse_is_s3):
-            return self.table.file_io
-
-        return FileIO(path_str, self.table.file_io.properties)
+        """Get the FileIO instance for the given path. Returns the table's default FileIO."""
+        return self.table.file_io
 
     def _get_fields_and_predicate(self, schema_id: int, read_fields):
         key = (schema_id, tuple(read_fields))

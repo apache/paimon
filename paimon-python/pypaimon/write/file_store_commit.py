@@ -245,7 +245,6 @@ class FileStoreCommit:
                     # file_path may lack the scheme when external paths are configured
                     path_to_delete = file.external_path if file.external_path else file.file_path
                     if path_to_delete:
-                        # Ensure path_to_delete is a string (not Path object) to preserve URL scheme
                         path_str = str(path_to_delete)
                         file_io_to_use = self._get_file_io_for_path(path_str)
                         file_io_to_use.delete_quietly(path_str)
@@ -256,39 +255,8 @@ class FileStoreCommit:
                     logger.warning(f"Failed to clean up file {path_to_delete} during abort: {e}")
 
     def _get_file_io_for_path(self, path_str: str) -> 'FileIO':
-        from urllib.parse import urlparse
-        from pypaimon.common.file_io import FileIO
-
-        parsed = urlparse(path_str)
-        path_scheme = parsed.scheme
-
-        if path_scheme and len(path_scheme) == 1 and path_scheme.isalpha() and not parsed.netloc:
-            # This is likely a Windows drive letter, not a URI scheme
-            return self.table.file_io
-
-        # If no scheme or scheme matches warehouse, use existing file_io
-        if not path_scheme:
-            return self.table.file_io
-
-        # Check if path scheme matches warehouse scheme
-        warehouse_path_str = str(self.table.table_path)
-        supported_schemes = ('file://', 's3://', 's3a://', 's3n://', 'oss://', 'hdfs://', 'viewfs://')
-        if warehouse_path_str.startswith(supported_schemes):
-            warehouse_url = warehouse_path_str
-        else:
-            warehouse_url = f"file://{warehouse_path_str}"
-        warehouse_parsed = urlparse(warehouse_url)
-        warehouse_scheme = warehouse_parsed.scheme or 'file'
-
-        # Normalize schemes for comparison
-        s3_schemes = {'s3', 's3a', 's3n', 'oss'}
-        path_is_s3 = path_scheme in s3_schemes
-        warehouse_is_s3 = warehouse_scheme in s3_schemes
-
-        if path_scheme == warehouse_scheme or (path_is_s3 and warehouse_is_s3):
-            return self.table.file_io
-
-        return FileIO(path_str, self.table.file_io.properties)
+        """Get the FileIO instance for the given path. Returns the table's default FileIO."""
+        return self.table.file_io
 
     def close(self):
         """Close the FileStoreCommit and release resources."""

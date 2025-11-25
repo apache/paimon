@@ -22,8 +22,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import splitport, urlparse
 
-from urlpath import URL
-
 import pyarrow
 from packaging.version import parse
 from pyarrow._fs import FileSystem
@@ -296,18 +294,7 @@ class FileIO:
 
         source_str = self.to_filesystem_path(source_path)
         target_str = self.to_filesystem_path(target_path)
-        
-        if overwrite and self.exists(target_path):
-            self.delete(target_path, recursive=False)
-        
-        with self.new_input_stream(source_path) as input_stream:
-            with self.new_output_stream(target_path) as output_stream:
-                chunk_size = 8192  # 8KB chunks
-                while True:
-                    chunk = input_stream.read(chunk_size)
-                    if not chunk:
-                        break
-                    output_stream.write(chunk)
+        self.filesystem.copy_file(source_str, target_str)
    
     def copy_files(self, source_directory: str, target_directory: str, overwrite: bool = False):
         file_infos = self.list_status(source_directory)

@@ -120,8 +120,6 @@ class DataWriter(ABC):
                 path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
                 if path_to_delete:
                     path_str = str(path_to_delete)
-                    # Get the appropriate FileIO instance for the path
-                    # This ensures we use the same FileIO instance that was used to write the file
                     file_io_to_use = self._get_file_io_for_path(path_str)
                     file_io_to_use.delete_quietly(path_str)
             except Exception as e:
@@ -171,8 +169,6 @@ class DataWriter(ABC):
         else:
             external_path_str = None
 
-        # Get the appropriate FileIO instance for the path
-        # If using external paths with different scheme, create a new FileIO instance
         file_io_to_use = self._get_file_io_for_path(file_path)
 
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
@@ -259,47 +255,8 @@ class DataWriter(ABC):
         return str(result)
 
     def _get_file_io_for_path(self, path: str) -> 'FileIO':
-        """
-        Get the appropriate FileIO instance for the given path.
-        If the path uses a different scheme than the warehouse, create a new FileIO instance.
-        """
-        from urllib.parse import urlparse
-        from pypaimon.common.file_io import FileIO
-
-        path_str = str(path)
-        parsed = urlparse(path_str)
-        path_scheme = parsed.scheme or ''
-
-        if path_scheme and len(path_scheme) == 1 and path_scheme.isalpha() and not parsed.netloc:
-            # This is likely a Windows drive letter, not a URI scheme
-            return self.file_io
-
-        # If no scheme or scheme matches warehouse, use existing file_io
-        if not path_scheme:
-            return self.file_io
-
-        # Check if path scheme matches warehouse scheme
-        warehouse_path_str = str(self.table.table_path)
-        supported_schemes = ('file://', 's3://', 's3a://', 's3n://', 'oss://', 'hdfs://', 'viewfs://')
-        if warehouse_path_str.startswith(supported_schemes):
-            warehouse_url = warehouse_path_str
-        else:
-            warehouse_url = f"file://{warehouse_path_str}"
-        warehouse_parsed = urlparse(warehouse_url)
-        warehouse_scheme = warehouse_parsed.scheme or 'file'
-
-        # Normalize schemes for comparison
-        s3_schemes = {'s3', 's3a', 's3n', 'oss'}
-        path_is_s3 = path_scheme in s3_schemes
-        warehouse_is_s3 = warehouse_scheme in s3_schemes
-
-        # If schemes match (both S3/OSS or both file), use existing file_io
-        if path_scheme == warehouse_scheme or (path_is_s3 and warehouse_is_s3):
-            return self.file_io
-
-        # Schemes don't match - create a new FileIO instance for the external path
-        # Use the same catalog options as the warehouse FileIO
-        return FileIO(path_str, self.file_io.properties)
+        """Get the FileIO instance for the given path. Returns the table's default FileIO."""
+        return self.file_io
 
     @staticmethod
     def _find_optimal_split_point(data: pa.RecordBatch, target_size: int) -> int:
