@@ -19,12 +19,9 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import List, Optional, Tuple
 
 import pyarrow as pa
-
-if TYPE_CHECKING:
-    from pypaimon.common.file_io import FileIO
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -251,15 +248,13 @@ class DataBlobWriter(DataWriter):
         file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
         file_path = str(self._generate_file_path(file_name))
 
-        file_io_to_use = self._get_file_io_for_path(file_path)
-
         # Write file based on format
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            file_io_to_use.write_parquet(file_path, data, compression=self.compression)
+            self.file_io.write_parquet(file_path, data, compression=self.compression)
         elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
-            file_io_to_use.write_orc(file_path, data, compression=self.compression)
+            self.file_io.write_orc(file_path, data, compression=self.compression)
         elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
-            file_io_to_use.write_avro(file_path, data)
+            self.file_io.write_avro(file_path, data)
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
@@ -267,10 +262,9 @@ class DataBlobWriter(DataWriter):
         is_external_path = self.external_path_provider is not None
         external_path_str = file_path if is_external_path else None
 
-        return self._create_data_file_meta(file_name, file_path, data, file_io_to_use, external_path_str)
+        return self._create_data_file_meta(file_name, file_path, data, external_path_str)
 
     def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table, 
-                                file_io_to_use: Optional['FileIO'] = None, 
                                 external_path: Optional[str] = None) -> DataFileMeta:
         # Column stats (only for normal columns)
         column_stats = {
@@ -291,12 +285,9 @@ class DataBlobWriter(DataWriter):
         max_seq = self.sequence_generator.current
         self.sequence_generator.start = self.sequence_generator.current
 
-        # Use the provided file_io_to_use if available, otherwise fall back to self.file_io
-        file_io_for_size = file_io_to_use if file_io_to_use is not None else self.file_io
-
         return DataFileMeta(
             file_name=file_name,
-            file_size=file_io_for_size.get_file_size(file_path),
+            file_size=self.file_io.get_file_size(file_path),
             row_count=data.num_rows,
             min_key=GenericRow([], []),
             max_key=GenericRow([], []),

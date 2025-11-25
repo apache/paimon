@@ -19,7 +19,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
 
 import pyarrow
@@ -295,7 +295,7 @@ class FileIO:
         source_str = self.to_filesystem_path(source_path)
         target_str = self.to_filesystem_path(target_path)
         self.filesystem.copy_file(source_str, target_str)
-   
+
     def copy_files(self, source_directory: str, target_directory: str, overwrite: bool = False):
         file_infos = self.list_status(source_directory)
         for file_info in file_infos:

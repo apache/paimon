@@ -120,8 +120,7 @@ class DataWriter(ABC):
                 path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
                 if path_to_delete:
                     path_str = str(path_to_delete)
-                    file_io_to_use = self._get_file_io_for_path(path_str)
-                    file_io_to_use.delete_quietly(path_str)
+                    self.file_io.delete_quietly(path_str)
             except Exception as e:
                 # Log but don't raise - we want to clean up as much as possible
                 import logging
@@ -169,16 +168,14 @@ class DataWriter(ABC):
         else:
             external_path_str = None
 
-        file_io_to_use = self._get_file_io_for_path(file_path)
-
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            file_io_to_use.write_parquet(file_path, data, compression=self.compression)
+            self.file_io.write_parquet(file_path, data, compression=self.compression)
         elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
-            file_io_to_use.write_orc(file_path, data, compression=self.compression)
+            self.file_io.write_orc(file_path, data, compression=self.compression)
         elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
-            file_io_to_use.write_avro(file_path, data)
+            self.file_io.write_avro(file_path, data)
         elif self.file_format == CoreOptions.FILE_FORMAT_BLOB:
-            file_io_to_use.write_blob(file_path, data, self.blob_as_descriptor)
+            self.file_io.write_blob(file_path, data, self.blob_as_descriptor)
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
@@ -214,7 +211,7 @@ class DataWriter(ABC):
         self.sequence_generator.start = self.sequence_generator.current
         self.committed_files.append(DataFileMeta(
             file_name=file_name,
-            file_size=file_io_to_use.get_file_size(file_path),
+            file_size=self.file_io.get_file_size(file_path),
             row_count=data.num_rows,
             min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
             max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
@@ -253,10 +250,6 @@ class DataWriter(ABC):
         bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
         result = bucket_path / file_name
         return str(result)
-
-    def _get_file_io_for_path(self, path: str) -> 'FileIO':
-        """Get the FileIO instance for the given path. Returns the table's default FileIO."""
-        return self.file_io
 
     @staticmethod
     def _find_optimal_split_point(data: pa.RecordBatch, target_size: int) -> int:

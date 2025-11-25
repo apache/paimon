@@ -36,24 +36,8 @@ class ExternalPathProvider:
         if self.position == len(self.external_table_paths):
             self.position = 0
 
-        external_base = self.external_table_paths[self.position].rstrip('/')
-        relative_path = self.relative_bucket_path.strip('/')
-        
-        # Construct full path
-        if relative_path:
-            full_path = f"{external_base}/{relative_path}/{file_name}"
+        external_base = self.external_table_paths[self.position]
+        if self.relative_bucket_path:
+            return f"{external_base.rstrip('/')}/{self.relative_bucket_path.strip('/')}/{file_name}"
         else:
-            full_path = f"{external_base}/{file_name}"
-        
-        # Normalize path separators - handle scheme:// correctly
-        if '://' in full_path:
-            # For URLs with scheme, normalize after scheme
-            parts = full_path.split('://', 1)
-            scheme = parts[0]
-            path_part = parts[1].replace('//', '/')
-            full_path = f"{scheme}://{path_part}"
-        else:
-            # For regular paths, just normalize slashes
-            full_path = full_path.replace('//', '/')
-        
-        return full_path
+            return f"{external_base.rstrip('/')}/{file_name}"

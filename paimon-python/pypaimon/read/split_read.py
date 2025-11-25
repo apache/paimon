@@ -93,18 +93,16 @@ class SplitRead(ABC):
         _, extension = os.path.splitext(file_path)
         file_format = extension[1:]
 
-        file_io_to_use = self._get_file_io_for_path(file_path)
-
         format_reader: RecordBatchReader
         if file_format == CoreOptions.FILE_FORMAT_AVRO:
-            format_reader = FormatAvroReader(file_io_to_use, file_path, read_file_fields,
+            format_reader = FormatAvroReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate)
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
             blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
-            format_reader = FormatBlobReader(file_io_to_use, file_path, read_file_fields,
+            format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
-            format_reader = FormatPyArrowReader(file_io_to_use, file_format, file_path,
+            format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path,
                                                 read_file_fields, read_arrow_predicate)
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
@@ -117,10 +115,6 @@ class SplitRead(ABC):
         else:
             return DataFileBatchReader(format_reader, index_mapping, partition_info, None,
                                        self.table.table_schema.fields)
-
-    def _get_file_io_for_path(self, path: str) -> 'FileIO':
-        """Get the FileIO instance for the given path. Returns the table's default FileIO."""
-        return self.table.file_io
 
     def _get_fields_and_predicate(self, schema_id: int, read_fields):
         key = (schema_id, tuple(read_fields))

@@ -246,17 +246,12 @@ class FileStoreCommit:
                     path_to_delete = file.external_path if file.external_path else file.file_path
                     if path_to_delete:
                         path_str = str(path_to_delete)
-                        file_io_to_use = self._get_file_io_for_path(path_str)
-                        file_io_to_use.delete_quietly(path_str)
+                        self.table.file_io.delete_quietly(path_str)
                 except Exception as e:
                     import logging
                     logger = logging.getLogger(__name__)
                     path_to_delete = file.external_path if file.external_path else file.file_path
                     logger.warning(f"Failed to clean up file {path_to_delete} during abort: {e}")
-
-    def _get_file_io_for_path(self, path_str: str) -> 'FileIO':
-        """Get the FileIO instance for the given path. Returns the table's default FileIO."""
-        return self.table.file_io
 
     def close(self):
         """Close the FileStoreCommit and release resources."""
