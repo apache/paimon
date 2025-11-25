@@ -23,6 +23,11 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.BinaryStringUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
+import java.util.Arrays;
+import java.util.List;
+
 /** listagg aggregate a field of a row. */
 public class FieldListaggAgg extends FieldAggregator {
 
@@ -49,8 +54,43 @@ public class FieldListaggAgg extends FieldAggregator {
         BinaryString mergeFieldSD = (BinaryString) accumulator;
         BinaryString inFieldSD = (BinaryString) inputField;
 
-        if (distinct && inFieldSD.getSizeInBytes() > 0 && mergeFieldSD.contains(inFieldSD)) {
+        if (inFieldSD.getSizeInBytes() <= 0) {
             return mergeFieldSD;
+        }
+
+        if (mergeFieldSD.getSizeInBytes() <= 0) {
+            return inFieldSD;
+        }
+
+        if (distinct) {
+            BinaryString delimiterBinaryString = BinaryString.fromString(delimiter);
+            BinaryString[] binaryStrings =
+                    BinaryStringUtils.splitByWholeSeparatorPreserveAllTokens(
+                            inFieldSD, delimiterBinaryString);
+
+            List<BinaryString> concatItems =
+                    Arrays.stream(binaryStrings)
+                            .filter(it -> it.getSizeInBytes() > 0 && !mergeFieldSD.contains(it))
+                            .collect(
+                                    () -> Lists.newArrayList(mergeFieldSD),
+                                    (acc, r) -> {
+                                        if (!acc.isEmpty()) {
+                                            acc.add(delimiterBinaryString);
+                                        }
+                                        acc.add(r);
+                                    },
+                                    (l, r) -> {
+                                        if (!l.isEmpty() && !r.isEmpty()) {
+                                            l.add(delimiterBinaryString);
+                                        }
+                                        l.addAll(r);
+                                    });
+
+            if (concatItems.size() == 1) {
+                return concatItems.get(0);
+            }
+
+            return BinaryStringUtils.concat(concatItems);
         }
 
         return BinaryStringUtils.concat(
