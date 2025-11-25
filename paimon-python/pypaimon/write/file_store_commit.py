@@ -241,10 +241,14 @@ class FileStoreCommit:
             for file in message.new_files:
                 try:
                     # Use external_path if available (contains full URL scheme), otherwise use file_path
+                    # external_path contains the full URL with scheme (e.g., s3://bucket/path/file.parquet)
+                    # file_path may lack the scheme when external paths are configured
                     path_to_delete = file.external_path if file.external_path else file.file_path
                     if path_to_delete:
-                        file_io_to_use = self._get_file_io_for_path(path_to_delete)
-                        file_io_to_use.delete_quietly(Path(path_to_delete))
+                        # Ensure path_to_delete is a string (not Path object) to preserve URL scheme
+                        path_str = str(path_to_delete)
+                        file_io_to_use = self._get_file_io_for_path(path_str)
+                        file_io_to_use.delete_quietly(path_str)
                 except Exception as e:
                     import logging
                     logger = logging.getLogger(__name__)

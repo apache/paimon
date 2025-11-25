@@ -119,10 +119,11 @@ class DataWriter(ABC):
                 # Use external_path if available (contains full URL scheme), otherwise use file_path
                 path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
                 if path_to_delete:
+                    path_str = str(path_to_delete)
                     # Get the appropriate FileIO instance for the path
                     # This ensures we use the same FileIO instance that was used to write the file
-                    file_io_to_use = self._get_file_io_for_path(Path(path_to_delete))
-                    file_io_to_use.delete_quietly(Path(path_to_delete))
+                    file_io_to_use = self._get_file_io_for_path(path_str)
+                    file_io_to_use.delete_quietly(path_str)
             except Exception as e:
                 # Log but don't raise - we want to clean up as much as possible
                 import logging
