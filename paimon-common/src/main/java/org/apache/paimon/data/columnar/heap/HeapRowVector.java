@@ -52,6 +52,11 @@ public class HeapRowVector extends AbstractStructVector
         // Nothing to store.
     }
 
+    public void appendRow() {
+        reserve(elementsAppended + 1);
+        elementsAppended++;
+    }
+
     public void setFields(WritableColumnVector[] fields) {
         System.arraycopy(fields, 0, this.children, 0, fields.length);
         this.vectorizedColumnBatch = new VectorizedColumnBatch(children);

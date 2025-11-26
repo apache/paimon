@@ -34,8 +34,16 @@ public class HeapMapVector extends AbstractArrayBasedVector implements MapColumn
         children[0] = keys;
     }
 
+    public ColumnVector getKeys() {
+        return children[0];
+    }
+
     public void setValues(ColumnVector values) {
         children[1] = values;
+    }
+
+    public ColumnVector getValues() {
+        return children[1];
     }
 
     @Override
