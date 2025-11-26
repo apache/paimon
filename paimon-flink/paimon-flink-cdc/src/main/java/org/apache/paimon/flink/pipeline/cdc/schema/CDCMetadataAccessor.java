@@ -100,6 +100,13 @@ public class CDCMetadataAccessor implements MetadataAccessor {
             Identifier identifier =
                     Identifier.create(tableId.getSchemaName(), tableId.getTableName());
             Table table = catalog.getTable(identifier);
+            if (!(table instanceof FileStoreTable)) {
+                throw new RuntimeException(
+                        String.format(
+                                "Table %s is not a file store table, but a %s, which is not supported by CDC",
+                                identifier, table.getClass().getName()));
+            }
+
             return convertPaimonSchemaToFlinkCDCSchema(((FileStoreTable) table).schema());
         } catch (Catalog.TableNotExistException e) {
             throw new RuntimeException(e);

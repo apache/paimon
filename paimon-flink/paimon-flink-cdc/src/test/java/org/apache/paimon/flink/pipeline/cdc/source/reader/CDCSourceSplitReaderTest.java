@@ -69,7 +69,6 @@ import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link CDCSourceSplitReader}. */
 public class CDCSourceSplitReaderTest {
@@ -343,14 +342,6 @@ public class CDCSourceSplitReaderTest {
         records = reader.fetch();
         assertRecords(records, "id2", "id2", 0, null);
 
-        reader.close();
-    }
-
-    @Test
-    public void testNoSplit() throws Exception {
-        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tablePath);
-        CDCSourceSplitReader reader = createReader(rw.createReadWithKey());
-        assertThatThrownBy(reader::fetch).hasMessageContaining("no split remaining");
         reader.close();
     }
 

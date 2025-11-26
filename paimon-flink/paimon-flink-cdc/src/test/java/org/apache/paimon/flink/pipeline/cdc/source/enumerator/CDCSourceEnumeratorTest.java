@@ -34,7 +34,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 
@@ -245,7 +245,7 @@ public class CDCSourceEnumeratorTest
                 getSplitEnumeratorContext(2);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
-        StreamTableScan scan = new MockScan(results);
+        StreamDataTableScan scan = new MockScan(results);
         CDCSourceEnumerator enumerator =
                 new Builder()
                         .setSplitEnumeratorContext(context)
@@ -408,7 +408,7 @@ public class CDCSourceEnumeratorTest
                 Collections.emptyList();
         protected long discoveryInterval = Long.MAX_VALUE;
 
-        protected StreamTableScan scan;
+        protected StreamDataTableScan scan;
         protected boolean unawareBucket = false;
 
         protected int splitMaxPerTask = 10;
@@ -429,7 +429,7 @@ public class CDCSourceEnumeratorTest
             return this;
         }
 
-        public Builder setScan(StreamTableScan scan) {
+        public Builder setScan(StreamDataTableScan scan) {
             this.scan = scan;
             return this;
         }

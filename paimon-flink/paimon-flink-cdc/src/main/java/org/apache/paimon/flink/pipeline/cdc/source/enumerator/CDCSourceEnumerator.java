@@ -77,7 +77,7 @@ public class CDCSourceEnumerator
     private final SplitEnumeratorContext<TableAwareFileStoreSourceSplit> context;
     private final long discoveryInterval;
     private final long tableDiscoveryInterval;
-    private long lastTableDiscoveryTime = Long.MAX_VALUE;
+    private long lastTableDiscoveryTime = 0L;
     private final AtomicInteger currentTableIndex = new AtomicInteger(0);
     private final String database;
     @Nullable private final String table;
@@ -342,7 +342,7 @@ public class CDCSourceEnumerator
     }
 
     private void discoverTables() throws Exception {
-        if (lastTableDiscoveryTime < System.currentTimeMillis() - tableDiscoveryInterval) {
+        if (System.currentTimeMillis() - lastTableDiscoveryTime < tableDiscoveryInterval) {
             return;
         }
         lastTableDiscoveryTime = System.currentTimeMillis();
@@ -392,7 +392,7 @@ public class CDCSourceEnumerator
     }
 
     @VisibleForTesting
-    void setScan(Identifier identifier, FileStoreTable table, StreamTableScan scan) {
+    void setScan(Identifier identifier, FileStoreTable table, StreamDataTableScan scan) {
         tableStatusMap.put(identifier, new TableStatus(table, scan));
     }
 
@@ -410,7 +410,7 @@ public class CDCSourceEnumerator
 
     private static class TableStatus {
         private final FileStoreTable table;
-        private final StreamTableScan scan;
+        private final StreamDataTableScan scan;
         private TableSchema schema;
         private Integer subtaskId;
         private Long nextSnapshotId;
@@ -419,13 +419,12 @@ public class CDCSourceEnumerator
             this.table = table;
             this.scan = table.newStreamScan();
             if (metricGroup(context) != null) {
-                ((StreamDataTableScan) this.scan)
-                        .withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
+                this.scan.withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
             }
         }
 
         @VisibleForTesting
-        private TableStatus(FileStoreTable table, StreamTableScan scan) {
+        private TableStatus(FileStoreTable table, StreamDataTableScan scan) {
             this.table = table;
             this.scan = scan;
         }

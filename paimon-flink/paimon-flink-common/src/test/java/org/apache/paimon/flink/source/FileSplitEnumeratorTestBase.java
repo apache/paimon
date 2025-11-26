@@ -21,11 +21,15 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.StreamTableScan;
-import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.source.snapshot.StartingContext;
 
 import org.apache.flink.api.connector.source.SourceSplit;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
@@ -94,7 +98,7 @@ public abstract class FileSplitEnumeratorTestBase<SplitT extends FileStoreSource
     }
 
     /** A mock {@link StreamTableScan} that can manually specify generated plans. */
-    protected static class MockScan implements StreamTableScan {
+    protected static class MockScan implements StreamDataTableScan {
 
         private final TreeMap<Long, Plan> results;
         private @Nullable Long nextSnapshotId;
@@ -108,8 +112,13 @@ public abstract class FileSplitEnumeratorTestBase<SplitT extends FileStoreSource
         }
 
         @Override
-        public TableScan withMetricRegistry(MetricRegistry registry) {
-            return this;
+        public InnerTableScan withFilter(Predicate predicate) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public InnerTableScan withMetricRegistry(MetricRegistry registry) {
+            throw new UnsupportedOperationException();
         }
 
         @Override
@@ -156,6 +165,21 @@ public abstract class FileSplitEnumeratorTestBase<SplitT extends FileStoreSource
 
         public Long getNextSnapshotIdForConsumer() {
             return nextSnapshotIdForConsumer;
+        }
+
+        @Override
+        public StartingContext startingContext() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+            throw new UnsupportedOperationException();
         }
     }
 

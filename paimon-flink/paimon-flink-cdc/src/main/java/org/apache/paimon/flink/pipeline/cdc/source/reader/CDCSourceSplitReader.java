@@ -198,7 +198,7 @@ public class CDCSourceSplitReader
 
         final TableAwareFileStoreSourceSplit nextSplit = splits.poll();
         if (nextSplit == null) {
-            throw new IOException("Cannot fetch from another split - no split remaining");
+            return;
         }
 
         // update metric when split changes
