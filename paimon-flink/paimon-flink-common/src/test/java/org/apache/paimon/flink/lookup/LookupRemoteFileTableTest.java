@@ -120,21 +120,13 @@ public class LookupRemoteFileTableTest extends TableTestBase {
         ReadBuilder readBuilder = table.newReadBuilder();
         List<Split> splits = readBuilder.newScan().plan().splits();
         assertThat(splits).hasSize(1);
-        DataSplit firstSplit = (DataSplit) splits.get(0);
-        DataFileMeta firstFile = firstSplit.dataFiles().get(0);
-        List<String> extraFiles = firstFile.extraFiles();
-        String extraFile = extraFiles.get(0);
-        // data-410685c7-4cc2-47d7-9dec-393f6cfe9d64-0.parquet.115.position.v1.lookup
-        assertThat(extraFile).endsWith(".position.v1.lookup");
-        long lookupFileSize =
-                fileIO.getFileSize(
-                        new Path(new Path(tempPath.toUri()), "default.db/t/bucket-0/" + extraFile));
-        String[] split = extraFile.split("\\.");
-        assertThat(split[split.length - 4]).isEqualTo(String.valueOf(lookupFileSize));
+        allShouldHaveRemoteSst(splits);
 
         // third write with lookup but no data file
 
         // delete file first
+        DataSplit firstSplit = (DataSplit) splits.get(0);
+        DataFileMeta firstFile = firstSplit.dataFiles().get(0);
         Path firstPath =
                 table.store()
                         .pathFactory()
@@ -174,9 +166,12 @@ public class LookupRemoteFileTableTest extends TableTestBase {
             }
         }
 
+        // check remote lookup files
+        splits = readBuilder.newScan().plan().splits();
+        allShouldHaveRemoteSst(splits);
+
         // restore file and check reading
         fileIO.copyFile(tmpPath, firstPath, false);
-        splits = readBuilder.newScan().plan().splits();
         List<GenericRow> result = new ArrayList<>();
         readBuilder
                 .newRead()
@@ -189,6 +184,31 @@ public class LookupRemoteFileTableTest extends TableTestBase {
                         GenericRow.of(3, 1),
                         GenericRow.of(4, 1),
                         GenericRow.of(5, 1));
+    }
+
+    private void allShouldHaveRemoteSst(List<Split> check) {
+        for (Split split : check) {
+            for (DataFileMeta file : ((DataSplit) split).dataFiles()) {
+                List<String> extraFiles = file.extraFiles();
+                String extraFile = extraFiles.get(0);
+                // data-410685c7-4cc2-47d7-9dec-393f6cfe9d64-0.parquet.115.position.v1.lookup
+                assertThat(extraFile).endsWith(".position.v1.lookup");
+                long lookupFileSize;
+                try {
+                    lookupFileSize =
+                            LocalFileIO.create()
+                                    .getFileSize(
+                                            new Path(
+                                                    new Path(tempPath.toUri()),
+                                                    "default.db/t/bucket-0/" + extraFile));
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+                String[] extraFileSplit = extraFile.split("\\.");
+                assertThat(extraFileSplit[extraFileSplit.length - 4])
+                        .isEqualTo(String.valueOf(lookupFileSize));
+            }
+        }
     }
 
     @Test
