@@ -88,7 +88,7 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
             @Nullable CDCCheckpoint checkpoint) {
         return new CDCSourceEnumerator(
                 context,
-                new org.apache.flink.configuration.Configuration(),
+                flinkConfig,
                 catalogContext
                         .options()
                         .get(org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL)
