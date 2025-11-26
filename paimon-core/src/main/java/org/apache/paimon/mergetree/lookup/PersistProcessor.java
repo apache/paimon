@@ -43,7 +43,7 @@ public interface PersistProcessor<T> {
         String identifier();
 
         PersistProcessor<T> create(
-                String fileSerializerId,
+                String fileSerVersion,
                 LookupSerializerFactory serializerFactory,
                 @Nullable RowType fileSchema);
     }

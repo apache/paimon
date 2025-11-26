@@ -50,7 +50,7 @@ public class LookupFile {
     private final File localFile;
     private final int level;
     private final long schemaId;
-    private final String serializerId;
+    private final String serVersion;
     private final LookupStoreReader reader;
     private final Runnable callback;
 
@@ -62,13 +62,13 @@ public class LookupFile {
             File localFile,
             int level,
             long schemaId,
-            String serializerId,
+            String serVersion,
             LookupStoreReader reader,
             Runnable callback) {
         this.localFile = localFile;
         this.level = level;
         this.schemaId = schemaId;
-        this.serializerId = serializerId;
+        this.serVersion = serVersion;
         this.reader = reader;
         this.callback = callback;
     }
@@ -81,8 +81,8 @@ public class LookupFile {
         return schemaId;
     }
 
-    public String serializerId() {
-        return serializerId;
+    public String serVersion() {
+        return serVersion;
     }
 
     @Nullable

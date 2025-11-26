@@ -70,7 +70,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private final Function<Long, BloomFilter.Builder> bfGenerator;
     private final Cache<String, LookupFile> lookupFileCache;
     private final Set<String> ownCachedFiles;
-    private final Map<Pair<Long, String>, PersistProcessor<T>> schemaIdAndSerIdToProcessors;
+    private final Map<Pair<Long, String>, PersistProcessor<T>> schemaIdAndSerVersionToProcessors;
 
     @Nullable private RemoteFileDownloader remoteFileDownloader;
 
@@ -100,7 +100,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         this.bfGenerator = bfGenerator;
         this.lookupFileCache = lookupFileCache;
         this.ownCachedFiles = new HashSet<>();
-        this.schemaIdAndSerIdToProcessors = new ConcurrentHashMap<>();
+        this.schemaIdAndSerVersionToProcessors = new ConcurrentHashMap<>();
         levels.addDropFileCallback(this);
     }
 
@@ -165,17 +165,17 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             return null;
         }
 
-        return getOrCreateProcessor(lookupFile.schemaId(), lookupFile.serializerId())
+        return getOrCreateProcessor(lookupFile.schemaId(), lookupFile.serVersion())
                 .readFromDisk(key, lookupFile.level(), valueBytes, file.fileName());
     }
 
-    private PersistProcessor<T> getOrCreateProcessor(long schemaId, String serializerId) {
-        return schemaIdAndSerIdToProcessors.computeIfAbsent(
-                Pair.of(schemaId, serializerId),
+    private PersistProcessor<T> getOrCreateProcessor(long schemaId, String serVersion) {
+        return schemaIdAndSerVersionToProcessors.computeIfAbsent(
+                Pair.of(schemaId, serVersion),
                 id -> {
                     RowType fileSchema =
                             schemaId == currentSchemaId ? null : schemaFunction.apply(schemaId);
-                    return processorFactory.create(serializerId, serializerFactory, fileSchema);
+                    return processorFactory.create(serVersion, serializerFactory, fileSchema);
                 });
     }
 
@@ -186,12 +186,12 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         }
 
         long schemaId = this.currentSchemaId;
-        String fileSerId = serializerFactory.identifier();
-        Optional<String> downloadSerId = tryToDownloadRemoteSst(file, localFile);
-        if (downloadSerId.isPresent()) {
+        String fileSerVersion = serializerFactory.version();
+        Optional<String> downloadSerVersion = tryToDownloadRemoteSst(file, localFile);
+        if (downloadSerVersion.isPresent()) {
             // use schema id from remote file
             schemaId = file.schemaId();
-            fileSerId = downloadSerId.get();
+            fileSerVersion = downloadSerVersion.get();
         } else {
             createSstFileFromDataFile(file, localFile);
         }
@@ -201,7 +201,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 localFile,
                 file.level(),
                 schemaId,
-                fileSerId,
+                fileSerVersion,
                 lookupStoreFactory.createReader(localFile),
                 () -> ownCachedFiles.remove(file.fileName()));
     }
@@ -219,7 +219,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
         // validate schema matched, no exception here
         try {
-            getOrCreateProcessor(file.schemaId(), remoteSst.serializerId);
+            getOrCreateProcessor(file.schemaId(), remoteSst.serVersion);
         } catch (UnsupportedOperationException e) {
             return Optional.empty();
         }
@@ -229,7 +229,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             return Optional.empty();
         }
 
-        return Optional.of(remoteSst.serializerId);
+        return Optional.of(remoteSst.serVersion);
     }
 
     public void addLocalFile(DataFileMeta file, LookupFile lookupFile) {
@@ -242,7 +242,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                                 localFile, bfGenerator.apply(file.rowCount()));
                 RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             PersistProcessor<T> processor =
-                    getOrCreateProcessor(currentSchemaId, serializerFactory.identifier());
+                    getOrCreateProcessor(currentSchemaId, serializerFactory.version());
             KeyValue kv;
             if (processor.withPosition()) {
                 FileRecordIterator<KeyValue> batch;
@@ -291,8 +291,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             return Optional.empty();
         }
 
-        String serializerId = split[split.length - 2];
-        return Optional.of(new RemoteSstFile(sstFileName, serializerId));
+        String serVersion = split[split.length - 2];
+        return Optional.of(new RemoteSstFile(sstFileName, serVersion));
     }
 
     public String newRemoteSst(DataFileMeta file, long length) {
@@ -302,7 +302,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 + "."
                 + processorFactory.identifier()
                 + "."
-                + serializerFactory.identifier()
+                + serializerFactory.version()
                 + REMOTE_LOOKUP_FILE_SUFFIX;
     }
 
@@ -314,15 +314,15 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         }
     }
 
-    /** Remote sst file with serializerId. */
+    /** Remote sst file with serVersion. */
     public static class RemoteSstFile {
 
         private final String sstFileName;
-        private final String serializerId;
+        private final String serVersion;
 
-        private RemoteSstFile(String sstFileName, String serializerId) {
+        private RemoteSstFile(String sstFileName, String serVersion) {
             this.sstFileName = sstFileName;
-            this.serializerId = serializerId;
+            this.serVersion = serVersion;
         }
     }
 }

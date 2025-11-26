@@ -73,13 +73,13 @@ public class PersistValueProcessor implements PersistProcessor<KeyValue> {
 
             @Override
             public PersistProcessor<KeyValue> create(
-                    String fileSerializerId,
+                    String fileSerVersion,
                     LookupSerializerFactory serializerFactory,
                     @Nullable RowType fileSchema) {
                 return new PersistValueProcessor(
                         serializerFactory.createSerializer(valueType),
                         serializerFactory.createDeserializer(
-                                fileSerializerId, valueType, fileSchema));
+                                fileSerVersion, valueType, fileSchema));
             }
         };
     }
