@@ -29,9 +29,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactoryUtils;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
-import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -42,33 +40,22 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.ProcedureUtils;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.Column;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
-import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
 import org.apache.spark.sql.functions;
-import org.apache.spark.sql.types.DataTypes;
-import org.apache.spark.sql.types.Metadata;
-import org.apache.spark.sql.types.StructField;
-import org.apache.spark.sql.types.StructType;
 import org.apache.spark.storage.StorageLevel;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
@@ -77,149 +64,44 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** Procedure to build global index files via Spark. */
-public class CreateGlobalIndexProcedure extends BaseProcedure {
+public class CreateGlobalIndexProcedure extends CreateGlobalIndexProcedureBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CreateGlobalIndexProcedure.class);
     private static final String AUXILIARY_COLUMN_PREFIX = "_group_id_";
-
-    private static final ProcedureParameter[] PARAMETERS =
-            new ProcedureParameter[] {
-                ProcedureParameter.required("table", DataTypes.StringType),
-                ProcedureParameter.required("index_column", DataTypes.StringType),
-                ProcedureParameter.required("index_type", DataTypes.StringType),
-                ProcedureParameter.optional("partitions", StringType),
-                ProcedureParameter.optional("options", DataTypes.StringType)
-            };
-
-    private static final StructType OUTPUT_TYPE =
-            new StructType(
-                    new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
-                    });
 
     protected CreateGlobalIndexProcedure(TableCatalog tableCatalog) {
         super(tableCatalog);
     }
 
     @Override
-    public ProcedureParameter[] parameters() {
-        return PARAMETERS;
-    }
+    protected List<IndexManifestEntry> buildIndex(
+            FileStoreTable table,
+            Identifier tableIdent,
+            long rowsPerShard,
+            PartitionPredicate partitionPredicate,
+            RowType readRowType,
+            String indexType,
+            DataField indexField,
+            Options userOptions,
+            GlobalIndexBuilderFactory globalIndexBuilderFactory) {
+        Map<BinaryRow, Map<Long, Dataset<Row>>> source =
+                sourceDataset(
+                        table,
+                        rowsPerShard,
+                        createRelation(tableIdent),
+                        partitionPredicate,
+                        readRowType);
 
-    @Override
-    public StructType outputType() {
-        return OUTPUT_TYPE;
-    }
-
-    @Override
-    public String description() {
-        return "Create global index files for a given column.";
-    }
-
-    @Override
-    public InternalRow[] call(InternalRow args) {
-        Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
-        String column = args.getString(1);
-        String indexType = args.getString(2).toLowerCase(Locale.ROOT).trim();
-        String partitions =
-                (args.isNullAt(3) || StringUtils.isNullOrWhitespaceOnly(args.getString(3)))
-                        ? null
-                        : args.getString(3);
-        String optionString = args.isNullAt(4) ? null : args.getString(4);
-
-        String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : null;
-
-        // Early validation: check if the index type is supported
-        GlobalIndexBuilderFactory globalIndexBuilderFactory =
-                GlobalIndexBuilderFactoryUtils.load(indexType);
-
-        LOG.info("Starting to build index for table " + tableIdent + " WHERE: " + finalWhere);
-
-        return modifyPaimonTable(
-                tableIdent,
-                t -> {
-                    try {
-                        checkArgument(
-                                t instanceof FileStoreTable,
-                                "Only FileStoreTable supports global index creation.");
-                        FileStoreTable table = (FileStoreTable) t;
-                        checkArgument(
-                                table.coreOptions().rowTrackingEnabled(),
-                                "Table '%s' must enable 'row-tracking.enabled=true' before creating global index.",
-                                tableIdent);
-
-                        RowType rowType = table.rowType();
-                        checkArgument(
-                                rowType.containsField(column),
-                                "Column '%s' does not exist in table '%s'.",
-                                column,
-                                tableIdent);
-                        DataSourceV2Relation relation = createRelation(tableIdent);
-                        PartitionPredicate partitionPredicate =
-                                SparkProcedureUtils.convertToPartitionPredicate(
-                                        finalWhere,
-                                        table.schema().logicalPartitionType(),
-                                        spark(),
-                                        relation);
-
-                        DataField indexField = rowType.getField(column);
-                        RowType projectedRowType =
-                                rowType.project(Collections.singletonList(column));
-                        RowType readRowType =
-                                SpecialFields.rowTypeWithRowTracking(
-                                        projectedRowType, false, false);
-
-                        HashMap<String, String> parsedOptions = new HashMap<>();
-                        ProcedureUtils.putAllOptions(parsedOptions, optionString);
-                        Options userOptions = Options.fromMap(parsedOptions);
-                        Options tableOptions = new Options(table.options());
-                        long rowsPerShard =
-                                tableOptions
-                                        .getOptional(GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
-                                        .orElse(GLOBAL_INDEX_ROW_COUNT_PER_SHARD.defaultValue());
-                        checkArgument(
-                                rowsPerShard > 0,
-                                "Option 'global-index.row-count-per-shard' must be greater than 0.");
-
-                        // There are three steps to build global index
-                        // Step 1: build the source dataset, every partition every shard should have
-                        // a dataset
-                        Map<BinaryRow, Map<Long, Dataset<Row>>> source =
-                                sourceDataset(
-                                        table,
-                                        rowsPerShard,
-                                        createRelation(tableIdent),
-                                        partitionPredicate,
-                                        readRowType);
-
-                        // Step 2: build index, generate index meta
-                        List<IndexManifestEntry> indexResults =
-                                buildIndex(
-                                        table,
-                                        source,
-                                        indexType,
-                                        readRowType,
-                                        indexField,
-                                        userOptions,
-                                        globalIndexBuilderFactory);
-
-                        // Step 3: commit index meta to a new snapshot
-                        commit(table, indexResults);
-
-                        return new InternalRow[] {newInternalRow(true)};
-                    } catch (Exception e) {
-                        throw new RuntimeException(
-                                String.format(
-                                        "Failed to create %s index for column '%s' on table '%s'.",
-                                        indexType, column, tableIdent),
-                                e);
-                    }
-                });
+        return buildIndex(
+                table,
+                source,
+                indexType,
+                readRowType,
+                indexField,
+                userOptions,
+                globalIndexBuilderFactory);
     }
 
     private Map<BinaryRow, Map<Long, Dataset<Row>>> sourceDataset(
