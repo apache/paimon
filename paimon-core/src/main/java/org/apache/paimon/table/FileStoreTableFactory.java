@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ChainBranchReadMode;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
@@ -98,7 +99,9 @@ public class FileStoreTableFactory {
 
         Options options = new Options(table.options());
         String fallbackBranch = options.get(CoreOptions.SCAN_FALLBACK_BRANCH);
-        if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
+        if (Boolean.parseBoolean(options.toMap().get(CoreOptions.CHAIN_TABLE_ENABLED.key()))) {
+            table = createChainTable(table, fileIO, tablePath, dynamicOptions, catalogEnvironment);
+        } else if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
             Options branchOptions = new Options(dynamicOptions.toMap());
             branchOptions.set(CoreOptions.BRANCH, fallbackBranch);
             Optional<TableSchema> schema =
@@ -128,6 +131,69 @@ public class FileStoreTableFactory {
         }
 
         return table;
+    }
+
+    public static FileStoreTable createChainTable(
+            FileStoreTable table,
+            FileIO fileIO,
+            Path tablePath,
+            Options dynamicOptions,
+            CatalogEnvironment catalogEnvironment) {
+        String scanFallbackSnapshotBranch =
+                table.options().get(CoreOptions.SCAN_FALLBACK_SNAPSHOT_BRANCH.key());
+        String scanFallbackDeltaBranch =
+                table.options().get(CoreOptions.SCAN_FALLBACK_DELTA_BRANCH.key());
+        String currentBranch = table.schema().options().get(CoreOptions.BRANCH.key());
+        if (scanFallbackSnapshotBranch == null || scanFallbackDeltaBranch == null) {
+            return table;
+        }
+        boolean scanFallbackSnapshotEnable =
+                scanFallbackSnapshotBranch.equalsIgnoreCase(currentBranch);
+        boolean scanFallbackDeltaEnable = scanFallbackDeltaBranch.equalsIgnoreCase(currentBranch);
+
+        LOG.info(
+                "Create chain table, tbl path {}, snapshotBranch {}, deltaBranch{}, currentBranch {} "
+                        + "scanFallbackSnapshotEnable{} scanFallbackDeltaEnable {}.",
+                tablePath,
+                scanFallbackSnapshotBranch,
+                scanFallbackDeltaBranch,
+                currentBranch,
+                scanFallbackSnapshotEnable,
+                scanFallbackDeltaEnable);
+        if (scanFallbackDeltaEnable || scanFallbackSnapshotEnable) {
+            return table;
+        }
+        Options snapshotBranchOptions = new Options(dynamicOptions.toMap());
+        snapshotBranchOptions.set(CoreOptions.BRANCH, scanFallbackSnapshotBranch);
+        snapshotBranchOptions.set(
+                CoreOptions.CHAIN_TABLE_BRANCH_INTERNAL_READ_MODE, ChainBranchReadMode.CHAIN_READ);
+        Optional<TableSchema> snapshotSchema =
+                new SchemaManager(fileIO, tablePath, scanFallbackSnapshotBranch).latest();
+        FileStoreTable snapshotTable =
+                createWithoutFallbackBranch(
+                        fileIO,
+                        tablePath,
+                        snapshotSchema.get(),
+                        snapshotBranchOptions,
+                        catalogEnvironment);
+        Options deltaBranchOptions = new Options(dynamicOptions.toMap());
+        deltaBranchOptions.set(CoreOptions.BRANCH, scanFallbackDeltaBranch);
+        deltaBranchOptions.set(
+                CoreOptions.CHAIN_TABLE_BRANCH_INTERNAL_READ_MODE, ChainBranchReadMode.CHAIN_READ);
+        Optional<TableSchema> deltaSchema =
+                new SchemaManager(fileIO, tablePath, scanFallbackDeltaBranch).latest();
+        FileStoreTable deltaTable =
+                createWithoutFallbackBranch(
+                        fileIO,
+                        tablePath,
+                        deltaSchema.get(),
+                        deltaBranchOptions,
+                        catalogEnvironment);
+        ChainFileStoreTable chainFileStoreTable =
+                new ChainFileStoreTable(
+                        (AbstractFileStoreTable) snapshotTable,
+                        (AbstractFileStoreTable) deltaTable);
+        return new FallbackReadFileStoreTable(table, chainFileStoreTable);
     }
 
     public static FileStoreTable createWithoutFallbackBranch(

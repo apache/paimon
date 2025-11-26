@@ -33,6 +33,7 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
@@ -383,7 +384,10 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotSystemTable(identifier, "createTable");
         validateCreateTable(schema, false);
         validateCustomTablePath(schema.options());
-
+        SchemaValidation.validateChainTableOptions(
+                schema.options(),
+                schema.primaryKeys() == null ? null : String.join(",", schema.primaryKeys()),
+                !schema.partitionKeys().isEmpty());
         // check db exists
         getDatabase(identifier.getDatabaseName());
 

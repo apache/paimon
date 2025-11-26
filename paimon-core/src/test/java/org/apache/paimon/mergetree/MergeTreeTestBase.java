@@ -455,6 +455,7 @@ public abstract class MergeTreeTestBase {
                 false,
                 options.needLookup(),
                 null,
+                false,
                 false);
     }
 
@@ -480,6 +481,7 @@ public abstract class MergeTreeTestBase {
                     false,
                     false,
                     null,
+                    false,
                     false);
         }
 

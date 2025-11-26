@@ -27,6 +27,7 @@ import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.spark.write.{PaimonV2WriteBuilder, PaimonWriteBuilder}
 import org.apache.paimon.table.{Table, _}
 import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED, POSTPONE_MODE}
+import org.apache.paimon.utils.{ChainTableUtils, StringUtils}
 
 import org.apache.spark.sql.connector.catalog._
 import org.apache.spark.sql.connector.read.ScanBuilder
@@ -142,10 +143,15 @@ abstract class PaimonSparkTableBase(val table: Table)
     table match {
       case fileStoreTable: FileStoreTable =>
         val options = Options.fromMap(info.options)
-        if (useV2Write) {
-          new PaimonV2WriteBuilder(fileStoreTable, info.schema(), options)
+        val writeTable = if (ChainTableUtils.isChainTable(fileStoreTable)) {
+          ChainTableUtils.getWriteTable(fileStoreTable)
         } else {
-          new PaimonWriteBuilder(fileStoreTable, options)
+          fileStoreTable
+        }
+        if (useV2Write) {
+          new PaimonV2WriteBuilder(writeTable, info.schema(), options)
+        } else {
+          new PaimonWriteBuilder(writeTable, options)
         }
       case _ =>
         throw new RuntimeException("Only FileStoreTable can be written.")

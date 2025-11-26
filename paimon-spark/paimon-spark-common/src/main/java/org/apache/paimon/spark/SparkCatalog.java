@@ -44,6 +44,7 @@ import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.ExceptionUtils;
 
 import org.apache.spark.sql.PaimonSparkSession$;
@@ -664,6 +665,9 @@ public class SparkCatalog extends SparkBaseCatalog
             } else if (table instanceof ObjectTable) {
                 return new SparkObjectTable(table);
             } else {
+                if (ChainTableUtils.isChainTable(table)) {
+                    table = ChainTableUtils.getTable(table);
+                }
                 return new SparkTable(table);
             }
         } catch (Catalog.TableNotExistException e) {
