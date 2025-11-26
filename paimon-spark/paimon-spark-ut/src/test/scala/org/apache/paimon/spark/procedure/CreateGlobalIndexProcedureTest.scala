@@ -32,12 +32,13 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
                   |CREATE TABLE T (id INT, name STRING)
                   |TBLPROPERTIES (
                   |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
                   |  'row-tracking.enabled' = 'true',
                   |  'data-evolution.enabled' = 'true')
                   |""".stripMargin)
 
       val values =
-        (0 until 100).map(i => s"($i, 'name_$i')").mkString(",")
+        (0 until 100000).map(i => s"($i, 'name_$i')").mkString(",")
       spark.sql(s"INSERT INTO T VALUES $values")
 
       val output =
@@ -57,9 +58,10 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
         .scanEntries()
         .asScala
         .filter(_.indexFile().indexType() == "bitmap")
+      table.newIndexScanBuilder().shardList()
       assert(bitmapEntries.nonEmpty)
       val totalRowCount = bitmapEntries.map(_.indexFile().rowCount()).sum
-      assert(totalRowCount == 100L)
+      assert(totalRowCount == 100000L)
     }
   }
 }

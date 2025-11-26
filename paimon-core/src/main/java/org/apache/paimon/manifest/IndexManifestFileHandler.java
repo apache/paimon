@@ -37,6 +37,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -91,6 +92,10 @@ public class IndexManifestFileHandler {
     }
 
     private IndexManifestFileCombiner getIndexManifestFileCombine(String indexType) {
+        if (!DELETION_VECTORS_INDEX.equals(indexType) && !HASH_INDEX.equals(indexType)) {
+            return new GlobalIndexCombiner();
+        }
+
         if (DELETION_VECTORS_INDEX.equals(indexType) && BucketMode.BUCKET_UNAWARE == bucketMode) {
             return new GlobalCombiner();
         } else {
@@ -186,6 +191,36 @@ public class IndexManifestFileHandler {
             }
             for (IndexManifestEntry entry : added) {
                 indexEntries.put(identifier(entry), entry);
+            }
+            return new ArrayList<>(indexEntries.values());
+        }
+    }
+
+    /** We combine the previous and new index files by file name. */
+    static class GlobalIndexCombiner implements IndexManifestFileCombiner {
+
+        @Override
+        public List<IndexManifestEntry> combine(
+                List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles) {
+            Map<String, IndexManifestEntry> indexEntries = new HashMap<>();
+            for (IndexManifestEntry entry : prevIndexFiles) {
+                indexEntries.put(entry.indexFile().fileName(), entry);
+            }
+
+            // The deleted entry is processed first to avoid overwriting a new entry.
+            List<IndexManifestEntry> removed =
+                    newIndexFiles.stream()
+                            .filter(f -> f.kind() == FileKind.DELETE)
+                            .collect(Collectors.toList());
+            List<IndexManifestEntry> added =
+                    newIndexFiles.stream()
+                            .filter(f -> f.kind() == FileKind.ADD)
+                            .collect(Collectors.toList());
+            for (IndexManifestEntry entry : removed) {
+                indexEntries.remove(entry.indexFile().fileName());
+            }
+            for (IndexManifestEntry entry : added) {
+                indexEntries.put(entry.indexFile().fileName(), entry);
             }
             return new ArrayList<>(indexEntries.values());
         }
