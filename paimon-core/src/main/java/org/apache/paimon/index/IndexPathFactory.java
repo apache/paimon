@@ -20,10 +20,8 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.fs.Path;
 
-import java.io.Serializable;
-
 /** Path factory to create an index path. */
-public interface IndexPathFactory extends Serializable {
+public interface IndexPathFactory {
 
     Path toPath(String fileName);
 
