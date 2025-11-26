@@ -38,7 +38,7 @@ public abstract class ParquetField {
     // When `variantFileType` has value, the parquet field should produce a variant type, and
     // `variantFileType` describes the file schema of the Parquet variant field.
     @Nullable private final ParquetField variantFileType;
-    // Represent the original variant type variantFields the parquet field.
+    // Represent the required variant fields.
     @Nullable List<VariantAccessInfo.VariantField> variantFields;
 
     public ParquetField(
