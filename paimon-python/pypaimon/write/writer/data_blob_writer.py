@@ -246,7 +246,7 @@ class DataBlobWriter(DataWriter):
         if data.num_rows == 0:
             return None
 
-        file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
+        file_name = f"{CoreOptions.get_data_file_prefix(self.options)}-{uuid.uuid4()}-0.{self.file_format}"
         file_path = self._generate_file_path(file_name)
 
         # Write file based on format

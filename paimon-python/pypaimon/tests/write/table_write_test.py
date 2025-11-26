@@ -240,9 +240,56 @@ class TableWriteTest(unittest.TestCase):
             self.assertEqual('s', parts[8], f"Fourth part should be 's', got '{parts[8]}'")
             self.assertEqual('w', parts[10], f"Sixth part should be 'w', got '{parts[10]}'")
 
-    def test_data_file_prefix(self):
+    def test_data_file_prefix_default(self):
         """Test that generated data file names follow the expected prefix format."""
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'])
+        self.catalog.create_table('default.test_file_prefix_default', schema, False)
+        table = self.catalog.get_table('default.test_file_prefix_default')
+
+        # Write some data to generate files
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        data = {
+            'user_id': [1, 2],
+            'item_id': [1001, 1002],
+            'behavior': ['a', 'b'],
+            'dt': ['p1', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+
+        commit_messages = table_write.prepare_commit()
+        table_commit.commit(commit_messages)
+        table_write.close()
+        table_commit.close()
+
+        # Find generated data files
+        table_path = os.path.join(self.warehouse, 'default.db', 'test_file_prefix_default')
+        data_files = []
+        for root, dirs, files in os.walk(table_path):
+            for file in files:
+                if file.endswith('.parquet') or file.endswith('.avro') or file.endswith('.orc'):
+                    data_files.append(file)
+
+        # Verify at least one data file was created
+        self.assertGreater(len(data_files), 0, "No data files were generated")
+
+        expected_pattern = r'^data-.+-0\.parquet$'
+
+        for file_name in data_files:
+            self.assertRegex(file_name, expected_pattern,
+                             f"File name '{file_name}' does not match expected prefix format")
+
+            # Additional checks for specific components
+            parts = file_name.split('-')
+            self.assertEqual('data', parts[0], f"File prefix should start with 'data', got '{parts[0]}'")
+
+    def test_data_file_prefix(self):
+        """Test that generated data file names follow the expected prefix format."""
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'],
+                                            options={'data-file.prefix': 'test_prefix'})
         self.catalog.create_table('default.test_file_prefix', schema, False)
         table = self.catalog.get_table('default.test_file_prefix')
 
@@ -276,7 +323,7 @@ class TableWriteTest(unittest.TestCase):
         # Verify at least one data file was created
         self.assertGreater(len(data_files), 0, "No data files were generated")
 
-        expected_pattern = r'^data-.+-0\.parquet$'
+        expected_pattern = r'^test_prefix-.+-0\.parquet$'
 
         for file_name in data_files:
             self.assertRegex(file_name, expected_pattern,
@@ -284,4 +331,4 @@ class TableWriteTest(unittest.TestCase):
 
             # Additional checks for specific components
             parts = file_name.split('-')
-            self.assertEqual('data', parts[0], f"File prefix should start with 'data', got '{parts[0]}'")
+            self.assertEqual('test_prefix', parts[0], f"File prefix should start with 'data', got '{parts[0]}'")
