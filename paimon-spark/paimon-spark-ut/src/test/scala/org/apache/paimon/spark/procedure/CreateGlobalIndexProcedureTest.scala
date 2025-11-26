@@ -42,7 +42,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
 
       val output =
         spark
-          .sql("CALL sys.create_global_index(table => 'test.T', column => 'name', index_type => 'bitmap')")
+          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'bitmap')")
           .collect()
           .head
 

@@ -90,7 +90,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", DataTypes.StringType),
-                ProcedureParameter.required("column", DataTypes.StringType),
+                ProcedureParameter.required("index_column", DataTypes.StringType),
                 ProcedureParameter.required("index_type", DataTypes.StringType),
                 ProcedureParameter.optional("partitions", StringType),
                 ProcedureParameter.optional("options", DataTypes.StringType)
