@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.globalindex;
 
+/** Global index builder factory on spark. */
 public interface GlobalIndexBuilderFactory {
 
     String identifier();
