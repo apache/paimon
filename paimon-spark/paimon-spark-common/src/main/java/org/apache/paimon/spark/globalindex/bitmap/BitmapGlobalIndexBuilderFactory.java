@@ -16,29 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.spark.globalindex.bitmap;
 
-import org.apache.paimon.predicate.FunctionVisitor;
-import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
+import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
+import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory;
 
-import java.io.Closeable;
-import java.util.List;
+/**
+ * Factory for creating bitmap-based global index builders.
+ *
+ * <p>This factory is automatically discovered via Java's ServiceLoader mechanism.
+ */
+public class BitmapGlobalIndexBuilderFactory implements GlobalIndexBuilderFactory {
 
-/** Index reader for global index, return {@link GlobalIndexResult}. */
-public interface GlobalIndexReader extends FunctionVisitor<GlobalIndexResult>, Closeable {
+    private static final String IDENTIFIER = "bitmap";
 
     @Override
-    default GlobalIndexResult visitAnd(List<GlobalIndexResult> children) {
-        throw new UnsupportedOperationException("Should not invoke this");
+    public String identifier() {
+        return IDENTIFIER;
     }
 
     @Override
-    default GlobalIndexResult visitOr(List<GlobalIndexResult> children) {
-        throw new UnsupportedOperationException("Should not invoke this");
-    }
-
-    @Override
-    default GlobalIndexResult visit(TransformPredicate predicate) {
-        throw new UnsupportedOperationException("Should not invoke this");
+    public GlobalIndexBuilder create(GlobalIndexBuilderContext context) {
+        return new BitmapGlobalIndexBuilder(context);
     }
 }

@@ -16,22 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index;
+package org.apache.paimon.spark.globalindex.bitmap;
 
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
+import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
 
-import java.io.Serializable;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
 
-/** Path factory to create an index path. */
-public interface IndexPathFactory extends Serializable {
+/**
+ * Builder for creating bitmap-based global indexes.
+ *
+ * <p>This implementation does not apply any custom transformations to the input dataset, allowing
+ * the data to be processed as-is for bitmap index creation.
+ */
+public class BitmapGlobalIndexBuilder extends GlobalIndexBuilder {
 
-    Path toPath(String fileName);
-
-    Path newPath();
-
-    default Path toPath(IndexFileMeta file) {
-        return toPath(file.fileName());
+    protected BitmapGlobalIndexBuilder(GlobalIndexBuilderContext context) {
+        super(context);
     }
 
-    boolean isExternalPath();
+    @Override
+    public Dataset<Row> customTopo(Dataset<Row> input) {
+        // No custom transformation needed for bitmap index
+        return input;
+    }
 }

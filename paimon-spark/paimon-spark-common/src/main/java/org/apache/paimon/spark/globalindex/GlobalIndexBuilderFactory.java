@@ -16,22 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index;
+package org.apache.paimon.spark.globalindex;
 
-import org.apache.paimon.fs.Path;
+public interface GlobalIndexBuilderFactory {
 
-import java.io.Serializable;
+    String identifier();
 
-/** Path factory to create an index path. */
-public interface IndexPathFactory extends Serializable {
-
-    Path toPath(String fileName);
-
-    Path newPath();
-
-    default Path toPath(IndexFileMeta file) {
-        return toPath(file.fileName());
-    }
-
-    boolean isExternalPath();
+    GlobalIndexBuilder create(GlobalIndexBuilderContext context);
 }

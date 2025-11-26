@@ -150,6 +150,17 @@ public class SpecialFields {
      *     and write
      */
     public static RowType rowTypeWithRowTracking(RowType rowType, boolean sequenceNumberNullable) {
+        return rowTypeWithRowTracking(rowType, true, sequenceNumberNullable);
+    }
+
+    /**
+     * Add row tracking fields to rowType.
+     *
+     * @param sequenceNumberNullable sequence number is not null for user, but is nullable when read
+     *     and write
+     */
+    public static RowType rowTypeWithRowTracking(
+            RowType rowType, boolean includeSequenceNumber, boolean sequenceNumberNullable) {
         List<DataField> fieldsWithRowTracking = new ArrayList<>(rowType.getFields());
 
         fieldsWithRowTracking.forEach(
@@ -162,10 +173,12 @@ public class SpecialFields {
                     }
                 });
         fieldsWithRowTracking.add(SpecialFields.ROW_ID);
-        fieldsWithRowTracking.add(
-                sequenceNumberNullable
-                        ? SpecialFields.SEQUENCE_NUMBER.copy(true)
-                        : SpecialFields.SEQUENCE_NUMBER);
+        if (includeSequenceNumber) {
+            fieldsWithRowTracking.add(
+                    sequenceNumberNullable
+                            ? SpecialFields.SEQUENCE_NUMBER.copy(true)
+                            : SpecialFields.SEQUENCE_NUMBER);
+        }
         return new RowType(fieldsWithRowTracking);
     }
 }
