@@ -88,7 +88,8 @@ class SplitRead(ABC):
     def file_reader_supplier(self, file: DataFileMeta, for_merge_read: bool, read_fields: List[str]):
         (read_file_fields, read_arrow_predicate) = self._get_fields_and_predicate(file.schema_id, read_fields)
 
-        file_path = file.file_path
+        # Use external_path if available, otherwise use file_path
+        file_path = file.external_path if file.external_path else file.file_path
         _, extension = os.path.splitext(file_path)
         file_format = extension[1:]
 
@@ -97,7 +98,7 @@ class SplitRead(ABC):
             format_reader = FormatAvroReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate)
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
-            blob_as_descriptor = CoreOptions.get_blob_as_descriptor(self.table.options)
+            blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
             format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:

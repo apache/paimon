@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import PyarrowFieldParser
@@ -46,18 +47,28 @@ class DataWriter(ABC):
         self.trimmed_primary_keys = self.table.trimmed_primary_keys
 
         options = self.table.options
-        self.target_file_size = CoreOptions.get_target_file_size(options, self.table.is_primary_key_table)
-        self.file_format = options.get(CoreOptions.FILE_FORMAT,
-                                       CoreOptions.FILE_FORMAT_PARQUET
-                                       if self.bucket != BucketMode.POSTPONE_BUCKET.value
-                                       else CoreOptions.FILE_FORMAT_AVRO)
-        self.compression = options.get(CoreOptions.FILE_COMPRESSION, "zstd")
+        self.target_file_size = CoreOptions.target_file_size(options, self.table.is_primary_key_table)
+        # POSTPONE_BUCKET uses AVRO format, otherwise default to PARQUET
+        default_format = (
+            CoreOptions.FILE_FORMAT_AVRO
+            if self.bucket == BucketMode.POSTPONE_BUCKET.value
+            else CoreOptions.FILE_FORMAT_PARQUET
+        )
+        self.file_format = CoreOptions.file_format(options, default=default_format)
+        self.compression = CoreOptions.file_compression(options)
         self.sequence_generator = SequenceGenerator(max_seq_number)
 
         self.pending_data: Optional[pa.Table] = None
         self.committed_files: List[DataFileMeta] = []
         self.write_cols = write_cols
-        self.blob_as_descriptor = CoreOptions.get_blob_as_descriptor(options)
+        self.blob_as_descriptor = CoreOptions.blob_as_descriptor(options)
+
+        self.path_factory = self.table.path_factory()
+        self.external_path_provider: Optional[ExternalPathProvider] = self.path_factory.create_external_path_provider(
+            self.partition, self.bucket
+        )
+        # Store the current generated external path to preserve scheme in metadata
+        self._current_external_path: Optional[str] = None
 
     def write(self, data: pa.RecordBatch):
         try:
@@ -105,13 +116,17 @@ class DataWriter(ABC):
         # Delete any files that were written
         for file_meta in self.committed_files:
             try:
-                if file_meta.file_path:
-                    self.file_io.delete_quietly(file_meta.file_path)
+                # Use external_path if available (contains full URL scheme), otherwise use file_path
+                path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
+                if path_to_delete:
+                    path_str = str(path_to_delete)
+                    self.file_io.delete_quietly(path_str)
             except Exception as e:
                 # Log but don't raise - we want to clean up as much as possible
                 import logging
                 logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to delete file {file_meta.file_path} during abort: {e}")
+                path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
+                logger.warning(f"Failed to delete file {path_to_delete} during abort: {e}")
 
         # Clean up resources
         self.pending_data = None
@@ -145,6 +160,14 @@ class DataWriter(ABC):
             return
         file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
         file_path = self._generate_file_path(file_name)
+
+        is_external_path = self.external_path_provider is not None
+        if is_external_path:
+            # Use the stored external path from _generate_file_path to preserve scheme
+            external_path_str = self._current_external_path if self._current_external_path else None
+        else:
+            external_path_str = None
+
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
             self.file_io.write_parquet(file_path, data, compression=self.compression)
         elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
@@ -211,7 +234,7 @@ class DataWriter(ABC):
             delete_row_count=0,
             file_source=0,
             value_stats_cols=None,  # None means all columns in the data have statistics
-            external_path=None,
+            external_path=external_path_str,  # Set external path if using external paths
             first_row_id=None,
             write_cols=self.write_cols,
             # None means all columns in the table have been written
@@ -219,19 +242,13 @@ class DataWriter(ABC):
         ))
 
     def _generate_file_path(self, file_name: str) -> str:
-        path_builder = str(self.table.table_path)
+        if self.external_path_provider:
+            external_path = self.external_path_provider.get_next_external_data_path(file_name)
+            self._current_external_path = external_path
+            return external_path
 
-        for i, field_name in enumerate(self.table.partition_keys):
-            path_builder = f"{path_builder.rstrip('/')}/{field_name}={str(self.partition[i])}"
-
-        if self.bucket == BucketMode.POSTPONE_BUCKET.value:
-            bucket_name = "postpone"
-        else:
-            bucket_name = str(self.bucket)
-
-        path_builder = f"{path_builder.rstrip('/')}/bucket-{bucket_name}/{file_name}"
-
-        return path_builder
+        bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
+        return f"{bucket_path.rstrip('/')}/{file_name}"
 
     @staticmethod
     def _find_optimal_split_point(data: pa.RecordBatch, target_size: int) -> int:

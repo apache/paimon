@@ -258,10 +258,14 @@ class DataBlobWriter(DataWriter):
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
-        # Generate metadata
-        return self._create_data_file_meta(file_name, file_path, data)
+        # Determine if this is an external path
+        is_external_path = self.external_path_provider is not None
+        external_path_str = file_path if is_external_path else None
 
-    def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table) -> DataFileMeta:
+        return self._create_data_file_meta(file_name, file_path, data, external_path_str)
+
+    def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table,
+                               external_path: Optional[str] = None) -> DataFileMeta:
         # Column stats (only for normal columns)
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
@@ -302,6 +306,7 @@ class DataBlobWriter(DataWriter):
             delete_row_count=0,
             file_source=0,
             value_stats_cols=self.normal_column_names,
+            external_path=external_path,
             file_path=file_path,
             write_cols=self.write_cols)
 
