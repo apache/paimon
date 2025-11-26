@@ -383,7 +383,7 @@ public class TableCommitTest {
     }
 
     @Test
-    public void testStrictModeForAppend() throws Exception {
+    public void testStrictModeForOverwriteCheckAppend() throws Exception {
         String path = tempDir.toString();
         RowType rowType =
                 RowType.of(
@@ -451,13 +451,71 @@ public class TableCommitTest {
         write1 = fixedBucketWriteTable.newWrite(user1);
         commit1 = fixedBucketWriteTable.newCommit(user1);
         write1.write(GenericRow.of(4, 4L));
-        commit1.commit(3, write1.prepareCommit(true, 3));
+        commit1.commit(3, write1.prepareCommit(false, 3));
 
         write2.write(GenericRow.of(5, 5L));
         assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
                         "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+    }
+
+    @Test
+    public void testStrictModeForNonOverwriteNoCheckAppend() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        String user1 = UUID.randomUUID().toString();
+        FileStoreTable fixedBucketWriteTable = table;
+        TableWriteImpl<?> write1 = fixedBucketWriteTable.newWrite(user1);
+        TableCommitImpl commit1 = fixedBucketWriteTable.newCommit(user1);
+
+        Map<String, String> newOptions = new HashMap<>();
+        newOptions.put(CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "-1");
+        table = table.copy(newOptions);
+        String user2 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write2 = table.newWrite(user2);
+        TableCommitImpl commit2 = table.newCommit(user2);
+
+        // by default, first commit is not checked
+
+        write1.write(GenericRow.of(0, 0L));
+        write1.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit1.commit(1, write1.prepareCommit(true, 1));
+
+        write2.write(GenericRow.of(1, 1L));
+        commit2.commit(1, write2.prepareCommit(false, 1));
+
+        // Non overwrite doesn't check APPEND with fixed bucket files
+        write1 = fixedBucketWriteTable.newWrite(user1);
+        commit1 = fixedBucketWriteTable.newCommit(user1);
+        write1.write(GenericRow.of(2, 2L));
+        commit1.commit(2, write1.prepareCommit(false, 2));
+
+        write2.write(GenericRow.of(3, 3L));
+        commit2.commit(2, write2.prepareCommit(false, 3));
     }
 
     @Test
