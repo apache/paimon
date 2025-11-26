@@ -992,24 +992,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         if (strictModeLastSafeSnapshot != null && strictModeLastSafeSnapshot >= 0) {
-            for (long id = strictModeLastSafeSnapshot + 1; id < newSnapshotId; id++) {
-                Snapshot snapshot = snapshotManager.snapshot(id);
-                if ((snapshot.commitKind() == CommitKind.COMPACT
-                                || snapshot.commitKind() == CommitKind.OVERWRITE)
-                        && !snapshot.commitUser().equals(commitUser)) {
-                    throw new RuntimeException(
-                            String.format(
-                                    "When trying to commit snapshot %d, "
-                                            + "commit user %s has found a %s snapshot (id: %d) by another user %s. "
-                                            + "Giving up committing as %s is set.",
-                                    newSnapshotId,
-                                    commitUser,
-                                    snapshot.commitKind().name(),
-                                    id,
-                                    snapshot.commitUser(),
-                                    CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
-                }
-            }
+            conflictDetection.commitStrictModeCheck(
+                    strictModeLastSafeSnapshot, newSnapshotId, commitKind, snapshotManager);
             strictModeLastSafeSnapshot = newSnapshotId - 1;
         }
 

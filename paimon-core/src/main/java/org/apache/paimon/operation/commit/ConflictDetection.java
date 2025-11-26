@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
@@ -28,13 +29,17 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,6 +52,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +77,7 @@ public class ConflictDetection {
     private final BucketMode bucketMode;
     private final boolean deletionVectorsEnabled;
     private final IndexFileHandler indexFileHandler;
+    private final FileStoreScan scan;
 
     private @Nullable PartitionExpire partitionExpire;
 
@@ -82,7 +89,8 @@ public class ConflictDetection {
             @Nullable Comparator<InternalRow> keyComparator,
             BucketMode bucketMode,
             boolean deletionVectorsEnabled,
-            IndexFileHandler indexFileHandler) {
+            IndexFileHandler indexFileHandler,
+            FileStoreScan scan) {
         this.tableName = tableName;
         this.commitUser = commitUser;
         this.partitionType = partitionType;
@@ -91,10 +99,63 @@ public class ConflictDetection {
         this.bucketMode = bucketMode;
         this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.indexFileHandler = indexFileHandler;
+        this.scan = scan;
     }
 
     public void withPartitionExpire(PartitionExpire partitionExpire) {
         this.partitionExpire = partitionExpire;
+    }
+
+    public void commitStrictModeCheck(
+            @Nullable Long strictModeLastSafeSnapshot,
+            long newSnapshotId,
+            CommitKind newCommitKind,
+            SnapshotManager snapshotManager) {
+        if (strictModeLastSafeSnapshot == null || strictModeLastSafeSnapshot < 0) {
+            return;
+        }
+
+        for (long id = strictModeLastSafeSnapshot + 1; id < newSnapshotId; id++) {
+            Snapshot snapshot = snapshotManager.snapshot(id);
+            if (snapshot.commitUser().equals(commitUser)) {
+                continue;
+            }
+            if (snapshot.commitKind() == CommitKind.COMPACT
+                    || snapshot.commitKind() == CommitKind.OVERWRITE) {
+                throw new RuntimeException(
+                        String.format(
+                                "When trying to commit snapshot %d, "
+                                        + "commit user %s has found a %s snapshot (id: %d) by another user %s. "
+                                        + "Giving up committing as %s is set.",
+                                newSnapshotId,
+                                commitUser,
+                                snapshot.commitKind().name(),
+                                id,
+                                snapshot.commitUser(),
+                                CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
+            }
+            if (snapshot.commitKind() == CommitKind.APPEND
+                    && newCommitKind == CommitKind.OVERWRITE) {
+                Iterator<ManifestEntry> entries =
+                        scan.withSnapshot(snapshot)
+                                .withKind(ScanMode.DELTA)
+                                .onlyReadRealBuckets()
+                                .dropStats()
+                                .readFileIterator();
+                if (entries.hasNext()) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "When trying to commit snapshot %d, "
+                                            + "commit user %s has found a APPEND snapshot (id: %d) by another user %s "
+                                            + "which committed files to fixed bucket. Giving up committing as %s is set.",
+                                    newSnapshotId,
+                                    commitUser,
+                                    id,
+                                    snapshot.commitUser(),
+                                    CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
+                }
+            }
+        }
     }
 
     public void checkNoConflictsOrFail(
