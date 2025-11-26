@@ -461,6 +461,7 @@ public class CDCSourceEnumeratorTest
                 enumerator =
                         new TestCDCSourceEnumerator(
                                 context,
+                                new org.apache.flink.configuration.Configuration(),
                                 discoveryInterval,
                                 CatalogContext.create(options),
                                 cdcConfig,
@@ -508,11 +509,12 @@ public class CDCSourceEnumeratorTest
 
         public TestCDCSourceEnumerator(
                 SplitEnumeratorContext<TableAwareFileStoreSourceSplit> context,
+                org.apache.flink.configuration.Configuration flinkConfig,
                 long discoveryInterval,
                 CatalogContext catalogContext,
                 Configuration cdcConfig,
                 @Nullable CDCCheckpoint checkpoint) {
-            super(context, discoveryInterval, catalogContext, cdcConfig, checkpoint);
+            super(context, flinkConfig, discoveryInterval, catalogContext, cdcConfig, checkpoint);
         }
 
         @Override

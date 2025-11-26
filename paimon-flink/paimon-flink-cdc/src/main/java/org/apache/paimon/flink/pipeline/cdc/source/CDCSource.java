@@ -60,10 +60,15 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
 
     private final CatalogContext catalogContext;
     private final Configuration cdcConfig;
+    private final org.apache.flink.configuration.Configuration flinkConfig;
 
-    public CDCSource(CatalogContext catalogContext, Configuration cdcConfig) {
+    public CDCSource(
+            CatalogContext catalogContext,
+            Configuration cdcConfig,
+            org.apache.flink.configuration.Configuration flinkConfig) {
         this.catalogContext = catalogContext;
         this.cdcConfig = cdcConfig;
+        this.flinkConfig = flinkConfig;
     }
 
     @Override
@@ -83,6 +88,7 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
             @Nullable CDCCheckpoint checkpoint) {
         return new CDCSourceEnumerator(
                 context,
+                new org.apache.flink.configuration.Configuration(),
                 catalogContext
                         .options()
                         .get(org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL)
@@ -111,7 +117,7 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
         FileStoreSourceReaderMetrics sourceReaderMetrics =
                 new FileStoreSourceReaderMetrics(metricGroup);
 
-        Catalog catalog = createCatalog(catalogContext);
+        Catalog catalog = createCatalog(catalogContext, flinkConfig);
         TableReadManager tableReadManager = new TableReadManager(catalog, ioManager, metricGroup);
         return new CDCSourceReader(context, sourceReaderMetrics, ioManager, tableReadManager);
     }

@@ -95,6 +95,7 @@ public class CDCSourceEnumerator
 
     public CDCSourceEnumerator(
             SplitEnumeratorContext<TableAwareFileStoreSourceSplit> context,
+            org.apache.flink.configuration.Configuration flinkConfig,
             long discoveryInterval,
             CatalogContext catalogContext,
             Configuration cdcConfig,
@@ -106,7 +107,7 @@ public class CDCSourceEnumerator
 
         this.database = cdcConfig.get(toCDCOption(DATABASE));
         this.table = cdcConfig.get(toCDCOption(TABLE));
-        this.catalog = createCatalog(catalogContext);
+        this.catalog = createCatalog(catalogContext, flinkConfig);
 
         this.numTablesWithSubtaskAssigned = 0;
 

@@ -22,30 +22,13 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
-import org.apache.paimon.utils.ReflectionUtils;
 
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.factories.FactoryUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 
 /** Utility methods for CDC class. */
 public class CDCUtils {
-    private static final Logger LOG = LoggerFactory.getLogger(CDCUtils.class);
-
-    public static Catalog createCatalog(CatalogContext catalogContext) {
-        Configuration flinkConfig;
-        try {
-            Method method = ReflectionUtils.getMethod(catalogContext.getClass(), "getFlinkConf", 0);
-            flinkConfig = (Configuration) method.invoke(catalogContext);
-        } catch (NoSuchMethodException | InvocationTargetException | IllegalAccessException e) {
-            LOG.info(
-                    "Cannot get Flink configuration from catalog context. It is possibly due to compatibility with Flink CDC 3.5. Using empty Flink configuration to create catalog instead.");
-            flinkConfig = new Configuration();
-        }
+    public static Catalog createCatalog(CatalogContext catalogContext, ReadableConfig flinkConfig) {
 
         FlinkCatalogFactory flinkCatalogFactory =
                 FactoryUtil.discoverFactory(

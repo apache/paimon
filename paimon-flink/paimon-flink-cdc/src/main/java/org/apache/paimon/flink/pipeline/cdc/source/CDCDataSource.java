@@ -33,22 +33,27 @@ import static org.apache.paimon.flink.pipeline.cdc.util.CDCUtils.createCatalog;
 public class CDCDataSource implements DataSource {
     private final CatalogContext catalogContext;
     private final Configuration cdcConfig;
+    private final org.apache.flink.configuration.Configuration flinkConfig;
     private Catalog catalog;
 
-    public CDCDataSource(CatalogContext catalogContext, Configuration cdcConfig) {
+    public CDCDataSource(
+            CatalogContext catalogContext,
+            Configuration cdcConfig,
+            org.apache.flink.configuration.Configuration flinkConfig) {
         this.catalogContext = catalogContext;
         this.cdcConfig = cdcConfig;
+        this.flinkConfig = flinkConfig;
     }
 
     @Override
     public EventSourceProvider getEventSourceProvider() {
-        return new CDCSourceProvider(catalogContext, cdcConfig);
+        return new CDCSourceProvider(catalogContext, cdcConfig, flinkConfig);
     }
 
     @Override
     public MetadataAccessor getMetadataAccessor() {
         if (catalog == null) {
-            catalog = createCatalog(catalogContext);
+            catalog = createCatalog(catalogContext, flinkConfig);
         }
         return new CDCMetadataAccessor(catalog);
     }

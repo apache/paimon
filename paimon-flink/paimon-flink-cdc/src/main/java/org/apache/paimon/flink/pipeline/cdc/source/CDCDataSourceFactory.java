@@ -20,13 +20,19 @@ package org.apache.paimon.flink.pipeline.cdc.source;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.ReflectionUtils;
 
 import org.apache.flink.cdc.common.configuration.ConfigOption;
 import org.apache.flink.cdc.common.configuration.Configuration;
 import org.apache.flink.cdc.common.factories.DataSourceFactory;
 import org.apache.flink.cdc.common.factories.FactoryHelper;
 import org.apache.flink.cdc.common.source.DataSource;
+import org.apache.flink.configuration.ReadableConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -40,6 +46,8 @@ import static org.apache.paimon.flink.pipeline.cdc.CDCOptions.toCDCOption;
 
 /** The {@link DataSourceFactory} for cdc source. */
 public class CDCDataSourceFactory implements DataSourceFactory {
+    private static final Logger LOG = LoggerFactory.getLogger(CDCDataSourceFactory.class);
+
     public static final String IDENTIFIER = "paimon";
 
     @Override
@@ -64,9 +72,35 @@ public class CDCDataSourceFactory implements DataSourceFactory {
                                 cdcConfig.put(key, value);
                             }
                         });
+
+        org.apache.flink.configuration.Configuration flinkConfig;
+        boolean isReadableConfigAcquired = false;
+        try {
+            Method getFlinkConfMethod =
+                    ReflectionUtils.getMethod(context.getClass(), "getFlinkConf", 0);
+            ReadableConfig readableConfig = (ReadableConfig) getFlinkConfMethod.invoke(context);
+            isReadableConfigAcquired = true;
+            if (readableConfig instanceof org.apache.flink.configuration.Configuration) {
+                flinkConfig = (org.apache.flink.configuration.Configuration) readableConfig;
+            } else {
+                Method toMapMethod =
+                        ReflectionUtils.getMethod(readableConfig.getClass(), "toMap", 0);
+                Map<String, String> configMap =
+                        (Map<String, String>) toMapMethod.invoke(readableConfig);
+                flinkConfig = org.apache.flink.configuration.Configuration.fromMap(configMap);
+            }
+        } catch (NoSuchMethodException | InvocationTargetException | IllegalAccessException e) {
+            String failReason = isReadableConfigAcquired ? "Flink CDC 3.5-" : "Flink 1.18-";
+            LOG.info(
+                    "Cannot get Flink configuration from context. It is possibly due to compatibility with {}. Using empty Flink configuration to create catalog instead.",
+                    failReason);
+            flinkConfig = new org.apache.flink.configuration.Configuration();
+        }
+
         return new CDCDataSource(
                 CatalogContext.create(Options.fromMap(catalogOptions)),
-                Configuration.fromMap(cdcConfig));
+                Configuration.fromMap(cdcConfig),
+                flinkConfig);
     }
 
     @Override

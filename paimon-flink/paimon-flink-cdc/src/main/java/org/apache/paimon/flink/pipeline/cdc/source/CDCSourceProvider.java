@@ -29,14 +29,19 @@ import org.apache.flink.cdc.common.source.FlinkSourceProvider;
 public class CDCSourceProvider implements FlinkSourceProvider {
     private final CatalogContext catalogContext;
     private final Configuration cdcConfig;
+    private final org.apache.flink.configuration.Configuration flinkConfig;
 
-    public CDCSourceProvider(CatalogContext catalogContext, Configuration cdcConfig) {
+    public CDCSourceProvider(
+            CatalogContext catalogContext,
+            Configuration cdcConfig,
+            org.apache.flink.configuration.Configuration flinkConfig) {
         this.catalogContext = catalogContext;
         this.cdcConfig = cdcConfig;
+        this.flinkConfig = flinkConfig;
     }
 
     @Override
     public Source<Event, ?, ?> getSource() {
-        return new CDCSource(catalogContext, cdcConfig);
+        return new CDCSource(catalogContext, cdcConfig, flinkConfig);
     }
 }
