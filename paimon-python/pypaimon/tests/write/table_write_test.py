@@ -227,7 +227,7 @@ class TableWriteTest(unittest.TestCase):
 
         # Verify file name format: {table_prefix}-u-{commit_user}-s-{random_number}-w--{uuid}-0.{format}
         # Expected pattern: data--u-{user}-s-{random}-w--{uuid}-0.{format}
-        expected_pattern = r'^data--u-.+-s-\d+-w--.+-0\.avro$'
+        expected_pattern = r'^data--u-.+-s-\d+-w-.+-0\.avro$'
 
         for file_name in data_files:
             self.assertRegex(file_name, expected_pattern,
@@ -323,12 +323,8 @@ class TableWriteTest(unittest.TestCase):
         # Verify at least one data file was created
         self.assertGreater(len(data_files), 0, "No data files were generated")
 
-        expected_pattern = r'^test_prefix-.+-0\.parquet$'
+        expected_pattern = r'^test_prefix.+-0\.parquet$'
 
         for file_name in data_files:
             self.assertRegex(file_name, expected_pattern,
                              f"File name '{file_name}' does not match expected prefix format")
-
-            # Additional checks for specific components
-            parts = file_name.split('-')
-            self.assertEqual('test_prefix', parts[0], f"File prefix should start with 'data', got '{parts[0]}'")

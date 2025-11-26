@@ -97,7 +97,8 @@ class BlobWriter(AppendOnlyDataWriter):
         self.sequence_generator.next()
 
     def open_current_writer(self):
-        file_name = f"{CoreOptions.get_data_file_prefix(self.options)}-{self.file_uuid}-{self.file_count}.{self.file_format}"
+        file_name = (f"{CoreOptions.get_data_file_prefix(self.options)}"
+                     f"{self.file_uuid}-{self.file_count}.{self.file_format}")
         self.file_count += 1  # Increment counter for next file
         file_path = self._generate_file_path(file_name)
         self.current_file_path = file_path
