@@ -66,6 +66,10 @@ class CoreOptions(str, Enum):
     DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS = "data-file.external-paths.specific-fs"
 
     @staticmethod
+    def data_file_prefix(options: dict) -> str:
+        return options.get(CoreOptions.DATA_FILE_PREFIX, "data-")
+
+    @staticmethod
     def blob_as_descriptor(options: dict) -> bool:
         return options.get(CoreOptions.FILE_BLOB_AS_DESCRIPTOR, "false").lower() == 'true'
 
