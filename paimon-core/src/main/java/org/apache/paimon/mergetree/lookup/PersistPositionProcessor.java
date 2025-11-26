@@ -65,7 +65,9 @@ public class PersistPositionProcessor implements PersistProcessor<FilePosition> 
 
             @Override
             public PersistProcessor<FilePosition> create(
-                    LookupSerializerFactory serializerFactory, @Nullable RowType fileSchema) {
+                    String fileSerializerId,
+                    LookupSerializerFactory serializerFactory,
+                    @Nullable RowType fileSchema) {
                 return new PersistPositionProcessor();
             }
         };

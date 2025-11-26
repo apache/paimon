@@ -37,7 +37,7 @@ public interface LookupSerializerFactory {
     Function<InternalRow, byte[]> createSerializer(RowType currentSchema);
 
     Function<byte[], InternalRow> createDeserializer(
-            RowType currentSchema, @Nullable RowType fileSchema);
+            String fileSerializerId, RowType currentSchema, @Nullable RowType fileSchema);
 
     Supplier<LookupSerializerFactory> INSTANCE =
             Suppliers.memoize(

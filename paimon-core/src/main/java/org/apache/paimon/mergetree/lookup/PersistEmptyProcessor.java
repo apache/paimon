@@ -53,7 +53,9 @@ public class PersistEmptyProcessor implements PersistProcessor<Boolean> {
 
             @Override
             public PersistProcessor<Boolean> create(
-                    LookupSerializerFactory serializerFactory, @Nullable RowType fileSchema) {
+                    String fileSerializerId,
+                    LookupSerializerFactory serializerFactory,
+                    @Nullable RowType fileSchema) {
                 return new PersistEmptyProcessor();
             }
         };
