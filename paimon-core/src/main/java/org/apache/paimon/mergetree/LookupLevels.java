@@ -34,6 +34,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
@@ -45,6 +46,7 @@ import java.io.IOException;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
@@ -68,8 +70,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private final Function<Long, BloomFilter.Builder> bfGenerator;
     private final Cache<String, LookupFile> lookupFileCache;
     private final Set<String> ownCachedFiles;
-    private final String remoteSstSuffix;
-    private final Map<Long, PersistProcessor<T>> schemaIdToProcessors;
+    private final Map<Pair<Long, String>, PersistProcessor<T>> schemaIdAndSerVersionToProcessors;
 
     @Nullable private RemoteFileDownloader remoteFileDownloader;
 
@@ -99,13 +100,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         this.bfGenerator = bfGenerator;
         this.lookupFileCache = lookupFileCache;
         this.ownCachedFiles = new HashSet<>();
-        this.remoteSstSuffix =
-                "."
-                        + processorFactory.identifier()
-                        + "."
-                        + serializerFactory.identifier()
-                        + REMOTE_LOOKUP_FILE_SUFFIX;
-        this.schemaIdToProcessors = new ConcurrentHashMap<>();
+        this.schemaIdAndSerVersionToProcessors = new ConcurrentHashMap<>();
         levels.addDropFileCallback(this);
     }
 
@@ -170,17 +165,17 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             return null;
         }
 
-        return getOrCreateProcessor(lookupFile.schemaId())
+        return getOrCreateProcessor(lookupFile.schemaId(), lookupFile.serVersion())
                 .readFromDisk(key, lookupFile.level(), valueBytes, file.fileName());
     }
 
-    private PersistProcessor<T> getOrCreateProcessor(long schemaId) {
-        return schemaIdToProcessors.computeIfAbsent(
-                schemaId,
+    private PersistProcessor<T> getOrCreateProcessor(long schemaId, String serVersion) {
+        return schemaIdAndSerVersionToProcessors.computeIfAbsent(
+                Pair.of(schemaId, serVersion),
                 id -> {
                     RowType fileSchema =
                             schemaId == currentSchemaId ? null : schemaFunction.apply(schemaId);
-                    return processorFactory.create(serializerFactory, fileSchema);
+                    return processorFactory.create(serVersion, serializerFactory, fileSchema);
                 });
     }
 
@@ -191,9 +186,12 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         }
 
         long schemaId = this.currentSchemaId;
-        if (tryToDownloadRemoteSst(file, localFile)) {
+        String fileSerVersion = serializerFactory.version();
+        Optional<String> downloadSerVersion = tryToDownloadRemoteSst(file, localFile);
+        if (downloadSerVersion.isPresent()) {
             // use schema id from remote file
             schemaId = file.schemaId();
+            fileSerVersion = downloadSerVersion.get();
         } else {
             createSstFileFromDataFile(file, localFile);
         }
@@ -203,21 +201,35 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 localFile,
                 file.level(),
                 schemaId,
+                fileSerVersion,
                 lookupStoreFactory.createReader(localFile),
                 () -> ownCachedFiles.remove(file.fileName()));
     }
 
-    private boolean tryToDownloadRemoteSst(DataFileMeta file, File localFile) {
+    private Optional<String> tryToDownloadRemoteSst(DataFileMeta file, File localFile) {
         if (remoteFileDownloader == null) {
-            return false;
+            return Optional.empty();
         }
+        Optional<RemoteSstFile> remoteSstFile = remoteSst(file);
+        if (!remoteSstFile.isPresent()) {
+            return Optional.empty();
+        }
+
+        RemoteSstFile remoteSst = remoteSstFile.get();
+
         // validate schema matched, no exception here
         try {
-            getOrCreateProcessor(file.schemaId());
+            getOrCreateProcessor(file.schemaId(), remoteSst.serVersion);
         } catch (UnsupportedOperationException e) {
-            return false;
+            return Optional.empty();
         }
-        return remoteFileDownloader.tryToDownload(file, localFile);
+        boolean success =
+                remoteFileDownloader.tryToDownload(file, remoteSst.sstFileName, localFile);
+        if (!success) {
+            return Optional.empty();
+        }
+
+        return Optional.of(remoteSst.serVersion);
     }
 
     public void addLocalFile(DataFileMeta file, LookupFile lookupFile) {
@@ -229,7 +241,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                         lookupStoreFactory.createWriter(
                                 localFile, bfGenerator.apply(file.rowCount()));
                 RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
-            PersistProcessor<T> processor = getOrCreateProcessor(currentSchemaId);
+            PersistProcessor<T> processor =
+                    getOrCreateProcessor(currentSchemaId, serializerFactory.version());
             KeyValue kv;
             if (processor.withPosition()) {
                 FileRecordIterator<KeyValue> batch;
@@ -258,8 +271,39 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         }
     }
 
-    public String remoteSstSuffix() {
-        return remoteSstSuffix;
+    public Optional<RemoteSstFile> remoteSst(DataFileMeta file) {
+        Optional<String> sstFile =
+                file.extraFiles().stream()
+                        .filter(f -> f.endsWith(REMOTE_LOOKUP_FILE_SUFFIX))
+                        .findFirst();
+        if (!sstFile.isPresent()) {
+            return Optional.empty();
+        }
+
+        String sstFileName = sstFile.get();
+        String[] split = sstFileName.split("\\.");
+        if (split.length < 3) {
+            return Optional.empty();
+        }
+
+        String processorId = split[split.length - 3];
+        if (!processorFactory.identifier().equals(processorId)) {
+            return Optional.empty();
+        }
+
+        String serVersion = split[split.length - 2];
+        return Optional.of(new RemoteSstFile(sstFileName, serVersion));
+    }
+
+    public String newRemoteSst(DataFileMeta file, long length) {
+        return file.fileName()
+                + "."
+                + length
+                + "."
+                + processorFactory.identifier()
+                + "."
+                + serializerFactory.version()
+                + REMOTE_LOOKUP_FILE_SUFFIX;
     }
 
     @Override
@@ -267,6 +311,18 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         Set<String> toClean = new HashSet<>(ownCachedFiles);
         for (String cachedFile : toClean) {
             lookupFileCache.invalidate(cachedFile);
+        }
+    }
+
+    /** Remote sst file with serVersion. */
+    public static class RemoteSstFile {
+
+        private final String sstFileName;
+        private final String serVersion;
+
+        private RemoteSstFile(String sstFileName, String serVersion) {
+            this.sstFileName = sstFileName;
+            this.serVersion = serVersion;
         }
     }
 }

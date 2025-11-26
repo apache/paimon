@@ -30,7 +30,7 @@ import java.util.function.Function;
 public class DefaultLookupSerializerFactory implements LookupSerializerFactory {
 
     @Override
-    public String identifier() {
+    public String version() {
         return "v1";
     }
 
@@ -42,7 +42,10 @@ public class DefaultLookupSerializerFactory implements LookupSerializerFactory {
 
     @Override
     public Function<byte[], InternalRow> createDeserializer(
-            RowType currentSchema, @Nullable RowType fileSchema) {
+            String fileSerVersion, RowType currentSchema, @Nullable RowType fileSchema) {
+        if (!version().equals(fileSerVersion)) {
+            throw new UnsupportedOperationException();
+        }
         if (fileSchema != null && !fileSchema.equalsIgnoreNullable(currentSchema)) {
             throw new UnsupportedOperationException();
         }

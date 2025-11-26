@@ -32,12 +32,12 @@ import java.util.function.Function;
 /** Factory to create serializer for lookup. */
 public interface LookupSerializerFactory {
 
-    String identifier();
+    String version();
 
     Function<InternalRow, byte[]> createSerializer(RowType currentSchema);
 
     Function<byte[], InternalRow> createDeserializer(
-            RowType currentSchema, @Nullable RowType fileSchema);
+            String fileSerVersion, RowType currentSchema, @Nullable RowType fileSchema);
 
     Supplier<LookupSerializerFactory> INSTANCE =
             Suppliers.memoize(

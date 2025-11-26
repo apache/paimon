@@ -25,5 +25,5 @@ import java.io.File;
 /** Downloader to try to download remote lookup file to local. */
 public interface RemoteFileDownloader {
 
-    boolean tryToDownload(DataFileMeta dataFile, File localFile);
+    boolean tryToDownload(DataFileMeta dataFile, String remoteSstFile, File localFile);
 }

@@ -37,7 +37,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 /** Manager to manage remote files for lookup. */
 public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
@@ -66,14 +65,14 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
             return file;
         }
 
-        if (remoteSst(file).isPresent()) {
+        if (lookupLevels.remoteSst(file).isPresent()) {
             // ignore existed
             return file;
         }
 
         LookupFile lookupFile = lookupLevels.createLookupFile(file);
         long length = lookupFile.localFile().length();
-        String remoteSstName = newRemoteSstName(file, length);
+        String remoteSstName = lookupLevels.newRemoteSst(file, length);
         Path sstFile = remoteSstPath(file, remoteSstName);
         try (FileInputStream is = new FileInputStream(lookupFile.localFile());
                 PositionOutputStream os = fileIO.newOutputStream(sstFile, false)) {
@@ -88,13 +87,8 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
     }
 
     @Override
-    public boolean tryToDownload(DataFileMeta dataFile, File localFile) {
-        Optional<String> remoteSst = remoteSst(dataFile);
-        if (!remoteSst.isPresent()) {
-            return false;
-        }
-
-        Path remoteSstPath = remoteSstPath(dataFile, remoteSst.get());
+    public boolean tryToDownload(DataFileMeta dataFile, String remoteSstFile, File localFile) {
+        Path remoteSstPath = remoteSstPath(dataFile, remoteSstFile);
         try (SeekableInputStream is = fileIO.newInputStream(remoteSstPath);
                 FileOutputStream os = new FileOutputStream(localFile)) {
             IOUtils.copy(is, os);
@@ -103,16 +97,6 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
             LOG.warn("Failed to download remote lookup file {}, skipping.", remoteSstPath, e);
             return false;
         }
-    }
-
-    private Optional<String> remoteSst(DataFileMeta file) {
-        return file.extraFiles().stream()
-                .filter(f -> f.endsWith(lookupLevels.remoteSstSuffix()))
-                .findFirst();
-    }
-
-    private String newRemoteSstName(DataFileMeta file, long length) {
-        return file.fileName() + "." + length + lookupLevels.remoteSstSuffix();
     }
 
     private Path remoteSstPath(DataFileMeta file, String remoteSstName) {

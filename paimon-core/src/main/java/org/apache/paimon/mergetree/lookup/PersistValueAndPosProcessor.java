@@ -85,10 +85,13 @@ public class PersistValueAndPosProcessor implements PersistProcessor<PositionedK
 
             @Override
             public PersistProcessor<PositionedKeyValue> create(
-                    LookupSerializerFactory serializerFactory, @Nullable RowType fileSchema) {
+                    String fileSerVersion,
+                    LookupSerializerFactory serializerFactory,
+                    @Nullable RowType fileSchema) {
                 return new PersistValueAndPosProcessor(
                         serializerFactory.createSerializer(valueType),
-                        serializerFactory.createDeserializer(valueType, fileSchema));
+                        serializerFactory.createDeserializer(
+                                fileSerVersion, valueType, fileSchema));
             }
         };
     }
