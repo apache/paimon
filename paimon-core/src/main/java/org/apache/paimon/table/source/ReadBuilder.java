@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -79,6 +80,11 @@ public interface ReadBuilder extends Serializable {
     /** Returns read row type. */
     RowType readType();
 
+    /** Returns actual read row type. */
+    default RowType actualReadType() {
+        return readType();
+    }
+
     /**
      * Apply filters to the readers to decrease the number of produced records.
      *
@@ -123,6 +129,14 @@ public interface ReadBuilder extends Serializable {
      * @since 1.0.0
      */
     ReadBuilder withReadType(RowType readType);
+
+    /**
+     * Push variant access to the reader.
+     *
+     * @param variantAccessInfo variant access info
+     * @since 1.4.0
+     */
+    ReadBuilder withVariantAccess(VariantAccessInfo[] variantAccessInfo);
 
     /**
      * Apply projection to the reader, if you need nested row pruning, use {@link

@@ -25,7 +25,8 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.columnar.RowColumnVector;
+import org.apache.paimon.data.columnar.RowToColumnConverter;
+import org.apache.paimon.data.columnar.heap.CastedRowColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableBytesVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.variant.VariantPathSegment.ArrayExtraction;
@@ -584,9 +585,19 @@ public class PaimonShreddingUtils {
      * extract. If it is variant struct, return a list of fields matching the variant struct fields.
      */
     public static FieldToExtract[] getFieldsToExtract(
-            DataType targetType, VariantSchema variantSchema) {
-        // todo: implement it
-        throw new UnsupportedOperationException();
+            List<VariantAccessInfo.VariantField> variantFields, VariantSchema variantSchema) {
+        if (variantFields != null) {
+            return variantFields.stream()
+                    .map(
+                            field ->
+                                    buildFieldsToExtract(
+                                            field.dataField().type(),
+                                            field.path(),
+                                            field.castArgs(),
+                                            variantSchema))
+                    .toArray(FieldToExtract[]::new);
+        }
+        return null;
     }
 
     /**
@@ -725,7 +736,7 @@ public class PaimonShreddingUtils {
 
     /** Assemble a batch of variant (binary format) from a batch of variant values. */
     public static void assembleVariantBatch(
-            WritableColumnVector input, WritableColumnVector output, VariantSchema variantSchema) {
+            CastedRowColumnVector input, WritableColumnVector output, VariantSchema variantSchema) {
         int numRows = input.getElementsAppended();
         output.reset();
         output.reserve(numRows);
@@ -735,12 +746,38 @@ public class PaimonShreddingUtils {
             if (input.isNullAt(i)) {
                 output.setNullAt(i);
             } else {
-                Variant v = assembleVariant(((RowColumnVector) input).getRow(i), variantSchema);
+                Variant v = assembleVariant(input.getRow(i), variantSchema);
                 byte[] value = v.value();
                 byte[] metadata = v.metadata();
                 valueChild.putByteArray(i, value, 0, value.length);
                 metadataChild.putByteArray(i, metadata, 0, metadata.length);
             }
+        }
+    }
+
+    /** Assemble a batch of variant struct from a batch of variant values. */
+    public static void assembleVariantStructBatch(
+            CastedRowColumnVector input,
+            WritableColumnVector output,
+            VariantSchema variantSchema,
+            FieldToExtract[] fields,
+            DataType readType) {
+        int numRows = input.getElementsAppended();
+        output.reset();
+        output.reserve(numRows);
+        RowToColumnConverter converter =
+                new RowToColumnConverter(RowType.of(new DataField(0, "placeholder", readType)));
+        WritableColumnVector[] converterVectors = new WritableColumnVector[1];
+        converterVectors[0] = output;
+        GenericRow converterRow = new GenericRow(1);
+        for (int i = 0; i < numRows; ++i) {
+            if (input.isNullAt(i)) {
+                converterRow.setField(0, null);
+            } else {
+                converterRow.setField(
+                        0, assembleVariantStruct(input.getRow(i), variantSchema, fields));
+            }
+            converter.convert(converterRow, converterVectors);
         }
     }
 }

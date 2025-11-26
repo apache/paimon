@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
@@ -90,6 +91,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     @Nullable private int[][] pushdownProjection;
     @Nullable private int[][] outerProjection;
+    @Nullable private VariantAccessInfo[] variantAccess;
 
     private boolean forceKeepDelete = false;
 
@@ -191,6 +193,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     @Override
+    public SplitRead<KeyValue> withVariantAccess(VariantAccessInfo[] variantAccess) {
+        this.variantAccess = variantAccess;
+        return this;
+    }
+
+    @Override
     public MergeFileSplitRead withIOManager(IOManager ioManager) {
         this.mergeSorter.setIOManager(ioManager);
         if (mfFactory instanceof LookupMergeFunction.Factory) {
@@ -278,9 +286,11 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         // So we cannot project keys or else the sorting will be incorrect.
         DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);
         KeyValueFileReaderFactory overlappedSectionFactory =
-                readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForKeys);
+                readerFactoryBuilder.build(
+                        partition, bucket, dvFactory, false, filtersForKeys, variantAccess);
         KeyValueFileReaderFactory nonOverlappedSectionFactory =
-                readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForAll);
+                readerFactoryBuilder.build(
+                        partition, bucket, dvFactory, false, filtersForAll, variantAccess);
 
         List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
         MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
@@ -320,7 +330,8 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                         bucket,
                         DeletionVector.factory(fileIO, files, deletionFiles),
                         true,
-                        onlyFilterKey ? filtersForKeys : filtersForAll);
+                        onlyFilterKey ? filtersForKeys : filtersForAll,
+                        variantAccess);
         List<ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
         for (DataFileMeta file : files) {
             suppliers.add(() -> readerFactory.createRecordReader(file));
