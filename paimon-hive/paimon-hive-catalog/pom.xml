@@ -52,7 +52,6 @@ under the License.
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-hive-common</artifactId>
             <version>${project.version}</version>
-            <scope>provided</scope>
         </dependency>
 
         <dependency>
