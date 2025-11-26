@@ -20,9 +20,6 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -32,14 +29,10 @@ import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
-import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
 
 import org.apache.spark.sql.Column;
 import org.apache.spark.sql.Dataset;
@@ -234,34 +227,6 @@ public class CreateGlobalIndexProcedure extends CreateGlobalIndexProcedureBase {
             return entries;
         } finally {
             executor.shutdown();
-        }
-    }
-
-    private void commit(FileStoreTable table, List<IndexManifestEntry> indexResults)
-            throws Exception {
-        Map<BinaryRow, List<IndexFileMeta>> partitionResults =
-                indexResults.stream()
-                        .map(s -> Pair.of(s.partition(), s.indexFile()))
-                        .collect(
-                                Collectors.groupingBy(
-                                        Pair::getKey,
-                                        Collectors.mapping(Pair::getValue, Collectors.toList())));
-
-        List<CommitMessage> commitMessages = new ArrayList<>();
-        for (Map.Entry<BinaryRow, List<IndexFileMeta>> entry : partitionResults.entrySet()) {
-            BinaryRow partition = entry.getKey();
-            List<IndexFileMeta> indexFiles = entry.getValue();
-            commitMessages.add(
-                    new CommitMessageImpl(
-                            partition,
-                            0,
-                            null,
-                            DataIncrement.indexIncrement(indexFiles),
-                            CompactIncrement.emptyIncrement()));
-        }
-
-        try (TableCommitImpl commit = table.newCommit("global-index-create-" + UUID.randomUUID())) {
-            commit.commit(commitMessages);
         }
     }
 
