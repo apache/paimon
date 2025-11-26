@@ -369,9 +369,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
                 attempts +=
                         tryCommit(
-                                appendTableFiles,
-                                appendChangelog,
-                                appendIndexFiles,
+                                provider(appendTableFiles, appendChangelog, appendIndexFiles),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
@@ -406,9 +404,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
                 attempts +=
                         tryCommit(
-                                compactTableFiles,
-                                compactChangelog,
-                                compactIndexFiles,
+                                provider(compactTableFiles, compactChangelog, compactIndexFiles),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
@@ -577,9 +573,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (!compactTableFiles.isEmpty() || !compactIndexFiles.isEmpty()) {
                 attempts +=
                         tryCommit(
-                                compactTableFiles,
-                                emptyList(),
-                                compactIndexFiles,
+                                provider(compactTableFiles, emptyList(), compactIndexFiles),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
@@ -687,9 +681,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     public void commitStatistics(Statistics stats, long commitIdentifier) {
         String statsFileName = statsFileHandler.writeStats(stats);
         tryCommit(
-                emptyList(),
-                emptyList(),
-                emptyList(),
+                provider(emptyList(), emptyList(), emptyList()),
                 commitIdentifier,
                 null,
                 Collections.emptyMap(),
@@ -830,9 +822,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private int tryCommit(
-            List<ManifestEntry> tableFiles,
-            List<ManifestEntry> changelogFiles,
-            List<IndexManifestEntry> indexFiles,
+            ChangesProvider changesProvider,
             long identifier,
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
@@ -845,12 +835,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long startMillis = System.currentTimeMillis();
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            CommitChanges changes = changesProvider.provide(latestSnapshot);
             CommitResult result =
                     tryCommitOnce(
                             retryResult,
-                            tableFiles,
-                            changelogFiles,
-                            indexFiles,
+                            changes.tableFiles,
+                            changes.changelogFiles,
+                            changes.indexFiles,
                             identifier,
                             watermark,
                             logOffsets,
@@ -895,8 +886,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
             Map<String, String> properties) {
-        // collect all files with overwrite
-        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        return tryCommit(
+                latestSnapshot ->
+                        overwriteChanges(changes, indexFiles, latestSnapshot, partitionFilter),
+                identifier,
+                watermark,
+                logOffsets,
+                properties,
+                CommitKind.OVERWRITE,
+                mustConflictCheck(),
+                null);
+    }
+
+    private CommitChanges overwriteChanges(
+            List<ManifestEntry> changes,
+            List<IndexManifestEntry> indexFiles,
+            @Nullable Snapshot latestSnapshot,
+            @Nullable PartitionPredicate partitionFilter) {
         List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
         List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
         if (latestSnapshot != null) {
@@ -931,18 +937,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
         changesWithOverwrite.addAll(changes);
         indexChangesWithOverwrite.addAll(indexFiles);
-
-        return tryCommit(
-                changesWithOverwrite,
-                emptyList(),
-                indexChangesWithOverwrite,
-                identifier,
-                watermark,
-                logOffsets,
-                properties,
-                CommitKind.OVERWRITE,
-                mustConflictCheck(),
-                null);
+        return new CommitChanges(changesWithOverwrite, emptyList(), indexChangesWithOverwrite);
     }
 
     @VisibleForTesting
@@ -1545,6 +1540,33 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         @Override
         public boolean isSuccess() {
             return false;
+        }
+    }
+
+    private static ChangesProvider provider(
+            List<ManifestEntry> tableFiles,
+            List<ManifestEntry> changelogFiles,
+            List<IndexManifestEntry> indexFiles) {
+        return s -> new CommitChanges(tableFiles, changelogFiles, indexFiles);
+    }
+
+    private interface ChangesProvider {
+        CommitChanges provide(@Nullable Snapshot latestSnapshot);
+    }
+
+    private static class CommitChanges {
+
+        private final List<ManifestEntry> tableFiles;
+        private final List<ManifestEntry> changelogFiles;
+        private final List<IndexManifestEntry> indexFiles;
+
+        private CommitChanges(
+                List<ManifestEntry> tableFiles,
+                List<ManifestEntry> changelogFiles,
+                List<IndexManifestEntry> indexFiles) {
+            this.tableFiles = tableFiles;
+            this.changelogFiles = changelogFiles;
+            this.indexFiles = indexFiles;
         }
     }
 }
