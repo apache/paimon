@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -68,6 +69,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD;
@@ -301,6 +303,23 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
         Map<BinaryRow, List<ManifestEntry>> entriesByPartition =
                 entries.stream().collect(Collectors.groupingBy(ManifestEntry::partition));
 
+        return groupFilesIntoShardsByPartition(
+                entriesByPartition, rowsPerShard, pathFactory::bucketPath);
+    }
+
+    /**
+     * Groups files into shards by partition. This method is extracted from split() to make it more
+     * testable.
+     *
+     * @param entriesByPartition manifest entries grouped by partition
+     * @param rowsPerShard number of rows per shard
+     * @param pathFactory path factory for creating bucket paths
+     * @return map of partition to shard splits
+     */
+    public static Map<BinaryRow, Map<Range, DataSplit>> groupFilesIntoShardsByPartition(
+            Map<BinaryRow, List<ManifestEntry>> entriesByPartition,
+            long rowsPerShard,
+            BiFunction<BinaryRow, Integer, Path> pathFactory) {
         Map<BinaryRow, Map<Range, DataSplit>> result = new HashMap<>();
 
         for (Map.Entry<BinaryRow, List<ManifestEntry>> partitionEntry :
@@ -355,7 +374,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 .withPartition(partition)
                                 .withBucket(0)
                                 .withDataFiles(shardFiles)
-                                .withBucketPath(pathFactory.bucketPath(partition, 0).toString())
+                                .withBucketPath(pathFactory.apply(partition, 0).toString())
                                 .rawConvertible(false)
                                 .build();
 
