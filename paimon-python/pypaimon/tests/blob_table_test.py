@@ -2038,24 +2038,24 @@ class DataBlobWriterTest(unittest.TestCase):
             pa_schema,
             options={
                 'row-tracking.enabled': 'true',
-                'data-evolution.enabled': 'true'
+                'data-evolution.enabled': 'true',
+                'blob.target-file-size': '10MB'
             }
         )
         self.catalog.create_table('test_db.blob_rolling_with_shard', schema, False)
         table = self.catalog.get_table('test_db.blob_rolling_with_shard')
 
-        # Create large blob data (50MB per blob)
-        large_blob_size = 50 * 1024 * 1024  # 50MB
+        # Create large blob data
+        large_blob_size = 3 * 1024 * 1024  #
         blob_pattern = b'LARGE_BLOB_PATTERN_' + b'X' * 1024  # ~1KB pattern
         pattern_size = len(blob_pattern)
         repetitions = large_blob_size // pattern_size
         large_blob_data = blob_pattern * repetitions
 
-        # Verify the blob size is exactly 50MB
         actual_size = len(large_blob_data)
         print(f"Created blob data: {actual_size:,} bytes ({actual_size / (1024 * 1024):.2f} MB)")
         for i in range(4):
-            # Write 40 batches of data (each with 1 blob of 50MB)
+            # Write 40 batches of data
             write_builder = table.new_batch_write_builder()
             writer = write_builder.new_write()
             # Write all 40 batches first
@@ -2165,7 +2165,7 @@ class DataBlobWriterTest(unittest.TestCase):
         result = table_read.to_arrow(splits)
 
         # Verify the data was read back correctly
-        self.assertEqual(result.num_rows, 2, "Should have 3 rows")
+        self.assertEqual(result.num_rows, 2, "Should have 2 rows")
         self.assertEqual(result.num_columns, 3, "Should have 3 columns")
 
 
