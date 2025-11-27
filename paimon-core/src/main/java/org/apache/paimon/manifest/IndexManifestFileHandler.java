@@ -93,7 +93,7 @@ public class IndexManifestFileHandler {
 
     private IndexManifestFileCombiner getIndexManifestFileCombine(String indexType) {
         if (!DELETION_VECTORS_INDEX.equals(indexType) && !HASH_INDEX.equals(indexType)) {
-            return new GlobalIndexCombiner();
+            return new GlobalFileNameCombiner();
         }
 
         if (DELETION_VECTORS_INDEX.equals(indexType) && BucketMode.BUCKET_UNAWARE == bucketMode) {
@@ -197,7 +197,7 @@ public class IndexManifestFileHandler {
     }
 
     /** We combine the previous and new index files by file name. */
-    static class GlobalIndexCombiner implements IndexManifestFileCombiner {
+    static class GlobalFileNameCombiner implements IndexManifestFileCombiner {
 
         @Override
         public List<IndexManifestEntry> combine(
