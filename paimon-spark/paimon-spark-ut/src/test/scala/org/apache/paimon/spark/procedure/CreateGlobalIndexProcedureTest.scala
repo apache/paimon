@@ -47,8 +47,6 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
           .collect()
           .head
 
-      spark.sql("SELECT * FROM T").collect()
-
       assert(output.getBoolean(0))
 
       val table = loadTable("T")
