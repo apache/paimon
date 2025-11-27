@@ -20,6 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.catalog.{Catalog, DelegateCatalog}
 import org.apache.paimon.hive.{HiveCatalog, TestHiveMetastore}
+import org.apache.paimon.spark.PaimonHiveTestBase._
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.hadoop.conf.Configuration
@@ -41,7 +42,7 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
 
   protected val hiveDbName: String = "test_hive"
 
-  val hiveUri: String = PaimonHiveTestBase.hiveUri
+  protected def configuration: Configuration = new Configuration
 
   /**
    * Add spark_catalog ([[SparkGenericCatalog]] in hive) and paimon_hive ([[SparkCatalog]] in hive)
@@ -61,7 +62,7 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
   }
 
   override protected def beforeAll(): Unit = {
-    testHiveMetastore.start(PaimonHiveTestBase.hivePort)
+    testHiveMetastore.start(configuration, hivePort)
     super.beforeAll()
     spark.sql(s"USE $sparkCatalogName")
     spark.sql(s"CREATE DATABASE IF NOT EXISTS $hiveDbName")

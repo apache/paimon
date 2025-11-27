@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.{DelegateCatalog, Identifier}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.hive.HiveCatalog
 import org.apache.paimon.spark.PaimonHiveTestBase
+import org.apache.paimon.spark.PaimonHiveTestBase.hiveUri
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.utils.CompressUtils
 
