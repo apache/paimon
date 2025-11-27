@@ -21,6 +21,8 @@ package org.apache.paimon.globalindex.bitmap;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringBitmap32;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.util.Iterator;
 
@@ -31,31 +33,44 @@ public class BitmapIndexResultWrapper implements GlobalIndexResult {
 
     private final BitmapIndexResult result;
     private final long start;
+    private RoaringNavigableMap64 lazyResult;
 
     public BitmapIndexResultWrapper(BitmapIndexResult result, long start) {
         this.result = result;
         this.start = start;
     }
 
-    @Override
-    public Iterator<Long> iterator() {
-        Iterator<Integer> rowIds = result.get().iterator();
-        return new Iterator<Long>() {
-            @Override
-            public boolean hasNext() {
-                return rowIds.hasNext();
-            }
+    public BitmapIndexResultWrapper(RoaringNavigableMap64 finalResult) {
+        this.result = null;
+        this.start = -1;
+        this.lazyResult = finalResult;
+    }
 
-            @Override
-            public Long next() {
-                return rowIds.next() + start;
-            }
-        };
+    @Override
+    public RoaringNavigableMap64 results() {
+        if (lazyResult != null) {
+            return lazyResult;
+        }
+        if (result == null) {
+            throw new IllegalStateException("No results available");
+        }
+        RoaringBitmap32 bitmap = result.get();
+        RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
+
+        // Convert 32-bit bitmap to 64-bit bitmap with offset
+        Iterator<Integer> iterator = bitmap.iterator();
+        while (iterator.hasNext()) {
+            result64.add(iterator.next() + start);
+        }
+        result64.runOptimize();
+        this.lazyResult = result64;
+        return result64;
     }
 
     public static BitmapIndexResultWrapper fromRange(Range range) {
-        return new BitmapIndexResultWrapper(
-                new BitmapIndexResult(() -> bitmapOfRange(0, range.to - range.from)), range.from);
+        RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
+        result64.addRange(range);
+        return new BitmapIndexResultWrapper(result64);
     }
 
     public BitmapIndexResult getBitmapIndexResult() {

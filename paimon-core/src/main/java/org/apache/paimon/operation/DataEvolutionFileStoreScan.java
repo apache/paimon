@@ -34,6 +34,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -100,14 +101,14 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     @Override
     protected List<ManifestFileMeta> postFilterManifests(List<ManifestFileMeta> manifests) {
-        if (rowIdList == null || rowIdList.isEmpty()) {
+        if (rowRanges == null || rowRanges.isEmpty()) {
             return manifests;
         }
         return manifests.stream().filter(this::filterManifestByRowIds).collect(Collectors.toList());
     }
 
     private boolean filterManifestByRowIds(ManifestFileMeta manifest) {
-        if (rowIdList == null || rowIdList.isEmpty()) {
+        if (rowRanges == null || rowRanges.isEmpty()) {
             return true;
         }
 
@@ -117,11 +118,14 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             return true;
         }
 
-        for (long rowId : rowIdList) {
-            if (rowId >= min && rowId <= max) {
+        Range manifestRowRange = new Range(min, max);
+
+        for (Range expected : rowRanges) {
+            if (Range.intersection(manifestRowRange, expected) != null) {
                 return true;
             }
         }
+
         return false;
     }
 
@@ -268,8 +272,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             }
         }
 
-        // If indices is null, all entries should be kept
-        if (this.rowIdList == null) {
+        // If rowRanges is null, all entries should be kept
+        if (this.rowRanges == null) {
             return true;
         }
 
@@ -279,12 +283,13 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             return true;
         }
 
-        // Check if any value in indices is in the range [firstRowId, firstRowId + rowCount)
+        // Check if any value in indices is in the range [firstRowId, firstRowId + rowCount - 1]
         long rowCount = file.rowCount();
-        long endRowId = firstRowId + rowCount;
+        long endRowId = firstRowId + rowCount - 1;
+        Range fileRowRange = new Range(firstRowId, endRowId);
 
-        for (Long index : this.rowIdList) {
-            if (index >= firstRowId && index < endRowId) {
+        for (Range expected : rowRanges) {
+            if (Range.intersection(fileRowRange, expected) != null) {
                 return true;
             }
         }

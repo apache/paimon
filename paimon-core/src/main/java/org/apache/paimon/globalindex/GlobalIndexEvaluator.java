@@ -86,7 +86,7 @@ public class GlobalIndexEvaluator
                 compoundResult = Optional.of(childResult);
             }
 
-            if (!compoundResult.get().iterator().hasNext()) {
+            if (compoundResult.get().results().isEmpty()) {
                 return compoundResult;
             }
         }
@@ -123,7 +123,7 @@ public class GlobalIndexEvaluator
                 }
 
                 // if not remain, no need to test anymore
-                if (compoundResult.isPresent() && !compoundResult.get().iterator().hasNext()) {
+                if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
                     return compoundResult;
                 }
             }
