@@ -19,7 +19,10 @@
 package org.apache.paimon.arrow.vector;
 
 import org.apache.paimon.arrow.ArrowBundleRecords;
+import org.apache.paimon.arrow.ArrowFieldTypeConversion;
+import org.apache.paimon.arrow.converter.Arrow2PaimonVectorConverter;
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
+import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -319,6 +322,37 @@ public class ArrowFormatWriterTest {
         }
     }
 
+    @Test
+    public void testCustomArrowFormatWriter() {
+        // Create custom field type visitor that converts decimals to binary
+        ArrowFieldTypeConversion.ArrowFieldTypeVisitor customFieldTypeVisitor =
+                new CustomDecimalArrowConversion.CustomArrowFieldTypeFactory();
+
+        // Create custom field writer factory visitor for decimal to binary conversion
+        ArrowFieldWriterFactoryVisitor customFieldWriterVisitor =
+                new CustomDecimalArrowConversion.CustomArrowFieldWriterFactory();
+
+        // Create custom vector converter visitor for binary to decimal conversion
+        Arrow2PaimonVectorConverter.Arrow2PaimonVectorConvertorVisitor customConverterVisitor =
+                new CustomDecimalArrowConversion.CustomArrow2PaimonVectorConvertorVisitor();
+
+        try (RootAllocator allocator = new RootAllocator()) {
+            // Create writer with custom visitors
+            try (ArrowFormatCWriter writer =
+                    new ArrowFormatCWriter(
+                            new ArrowFormatWriter(
+                                    PRIMITIVE_TYPE,
+                                    4096,
+                                    true,
+                                    allocator,
+                                    null,
+                                    customFieldTypeVisitor,
+                                    customFieldWriterVisitor))) {
+                writeAndCheckCustom(writer, customConverterVisitor);
+            }
+        }
+    }
+
     private void writeAndCheckArrayMap(ArrowFormatWriter arrowFormatWriter) {
         GenericRow genericRow = new GenericRow(1);
         Map<BinaryString, BinaryString> map = new HashMap<>();
@@ -437,6 +471,40 @@ public class ArrowFormatWriterTest {
         VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
 
         ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE, true);
+        Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
+
+        Iterator<InternalRow> iterator = rows.iterator();
+        for (int i = 0; i < 1000; i++) {
+            InternalRow actual = iterator.next();
+            InternalRow expectec = list.get(i);
+
+            for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
+                assertThat(fieldGetter.getFieldOrNull(actual))
+                        .isEqualTo(fieldGetter.getFieldOrNull(expectec));
+            }
+        }
+        vectorSchemaRoot.close();
+    }
+
+    private void writeAndCheckCustom(
+            ArrowFormatCWriter writer,
+            Arrow2PaimonVectorConverter.Arrow2PaimonVectorConvertorVisitor visitor) {
+        List<InternalRow> list = new ArrayList<>();
+        List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
+
+        for (int i = 0; i < PRIMITIVE_TYPE.getFieldCount(); i++) {
+            fieldGetters.add(InternalRow.createFieldGetter(PRIMITIVE_TYPE.getTypeAt(i), i));
+        }
+        for (int i = 0; i < 1000; i++) {
+            list.add(GenericRow.of(randomRowValues(null)));
+        }
+
+        list.forEach(writer::write);
+
+        writer.flush();
+        VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+
+        ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE, true, visitor);
         Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
 
         Iterator<InternalRow> iterator = rows.iterator();
