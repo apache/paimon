@@ -82,10 +82,10 @@ class RESTSimpleTest(RESTBaseTest):
         splits = read_builder.new_scan().with_shard(2, 3).plan().splits()
         actual = table_read.to_arrow(splits).sort_by('user_id')
         expected = pa.Table.from_pydict({
-            'user_id': [5, 7, 7, 8, 9, 11, 13],
-            'item_id': [1005, 1007, 1007, 1008, 1009, 1011, 1013],
-            'behavior': ['e', 'f', 'g', 'h', 'h', 'j', 'l'],
-            'dt': ['p2', 'p2', 'p2', 'p2', 'p2', 'p2', 'p2'],
+            'user_id': [5, 7, 8, 9, 11, 13],
+            'item_id': [1005, 1007, 1008, 1009, 1011, 1013],
+            'behavior': ['e', 'g', 'h', 'h', 'j', 'l'],
+            'dt': ['p2', 'p2', 'p2', 'p2', 'p2', 'p2'],
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
@@ -212,7 +212,7 @@ class RESTSimpleTest(RESTBaseTest):
         expected = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, expected)
 
-    def test_shard_single_partition(self):
+    def test_with_shard_single_partition(self):
         """Test sharding with single partition - tests _filter_by_shard with simple data"""
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.create_table('default.test_shard_single_partition', schema, False)
@@ -259,7 +259,7 @@ class RESTSimpleTest(RESTBaseTest):
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
-    def test_shard_uneven_distribution(self):
+    def test_with_shard_uneven_distribution(self):
         """Test sharding with uneven row distribution across shards"""
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.create_table('default.test_shard_uneven', schema, False)
@@ -284,23 +284,23 @@ class RESTSimpleTest(RESTBaseTest):
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
 
-        # Test sharding into 3 parts: 2, 2, 3 rows
+        # Test sharding into 3 parts: 3, 2, 2 rows
         plan1 = read_builder.new_scan().with_shard(0, 3).plan()
         actual1 = table_read.to_arrow(plan1.splits()).sort_by('user_id')
         expected1 = pa.Table.from_pydict({
-            'user_id': [1, 2],
-            'item_id': [1001, 1002],
-            'behavior': ['a', 'b'],
-            'dt': ['p1', 'p1'],
+            'user_id': [1, 2, 3],
+            'item_id': [1001, 1002, 1003],
+            'behavior': ['a', 'b', 'c'],
+            'dt': ['p1', 'p1', 'p1'],
         }, schema=self.pa_schema)
         self.assertEqual(actual1, expected1)
 
         plan2 = read_builder.new_scan().with_shard(1, 3).plan()
         actual2 = table_read.to_arrow(plan2.splits()).sort_by('user_id')
         expected2 = pa.Table.from_pydict({
-            'user_id': [3, 4],
-            'item_id': [1003, 1004],
-            'behavior': ['c', 'd'],
+            'user_id': [4, 5],
+            'item_id': [1004, 1005],
+            'behavior': ['d', 'e'],
             'dt': ['p1', 'p1'],
         }, schema=self.pa_schema)
         self.assertEqual(actual2, expected2)
@@ -308,14 +308,14 @@ class RESTSimpleTest(RESTBaseTest):
         plan3 = read_builder.new_scan().with_shard(2, 3).plan()
         actual3 = table_read.to_arrow(plan3.splits()).sort_by('user_id')
         expected3 = pa.Table.from_pydict({
-            'user_id': [5, 6, 7],
-            'item_id': [1005, 1006, 1007],
-            'behavior': ['e', 'f', 'g'],
-            'dt': ['p1', 'p1', 'p1'],
+            'user_id': [6, 7],
+            'item_id': [1006, 1007],
+            'behavior': ['f', 'g'],
+            'dt': ['p1', 'p1'],
         }, schema=self.pa_schema)
         self.assertEqual(actual3, expected3)
 
-    def test_shard_single_shard(self):
+    def test_with_shard_single_shard(self):
         """Test sharding with only one shard - should return all data"""
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.create_table('default.test_shard_single', schema, False)
@@ -345,7 +345,7 @@ class RESTSimpleTest(RESTBaseTest):
         expected = pa.Table.from_pydict(data, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
-    def test_shard_many_small_shards(self):
+    def test_with_shard_many_small_shards(self):
         """Test sharding with many small shards"""
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.create_table('default.test_shard_many_small', schema, False)
@@ -376,7 +376,7 @@ class RESTSimpleTest(RESTBaseTest):
             self.assertEqual(len(actual), 1)
             self.assertEqual(actual['user_id'][0].as_py(), i + 1)
 
-    def test_shard_boundary_conditions(self):
+    def test_with_shard_boundary_conditions(self):
         """Test sharding boundary conditions with edge cases"""
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.create_table('default.test_shard_boundary', schema, False)
@@ -400,20 +400,20 @@ class RESTSimpleTest(RESTBaseTest):
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
 
-        # Test first shard (0, 4) - should get 1 row (5//4 = 1)
+        # Test first shard (0, 4) - should get 1 row (5//4 +1= 2)
         plan = read_builder.new_scan().with_shard(0, 4).plan()
         actual = table_read.to_arrow(plan.splits())
-        self.assertEqual(len(actual), 1)
+        self.assertEqual(len(actual), 2)
 
         # Test middle shard (1, 4) - should get 1 row
         plan = read_builder.new_scan().with_shard(1, 4).plan()
         actual = table_read.to_arrow(plan.splits())
         self.assertEqual(len(actual), 1)
 
-        # Test last shard (3, 4) - should get 2 rows (remainder goes to last shard)
+        # Test last shard (3, 4) - should get 1 rows (remainder goes to last shard)
         plan = read_builder.new_scan().with_shard(3, 4).plan()
         actual = table_read.to_arrow(plan.splits())
-        self.assertEqual(len(actual), 2)
+        self.assertEqual(len(actual), 1)
 
     def test_with_shard_large_dataset(self):
         """Test with_shard method using 50000 rows of data to verify performance and correctness"""
@@ -502,7 +502,64 @@ class RESTSimpleTest(RESTBaseTest):
 
         print(f"Successfully tested with_shard method using {num_rows} rows of data")
 
-    def test_shard_parameter_validation(self):
+    def test_with_shard_large_dataset_one_commit(self):
+        """Test with_shard method using 50000 rows of data to verify performance and correctness"""
+        schema = Schema.from_pyarrow_schema(self.pa_schema)
+        self.rest_catalog.create_table('default.test_with_shard_large_dataset', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_shard_large_dataset')
+        write_builder = table.new_batch_write_builder()
+
+        # Generate 50000 rows of test data
+        num_rows = 50000
+        batch_data = {
+            'user_id': list(range(0, num_rows)),
+            'item_id': [2000 + i for i in range(0, num_rows)],
+            'behavior': [chr(ord('a') + (i % 26)) for i in range(0, num_rows)],
+            'dt': [f'p{(i % 5) + 1}' for i in range(0, num_rows)],
+        }
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        pa_table = pa.Table.from_pydict(batch_data, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        num_shards = 5
+        shard_results = []
+        total_rows_from_shards = 0
+        for shard_idx in range(num_shards):
+            splits = read_builder.new_scan().with_shard(shard_idx, num_shards).plan().splits()
+            shard_result = table_read.to_arrow(splits)
+            shard_results.append(shard_result)
+            shard_rows = len(shard_result) if shard_result else 0
+            total_rows_from_shards += shard_rows
+            print(f"Shard {shard_idx}/{num_shards}: {shard_rows} rows")
+
+        # Verify that all shards together contain all the data
+        concatenated_result = pa.concat_tables(shard_results).sort_by('user_id')
+
+        # Read all data without sharding for comparison
+        all_splits = read_builder.new_scan().plan().splits()
+        all_data = table_read.to_arrow(all_splits).sort_by('user_id')
+
+        # Verify total row count
+        self.assertEqual(len(concatenated_result), len(all_data))
+        self.assertEqual(len(all_data), num_rows)
+        self.assertEqual(total_rows_from_shards, num_rows)
+
+        # Verify data integrity - check first and last few rows
+        self.assertEqual(concatenated_result['user_id'][0].as_py(), 0)
+        self.assertEqual(concatenated_result['user_id'][-1].as_py(), num_rows - 1)
+        self.assertEqual(concatenated_result['item_id'][0].as_py(), 2000)
+        self.assertEqual(concatenated_result['item_id'][-1].as_py(), 2000 + num_rows - 1)
+
+        # Verify that concatenated result equals all data
+        self.assertEqual(concatenated_result, all_data)
+
+    def test_with_shard_parameter_validation(self):
         """Test edge cases for parameter validation"""
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.create_table('default.test_shard_validation_edge', schema, False)
@@ -563,6 +620,43 @@ class RESTSimpleTest(RESTBaseTest):
         }
         expected = pa.Table.from_pydict(data_expected, schema=self.pa_schema)
         self.assertEqual(actual, expected)
+
+    def test_with_shard_uniform_division(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.with_shard_uniform_division', schema, False)
+        table = self.rest_catalog.get_table('default.with_shard_uniform_division')
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = {
+            'user_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014],
+            'behavior': ['a', 'b', 'c', None, 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+
+        # Get the three actual tables
+        splits1 = read_builder.new_scan().with_shard(0, 3).plan().splits()
+        actual1 = table_read.to_arrow(splits1).sort_by('user_id')
+        splits2 = read_builder.new_scan().with_shard(1, 3).plan().splits()
+        actual2 = table_read.to_arrow(splits2).sort_by('user_id')
+        splits3 = read_builder.new_scan().with_shard(2, 3).plan().splits()
+        actual3 = table_read.to_arrow(splits3).sort_by('user_id')
+        self.assertEqual(5, len(actual1))
+        self.assertEqual(5, len(actual2))
+        self.assertEqual(4, len(actual3))
+        # Concatenate the three tables
+        actual = pa.concat_tables([actual1, actual2, actual3]).sort_by('user_id')
+        expected = self._read_test_table(read_builder).sort_by('user_id')
+        self.assertEqual(expected, actual)
 
     def test_create_drop_database_table(self):
         # test create database

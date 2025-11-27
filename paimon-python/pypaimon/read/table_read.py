@@ -80,6 +80,8 @@ class TableRead:
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         table_list = []
         for batch in iter(batch_reader.read_next_batch, None):
+            if batch.num_rows == 0:
+                continue
             table_list.append(self._try_to_pad_batch_by_schema(batch, schema))
 
         if not table_list:

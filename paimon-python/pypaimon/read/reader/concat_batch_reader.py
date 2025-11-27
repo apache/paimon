@@ -75,6 +75,9 @@ class ShardBatchReader(ConcatBatchReader):
                                    min(self.split_end_row, self.cur_end) - self.split_start_row)
             elif cur_begin < self.split_end_row <= self.cur_end:
                 return batch.slice(0, self.split_end_row - cur_begin)
+            else:
+                # return empty RecordBatch if the batch size has not reached split_start_row
+                return pa.RecordBatch.from_arrays([], [])
         else:
             return batch
 
