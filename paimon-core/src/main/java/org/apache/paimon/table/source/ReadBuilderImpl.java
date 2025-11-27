@@ -83,7 +83,8 @@ public class ReadBuilderImpl implements ReadBuilder {
         RowType finalReadType = readType != null ? readType : table.rowType();
         // When variantAccessInfo is not null, replace the variant with the actual readType.
         if (variantAccessInfo != null) {
-            finalReadType = VariantAccessInfoUtils.buildReadRowType(finalReadType, variantAccessInfo);
+            finalReadType =
+                    VariantAccessInfoUtils.buildReadRowType(finalReadType, variantAccessInfo);
         }
         return finalReadType;
     }
