@@ -84,8 +84,12 @@ public class GlobalIndexBuilderContext implements Serializable {
         return spark;
     }
 
-    public BinaryRow partitionFromBytes() throws IOException {
-        return binaryRowSerializer.deserializeFromBytes(partitionBytes);
+    public BinaryRow partitionFromBytes() {
+        try {
+            return binaryRowSerializer.deserializeFromBytes(partitionBytes);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public BinaryRow partition() {
@@ -116,7 +120,7 @@ public class GlobalIndexBuilderContext implements Serializable {
         return options;
     }
 
-    public GlobalIndexFileReadWrite globalIndexFileReadWrite() throws IOException {
+    public GlobalIndexFileReadWrite globalIndexFileReadWrite() {
         FileIO fileIO = table.fileIO();
         IndexPathFactory indexPathFactory =
                 table.store().pathFactory().indexFileFactory(partitionFromBytes(), 0);
