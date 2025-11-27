@@ -117,14 +117,20 @@ class FullStartingScanner(StartingScanner):
             for entry in file_entries:
                 total_row += entry.file.row_count
 
-        # Calculate number of rows this shard should process
-        # Last shard handles all remaining rows (handles non-divisible cases)
-        if self.idx_of_this_subtask == self.number_of_para_subtasks - 1:
-            num_row = total_row - total_row // self.number_of_para_subtasks * self.idx_of_this_subtask
+        # Calculate number of rows this shard should process using balanced distribution
+        # Distribute remainder evenly among first few shards to avoid last shard overload
+        base_rows_per_shard = total_row // self.number_of_para_subtasks
+        remainder = total_row % self.number_of_para_subtasks
+
+        # Each of the first 'remainder' shards gets one extra row
+        if self.idx_of_this_subtask < remainder:
+            num_row = base_rows_per_shard + 1
+            start_row = self.idx_of_this_subtask * (base_rows_per_shard + 1)
         else:
-            num_row = total_row // self.number_of_para_subtasks
-        # Calculate start row and end row position for current shard in all data
-        start_row = self.idx_of_this_subtask * (total_row // self.number_of_para_subtasks)
+            num_row = base_rows_per_shard
+            start_row = (remainder * (base_rows_per_shard + 1) +
+                         (self.idx_of_this_subtask - remainder) * base_rows_per_shard)
+
         end_row = start_row + num_row
 
         plan_start_row = 0
@@ -160,24 +166,25 @@ class FullStartingScanner(StartingScanner):
 
     def _data_evolution_filter_by_shard(self, partitioned_files: defaultdict) -> (defaultdict, int, int):
         total_row = 0
-        first_row_id_set = set()
-        # Sort by file creation time to ensure consistent sharding
         for key, file_entries in partitioned_files.items():
             for entry in file_entries:
-                if entry.file.first_row_id is None:
-                    total_row += entry.file.row_count
-                elif entry.file.first_row_id not in first_row_id_set:
-                    first_row_id_set.add(entry.file.first_row_id)
+                if not self._is_blob_file(entry.file.file_name):
                     total_row += entry.file.row_count
 
-        # Calculate number of rows this shard should process
-        # Last shard handles all remaining rows (handles non-divisible cases)
-        if self.idx_of_this_subtask == self.number_of_para_subtasks - 1:
-            num_row = total_row - total_row // self.number_of_para_subtasks * self.idx_of_this_subtask
+        # Calculate number of rows this shard should process using balanced distribution
+        # Distribute remainder evenly among first few shards to avoid last shard overload
+        base_rows_per_shard = total_row // self.number_of_para_subtasks
+        remainder = total_row % self.number_of_para_subtasks
+
+        # Each of the first 'remainder' shards gets one extra row
+        if self.idx_of_this_subtask < remainder:
+            num_row = base_rows_per_shard + 1
+            start_row = self.idx_of_this_subtask * (base_rows_per_shard + 1)
         else:
-            num_row = total_row // self.number_of_para_subtasks
-        # Calculate start row and end row position for current shard in all data
-        start_row = self.idx_of_this_subtask * (total_row // self.number_of_para_subtasks)
+            num_row = base_rows_per_shard
+            start_row = (remainder * (base_rows_per_shard + 1) +
+                         (self.idx_of_this_subtask - remainder) * base_rows_per_shard)
+
         end_row = start_row + num_row
 
         plan_start_row = 0
@@ -188,14 +195,13 @@ class FullStartingScanner(StartingScanner):
         # Iterate through all file entries to find files that overlap with current shard range
         for key, file_entries in partitioned_files.items():
             filtered_entries = []
-            first_row_id_set = set()
+            blob_added = False  # If it is true, all blobs corresponding to this data file are added
             for entry in file_entries:
-                if entry.file.first_row_id is not None:
-                    if entry.file.first_row_id in first_row_id_set:
+                if self._is_blob_file(entry.file.file_name):
+                    if blob_added:
                         filtered_entries.append(entry)
-                        continue
-                    else:
-                        first_row_id_set.add(entry.file.first_row_id)
+                    continue
+                blob_added = False
                 entry_begin_row = entry_end_row  # Starting row position of current file in all data
                 entry_end_row += entry.file.row_count  # Update to row position after current file
 
@@ -213,6 +219,7 @@ class FullStartingScanner(StartingScanner):
                     plan_end_row = end_row - splits_start_row
                 # Add files that overlap with shard range to result
                 filtered_entries.append(entry)
+                blob_added = True
             if filtered_entries:
                 filtered_partitioned_files[key] = filtered_entries
 
@@ -220,11 +227,16 @@ class FullStartingScanner(StartingScanner):
 
     def _compute_split_start_end_row(self, splits: List[Split], plan_start_row, plan_end_row):
         file_end_row = 0  # end row position of current file in all data
+
         for split in splits:
+            row_cnt = 0
             files = split.files
             split_start_row = file_end_row
             # Iterate through all file entries to find files that overlap with current shard range
             for file in files:
+                if self._is_blob_file(file.file_name):
+                    continue
+                row_cnt += file.row_count
                 file_begin_row = file_end_row  # Starting row position of current file in all data
                 file_end_row += file.row_count  # Update to row position after current file
 
@@ -238,7 +250,7 @@ class FullStartingScanner(StartingScanner):
             if split.split_start_row is None:
                 split.split_start_row = 0
             if split.split_end_row is None:
-                split.split_end_row = split.row_count
+                split.split_end_row = row_cnt
 
     def _primary_key_filter_by_shard(self, file_entries: List[ManifestEntry]) -> List[ManifestEntry]:
         filtered_entries = []
@@ -359,6 +371,95 @@ class FullStartingScanner(StartingScanner):
             splits += self._build_split_from_pack(flatten_packed_files, file_entries, True)
         return splits
 
+    def _create_data_evolution_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
+        def sort_key(manifest_entry: ManifestEntry) -> tuple:
+            first_row_id = manifest_entry.file.first_row_id if manifest_entry.file.first_row_id is not None else float(
+                '-inf')
+            is_blob = 1 if self._is_blob_file(manifest_entry.file.file_name) else 0
+            # For files with same firstRowId, sort by maxSequenceNumber in descending order
+            # (larger sequence number means more recent data)
+            max_seq = manifest_entry.file.max_sequence_number
+            return first_row_id, is_blob, -max_seq
+
+        sorted_entries = sorted(file_entries, key=sort_key)
+
+        partitioned_files = defaultdict(list)
+        for entry in sorted_entries:
+            partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
+
+        if self.idx_of_this_subtask is not None:
+            partitioned_files, plan_start_row, plan_end_row = self._data_evolution_filter_by_shard(partitioned_files)
+
+        def weight_func(file_list: List[DataFileMeta]) -> int:
+            return max(sum(f.file_size for f in file_list), self.open_file_cost)
+
+        splits = []
+        for key, sorted_entries in partitioned_files.items():
+            if not sorted_entries:
+                continue
+
+            data_files: List[DataFileMeta] = [e.file for e in sorted_entries]
+
+            # Split files by firstRowId for data evolution
+            split_by_row_id = self._split_by_row_id(data_files)
+
+            # Pack the split groups for optimal split sizes
+            packed_files: List[List[List[DataFileMeta]]] = self._pack_for_ordered(split_by_row_id, weight_func,
+                                                                                  self.target_split_size)
+
+            # Flatten the packed files and build splits
+            flatten_packed_files: List[List[DataFileMeta]] = [
+                [file for sub_pack in pack for file in sub_pack]
+                for pack in packed_files
+            ]
+
+            splits += self._build_split_from_pack(flatten_packed_files, sorted_entries, False)
+
+        if self.idx_of_this_subtask is not None:
+            self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
+        return splits
+
+    def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
+        split_by_row_id = []
+
+        # Filter blob files to only include those within the row ID range of non-blob files
+        sorted_files = self._filter_blob(files)
+
+        # Split files by firstRowId
+        last_row_id = -1
+        check_row_id_start = 0
+        current_split = []
+
+        for file in sorted_files:
+            first_row_id = file.first_row_id
+            if first_row_id is None:
+                # Files without firstRowId are treated as individual splits
+                split_by_row_id.append([file])
+                continue
+
+            if not self._is_blob_file(file.file_name) and first_row_id != last_row_id:
+                if current_split:
+                    split_by_row_id.append(current_split)
+
+                # Validate that files don't overlap
+                if first_row_id < check_row_id_start:
+                    file_names = [f.file_name for f in sorted_files]
+                    raise ValueError(
+                        f"There are overlapping files in the split: {file_names}, "
+                        f"the wrong file is: {file.file_name}"
+                    )
+
+                current_split = []
+                last_row_id = first_row_id
+                check_row_id_start = first_row_id + file.row_count
+
+            current_split.append(file)
+
+        if current_split:
+            split_by_row_id.append(current_split)
+
+        return split_by_row_id
+
     def _build_split_from_pack(self, packed_files, file_entries, for_primary_key_split: bool) -> List['Split']:
         splits = []
         for file_group in packed_files:
@@ -410,94 +511,6 @@ class FullStartingScanner(StartingScanner):
             packed.append(bin_items)
 
         return packed
-
-    def _create_data_evolution_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
-        partitioned_files = defaultdict(list)
-        for entry in file_entries:
-            partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
-
-        if self.idx_of_this_subtask is not None:
-            partitioned_files, plan_start_row, plan_end_row = self._data_evolution_filter_by_shard(partitioned_files)
-
-        def weight_func(file_list: List[DataFileMeta]) -> int:
-            return max(sum(f.file_size for f in file_list), self.open_file_cost)
-
-        splits = []
-        for key, file_entries in partitioned_files.items():
-            if not file_entries:
-                continue
-
-            data_files: List[DataFileMeta] = [e.file for e in file_entries]
-
-            # Split files by firstRowId for data evolution
-            split_by_row_id = self._split_by_row_id(data_files)
-
-            # Pack the split groups for optimal split sizes
-            packed_files: List[List[List[DataFileMeta]]] = self._pack_for_ordered(split_by_row_id, weight_func,
-                                                                                  self.target_split_size)
-
-            # Flatten the packed files and build splits
-            flatten_packed_files: List[List[DataFileMeta]] = [
-                [file for sub_pack in pack for file in sub_pack]
-                for pack in packed_files
-            ]
-
-            splits += self._build_split_from_pack(flatten_packed_files, file_entries, False)
-
-        if self.idx_of_this_subtask is not None:
-            self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
-        return splits
-
-    def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
-        split_by_row_id = []
-
-        def sort_key(file: DataFileMeta) -> tuple:
-            first_row_id = file.first_row_id if file.first_row_id is not None else float('-inf')
-            is_blob = 1 if self._is_blob_file(file.file_name) else 0
-            # For files with same firstRowId, sort by maxSequenceNumber in descending order
-            # (larger sequence number means more recent data)
-            max_seq = file.max_sequence_number
-            return (first_row_id, is_blob, -max_seq)
-
-        sorted_files = sorted(files, key=sort_key)
-
-        # Filter blob files to only include those within the row ID range of non-blob files
-        sorted_files = self._filter_blob(sorted_files)
-
-        # Split files by firstRowId
-        last_row_id = -1
-        check_row_id_start = 0
-        current_split = []
-
-        for file in sorted_files:
-            first_row_id = file.first_row_id
-            if first_row_id is None:
-                # Files without firstRowId are treated as individual splits
-                split_by_row_id.append([file])
-                continue
-
-            if not self._is_blob_file(file.file_name) and first_row_id != last_row_id:
-                if current_split:
-                    split_by_row_id.append(current_split)
-
-                # Validate that files don't overlap
-                if first_row_id < check_row_id_start:
-                    file_names = [f.file_name for f in sorted_files]
-                    raise ValueError(
-                        f"There are overlapping files in the split: {file_names}, "
-                        f"the wrong file is: {file.file_name}"
-                    )
-
-                current_split = []
-                last_row_id = first_row_id
-                check_row_id_start = first_row_id + file.row_count
-
-            current_split.append(file)
-
-        if current_split:
-            split_by_row_id.append(current_split)
-
-        return split_by_row_id
 
     @staticmethod
     def _is_blob_file(file_name: str) -> bool:
