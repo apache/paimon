@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -31,6 +32,7 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -49,9 +51,11 @@ public class WriterRefresher {
 
     private FileStoreTable table;
     private final Refresher refresher;
-    private final Set<String> configGroups;
 
-    private WriterRefresher(FileStoreTable table, Refresher refresher, Set<String> configGroups) {
+    @Nullable private final Set<String> configGroups;
+
+    private WriterRefresher(
+            FileStoreTable table, Refresher refresher, @Nullable Set<String> configGroups) {
         this.table = table;
         this.refresher = refresher;
         this.configGroups = configGroups;
@@ -60,6 +64,15 @@ public class WriterRefresher {
     @Nullable
     public static WriterRefresher create(
             boolean isStreaming, FileStoreTable table, Refresher refresher) {
+        return create(isStreaming, false, table, refresher);
+    }
+
+    @Nullable
+    public static WriterRefresher create(
+            boolean isStreaming,
+            boolean needForCompact,
+            FileStoreTable table,
+            Refresher refresher) {
         if (!isStreaming) {
             return null;
         }
@@ -71,13 +84,21 @@ public class WriterRefresher {
                 isNullOrWhitespaceOnly(refreshDetectors)
                         ? null
                         : Arrays.stream(refreshDetectors.split(",")).collect(Collectors.toSet());
-        if (configGroups == null || configGroups.isEmpty()) {
+        if (!needForCompact && (configGroups == null || configGroups.isEmpty())) {
             return null;
         }
         return new WriterRefresher(table, refresher, configGroups);
     }
 
-    public void tryRefresh() {
+    /**
+     * Try to refresh write when configs which are expected to be refreshed in streaming mode
+     * changed.
+     */
+    public void tryRefreshForConfigs() {
+        if (configGroups == null || configGroups.isEmpty()) {
+            return;
+        }
+
         Optional<TableSchema> latestSchema = table.schemaManager().latest();
         if (!latestSchema.isPresent()) {
             return;
@@ -92,20 +113,47 @@ public class WriterRefresher {
                         configGroups(configGroups, CoreOptions.fromMap(latest.options()));
 
                 if (!Objects.equals(newOptions, currentOptions)) {
-                    if (LOG.isDebugEnabled()) {
-                        LOG.debug(
-                                "table schema has changed, current schema-id:{}, try to update write with new schema-id:{}. "
-                                        + "current options:{}, new options:{}.",
-                                table.schema().id(),
-                                latestSchema.get().id(),
-                                currentOptions,
-                                newOptions);
-                    }
                     table = table.copy(newOptions);
                     refresher.refresh(table);
+                    LOG.info(
+                            "write has been refreshed due to configs changed. old options:{}, new options:{}.",
+                            currentOptions,
+                            newOptions);
                 }
             } catch (Exception e) {
                 throw new RuntimeException("update write failed.", e);
+            }
+        }
+    }
+
+    /**
+     * This is used for dedicated compaction in streaming mode. When the schema-id of newly added
+     * data files exceeds the current schema-id, the writer needs to be refreshed to prevent data
+     * loss.
+     */
+    public void tryRefreshForDataFiles(List<DataFileMeta> files) {
+        long fileSchemaId =
+                files.stream().mapToLong(DataFileMeta::schemaId).max().orElse(table.schema().id());
+        if (fileSchemaId > table.schema().id()) {
+            Optional<TableSchema> latestSchema = table.schemaManager().latest();
+            if (!latestSchema.isPresent()) {
+                return;
+            }
+            TableSchema latest = latestSchema.get();
+
+            if (latest.id() > table.schema().id()) {
+                try {
+                    // here we cannot use table.copy(lastestSchema), because table used for
+                    // dedicated compaction has some dynamic options,we should not overwrite them.
+                    // we just need copy the lastest fields.
+                    table = table.copyWithLatestSchema();
+                    refresher.refresh(table);
+                    LOG.info(
+                            "write has been refreshed due to schema in data files changed. new schema id:{}.",
+                            table.schema().id());
+                } catch (Exception e) {
+                    throw new RuntimeException("update write failed.", e);
+                }
             }
         }
     }

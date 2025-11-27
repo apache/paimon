@@ -57,15 +57,19 @@ public abstract class AppendCompactWorkerOperator<IN>
 
     private final boolean isStreaming;
 
+    private final boolean forDedicatedCompact;
+
     public AppendCompactWorkerOperator(
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             String commitUser,
-            boolean isStreaming) {
+            boolean isStreaming,
+            boolean forDedicatedCompact) {
         super(parameters, Options.fromMap(table.options()));
         this.table = table;
         this.commitUser = commitUser;
         this.isStreaming = isStreaming;
+        this.forDedicatedCompact = forDedicatedCompact;
     }
 
     @VisibleForTesting
@@ -78,7 +82,12 @@ public abstract class AppendCompactWorkerOperator<IN>
         LOG.debug("Opened a append-only table compaction worker.");
         this.unawareBucketCompactor =
                 new AppendTableCompactor(
-                        table, commitUser, this::workerExecutor, getMetricGroup(), isStreaming);
+                        table,
+                        commitUser,
+                        this::workerExecutor,
+                        getMetricGroup(),
+                        isStreaming,
+                        forDedicatedCompact);
     }
 
     @Override

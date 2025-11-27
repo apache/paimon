@@ -101,6 +101,7 @@ public class AppendTableCompactorTest {
                                 return counter;
                             }
                         },
+                        false,
                         false);
 
         for (int i = 0; i < 320; i++) {

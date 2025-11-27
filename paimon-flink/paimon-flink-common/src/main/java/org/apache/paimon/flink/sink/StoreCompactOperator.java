@@ -43,6 +43,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -119,7 +120,8 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                         getContainingTask().getEnvironment().getIOManager(),
                         memoryPoolFactory,
                         getMetricGroup());
-        this.writeRefresher = WriterRefresher.create(write.streamingMode(), table, write::replace);
+        this.writeRefresher =
+                WriterRefresher.create(write.streamingMode(), true, table, write::replace);
     }
 
     @Override
@@ -150,6 +152,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
         if (write.streamingMode()) {
             write.notifyNewFiles(snapshotId, partition, bucket, files);
+            tryRefreshWrite(true, files);
         } else {
             Preconditions.checkArgument(
                     files.isEmpty(),
@@ -198,8 +201,18 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     }
 
     private void tryRefreshWrite() {
+        tryRefreshWrite(false, Collections.emptyList());
+    }
+
+    private void tryRefreshWrite(boolean forCompact, List<DataFileMeta> files) {
         if (writeRefresher != null) {
-            writeRefresher.tryRefresh();
+            if (forCompact) {
+                if (!files.isEmpty()) {
+                    writeRefresher.tryRefreshForDataFiles(files);
+                }
+            } else {
+                writeRefresher.tryRefreshForConfigs();
+            }
         }
     }
 

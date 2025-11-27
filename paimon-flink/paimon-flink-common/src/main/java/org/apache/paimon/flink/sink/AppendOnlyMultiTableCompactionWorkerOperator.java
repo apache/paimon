@@ -112,9 +112,10 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
     @Override
     public void processElement(StreamRecord<MultiTableAppendCompactTask> element) throws Exception {
         Identifier identifier = element.getValue().tableIdentifier();
-        compactorContainer
-                .computeIfAbsent(identifier, this::compactor)
-                .processElement(element.getValue());
+        AppendTableCompactor compactor =
+                compactorContainer.computeIfAbsent(identifier, this::compactor);
+        compactor.tryRefreshWrite(true, element.getValue().compactBefore());
+        compactor.processElement(element.getValue());
     }
 
     private AppendTableCompactor compactor(Identifier tableId) {
@@ -124,7 +125,8 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
                     commitUser,
                     this::workerExecutor,
                     getMetricGroup(),
-                    isStreaming);
+                    isStreaming,
+                    true);
         } catch (Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }

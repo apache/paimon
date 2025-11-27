@@ -23,11 +23,14 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -35,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -84,9 +88,9 @@ public class WriterRefresherTest {
         WriterRefresher writerRefresher =
                 WriterRefresher.create(
                         true, table1, new TestWriteRefresher(groups, refreshedOptions));
-        writerRefresher.tryRefresh();
+        writerRefresher.tryRefreshForConfigs();
         assertThat(refreshedOptions).isEqualTo(configGroups(groups, table2.coreOptions()));
-        writerRefresher.tryRefresh();
+        writerRefresher.tryRefreshForConfigs();
     }
 
     @Test
@@ -149,7 +153,7 @@ public class WriterRefresherTest {
                         true, table1, new TestWriteRefresher(groups, refreshedOptions));
 
         // No schema changes made, should not refresh
-        writerRefresher.tryRefresh();
+        writerRefresher.tryRefreshForConfigs();
 
         // Options should remain unchanged
         assertThat(refreshedOptions).containsEntry("initial", "value");
@@ -185,11 +189,60 @@ public class WriterRefresherTest {
                         true, table1, new TestWriteRefresher(groups, refreshedOptions));
 
         // Should not refresh when monitored config groups haven't changed
-        writerRefresher.tryRefresh();
+        writerRefresher.tryRefreshForConfigs();
 
         // Options should remain unchanged
         assertThat(refreshedOptions).containsEntry("initial", "value");
         assertThat(refreshedOptions).hasSize(1);
+    }
+
+    @Test
+    public void testRefreshWithNeedCompact() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        createTable(options);
+        FileStoreTable table1 = getTable();
+        WriterRefresher writerRefresher =
+                WriterRefresher.create(true, false, table1, new TestWriteRefresher(null, null));
+        assertThat(writerRefresher).isNull();
+
+        writerRefresher =
+                WriterRefresher.create(true, true, table1, new TestWriteRefresher(null, null));
+        assertThat(writerRefresher).isNotNull();
+    }
+
+    @Test
+    public void testRefreshForDataFiles() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        createTable(options);
+
+        FileStoreTable table1 = getTable();
+
+        table1.schemaManager()
+                .commitChanges(
+                        SchemaChange.setOption(
+                                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "round-robin"),
+                        SchemaChange.addColumn("c", DataTypes.INT()));
+        FileStoreTable table2 = getTable();
+        try (BatchTableWrite write = table2.newBatchWriteBuilder().newWrite();
+                BatchTableCommit commit = table2.newBatchWriteBuilder().newCommit()) {
+            write.write(GenericRow.of(1, 1, 1));
+            commit.commit(write.prepareCommit());
+        }
+
+        Map<String, String> refreshedOptions = new HashMap<>();
+        WriterRefresher writerRefresher =
+                WriterRefresher.create(
+                        true,
+                        true,
+                        table1,
+                        new TestWriteRefresher(
+                                Collections.singleton("external-paths"), refreshedOptions));
+        writerRefresher.tryRefreshForDataFiles(
+                table2.newSnapshotReader().read().dataSplits().get(0).dataFiles());
+        assertThat(refreshedOptions)
+                .isEqualTo(
+                        configGroups(
+                                Collections.singleton("external-paths"), table2.coreOptions()));
     }
 
     private void createTable(Map<String, String> options) throws Exception {
