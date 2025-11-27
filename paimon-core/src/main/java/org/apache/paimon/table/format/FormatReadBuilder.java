@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.format;
 
+import java.util.Random;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.variant.VariantAccessInfo;
@@ -51,6 +52,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.apache.paimon.utils.Range;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
@@ -243,8 +245,8 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     @Override
-    public ReadBuilder withRowIds(List<Long> indices) {
-        throw new UnsupportedOperationException("Format Table does not support withRowIds.");
+    public ReadBuilder withRowRanges(List<Range> rowRanges) {
+        throw new UnsupportedOperationException("Format Table does not support withRowRanges.");
     }
 
     @Override

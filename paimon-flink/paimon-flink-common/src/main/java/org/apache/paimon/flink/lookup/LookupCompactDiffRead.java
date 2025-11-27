@@ -35,6 +35,7 @@ import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
 import java.util.List;
+import org.apache.paimon.utils.Range;
 
 import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
 
@@ -63,8 +64,8 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
     }
 
     @Override
-    public void applyRowIds(List<Long> indices) {
-        throw new UnsupportedOperationException("Does not support row ids.");
+    public void applyRowRanges(List<Range> rowRanges) {
+        throw new UnsupportedOperationException("Does not support row ranges.");
     }
 
     @Override

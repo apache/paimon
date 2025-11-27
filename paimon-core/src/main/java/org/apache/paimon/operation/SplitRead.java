@@ -31,6 +31,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
+import org.apache.paimon.utils.Range;
 
 /**
  * Read operation which provides {@link RecordReader} creation.
@@ -57,7 +58,7 @@ public interface SplitRead<T> {
         return this;
     }
 
-    default SplitRead<T> withRowIds(@Nullable List<Long> indices) {
+    default SplitRead<T> withRowRanges(@Nullable List<Range> rowRanges) {
         return this;
     }
 
@@ -98,8 +99,8 @@ public interface SplitRead<T> {
             }
 
             @Override
-            public SplitRead<R> withRowIds(@Nullable List<Long> indices) {
-                read.withRowIds(indices);
+            public SplitRead<R> withRowRanges(@Nullable List<Range> rowRanges) {
+                read.withRowRanges(rowRanges);
                 return this;
             }
 

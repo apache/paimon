@@ -30,6 +30,7 @@ import org.apache.paimon.types.RowType;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
+import org.apache.paimon.utils.Range;
 
 /** A {@link InnerTableRead} for data table. */
 public abstract class AbstractDataTableRead implements InnerTableRead {
@@ -47,7 +48,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     public abstract void applyVariantAccess(VariantAccessInfo[] variantAccess);
 
-    public abstract void applyRowIds(List<Long> indices);
+    public abstract void applyRowRanges(List<Range> rowRanges);
 
     public abstract RecordReader<InternalRow> reader(Split split) throws IOException;
 
@@ -92,8 +93,8 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     }
 
     @Override
-    public InnerTableRead withRowIds(List<Long> indices) {
-        applyRowIds(indices);
+    public InnerTableRead withRowRanges(List<Range> rowRange) {
+        applyRowRanges(rowRange);
         return this;
     }
 

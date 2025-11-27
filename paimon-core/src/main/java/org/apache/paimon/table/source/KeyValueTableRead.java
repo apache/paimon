@@ -44,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.function.Supplier;
+import org.apache.paimon.utils.Range;
 
 /**
  * An abstraction layer above {@link MergeFileSplitRead} to provide reading of {@link InternalRow}.
@@ -116,8 +117,8 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    public void applyRowIds(List<Long> indices) {
-        throw new UnsupportedOperationException("Does not support row ids.");
+    public void applyRowRanges(List<Range> rowRanges) {
+        throw new UnsupportedOperationException("Does not support row ranges.");
     }
 
     @Override

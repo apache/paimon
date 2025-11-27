@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.apache.paimon.utils.Range;
 
 /**
  * An abstraction layer above {@link MergeFileSplitRead} to provide reading of {@link InternalRow}.
@@ -49,7 +50,7 @@ public final class AppendTableRead extends AbstractDataTableRead {
     private Predicate predicate = null;
     private TopN topN = null;
     private Integer limit = null;
-    @Nullable private List<Long> indices;
+    @Nullable private List<Range> rowRanges;
     @Nullable private VariantAccessInfo[] variantAccess;
 
     public AppendTableRead(
@@ -79,7 +80,7 @@ public final class AppendTableRead extends AbstractDataTableRead {
         read.withFilter(predicate);
         read.withTopN(topN);
         read.withLimit(limit);
-        read.withRowIds(indices);
+        read.withRowRanges(rowRanges);
         read.withVariantAccess(variantAccess);
     }
 
@@ -96,9 +97,9 @@ public final class AppendTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    public void applyRowIds(List<Long> indices) {
-        initialized().forEach(r -> r.withRowIds(indices));
-        this.indices = indices;
+    public void applyRowRanges(List<Range> rowRanges) {
+        initialized().forEach(r -> r.withRowRanges(rowRanges));
+        this.rowRanges = rowRanges;
     }
 
     @Override
