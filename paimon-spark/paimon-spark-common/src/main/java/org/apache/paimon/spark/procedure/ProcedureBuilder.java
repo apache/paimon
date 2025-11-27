@@ -21,7 +21,7 @@ package org.apache.paimon.spark.procedure;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 
-/** A builder of {@link Procedure} that build a stored procedure. */
+/** A builder of {@link Procedure} that builds a stored procedure. */
 public interface ProcedureBuilder {
 
     /**

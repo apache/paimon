@@ -101,7 +101,7 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
     }
   }
 
-  // First traversal build up the cache and inserts `ScalarSubqueryReference`s to the plan.
+  // First traversal builds up the cache and inserts `ScalarSubqueryReference`s to the plan.
   private def insertReferences(plan: LogicalPlan, cache: ArrayBuffer[Header]): LogicalPlan = {
     plan.transformUpWithSubqueries {
       case n =>
