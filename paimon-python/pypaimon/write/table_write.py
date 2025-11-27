@@ -27,13 +27,14 @@ from pypaimon.write.file_store_write import FileStoreWrite
 
 
 class TableWrite:
-    def __init__(self, table):
+    def __init__(self, table, commit_user):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.table_pyarrow_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
-        self.file_store_write = FileStoreWrite(self.table)
+        self.file_store_write = FileStoreWrite(self.table, commit_user)
         self.row_key_extractor = self.table.create_row_key_extractor()
+        self.commit_user = commit_user
 
     def write_arrow(self, table: pa.Table):
         batches_iterator = table.to_batches()
@@ -79,8 +80,8 @@ class TableWrite:
 
 
 class BatchTableWrite(TableWrite):
-    def __init__(self, table):
-        super().__init__(table)
+    def __init__(self, table, commit_user):
+        super().__init__(table, commit_user)
         self.batch_committed = False
 
     def prepare_commit(self) -> List[CommitMessage]:

@@ -19,7 +19,7 @@
 import logging
 import uuid
 import pyarrow as pa
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
@@ -32,8 +32,10 @@ CHECK_ROLLING_RECORD_CNT = 1000
 
 class BlobWriter(AppendOnlyDataWriter):
 
-    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, blob_column: str):
-        super().__init__(table, partition, bucket, max_seq_number, [blob_column])
+    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, blob_column: str,
+                 options: Dict[str, str] = None):
+        super().__init__(table, partition, bucket, max_seq_number,
+                         options, write_cols=[blob_column])
 
         # Override file format to "blob"
         self.file_format = CoreOptions.FILE_FORMAT_BLOB
@@ -95,7 +97,8 @@ class BlobWriter(AppendOnlyDataWriter):
         self.sequence_generator.next()
 
     def open_current_writer(self):
-        file_name = f"data-{self.file_uuid}-{self.file_count}.{self.file_format}"
+        file_name = (f"{CoreOptions.data_file_prefix(self.options)}"
+                     f"{self.file_uuid}-{self.file_count}.{self.file_format}")
         self.file_count += 1  # Increment counter for next file
         file_path = self._generate_file_path(file_name)
         self.current_file_path = file_path
