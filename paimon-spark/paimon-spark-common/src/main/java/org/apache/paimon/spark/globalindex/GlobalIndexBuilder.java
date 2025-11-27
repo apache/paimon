@@ -51,7 +51,7 @@ public abstract class GlobalIndexBuilder {
         this.context = context;
     }
 
-    public List<IndexManifestEntry> builds(DataSplit dataSplit) throws IOException {
+    public List<IndexManifestEntry> build(DataSplit dataSplit) throws IOException {
         final GlobalIndexBuilderContext buildContext = this.context;
         JavaSparkContext javaSparkContext =
                 new JavaSparkContext(buildContext.spark().sparkContext());

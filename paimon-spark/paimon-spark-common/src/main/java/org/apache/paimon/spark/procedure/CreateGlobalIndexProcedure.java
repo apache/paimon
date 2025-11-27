@@ -182,7 +182,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
 
                         // Step 2: build index by certain index system
                         List<IndexManifestEntry> indexResults =
-                                buildIndexSS(
+                                buildIndex(
                                         table,
                                         splits,
                                         indexType,
@@ -205,7 +205,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                 });
     }
 
-    private List<IndexManifestEntry> buildIndexSS(
+    private List<IndexManifestEntry> buildIndex(
             FileStoreTable table,
             Map<BinaryRow, Map<Range, DataSplit>> preparedDS,
             String indexType,
@@ -239,7 +239,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                     () -> {
                                         GlobalIndexBuilder globalIndexBuilder =
                                                 globalIndexBuilderFactory.create(builderContext);
-                                        return globalIndexBuilder.builds(partitionDS);
+                                        return globalIndexBuilder.build(partitionDS);
                                     }));
                 }
             }
