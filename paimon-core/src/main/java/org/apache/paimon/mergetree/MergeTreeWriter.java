@@ -215,7 +215,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
             final RollingFileWriter<KeyValue, DataFileMeta> changelogWriter =
                     changelogProducer == ChangelogProducer.INPUT
-                            ? writerFactory.createRollingChangelogFileWriter(0)
+                            ? writerFactory.createRollingChangelogFileWriter(1)
                             : null;
             final RollingFileWriter<KeyValue, DataFileMeta> dataWriter =
                     writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
