@@ -122,7 +122,7 @@ def main():
 
         # Convert to Ray Dataset
         ray_dataset = table_read.to_ray(splits, use_distributed_read=True)
-        print(f"✓ Ray Dataset created successfully")
+        print("✓ Ray Dataset created successfully")
         print(f"  - Total rows: {ray_dataset.count()}")
         # Note: num_blocks() requires materialized dataset, so we skip it for simplicity
 
@@ -140,7 +140,7 @@ def main():
 
         print(f"Distributed mode rows: {ray_dataset.count()}")
         print(f"Simple mode rows: {ray_dataset_simple.count()}")
-        print(f"✓ Both modes return the same number of rows")
+        print("✓ Both modes return the same number of rows")
 
         # Verify data consistency (sort by id for comparison)
         df_ray_sorted = df_ray.sort_values(by='id').reset_index(drop=True)
@@ -162,6 +162,7 @@ def main():
 
         # Map operation
         print("\n4.2 Map: Double the value column")
+
         def double_value(row):
             row['value'] = row['value'] * 2
             return row
@@ -209,7 +210,7 @@ def main():
         ray_dataset_projected = table_read_projected.to_ray(splits_projected, use_distributed_read=True)
         df_projected = ray_dataset_projected.to_pandas()
         print(f"✓ Projected columns: {list(df_projected.columns)}")
-        print(f"  - Expected: ['id', 'name', 'value']")
+        print("  - Expected: ['id', 'name', 'value']")
         print(f"  - Match: {set(df_projected.columns) == {'id', 'name', 'value'}}")
 
         # Optional: Blob data example (uncomment to demonstrate blob data handling)
@@ -242,4 +243,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

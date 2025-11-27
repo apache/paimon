@@ -124,7 +124,11 @@ class RayDataTest(unittest.TestCase):
         # Sort by id to ensure order-independent comparison
         df_sorted = df.sort_values(by='id').reset_index(drop=True)
         self.assertEqual(list(df_sorted['id']), [1, 2, 3, 4, 5], "ID column should match")
-        self.assertEqual(list(df_sorted['name']), ['Alice', 'Bob', 'Charlie', 'David', 'Eve'], "Name column should match")
+        self.assertEqual(
+            list(df_sorted['name']),
+            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            "Name column should match"
+        )
 
     def test_ray_data_with_predicate(self):
         """Test Ray Data read with predicate filtering."""
