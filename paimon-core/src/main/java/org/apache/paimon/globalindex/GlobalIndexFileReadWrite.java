@@ -48,6 +48,10 @@ public class GlobalIndexFileReadWrite implements GlobalIndexFileReader, GlobalIn
         return indexPathFactory.toPath(fileName);
     }
 
+    public long fileSize(String fileName) throws IOException {
+        return fileIO.getFileSize(filePath(fileName));
+    }
+
     public OutputStream newOutputStream(String fileName) throws IOException {
         return fileIO.newOutputStream(indexPathFactory.toPath(fileName), true);
     }

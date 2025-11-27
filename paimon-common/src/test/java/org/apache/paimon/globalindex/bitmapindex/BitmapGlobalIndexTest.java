@@ -93,26 +93,23 @@ public class BitmapGlobalIndexTest {
                                 writer.write(o);
                             }
                         });
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, a).get())
+        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, a))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 4));
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, b).get())
+        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, b))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(2));
-        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef).get())
+        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(1, 3));
-        assert ((BitmapIndexResultWrapper) reader.visitIn(fieldRef, Arrays.asList(a, b)).get())
+        assert ((BitmapIndexResultWrapper) reader.visitIn(fieldRef, Arrays.asList(a, b)))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 2, 4));
-        assert !reader.visitEqual(fieldRef, BinaryString.fromString("c"))
-                .get()
-                .iterator()
-                .hasNext();
+        assert !reader.visitEqual(fieldRef, BinaryString.fromString("c")).iterator().hasNext();
     }
 
     private void testIntType(int version) throws Exception {
@@ -128,24 +125,24 @@ public class BitmapGlobalIndexTest {
                                 writer.write(o);
                             }
                         });
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, 0).get())
+        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, 0))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0));
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, 1).get())
+        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, 1))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(1));
-        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef).get())
+        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(2));
-        assert ((BitmapIndexResultWrapper) reader.visitIn(fieldRef, Arrays.asList(0, 1, 2)).get())
+        assert ((BitmapIndexResultWrapper) reader.visitIn(fieldRef, Arrays.asList(0, 1, 2)))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 1));
 
-        assert !reader.visitEqual(fieldRef, 2).get().iterator().hasNext();
+        assert !reader.visitEqual(fieldRef, 2).iterator().hasNext();
     }
 
     private void testBooleanType(int version) throws Exception {
@@ -161,11 +158,11 @@ public class BitmapGlobalIndexTest {
                                 writer.write(o);
                             }
                         });
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, Boolean.TRUE).get())
+        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, Boolean.TRUE))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 2));
-        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef).get())
+        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(4));
@@ -202,13 +199,12 @@ public class BitmapGlobalIndexTest {
         long time2 = System.currentTimeMillis();
         GlobalIndexResult result =
                 reader.visitEqual(
-                                fieldRef, BinaryString.fromString(prefix + (approxCardinality / 2)))
-                        .get();
+                        fieldRef, BinaryString.fromString(prefix + (approxCardinality / 2)));
         RoaringBitmap32 resultBm = ((BitmapIndexResultWrapper) result).getBitmapIndexResult().get();
         System.out.println("read time: " + (System.currentTimeMillis() - time2));
         assert resultBm.equals(middleBm);
         long time3 = System.currentTimeMillis();
-        GlobalIndexResult resultNull = reader.visitIsNull(fieldRef).get();
+        GlobalIndexResult resultNull = reader.visitIsNull(fieldRef);
         RoaringBitmap32 resultNullBm =
                 ((BitmapIndexResultWrapper) resultNull).getBitmapIndexResult().get();
         System.out.println("read null bitmap time: " + (System.currentTimeMillis() - time3));
@@ -277,26 +273,23 @@ public class BitmapGlobalIndexTest {
                             a.pointTo(c.getSegments(), c.getOffset(), c.getSizeInBytes());
                             writer.write(null);
                         });
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, a).get())
+        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, a))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0));
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, b).get())
+        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, b))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(3));
-        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef).get())
+        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(1, 2, 4, 5));
-        assert ((BitmapIndexResultWrapper) reader.visitIn(fieldRef, Arrays.asList(a, b)).get())
+        assert ((BitmapIndexResultWrapper) reader.visitIn(fieldRef, Arrays.asList(a, b)))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 3));
-        assert !reader.visitEqual(fieldRef, BinaryString.fromString("c"))
-                .get()
-                .iterator()
-                .hasNext();
+        assert !reader.visitEqual(fieldRef, BinaryString.fromString("c")).iterator().hasNext();
     }
 
     private void testAllNull(int version) throws Exception {
@@ -312,10 +305,10 @@ public class BitmapGlobalIndexTest {
                                 writer.write(o);
                             }
                         });
-        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef).get())
+        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef))
                 .getBitmapIndexResult()
                 .get()
                 .equals(RoaringBitmap32.bitmapOf(0, 1, 2));
-        assert !reader.visitIsNotNull(fieldRef).get().iterator().hasNext();
+        assert !reader.visitIsNotNull(fieldRef).iterator().hasNext();
     }
 }

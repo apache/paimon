@@ -164,6 +164,7 @@ public interface ReadBuilder extends Serializable {
      *
      * @param indices the row ids to be read
      */
+    // TODO: support List<Range>, List<Long> is wasting of memory
     ReadBuilder withRowIds(List<Long> indices);
 
     /** Delete stats in scan plan result. */
