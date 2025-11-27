@@ -44,7 +44,7 @@ class FileStoreWrite:
         if (CoreOptions.BUCKET in table.options and
                 self.table.bucket_mode() == BucketMode.POSTPONE_MODE):
             self.options[CoreOptions.DATA_FILE_PREFIX] = \
-                (f"{CoreOptions.get_data_file_prefix(table.options)}-u-{commit_user}"
+                (f"{CoreOptions.data_file_prefix(table.options)}-u-{commit_user}"
                  f"-s-{random.randint(0, 2 ** 31 - 2)}-w-")
 
     def write(self, partition: Tuple, bucket: int, data: pa.RecordBatch):
