@@ -26,6 +26,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.WriterRefresher;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
@@ -43,6 +44,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
@@ -72,7 +74,8 @@ public class AppendTableCompactor {
             String commitUser,
             Supplier<ExecutorService> lazyCompactExecutor,
             @Nullable MetricGroup metricGroup,
-            boolean isStreaming) {
+            boolean isStreaming,
+            boolean forDedicatedCompact) {
         this.table = table;
         this.commitUser = commitUser;
         CoreOptions coreOptions = table.coreOptions();
@@ -91,7 +94,8 @@ public class AppendTableCompactor {
                         ? null
                         // partition and bucket fields are no use.
                         : this.compactionMetrics.createReporter(BinaryRow.EMPTY_ROW, 0);
-        this.writeRefresher = WriterRefresher.create(isStreaming, table, this::replace);
+        this.writeRefresher =
+                WriterRefresher.create(isStreaming, forDedicatedCompact, table, this::replace);
     }
 
     public void processElement(AppendCompactTask task) throws Exception {
@@ -220,11 +224,22 @@ public class AppendTableCompactor {
     }
 
     public void tryRefreshWrite() {
+        tryRefreshWrite(false, Collections.emptyList());
+    }
+
+    public void tryRefreshWrite(boolean forCompact, List<DataFileMeta> files) {
         if (commitUser == null) {
             return;
         }
+
         if (writeRefresher != null) {
-            writeRefresher.tryRefresh();
+            if (forCompact) {
+                if (!files.isEmpty()) {
+                    writeRefresher.tryRefreshForDataFiles(files);
+                }
+            } else {
+                writeRefresher.tryRefreshForConfigs();
+            }
         }
     }
 }

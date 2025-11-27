@@ -39,12 +39,14 @@ public class AppendOnlySingleTableCompactionWorkerOperator
             FileStoreTable table,
             String commitUser,
             boolean isStreaming) {
-        super(parameters, table, commitUser, isStreaming);
+        super(parameters, table, commitUser, isStreaming, true);
     }
 
     @Override
     public void processElement(StreamRecord<AppendCompactTask> element) throws Exception {
-        this.unawareBucketCompactor.processElement(element.getValue());
+        AppendCompactTask task = element.getValue();
+        this.unawareBucketCompactor.tryRefreshWrite(true, task.compactBefore());
+        this.unawareBucketCompactor.processElement(task);
     }
 
     /** {@link StreamOperatorFactory} of {@link AppendOnlySingleTableCompactionWorkerOperator}. */

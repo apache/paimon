@@ -36,7 +36,7 @@ public class AppendBypassCompactWorkerOperator
             FileStoreTable table,
             String commitUser,
             boolean isStreaming) {
-        super(parameters, table, commitUser, isStreaming);
+        super(parameters, table, commitUser, isStreaming, false);
     }
 
     @Override
