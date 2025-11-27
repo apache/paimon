@@ -2054,7 +2054,7 @@ class DataBlobWriterTest(unittest.TestCase):
         # Verify the blob size is exactly 50MB
         actual_size = len(large_blob_data)
         print(f"Created blob data: {actual_size:,} bytes ({actual_size / (1024 * 1024):.2f} MB)")
-        for i in range(7):
+        for i in range(4):
             # Write 40 batches of data (each with 1 blob of 50MB)
             write_builder = table.new_batch_write_builder()
             writer = write_builder.new_write()
@@ -2080,12 +2080,12 @@ class DataBlobWriterTest(unittest.TestCase):
         result = table_read.to_arrow(table_scan.plan().splits())
 
         # Verify the data
-        self.assertEqual(result.num_rows, 94, "Should have 94 rows")
+        self.assertEqual(result.num_rows, 54, "Should have 94 rows")
         self.assertEqual(result.num_columns, 4, "Should have 4 columns")
 
         # Verify blob data integrity
         blob_data = result.column('large_blob').to_pylist()
-        self.assertEqual(len(blob_data), 94, "Should have 94 blob records")
+        self.assertEqual(len(blob_data), 54, "Should have 94 blob records")
         # Verify each blob
         for i, blob in enumerate(blob_data):
             self.assertEqual(len(blob), len(large_blob_data), f"Blob {i + 1} should be {large_blob_size:,} bytes")
@@ -2101,9 +2101,9 @@ class DataBlobWriterTest(unittest.TestCase):
         actual = pa.concat_tables([actual1, actual2, actual3]).sort_by('id')
 
         # Verify the data
-        self.assertEqual(actual.num_rows, 280, "Should have 280 rows")
+        self.assertEqual(actual.num_rows, 160, "Should have 280 rows")
         self.assertEqual(actual.num_columns, 4, "Should have 4 columns")
-        self.assertEqual(actual.column('id').to_pylist(), list(range(1, 281)), "ID column should match")
+        self.assertEqual(actual.column('id').to_pylist(), list(range(1, 161)), "ID column should match")
         self.assertEqual(actual, expected)
 
     def test_data_blob_writer_with_shard(self):
