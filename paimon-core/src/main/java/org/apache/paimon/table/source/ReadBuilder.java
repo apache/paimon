@@ -80,11 +80,6 @@ public interface ReadBuilder extends Serializable {
     /** Returns read row type. */
     RowType readType();
 
-    /** Returns actual read row type. */
-    default RowType actualReadType() {
-        return readType();
-    }
-
     /**
      * Apply filters to the readers to decrease the number of produced records.
      *

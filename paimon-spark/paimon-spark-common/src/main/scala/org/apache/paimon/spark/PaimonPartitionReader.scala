@@ -49,7 +49,7 @@ case class PaimonPartitionReader(
   private val ioManager: IOManager = createIOManager()
   @Nullable private var currentRecordReader = readSplit()
   private val sparkRow: SparkInternalRow = {
-    val dataFields = new JList(readBuilder.actualReadType().getFields)
+    val dataFields = new JList(readBuilder.readType().getFields)
     dataFields.addAll(metadataColumns.map(_.toPaimonDataField).asJava)
     val rowType = new RowType(dataFields)
     SparkInternalRow.create(rowType, blobAsDescriptor)

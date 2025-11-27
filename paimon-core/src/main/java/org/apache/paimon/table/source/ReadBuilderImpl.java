@@ -80,21 +80,12 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public RowType readType() {
-        if (readType != null) {
-            return readType;
-        } else {
-            return table.rowType();
-        }
-    }
-
-    @Override
-    public RowType actualReadType() {
+        RowType finalReadType = readType != null ? readType : table.rowType();
         // When variantAccessInfo is not null, replace the variant with the actual readType.
         if (variantAccessInfo != null) {
-            return VariantAccessInfoUtils.buildReadRowType(readType(), variantAccessInfo);
+            finalReadType = VariantAccessInfoUtils.buildReadRowType(finalReadType, variantAccessInfo);
         }
-
-        return readType();
+        return finalReadType;
     }
 
     @Override
