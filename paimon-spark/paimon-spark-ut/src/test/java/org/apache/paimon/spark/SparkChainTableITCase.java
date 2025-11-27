@@ -2298,4 +2298,71 @@ public class SparkChainTableITCase {
 
         spark.close();
     }
+
+    @Test
+    public void testChainMerge(@TempDir java.nio.file.Path tempDir) throws IOException {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession.Builder builder = createSparkSessionBuilder(warehousePath);
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE spark_catalog.my_db1");
+
+        /** Create table */
+        spark.sql(
+                "CREATE TABLE IF NOT EXISTS \n"
+                        + "  `my_db1`.`chain_merge_test` (\n"
+                        + "    `t1` BIGINT COMMENT 't1',\n"
+                        + "    `t2` BIGINT COMMENT 't2',\n"
+                        + "    `t3` STRING COMMENT 't3'\n"
+                        + "  ) PARTITIONED BY (`dt` STRING COMMENT 'dt') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
+                        + "WITH\n"
+                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "    'bucket-key' = 't1',\n"
+                        + "    'primary-key' = 'dt,t1',\n"
+                        + "    'partition.timestamp-pattern' = '$dt',\n"
+                        + "    'partition.timestamp-formatter' = 'yyyyMMdd',\n"
+                        + "    'chain-table.enabled' = 'true',\n"
+                        + "    'bucket' = '2',\n"
+                        + "    'merge-engine' = 'deduplicate', \n"
+                        + "    'sequence.field' = 't2'\n"
+                        + "  )");
+
+        setupChainTableBranches(spark, "chain_merge_test");
+        spark.close();
+
+        spark = builder.getOrCreate();
+        /** Write delta branch */
+        spark.sql("set spark.paimon.branch=delta;");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_merge_test` partition (dt = '20260514') values (1, 1, '1'),(2, 1, '1');");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_merge_test` partition (dt = '20260515') values (1, 2, '1-1' ),(3, 1, '1' );");
+        spark.close();
+
+        /** Chain merge */
+        spark = builder.getOrCreate();
+        Row[] res =
+                spark.sql(
+                                "CALL sys.chain_merge(table => 'my_db1.chain_merge_test', partitions => \"dt='20260515'\");")
+                        .collectAsList()
+                        .toArray(new Row[0]);
+        assertThat(res[0].getBoolean(0)).isTrue();
+        spark.close();
+
+        spark = builder.getOrCreate();
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT t1,t2,t3 FROM `my_db1`.`chain_merge_test$branch_snapshot` where dt = '20260515'")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,2,1-1]", "[2,1,1]", "[3,1,1]");
+        spark.close();
+
+        /** Drop table */
+        spark = builder.getOrCreate();
+        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_merge_test`;");
+        spark.close();
+    }
 }
