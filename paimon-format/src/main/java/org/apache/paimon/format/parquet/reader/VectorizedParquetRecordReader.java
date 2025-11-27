@@ -19,24 +19,12 @@
 package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.columnar.ColumnVector;
-import org.apache.paimon.data.columnar.heap.CastedArrayColumnVector;
-import org.apache.paimon.data.columnar.heap.CastedMapColumnVector;
-import org.apache.paimon.data.columnar.heap.CastedRowColumnVector;
-import org.apache.paimon.data.columnar.heap.HeapArrayVector;
-import org.apache.paimon.data.columnar.heap.HeapMapVector;
-import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.MapType;
-import org.apache.paimon.types.MultisetType;
-import org.apache.paimon.types.RowType;
 
 import org.apache.parquet.VersionParser;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -50,13 +38,13 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static java.lang.String.format;
+import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.createReadableColumnVectors;
 
 /** Record reader for parquet. */
 public class VectorizedParquetRecordReader implements FileRecordReader<InternalRow> {
@@ -128,7 +116,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         columnarBatch =
                 new ColumnarBatch(
                         filePath,
-                        createVectorizedColumnBatch(
+                        createReadableColumnVectors(
                                 fields.stream()
                                         .map(ParquetField::getType)
                                         .collect(Collectors.toList()),
@@ -139,77 +127,6 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                     new ParquetColumnVector(
                             fields.get(i), vectors[i], batchSize, missingColumns, true);
         }
-    }
-
-    /**
-     * Create readable vectors from writable vectors. Especially for decimal, see {@link
-     * ParquetDecimalVector}.
-     */
-    private ColumnVector[] createVectorizedColumnBatch(
-            List<DataType> types, WritableColumnVector[] writableVectors) {
-        ColumnVector[] vectors = new ColumnVector[writableVectors.length];
-        for (int i = 0; i < writableVectors.length; i++) {
-            switch (types.get(i).getTypeRoot()) {
-                case DECIMAL:
-                    vectors[i] = new ParquetDecimalVector(writableVectors[i]);
-                    break;
-                case TIMESTAMP_WITHOUT_TIME_ZONE:
-                case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                    vectors[i] = new ParquetTimestampVector(writableVectors[i]);
-                    break;
-                case ARRAY:
-                    vectors[i] =
-                            new CastedArrayColumnVector(
-                                    (HeapArrayVector) writableVectors[i],
-                                    createVectorizedColumnBatch(
-                                            Collections.singletonList(
-                                                    ((ArrayType) types.get(i)).getElementType()),
-                                            Arrays.stream(writableVectors[i].getChildren())
-                                                    .map(WritableColumnVector.class::cast)
-                                                    .toArray(WritableColumnVector[]::new)));
-                    break;
-                case MAP:
-                    MapType mapType = (MapType) types.get(i);
-                    vectors[i] =
-                            new CastedMapColumnVector(
-                                    (HeapMapVector) writableVectors[i],
-                                    createVectorizedColumnBatch(
-                                            Arrays.asList(
-                                                    mapType.getKeyType(), mapType.getValueType()),
-                                            Arrays.stream(writableVectors[i].getChildren())
-                                                    .map(WritableColumnVector.class::cast)
-                                                    .toArray(WritableColumnVector[]::new)));
-                    break;
-                case MULTISET:
-                    MultisetType multisetType = (MultisetType) types.get(i);
-                    vectors[i] =
-                            new CastedMapColumnVector(
-                                    (HeapMapVector) writableVectors[i],
-                                    createVectorizedColumnBatch(
-                                            Arrays.asList(
-                                                    multisetType.getElementType(),
-                                                    multisetType.getElementType()),
-                                            Arrays.stream(writableVectors[i].getChildren())
-                                                    .map(WritableColumnVector.class::cast)
-                                                    .toArray(WritableColumnVector[]::new)));
-                    break;
-                case ROW:
-                    RowType rowType = (RowType) types.get(i);
-                    vectors[i] =
-                            new CastedRowColumnVector(
-                                    (HeapRowVector) writableVectors[i],
-                                    createVectorizedColumnBatch(
-                                            rowType.getFieldTypes(),
-                                            Arrays.stream(writableVectors[i].getChildren())
-                                                    .map(WritableColumnVector.class::cast)
-                                                    .toArray(WritableColumnVector[]::new)));
-                    break;
-                default:
-                    vectors[i] = writableVectors[i];
-            }
-        }
-
-        return vectors;
     }
 
     private void checkMissingColumns() throws IOException {

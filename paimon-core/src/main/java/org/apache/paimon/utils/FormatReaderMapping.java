@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.casting.CastFieldGetter;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.partition.PartitionUtils;
@@ -158,6 +159,7 @@ public class FormatReaderMapping {
         @Nullable private final List<Predicate> filters;
         @Nullable private final TopN topN;
         @Nullable private final Integer limit;
+        @Nullable private final VariantAccessInfo[] variantAccess;
 
         public Builder(
                 FileFormatDiscover formatDiscover,
@@ -165,13 +167,15 @@ public class FormatReaderMapping {
                 Function<TableSchema, List<DataField>> fieldsExtractor,
                 @Nullable List<Predicate> filters,
                 @Nullable TopN topN,
-                @Nullable Integer limit) {
+                @Nullable Integer limit,
+                @Nullable VariantAccessInfo[] variantAccess) {
             this.formatDiscover = formatDiscover;
             this.readFields = readFields;
             this.fieldsExtractor = fieldsExtractor;
             this.filters = filters;
             this.topN = topN;
             this.limit = limit;
+            this.variantAccess = variantAccess;
         }
 
         /**
@@ -233,7 +237,8 @@ public class FormatReaderMapping {
                             .createReaderFactory(
                                     new RowType(allDataFieldsInFile),
                                     actualReadRowType,
-                                    readFilters),
+                                    readFilters,
+                                    variantAccess),
                     dataSchema,
                     readFilters,
                     systemFields,
