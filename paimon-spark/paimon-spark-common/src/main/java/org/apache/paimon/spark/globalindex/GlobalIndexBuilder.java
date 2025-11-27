@@ -73,19 +73,18 @@ public abstract class GlobalIndexBuilder {
                             return convertToEntry(buildContext, resultEntries);
                         })
                 .flatMap(
-                        e -> {
-                            return e.stream()
-                                    .map(
-                                            entry -> {
-                                                try {
-                                                    return indexManifestEntrySerializer
-                                                            .serializeToBytes(entry);
-                                                } catch (IOException ex) {
-                                                    throw new RuntimeException(ex);
-                                                }
-                                            })
-                                    .iterator();
-                        })
+                        e ->
+                                e.stream()
+                                        .map(
+                                                entry -> {
+                                                    try {
+                                                        return indexManifestEntrySerializer
+                                                                .serializeToBytes(entry);
+                                                    } catch (IOException ex) {
+                                                        throw new RuntimeException(ex);
+                                                    }
+                                                })
+                                        .iterator())
                 .collect().stream()
                 .map(
                         e -> {
