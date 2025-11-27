@@ -127,6 +127,31 @@ public class TableSchema implements Serializable {
         numBucket = CoreOptions.fromMap(options).bucket();
     }
 
+    private TableSchema(
+            int version,
+            long id,
+            List<DataField> fields,
+            int highestFieldId,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            Map<String, String> options,
+            @Nullable String comment,
+            long timeMillis,
+            List<String> bucketKeys,
+            int numBucket) {
+        this.version = version;
+        this.id = id;
+        this.fields = Collections.unmodifiableList(new ArrayList<>(fields));
+        this.highestFieldId = highestFieldId;
+        this.partitionKeys = partitionKeys;
+        this.primaryKeys = primaryKeys;
+        this.options = options;
+        this.comment = comment;
+        this.timeMillis = timeMillis;
+        this.bucketKeys = bucketKeys;
+        this.numBucket = numBucket;
+    }
+
     public int version() {
         return version;
     }
@@ -294,7 +319,9 @@ public class TableSchema implements Serializable {
                 primaryKeys,
                 options,
                 comment,
-                timeMillis);
+                timeMillis,
+                bucketKeys,
+                numBucket);
     }
 
     private List<DataField> projectedDataFields(List<String> projectedFieldNames) {
