@@ -43,17 +43,17 @@ abstract class DDLWithIncompatibleColType extends PaimonHiveTestBase {
   }
 
   test("Paimon DDL with hive catalog: alter with incompatible col type") {
-    withTable("t1") {
-      sql("CREATE TABLE t1 (a INT, b INT, c STRUCT<f1: INT>) USING paimon")
+    withTable("t") {
+      spark.sql("CREATE TABLE t (a INT, b INT, c STRUCT<f1: INT>) USING paimon")
       if (disallowIncompatible) {
         val e = intercept[Exception] {
-          sql("ALTER TABLE t1 DROP COLUMN b")
+          spark.sql("ALTER TABLE t DROP COLUMN b")
         }
         assert(
           e.getMessage.contains(
             "The following columns have types incompatible with the existing columns"))
       } else {
-        sql("ALTER TABLE t1 DROP COLUMN b")
+        spark.sql("ALTER TABLE t DROP COLUMN b")
       }
     }
   }
