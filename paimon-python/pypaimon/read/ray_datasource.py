@@ -94,7 +94,7 @@ class PaimonDatasource(Datasource):
 
         return chunks
 
-    def get_read_tasks(self, parallelism: int, per_task_row_limit: Optional[int] = None) -> List:
+    def get_read_tasks(self, parallelism: int) -> List:
         """Return a list of read tasks that can be executed in parallel."""
         from ray.data.datasource import ReadTask
         from ray.data.block import BlockMetadata
@@ -189,13 +189,12 @@ class PaimonDatasource(Datasource):
                 exec_stats=None,  # Will be populated by Ray during execution
             )
 
-            # Create ReadTask with lambda to capture chunk_splits
+            # TODO: per_task_row_limit is not supported in Ray 2.48.0, will be added in future versions
             read_tasks.append(
                 ReadTask(
                     read_fn=lambda splits=chunk_splits: get_read_task(splits),
                     metadata=metadata,
                     schema=schema,
-                    per_task_row_limit=per_task_row_limit,
                 )
             )
 
