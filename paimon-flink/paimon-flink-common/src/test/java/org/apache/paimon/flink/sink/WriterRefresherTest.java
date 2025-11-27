@@ -31,15 +31,18 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -214,14 +217,9 @@ public class WriterRefresherTest {
     public void testRefreshForDataFiles() throws Exception {
         Map<String, String> options = new HashMap<>();
         createTable(options);
-
         FileStoreTable table1 = getTable();
 
-        table1.schemaManager()
-                .commitChanges(
-                        SchemaChange.setOption(
-                                CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "round-robin"),
-                        SchemaChange.addColumn("c", DataTypes.INT()));
+        table1.schemaManager().commitChanges(SchemaChange.addColumn("c", DataTypes.INT()));
         FileStoreTable table2 = getTable();
         try (BatchTableWrite write = table2.newBatchWriteBuilder().newWrite();
                 BatchTableCommit commit = table2.newBatchWriteBuilder().newCommit()) {
@@ -229,20 +227,16 @@ public class WriterRefresherTest {
             commit.commit(write.prepareCommit());
         }
 
-        Map<String, String> refreshedOptions = new HashMap<>();
+        List<DataField> dataFields = new ArrayList<>();
         WriterRefresher writerRefresher =
                 WriterRefresher.create(
                         true,
                         true,
                         table1,
-                        new TestWriteRefresher(
-                                Collections.singleton("external-paths"), refreshedOptions));
+                        new TestWriteRefresher(null, Collections.emptyMap(), dataFields));
         writerRefresher.tryRefreshForDataFiles(
                 table2.newSnapshotReader().read().dataSplits().get(0).dataFiles());
-        assertThat(refreshedOptions)
-                .isEqualTo(
-                        configGroups(
-                                Collections.singleton("external-paths"), table2.coreOptions()));
+        assertThat(dataFields).isEqualTo(table2.schema().fields());
     }
 
     private void createTable(Map<String, String> options) throws Exception {
@@ -264,10 +258,17 @@ public class WriterRefresherTest {
 
         private final Set<String> groups;
         private final Map<String, String> options;
+        private final List<DataField> dataFields;
 
         TestWriteRefresher(Set<String> groups, Map<String, String> options) {
+            this(groups, options, null);
+        }
+
+        TestWriteRefresher(
+                Set<String> groups, Map<String, String> options, List<DataField> fields) {
             this.groups = groups;
             this.options = options;
+            this.dataFields = fields;
         }
 
         @Override
@@ -275,6 +276,10 @@ public class WriterRefresherTest {
             options.clear();
             if (groups != null) {
                 options.putAll(configGroups(groups, table.coreOptions()));
+            }
+            if (dataFields != null) {
+                dataFields.clear();
+                dataFields.addAll(table.schema().fields());
             }
         }
     }
