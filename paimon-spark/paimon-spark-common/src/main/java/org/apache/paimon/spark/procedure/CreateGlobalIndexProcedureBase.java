@@ -151,9 +151,7 @@ public abstract class CreateGlobalIndexProcedureBase extends BaseProcedure {
                         DataField indexField = rowType.getField(column);
                         RowType projectedRowType =
                                 rowType.project(Collections.singletonList(column));
-                        RowType readRowType =
-                                SpecialFields.rowTypeWithRowTracking(
-                                        projectedRowType, false, false);
+                        RowType readRowType = SpecialFields.rowTypeWithRowId(projectedRowType);
 
                         HashMap<String, String> parsedOptions = new HashMap<>();
                         ProcedureUtils.putAllOptions(parsedOptions, optionString);
