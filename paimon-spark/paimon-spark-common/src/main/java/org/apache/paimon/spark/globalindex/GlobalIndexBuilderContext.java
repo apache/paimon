@@ -27,6 +27,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
+
+import org.apache.spark.sql.SparkSession;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -40,6 +43,7 @@ import java.io.Serializable;
  */
 public class GlobalIndexBuilderContext implements Serializable {
 
+    private final transient SparkSession spark;
     private final FileStoreTable table;
     private final BinaryRowSerializer binaryRowSerializer;
     private final transient BinaryRow partition;
@@ -47,23 +51,25 @@ public class GlobalIndexBuilderContext implements Serializable {
     private final RowType readType;
     private final DataField indexField;
     private final String indexType;
-    private final long rangeStartOffset;
+    private final Range rowRange;
     private final Options options;
 
     public GlobalIndexBuilderContext(
+            SparkSession spark,
             FileStoreTable table,
             BinaryRow partition,
             RowType readType,
             DataField indexField,
             String indexType,
-            long rangeStartOffset,
+            Range rowRange,
             Options options) {
+        this.spark = spark;
         this.table = table;
         this.partition = partition;
         this.readType = readType;
         this.indexField = indexField;
         this.indexType = indexType;
-        this.rangeStartOffset = rangeStartOffset;
+        this.rowRange = rowRange;
         this.options = options;
 
         this.binaryRowSerializer = new BinaryRowSerializer(partition.getFieldCount());
@@ -72,6 +78,10 @@ public class GlobalIndexBuilderContext implements Serializable {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public SparkSession spark() {
+        return spark;
     }
 
     public BinaryRow partitionFromBytes() throws IOException {
@@ -98,8 +108,8 @@ public class GlobalIndexBuilderContext implements Serializable {
         return indexType;
     }
 
-    public long rangeStartOffset() {
-        return rangeStartOffset;
+    public Range range() {
+        return rowRange;
     }
 
     public Options options() {

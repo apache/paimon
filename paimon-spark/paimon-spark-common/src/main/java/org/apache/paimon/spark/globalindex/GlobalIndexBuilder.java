@@ -28,15 +28,17 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestEntrySerializer;
-import org.apache.paimon.spark.SparkRow;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
 
-import org.apache.spark.api.java.function.FlatMapFunction;
-import org.apache.spark.sql.Dataset;
-import org.apache.spark.sql.Row;
+import org.apache.spark.api.java.JavaSparkContext;
 
 import java.io.IOException;
-import java.util.Iterator;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -49,64 +51,81 @@ public abstract class GlobalIndexBuilder {
         this.context = context;
     }
 
-    public List<IndexManifestEntry> build(Dataset<Row> input) {
-        Dataset<Row> customDs = customTopo(input);
-        final GlobalIndexBuilderContext globalContext = this.context;
-        final IndexManifestEntrySerializer manifestEntrySerializer =
+    public List<IndexManifestEntry> builds(DataSplit dataSplit) throws IOException {
+        final GlobalIndexBuilderContext buildContext = this.context;
+        JavaSparkContext javaSparkContext =
+                new JavaSparkContext(buildContext.spark().sparkContext());
+        byte[] dsBytes = InstantiationUtil.serializeObject(dataSplit);
+        IndexManifestEntrySerializer indexManifestEntrySerializer =
                 new IndexManifestEntrySerializer();
-        List<byte[]> result =
-                customDs.toJavaRDD()
-                        .mapPartitions(
-                                (FlatMapFunction<Iterator<Row>, GlobalIndexWriter.ResultEntry>)
-                                        rows -> writeRows(globalContext, rows))
-                        .map(
-                                entry -> {
-                                    String fileName = entry.fileName();
-                                    Range range =
-                                            entry.rowRange()
-                                                    .addOffset(globalContext.rangeStartOffset());
-                                    GlobalIndexFileReadWrite readWrite =
-                                            globalContext.globalIndexFileReadWrite();
-                                    long fileSize = readWrite.fileSize(fileName);
-                                    GlobalIndexMeta globalIndexMeta =
-                                            new GlobalIndexMeta(
-                                                    range.from,
-                                                    range.to,
-                                                    globalContext.indexField().id(),
-                                                    null,
-                                                    entry.meta());
-                                    IndexFileMeta indexFileMeta =
-                                            new IndexFileMeta(
-                                                    BitmapGlobalIndexerFactory.IDENTIFIER,
-                                                    fileName,
-                                                    fileSize,
-                                                    range.to - range.from + 1,
-                                                    globalIndexMeta);
-                                    IndexManifestEntry indexManifestEntry =
-                                            new IndexManifestEntry(
-                                                    FileKind.ADD,
-                                                    globalContext.partitionFromBytes(),
-                                                    0,
-                                                    indexFileMeta);
-                                    return manifestEntrySerializer.serializeToBytes(
-                                            indexManifestEntry);
-                                })
-                        .collect();
-
-        return result.stream()
+        return javaSparkContext.parallelize(Collections.singletonList(dsBytes))
                 .map(
-                        b -> {
+                        splitBytes -> {
+                            DataSplit split =
+                                    InstantiationUtil.deserializeObject(
+                                            splitBytes, GlobalIndexBuilder.class.getClassLoader());
+                            ReadBuilder builder = buildContext.table().newReadBuilder();
+                            builder.withRowIds(buildContext.range().toListLong())
+                                    .withReadType(buildContext.readType());
+                            RecordReader<InternalRow> rows = builder.newRead().createReader(split);
+                            List<GlobalIndexWriter.ResultEntry> resultEntries =
+                                    writePaimonRows(buildContext, rows);
+                            return convertToEntry(buildContext, resultEntries);
+                        })
+                .flatMap(
+                        e -> {
+                            return e.stream()
+                                    .map(
+                                            entry -> {
+                                                try {
+                                                    return indexManifestEntrySerializer
+                                                            .serializeToBytes(entry);
+                                                } catch (IOException ex) {
+                                                    throw new RuntimeException(ex);
+                                                }
+                                            })
+                                    .iterator();
+                        })
+                .collect().stream()
+                .map(
+                        e -> {
                             try {
-                                return manifestEntrySerializer.deserializeFromBytes(b);
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
+                                return indexManifestEntrySerializer.deserializeFromBytes(e);
+                            } catch (IOException ex) {
+                                throw new RuntimeException(ex);
                             }
                         })
                 .collect(Collectors.toList());
     }
 
-    private static Iterator<GlobalIndexWriter.ResultEntry> writeRows(
-            GlobalIndexBuilderContext context, Iterator<Row> partitionRows) throws IOException {
+    private static List<IndexManifestEntry> convertToEntry(
+            GlobalIndexBuilderContext context, List<GlobalIndexWriter.ResultEntry> entries)
+            throws IOException {
+        List<IndexManifestEntry> results = new ArrayList<>();
+        for (GlobalIndexWriter.ResultEntry entry : entries) {
+            String fileName = entry.fileName();
+            Range range = entry.rowRange().addOffset(context.range().from);
+            GlobalIndexFileReadWrite readWrite = context.globalIndexFileReadWrite();
+            long fileSize = readWrite.fileSize(fileName);
+            GlobalIndexMeta globalIndexMeta =
+                    new GlobalIndexMeta(
+                            range.from, range.to, context.indexField().id(), null, entry.meta());
+            IndexFileMeta indexFileMeta =
+                    new IndexFileMeta(
+                            BitmapGlobalIndexerFactory.IDENTIFIER,
+                            fileName,
+                            fileSize,
+                            range.to - range.from + 1,
+                            globalIndexMeta);
+            results.add(
+                    new IndexManifestEntry(
+                            FileKind.ADD, context.partitionFromBytes(), 0, indexFileMeta));
+        }
+        return results;
+    }
+
+    private static List<GlobalIndexWriter.ResultEntry> writePaimonRows(
+            GlobalIndexBuilderContext context, RecordReader<InternalRow> rows) throws IOException {
         GlobalIndexer globalIndexer =
                 GlobalIndexer.create(
                         context.indexType(), context.indexField().type(), context.options());
@@ -116,14 +135,11 @@ public abstract class GlobalIndexBuilder {
                 InternalRow.createFieldGetter(
                         context.indexField().type(),
                         context.readType().getFieldIndex(context.indexField().name()));
-        partitionRows.forEachRemaining(
+        rows.forEachRemaining(
                 row -> {
-                    Object indexO = getter.getFieldOrNull(new SparkRow(context.readType(), row));
+                    Object indexO = getter.getFieldOrNull(row);
                     globalIndexWriter.write(indexO);
                 });
-
-        return globalIndexWriter.finish().iterator();
+        return globalIndexWriter.finish();
     }
-
-    public abstract Dataset<Row> customTopo(Dataset<Row> input);
 }

@@ -21,9 +21,6 @@ package org.apache.paimon.spark.globalindex.bitmap;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
 
-import org.apache.spark.sql.Dataset;
-import org.apache.spark.sql.Row;
-
 /**
  * Builder for creating bitmap-based global indexes.
  *
@@ -34,11 +31,5 @@ public class BitmapGlobalIndexBuilder extends GlobalIndexBuilder {
 
     protected BitmapGlobalIndexBuilder(GlobalIndexBuilderContext context) {
         super(context);
-    }
-
-    @Override
-    public Dataset<Row> customTopo(Dataset<Row> input) {
-        // No custom transformation needed for bitmap index
-        return input;
     }
 }
