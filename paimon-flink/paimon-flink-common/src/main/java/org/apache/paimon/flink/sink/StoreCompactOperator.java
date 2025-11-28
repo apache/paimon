@@ -71,7 +71,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     private transient DataFileMetaSerializer dataFileMetaSerializer;
     private transient Set<Pair<BinaryRow, Integer>> waitToCompact;
 
-    protected transient @Nullable WriterRefresher writeRefresher;
+    protected transient @Nullable CompactWriterRefresher compactWriterRefresher;
 
     public StoreCompactOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -120,8 +120,8 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                         getContainingTask().getEnvironment().getIOManager(),
                         memoryPoolFactory,
                         getMetricGroup());
-        this.writeRefresher =
-                WriterRefresher.create(write.streamingMode(), true, table, write::replace);
+        this.compactWriterRefresher =
+                CompactWriterRefresher.create(write.streamingMode(), table, write::replace);
     }
 
     @Override
@@ -152,7 +152,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
         if (write.streamingMode()) {
             write.notifyNewFiles(snapshotId, partition, bucket, files);
-            tryRefreshWrite(true, files);
+            tryRefreshWrite(files);
         } else {
             Preconditions.checkArgument(
                     files.isEmpty(),
@@ -178,7 +178,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
         List<Committable> committables = write.prepareCommit(waitCompaction, checkpointId);
 
-        tryRefreshWrite();
+        tryRefreshWrite(Collections.emptyList());
         return committables;
     }
 
@@ -200,19 +200,9 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
         return waitToCompact;
     }
 
-    private void tryRefreshWrite() {
-        tryRefreshWrite(false, Collections.emptyList());
-    }
-
-    private void tryRefreshWrite(boolean forCompact, List<DataFileMeta> files) {
-        if (writeRefresher != null) {
-            if (forCompact) {
-                if (!files.isEmpty()) {
-                    writeRefresher.tryRefreshForDataFiles(files);
-                }
-            } else {
-                writeRefresher.tryRefreshForConfigs();
-            }
+    private void tryRefreshWrite(List<DataFileMeta> files) {
+        if (compactWriterRefresher != null) {
+            compactWriterRefresher.tryRefresh(files);
         }
     }
 
