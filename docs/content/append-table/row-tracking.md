@@ -47,7 +47,7 @@ CREATE TABLE part_t (
 WITH ('row-tracking.enabled' = 'true');
 ```
 Notice that:
-- Row tracking is only supported for unaware append tables, not for primary key tables. Which means you can't define `bucket` and `bucket-key` for the table.
+- Row tracking is only supported for append tables, not for primary key tables.
 - Only spark support update, merge into and delete operations on row-tracking tables, Flink SQL does not support these operations yet.
 - This function is experimental, this line will be removed after being stable.
 

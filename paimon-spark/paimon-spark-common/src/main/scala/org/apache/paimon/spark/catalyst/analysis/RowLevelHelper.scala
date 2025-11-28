@@ -41,23 +41,21 @@ trait RowLevelHelper extends SQLConfHelper {
 
   protected def validUpdateAssignment(
       output: AttributeSet,
-      primaryKeys: Seq[String],
+      keys: Seq[String],
       assignments: Seq[Assignment]): Boolean = {
-    !primaryKeys.exists {
-      primaryKey => isUpdateExpressionToPrimaryKey(output, assignments, primaryKey)
-    }
+    !keys.exists(key => isUpdateExpressionForKey(output, assignments, key))
   }
 
   // Check whether there is an update expression related to primary key.
-  protected def isUpdateExpressionToPrimaryKey(
+  protected def isUpdateExpressionForKey(
       output: AttributeSet,
       expressions: Seq[Expression],
-      primaryKey: String): Boolean = {
+      key: String): Boolean = {
     val resolver = conf.resolver
 
     // Check whether this attribute is same to primary key and is from target table.
-    def isTargetPrimaryKey(attr: AttributeReference): Boolean = {
-      resolver(primaryKey, attr.name) && output.contains(attr)
+    def isTargetKey(attr: AttributeReference): Boolean = {
+      resolver(key, attr.name) && output.contains(attr)
     }
 
     expressions
@@ -67,9 +65,9 @@ trait RowLevelHelper extends SQLConfHelper {
       }
       .exists {
         case EqualTo(left: AttributeReference, right: AttributeReference) =>
-          isTargetPrimaryKey(left) || isTargetPrimaryKey(right)
+          isTargetKey(left) || isTargetKey(right)
         case Assignment(key: AttributeReference, _) =>
-          isTargetPrimaryKey(key)
+          isTargetKey(key)
         case _ => false
       }
   }
