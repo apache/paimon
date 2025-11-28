@@ -29,8 +29,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
-import org.apache.spark.sql.SparkSession;
-
 import java.io.IOException;
 import java.io.Serializable;
 
@@ -43,10 +41,8 @@ import java.io.Serializable;
  */
 public class GlobalIndexBuilderContext implements Serializable {
 
-    private final transient SparkSession spark;
     private final FileStoreTable table;
     private final BinaryRowSerializer binaryRowSerializer;
-    private final transient BinaryRow partition;
     private final byte[] partitionBytes;
     private final RowType readType;
     private final DataField indexField;
@@ -55,7 +51,6 @@ public class GlobalIndexBuilderContext implements Serializable {
     private final Options options;
 
     public GlobalIndexBuilderContext(
-            SparkSession spark,
             FileStoreTable table,
             BinaryRow partition,
             RowType readType,
@@ -63,9 +58,7 @@ public class GlobalIndexBuilderContext implements Serializable {
             String indexType,
             Range rowRange,
             Options options) {
-        this.spark = spark;
         this.table = table;
-        this.partition = partition;
         this.readType = readType;
         this.indexField = indexField;
         this.indexType = indexType;
@@ -80,20 +73,12 @@ public class GlobalIndexBuilderContext implements Serializable {
         }
     }
 
-    public SparkSession spark() {
-        return spark;
-    }
-
-    public BinaryRow partitionFromBytes() {
+    public BinaryRow partition() {
         try {
             return binaryRowSerializer.deserializeFromBytes(partitionBytes);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    public BinaryRow partition() {
-        return partition;
     }
 
     public FileStoreTable table() {
@@ -123,7 +108,7 @@ public class GlobalIndexBuilderContext implements Serializable {
     public GlobalIndexFileReadWrite globalIndexFileReadWrite() {
         FileIO fileIO = table.fileIO();
         IndexPathFactory indexPathFactory =
-                table.store().pathFactory().indexFileFactory(partitionFromBytes(), 0);
+                table.store().pathFactory().indexFileFactory(partition(), 0);
         return new GlobalIndexFileReadWrite(fileIO, indexPathFactory);
     }
 }
