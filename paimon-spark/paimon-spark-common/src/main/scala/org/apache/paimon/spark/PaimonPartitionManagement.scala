@@ -41,16 +41,27 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
 
   override lazy val partitionSchema: StructType = SparkTypeUtils.fromPaimonRowType(partitionRowType)
 
-  private def toPaimonPartitions(rows: Array[InternalRow]): Array[java.util.Map[String, String]] = {
+  private def toPaimonPartitions(
+      rows: Array[InternalRow],
+      preservePartitionValue: Boolean): Array[java.util.Map[String, String]] = {
     table match {
       case fileStoreTable: FileStoreTable =>
         val rowConverter = CatalystTypeConverters
           .createToScalaConverter(CharVarcharUtils.replaceCharVarcharWithString(partitionSchema))
-        val rowDataPartitionComputer = new InternalRowPartitionComputer(
-          fileStoreTable.coreOptions().partitionDefaultName(),
-          partitionRowType,
-          table.partitionKeys().asScala.toArray,
-          CoreOptions.fromMap(table.options()).legacyPartitionName)
+
+        val rowDataPartitionComputer =
+          if (preservePartitionValue)
+            InternalRowPartitionComputer.preserveNullOrEmptyValue(
+              partitionRowType,
+              table.partitionKeys().asScala.toArray,
+              CoreOptions.fromMap(table.options()).legacyPartitionName)
+          else
+            InternalRowPartitionComputer.withDefaultValue(
+              fileStoreTable.coreOptions().partitionDefaultName(),
+              partitionRowType,
+              table.partitionKeys().asScala.toArray,
+              CoreOptions.fromMap(table.options()).legacyPartitionName
+            )
 
         rows.map {
           r =>
@@ -65,7 +76,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
   override def dropPartitions(rows: Array[InternalRow]): Boolean = {
     table match {
       case fileStoreTable: FileStoreTable =>
-        val partitions = toPaimonPartitions(rows).toSeq.asJava
+        val partitions = toPaimonPartitions(rows, true).toSeq.asJava
         val partitionHandler = fileStoreTable.catalogEnvironment().partitionHandler()
         if (partitionHandler != null) {
           try {
@@ -134,7 +145,7 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
       maps: Array[JMap[String, String]]): Unit = {
     table match {
       case fileStoreTable: FileStoreTable =>
-        val partitions = toPaimonPartitions(rows)
+        val partitions = toPaimonPartitions(rows, false)
         val partitionHandler = fileStoreTable.catalogEnvironment().partitionHandler()
         if (partitionHandler != null) {
           try {

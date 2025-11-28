@@ -76,12 +76,11 @@ case class DeleteFromPaimonTableCommand(
       ) {
         val matchedPartitions =
           table.newSnapshotReader().withPartitionFilter(partitionPredicate.get).partitions().asScala
-        val rowDataPartitionComputer = new InternalRowPartitionComputer(
-          table.coreOptions().partitionDefaultName(),
+        val rowDataPartitionComputer = InternalRowPartitionComputer.preserveNullOrEmptyValue(
           table.schema().logicalPartitionType(),
           table.partitionKeys.asScala.toArray,
-          table.coreOptions().legacyPartitionName()
-        )
+          table.coreOptions().legacyPartitionName())
+
         val dropPartitions = matchedPartitions.map {
           partition => rowDataPartitionComputer.generatePartValues(partition).asScala.asJava
         }
