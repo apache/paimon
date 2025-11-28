@@ -323,7 +323,7 @@ public class ArrowFormatWriterTest {
     }
 
     @Test
-    public void testCustomArrowFormatWriter() {
+    public void testCustomArrowFormatCWriter() {
         // Create custom field type visitor that converts decimals to binary
         ArrowFieldTypeConversion.ArrowFieldTypeVisitor customFieldTypeVisitor =
                 new CustomDecimalArrowConversion.CustomArrowFieldTypeFactory();
