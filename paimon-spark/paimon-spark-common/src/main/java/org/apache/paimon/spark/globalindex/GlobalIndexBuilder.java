@@ -74,7 +74,7 @@ public abstract class GlobalIndexBuilder {
                                             builder.newRead().createReader(split);
                                     List<GlobalIndexWriter.ResultEntry> resultEntries =
                                             writePaimonRows(buildContext, rows);
-                                    return convertToEntry(buildContext, resultEntries);
+                                    return convertToIndexMeta(buildContext, resultEntries);
                                 })
                         .flatMap(
                                 e ->
@@ -105,7 +105,7 @@ public abstract class GlobalIndexBuilder {
                 context.partition(), 0, null, dataIncrement, CompactIncrement.emptyIncrement());
     }
 
-    private static List<IndexFileMeta> convertToEntry(
+    private static List<IndexFileMeta> convertToIndexMeta(
             GlobalIndexBuilderContext context, List<GlobalIndexWriter.ResultEntry> entries)
             throws IOException {
         List<IndexFileMeta> results = new ArrayList<>();
