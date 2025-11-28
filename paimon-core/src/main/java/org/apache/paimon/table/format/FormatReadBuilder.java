@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.format;
 
-import java.util.Random;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.variant.VariantAccessInfo;
@@ -43,6 +42,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -52,7 +52,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-import org.apache.paimon.utils.Range;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;

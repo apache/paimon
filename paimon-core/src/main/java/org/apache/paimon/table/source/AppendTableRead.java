@@ -29,6 +29,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.SplitReadConfig;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -37,7 +38,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import org.apache.paimon.utils.Range;
 
 /**
  * An abstraction layer above {@link MergeFileSplitRead} to provide reading of {@link InternalRow}.

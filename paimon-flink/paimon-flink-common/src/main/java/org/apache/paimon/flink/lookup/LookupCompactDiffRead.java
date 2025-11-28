@@ -32,10 +32,10 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.util.List;
-import org.apache.paimon.utils.Range;
 
 import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
 

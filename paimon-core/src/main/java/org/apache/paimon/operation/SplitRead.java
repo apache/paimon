@@ -26,12 +26,12 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
-import org.apache.paimon.utils.Range;
 
 /**
  * Read operation which provides {@link RecordReader} creation.

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.io;
 
-import java.util.ArrayList;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
@@ -30,6 +29,7 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import javax.annotation.Nullable;
 
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;

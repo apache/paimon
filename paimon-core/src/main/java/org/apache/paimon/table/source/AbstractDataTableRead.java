@@ -26,11 +26,11 @@ import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
-import org.apache.paimon.utils.Range;
 
 /** A {@link InnerTableRead} for data table. */
 public abstract class AbstractDataTableRead implements InnerTableRead {
