@@ -20,11 +20,7 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -36,13 +32,11 @@ import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.StringUtils;
@@ -183,7 +177,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 split(table, partitionPredicate, rowsPerShard);
 
                         // Step 2: build index by certain index system
-                        List<IndexManifestEntry> indexResults =
+                        List<CommitMessage> indexResults =
                                 buildIndex(
                                         table,
                                         splits,
@@ -207,7 +201,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                 });
     }
 
-    private List<IndexManifestEntry> buildIndex(
+    private List<CommitMessage> buildIndex(
             FileStoreTable table,
             Map<BinaryRow, Map<Range, DataSplit>> preparedDS,
             String indexType,
@@ -216,7 +210,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             Options options,
             GlobalIndexBuilderFactory globalIndexBuilderFactory) {
         ExecutorService executor = Executors.newCachedThreadPool();
-        List<Future<List<IndexManifestEntry>>> futures = new ArrayList<>();
+        List<Future<CommitMessage>> futures = new ArrayList<>();
         try {
             for (Map.Entry<BinaryRow, Map<Range, DataSplit>> entry : preparedDS.entrySet()) {
                 BinaryRow partition = entry.getKey();
@@ -246,10 +240,10 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                 }
             }
 
-            List<IndexManifestEntry> entries = new ArrayList<>();
-            for (Future<List<IndexManifestEntry>> future : futures) {
+            List<CommitMessage> entries = new ArrayList<>();
+            for (Future<CommitMessage> future : futures) {
                 try {
-                    entries.addAll(future.get());
+                    entries.add(future.get());
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException("Index creation was interrupted", e);
@@ -264,29 +258,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
         }
     }
 
-    private void commit(FileStoreTable table, List<IndexManifestEntry> indexResults)
-            throws Exception {
-        Map<BinaryRow, List<IndexFileMeta>> partitionResults =
-                indexResults.stream()
-                        .map(s -> Pair.of(s.partition(), s.indexFile()))
-                        .collect(
-                                Collectors.groupingBy(
-                                        Pair::getKey,
-                                        Collectors.mapping(Pair::getValue, Collectors.toList())));
-
-        List<CommitMessage> commitMessages = new ArrayList<>();
-        for (Map.Entry<BinaryRow, List<IndexFileMeta>> entry : partitionResults.entrySet()) {
-            BinaryRow partition = entry.getKey();
-            List<IndexFileMeta> indexFiles = entry.getValue();
-            commitMessages.add(
-                    new CommitMessageImpl(
-                            partition,
-                            0,
-                            null,
-                            DataIncrement.indexIncrement(indexFiles),
-                            CompactIncrement.emptyIncrement()));
-        }
-
+    private void commit(FileStoreTable table, List<CommitMessage> commitMessages) throws Exception {
         try (TableCommitImpl commit = table.newCommit("global-index-create-" + UUID.randomUUID())) {
             commit.commit(commitMessages);
         }
