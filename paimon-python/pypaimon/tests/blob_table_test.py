@@ -1163,7 +1163,7 @@ class DataBlobWriterTest(unittest.TestCase):
         print(
             f"✅ Large blob end-to-end test passed: wrote and read back {len(blob_data)} large blob records correctly")  # noqa: E501
 
-    def test_blob_large_data_volume(self):
+    def test_blob_write_read_large_data_volume(self):
         from pypaimon import Schema
 
         # Create schema with blob column
@@ -1217,6 +1217,60 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(result.num_rows, num_row)
         self.assertEqual(result.num_columns, 4)
 
+        self.assertEqual(expected, result)
+
+    def test_blob_write_read_large_data_volume_rolling(self):
+        from pypaimon import Schema
+
+        # Create schema with blob column
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('batch_id', pa.int32()),
+            ('metadata', pa.string()),
+            ('large_blob', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob.target-file-size': '21MB'
+            }
+        )
+        self.catalog.create_table('test_db.large_data_volume_rolling', schema, False)
+        table = self.catalog.get_table('test_db.large_data_volume_rolling')
+
+        # Create large blob data
+        large_blob_size = 5 * 1024  #
+        blob_pattern = b'LARGE_BLOB_PATTERN_' + b'X' * 1024  # ~1KB pattern
+        pattern_size = len(blob_pattern)
+        repetitions = large_blob_size // pattern_size
+        large_blob_data = blob_pattern * repetitions
+
+        actual_size = len(large_blob_data)
+        print(f"Created blob data: {actual_size:,} bytes ({actual_size / (1024 * 1024):.2f} MB)")
+        num_row = 20000
+        expected = pa.Table.from_pydict({
+            'id': [1] * num_row,
+            'batch_id': [11] * num_row,
+            'metadata': [f'Large blob batch {11}'] * num_row,
+            'large_blob': [i.to_bytes(2, byteorder='little') + large_blob_data for i in range(num_row)]
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(expected)
+
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        # Read data back
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        result = table_read.to_arrow(table_scan.plan().splits())
         self.assertEqual(expected, result)
 
     def test_blob_write_read_mixed_sizes_end_to_end(self):
@@ -2289,6 +2343,73 @@ class DataBlobWriterTest(unittest.TestCase):
         # Verify the data was read back correctly
         self.assertEqual(result.num_rows, 2, "Should have 2 rows")
         self.assertEqual(result.num_columns, 3, "Should have 3 columns")
+
+    def test_blob_write_read_large_data_volume_rolling_with_shard(self):
+        from pypaimon import Schema
+
+        # Create schema with blob column
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('batch_id', pa.int32()),
+            ('metadata', pa.string()),
+            ('large_blob', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob.target-file-size': '10MB'
+            }
+        )
+        self.catalog.create_table('test_db.test_blob_write_read_large_data_volume_rolling_with_shard', schema, False)
+        table = self.catalog.get_table('test_db.test_blob_write_read_large_data_volume_rolling_with_shard')
+
+        # Create large blob data
+        large_blob_size = 5 * 1024  #
+        blob_pattern = b'LARGE_BLOB_PATTERN_' + b'X' * 1024  # ~1KB pattern
+        pattern_size = len(blob_pattern)
+        repetitions = large_blob_size // pattern_size
+        large_blob_data = blob_pattern * repetitions
+
+        actual_size = len(large_blob_data)
+        print(f"Created blob data: {actual_size:,} bytes ({actual_size / (1024 * 1024):.2f} MB)")
+        # Write 40 batches of data
+        num_row = 10000
+        expected = pa.Table.from_pydict({
+            'id': [1] * num_row,
+            'batch_id': [11] * num_row,
+            'metadata': [f'Large blob batch {11}'] * num_row,
+            'large_blob': [i.to_bytes(2, byteorder='little') + large_blob_data for i in range(num_row)]
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(expected)
+
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        # Read data back
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        result = table_read.to_arrow(table_scan.plan().splits())
+        self.assertEqual(expected, result)
+
+        splits = read_builder.new_scan().plan().splits()
+        expected = table_read.to_arrow(splits)
+        splits1 = read_builder.new_scan().with_shard(0, 3).plan().splits()
+        actual1 = table_read.to_arrow(splits1)
+        splits2 = read_builder.new_scan().with_shard(1, 3).plan().splits()
+        actual2 = table_read.to_arrow(splits2)
+        splits3 = read_builder.new_scan().with_shard(2, 3).plan().splits()
+        actual3 = table_read.to_arrow(splits3)
+        actual = pa.concat_tables([actual1, actual2, actual3]).sort_by('id')
+
+        self.assertEqual(actual, expected)
 
 
 if __name__ == '__main__':

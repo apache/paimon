@@ -20,6 +20,7 @@ import collections
 from typing import Callable, List, Optional
 
 import pyarrow as pa
+import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
@@ -89,14 +90,15 @@ class MergeAllBatchReader(RecordBatchReader):
     into a single batch for processing.
     """
 
-    def __init__(self, reader_suppliers: List[Callable]):
+    def __init__(self, reader_suppliers: List[Callable], batch_size: int = 4096):
         self.reader_suppliers = reader_suppliers
         self.merged_batch: Optional[RecordBatch] = None
-        self.batch_created = False
+        self.reader = None
+        self._batch_size = batch_size
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
-        if self.batch_created:
-            return None
+        if self.reader:
+            return self.reader.read_next_batch()
 
         all_batches = []
 
@@ -140,10 +142,10 @@ class MergeAllBatchReader(RecordBatchReader):
                     )
         else:
             self.merged_batch = None
-
-        self.batch_created = True
-        return self.merged_batch
+        dataset = ds.InMemoryDataset(self.merged_batch)
+        self.reader = dataset.scanner(batch_size=self._batch_size).to_reader()
+        return self.reader.read_next_batch()
 
     def close(self) -> None:
         self.merged_batch = None
-        self.batch_created = False
+        self.reader = None
