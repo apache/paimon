@@ -23,14 +23,11 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.BatchTableCommit;
-import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
@@ -38,9 +35,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -91,9 +86,9 @@ public class WriterRefresherTest {
         WriterRefresher writerRefresher =
                 WriterRefresher.create(
                         true, table1, new TestWriteRefresher(groups, refreshedOptions));
-        writerRefresher.tryRefreshForConfigs();
+        writerRefresher.tryRefresh();
         assertThat(refreshedOptions).isEqualTo(configGroups(groups, table2.coreOptions()));
-        writerRefresher.tryRefreshForConfigs();
+        writerRefresher.tryRefresh();
     }
 
     @Test
@@ -156,7 +151,7 @@ public class WriterRefresherTest {
                         true, table1, new TestWriteRefresher(groups, refreshedOptions));
 
         // No schema changes made, should not refresh
-        writerRefresher.tryRefreshForConfigs();
+        writerRefresher.tryRefresh();
 
         // Options should remain unchanged
         assertThat(refreshedOptions).containsEntry("initial", "value");
@@ -192,51 +187,11 @@ public class WriterRefresherTest {
                         true, table1, new TestWriteRefresher(groups, refreshedOptions));
 
         // Should not refresh when monitored config groups haven't changed
-        writerRefresher.tryRefreshForConfigs();
+        writerRefresher.tryRefresh();
 
         // Options should remain unchanged
         assertThat(refreshedOptions).containsEntry("initial", "value");
         assertThat(refreshedOptions).hasSize(1);
-    }
-
-    @Test
-    public void testRefreshWithNeedCompact() throws Exception {
-        Map<String, String> options = new HashMap<>();
-        createTable(options);
-        FileStoreTable table1 = getTable();
-        WriterRefresher writerRefresher =
-                WriterRefresher.create(true, false, table1, new TestWriteRefresher(null, null));
-        assertThat(writerRefresher).isNull();
-
-        writerRefresher =
-                WriterRefresher.create(true, true, table1, new TestWriteRefresher(null, null));
-        assertThat(writerRefresher).isNotNull();
-    }
-
-    @Test
-    public void testRefreshForDataFiles() throws Exception {
-        Map<String, String> options = new HashMap<>();
-        createTable(options);
-        FileStoreTable table1 = getTable();
-
-        table1.schemaManager().commitChanges(SchemaChange.addColumn("c", DataTypes.INT()));
-        FileStoreTable table2 = getTable();
-        try (BatchTableWrite write = table2.newBatchWriteBuilder().newWrite();
-                BatchTableCommit commit = table2.newBatchWriteBuilder().newCommit()) {
-            write.write(GenericRow.of(1, 1, 1));
-            commit.commit(write.prepareCommit());
-        }
-
-        List<DataField> dataFields = new ArrayList<>();
-        WriterRefresher writerRefresher =
-                WriterRefresher.create(
-                        true,
-                        true,
-                        table1,
-                        new TestWriteRefresher(null, Collections.emptyMap(), dataFields));
-        writerRefresher.tryRefreshForDataFiles(
-                table2.newSnapshotReader().read().dataSplits().get(0).dataFiles());
-        assertThat(dataFields).isEqualTo(table2.schema().fields());
     }
 
     private void createTable(Map<String, String> options) throws Exception {
@@ -254,7 +209,8 @@ public class WriterRefresherTest {
         return (FileStoreTable) catalog.getTable(Identifier.create("default", "T"));
     }
 
-    private static class TestWriteRefresher implements WriterRefresher.Refresher {
+    /** Test implementation of {@link WriterRefresher.Refresher} for testing purposes. */
+    protected static class TestWriteRefresher implements WriterRefresher.Refresher {
 
         private final Set<String> groups;
         private final Map<String, String> options;

@@ -25,7 +25,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.Committable;
-import org.apache.paimon.flink.sink.WriterRefresher;
+import org.apache.paimon.flink.sink.CompactWriterRefresher;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
@@ -44,7 +44,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
@@ -67,15 +66,14 @@ public class AppendTableCompactor {
     @Nullable private final CompactionMetrics compactionMetrics;
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
-    @Nullable protected final WriterRefresher writeRefresher;
+    @Nullable protected final CompactWriterRefresher compactWriteRefresher;
 
     public AppendTableCompactor(
             FileStoreTable table,
             String commitUser,
             Supplier<ExecutorService> lazyCompactExecutor,
             @Nullable MetricGroup metricGroup,
-            boolean isStreaming,
-            boolean forDedicatedCompact) {
+            boolean isStreaming) {
         this.table = table;
         this.commitUser = commitUser;
         CoreOptions coreOptions = table.coreOptions();
@@ -94,8 +92,8 @@ public class AppendTableCompactor {
                         ? null
                         // partition and bucket fields are no use.
                         : this.compactionMetrics.createReporter(BinaryRow.EMPTY_ROW, 0);
-        this.writeRefresher =
-                WriterRefresher.create(isStreaming, forDedicatedCompact, table, this::replace);
+        this.compactWriteRefresher =
+                CompactWriterRefresher.create(isStreaming, table, this::replace);
     }
 
     public void processElement(AppendCompactTask task) throws Exception {
@@ -223,23 +221,12 @@ public class AppendTableCompactor {
         this.write.restore(states);
     }
 
-    public void tryRefreshWrite() {
-        tryRefreshWrite(false, Collections.emptyList());
-    }
-
-    public void tryRefreshWrite(boolean forCompact, List<DataFileMeta> files) {
+    public void tryRefreshWrite(List<DataFileMeta> files) {
         if (commitUser == null) {
             return;
         }
-
-        if (writeRefresher != null) {
-            if (forCompact) {
-                if (!files.isEmpty()) {
-                    writeRefresher.tryRefreshForDataFiles(files);
-                }
-            } else {
-                writeRefresher.tryRefreshForConfigs();
-            }
+        if (compactWriteRefresher != null) {
+            compactWriteRefresher.tryRefresh(files);
         }
     }
 }

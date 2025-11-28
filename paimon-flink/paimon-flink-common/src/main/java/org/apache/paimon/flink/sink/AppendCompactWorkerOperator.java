@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -57,19 +58,15 @@ public abstract class AppendCompactWorkerOperator<IN>
 
     private final boolean isStreaming;
 
-    private final boolean forDedicatedCompact;
-
     public AppendCompactWorkerOperator(
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             String commitUser,
-            boolean isStreaming,
-            boolean forDedicatedCompact) {
+            boolean isStreaming) {
         super(parameters, Options.fromMap(table.options()));
         this.table = table;
         this.commitUser = commitUser;
         this.isStreaming = isStreaming;
-        this.forDedicatedCompact = forDedicatedCompact;
     }
 
     @VisibleForTesting
@@ -82,12 +79,7 @@ public abstract class AppendCompactWorkerOperator<IN>
         LOG.debug("Opened a append-only table compaction worker.");
         this.unawareBucketCompactor =
                 new AppendTableCompactor(
-                        table,
-                        commitUser,
-                        this::workerExecutor,
-                        getMetricGroup(),
-                        isStreaming,
-                        forDedicatedCompact);
+                        table, commitUser, this::workerExecutor, getMetricGroup(), isStreaming);
     }
 
     @Override
@@ -95,7 +87,7 @@ public abstract class AppendCompactWorkerOperator<IN>
             throws IOException {
         List<Committable> committables =
                 this.unawareBucketCompactor.prepareCommit(waitCompaction, checkpointId);
-        this.unawareBucketCompactor.tryRefreshWrite();
+        this.unawareBucketCompactor.tryRefreshWrite(Collections.emptyList());
         return committables;
     }
 

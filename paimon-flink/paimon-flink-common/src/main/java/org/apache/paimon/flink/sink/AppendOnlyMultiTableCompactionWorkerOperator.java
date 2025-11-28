@@ -114,7 +114,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
         Identifier identifier = element.getValue().tableIdentifier();
         AppendTableCompactor compactor =
                 compactorContainer.computeIfAbsent(identifier, this::compactor);
-        compactor.tryRefreshWrite(true, element.getValue().compactBefore());
+        compactor.tryRefreshWrite(element.getValue().compactBefore());
         compactor.processElement(element.getValue());
     }
 
@@ -125,8 +125,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
                     commitUser,
                     this::workerExecutor,
                     getMetricGroup(),
-                    isStreaming,
-                    true);
+                    isStreaming);
         } catch (Catalog.TableNotExistException e) {
             throw new RuntimeException(e);
         }
