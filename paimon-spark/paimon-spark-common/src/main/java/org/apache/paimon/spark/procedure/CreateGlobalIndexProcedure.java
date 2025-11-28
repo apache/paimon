@@ -32,15 +32,19 @@ import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -52,6 +56,7 @@ import org.apache.spark.sql.types.StructType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -59,10 +64,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
@@ -184,8 +185,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                         indexType,
                                         readRowType,
                                         indexField,
-                                        userOptions,
-                                        globalIndexBuilderFactory);
+                                        userOptions);
 
                         // Step 3: commit index meta to a new snapshot
                         commit(table, indexResults);
@@ -207,55 +207,62 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             String indexType,
             RowType readType,
             DataField indexField,
-            Options options,
-            GlobalIndexBuilderFactory globalIndexBuilderFactory) {
-        ExecutorService executor = Executors.newCachedThreadPool();
-        List<Future<CommitMessage>> futures = new ArrayList<>();
-        try {
-            for (Map.Entry<BinaryRow, Map<Range, DataSplit>> entry : preparedDS.entrySet()) {
-                BinaryRow partition = entry.getKey();
-                Map<Range, DataSplit> partitions = entry.getValue();
+            Options options)
+            throws IOException {
+        JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
+        List<Pair<GlobalIndexBuilderContext, byte[]>> waited = new ArrayList<>();
+        for (Map.Entry<BinaryRow, Map<Range, DataSplit>> entry : preparedDS.entrySet()) {
+            BinaryRow partition = entry.getKey();
+            Map<Range, DataSplit> partitions = entry.getValue();
 
-                for (Map.Entry<Range, DataSplit> partitionEntry : partitions.entrySet()) {
-                    Range startOffset = partitionEntry.getKey();
-                    DataSplit partitionDS = partitionEntry.getValue();
-                    GlobalIndexBuilderContext builderContext =
-                            new GlobalIndexBuilderContext(
-                                    spark(),
-                                    table,
-                                    partition,
-                                    readType,
-                                    indexField,
-                                    indexType,
-                                    startOffset,
-                                    options);
+            for (Map.Entry<Range, DataSplit> partitionEntry : partitions.entrySet()) {
+                Range startOffset = partitionEntry.getKey();
+                DataSplit partitionDS = partitionEntry.getValue();
+                GlobalIndexBuilderContext builderContext =
+                        new GlobalIndexBuilderContext(
+                                table,
+                                partition,
+                                readType,
+                                indexField,
+                                indexType,
+                                startOffset,
+                                options);
 
-                    futures.add(
-                            executor.submit(
-                                    () -> {
-                                        GlobalIndexBuilder globalIndexBuilder =
-                                                globalIndexBuilderFactory.create(builderContext);
-                                        return globalIndexBuilder.build(partitionDS);
-                                    }));
-                }
+                byte[] dsBytes = InstantiationUtil.serializeObject(partitionDS);
+                waited.add(Pair.of(builderContext, dsBytes));
             }
-
-            List<CommitMessage> entries = new ArrayList<>();
-            for (Future<CommitMessage> future : futures) {
-                try {
-                    entries.add(future.get());
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException("Index creation was interrupted", e);
-                } catch (ExecutionException e) {
-                    throw new RuntimeException("Build index failed", e.getCause());
-                }
-            }
-
-            return entries;
-        } finally {
-            executor.shutdown();
         }
+
+        List<byte[]> commitMessageBytes =
+                javaSparkContext
+                        .parallelize(waited)
+                        .map(
+                                pair -> {
+                                    CommitMessageSerializer commitMessageSerializer =
+                                            new CommitMessageSerializer();
+                                    GlobalIndexBuilderContext builderContext = pair.getLeft();
+                                    byte[] dataSplitBytes = pair.getRight();
+                                    DataSplit split =
+                                            InstantiationUtil.deserializeObject(
+                                                    dataSplitBytes,
+                                                    GlobalIndexBuilder.class.getClassLoader());
+                                    GlobalIndexBuilderFactory globalIndexBuilderFactory =
+                                            GlobalIndexBuilderFactoryUtils.load(
+                                                    builderContext.indexType());
+                                    GlobalIndexBuilder globalIndexBuilder =
+                                            globalIndexBuilderFactory.create(builderContext);
+                                    return commitMessageSerializer.serialize(
+                                            globalIndexBuilder.build(split));
+                                })
+                        .collect();
+
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        CommitMessageSerializer commitMessageSerializer = new CommitMessageSerializer();
+        for (byte[] b : commitMessageBytes) {
+            commitMessages.add(
+                    commitMessageSerializer.deserialize(commitMessageSerializer.getVersion(), b));
+        }
+        return commitMessages;
     }
 
     private void commit(FileStoreTable table, List<CommitMessage> commitMessages) throws Exception {
@@ -326,7 +333,6 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
 
             // Create DataSplit for each shard with exact ranges
             Map<Range, DataSplit> shardSplits = new HashMap<>();
-
             for (Map.Entry<Long, List<DataFileMeta>> shardEntry : filesByShard.entrySet()) {
                 long startRowId = shardEntry.getKey();
                 List<DataFileMeta> shardFiles = shardEntry.getValue();
