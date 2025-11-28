@@ -63,6 +63,7 @@ under the License.
         <module>paimon-filesystems</module>
         <module>paimon-format</module>
         <module>paimon-lance</module>
+        <module>paimon-vector</module>
         <module>paimon-vfs</module>
         <module>paimon-bundle</module>
         <module>paimon-hive</module>
