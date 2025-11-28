@@ -24,5 +24,6 @@ import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 
 /** Orc field writer. */
 public interface FieldWriter {
-    void write(int rowId, ColumnVector column, DataGetters getters, int columnId);
+
+    int write(int rowId, ColumnVector column, DataGetters getters, int columnId);
 }
