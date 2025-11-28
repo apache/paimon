@@ -34,12 +34,24 @@ import java.util.TimeZone;
  * A functional interface for converting CDC metadata.
  *
  * <p>This interface provides a mechanism to convert Change Data Capture (CDC) metadata from a given
- * {@link JsonNode} source. Implementations of this interface can be used to process and transform
- * metadata entries from CDC sources.
+ * {@link JsonNode} source or {@link CdcSourceRecord}. Implementations of this interface can be used
+ * to process and transform metadata entries from CDC sources.
  */
 public interface CdcMetadataConverter extends Serializable {
 
     String read(JsonNode payload);
+
+    /**
+     * Read metadata from a CDC source record. Default implementation throws
+     * UnsupportedOperationException to maintain backward compatibility.
+     *
+     * @param record the CDC source record
+     * @return the metadata value as a string
+     */
+    default String read(CdcSourceRecord record) {
+        throw new UnsupportedOperationException(
+                "This metadata converter does not support reading from CdcSourceRecord");
+    }
 
     DataType dataType();
 

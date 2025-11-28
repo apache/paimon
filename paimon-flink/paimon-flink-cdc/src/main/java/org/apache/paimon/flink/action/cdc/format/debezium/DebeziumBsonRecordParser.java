@@ -137,6 +137,7 @@ public class DebeziumBsonRecordParser extends DebeziumJsonRecordParser {
         }
 
         evalComputedColumns(resultMap, schemaBuilder);
+        evalMetadataColumns(resultMap, schemaBuilder);
 
         return resultMap;
     }
