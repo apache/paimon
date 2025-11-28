@@ -32,6 +32,7 @@ import org.apache.paimon.reader.DataEvolutionRow;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RangeHelper;
@@ -127,8 +128,14 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     @Override
     public FileStoreScan withReadType(RowType readType) {
-        if (readType != null && !readType.getFields().isEmpty()) {
-            this.readType = readType;
+        if (readType != null) {
+            List<DataField> nonSystemFields =
+                    readType.getFields().stream()
+                            .filter(f -> !SpecialFields.isSystemField(f.id()))
+                            .collect(Collectors.toList());
+            if (!nonSystemFields.isEmpty()) {
+                this.readType = readType;
+            }
         }
         return this;
     }

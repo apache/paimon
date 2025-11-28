@@ -109,6 +109,34 @@ public class DataEvolutionTableTest extends TableTestBase {
                     assertThat(r.getString(1).toString()).isEqualTo("a");
                     assertThat(r.getString(2).toString()).isEqualTo("c");
                 });
+
+        // projection with only special fields.
+        readBuilder = getTableDefault().newReadBuilder();
+        reader =
+                readBuilder
+                        .withReadType(RowType.of(SpecialFields.ROW_ID))
+                        .newRead()
+                        .createReader(readBuilder.newScan().plan());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(
+                r -> {
+                    cnt.incrementAndGet();
+                });
+        assertThat(cnt.get()).isEqualTo(1);
+
+        // projection with an empty read type
+        readBuilder = getTableDefault().newReadBuilder();
+        reader =
+                readBuilder
+                        .withReadType(RowType.of())
+                        .newRead()
+                        .createReader(readBuilder.newScan().plan());
+        AtomicInteger cnt1 = new AtomicInteger(0);
+        reader.forEachRemaining(
+                r -> {
+                    cnt1.incrementAndGet();
+                });
+        assertThat(cnt1.get()).isEqualTo(1);
     }
 
     @Test
