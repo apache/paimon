@@ -77,6 +77,10 @@ public class WriterRefresher {
         return new WriterRefresher(table, refresher, configGroups);
     }
 
+    /**
+     * Try to refresh write when configs which are expected to be refreshed in streaming mode
+     * changed.
+     */
     public void tryRefresh() {
         Optional<TableSchema> latestSchema = table.schemaManager().latest();
         if (!latestSchema.isPresent()) {
@@ -92,22 +96,25 @@ public class WriterRefresher {
                         configGroups(configGroups, CoreOptions.fromMap(latest.options()));
 
                 if (!Objects.equals(newOptions, currentOptions)) {
-                    if (LOG.isDebugEnabled()) {
-                        LOG.debug(
-                                "table schema has changed, current schema-id:{}, try to update write with new schema-id:{}. "
-                                        + "current options:{}, new options:{}.",
-                                table.schema().id(),
-                                latestSchema.get().id(),
-                                currentOptions,
-                                newOptions);
-                    }
                     table = table.copy(newOptions);
                     refresher.refresh(table);
+                    LOG.info(
+                            "write has been refreshed due to configs changed. old options:{}, new options:{}.",
+                            currentOptions,
+                            newOptions);
                 }
             } catch (Exception e) {
                 throw new RuntimeException("update write failed.", e);
             }
         }
+    }
+
+    public void updateTable(FileStoreTable table) {
+        this.table = table;
+    }
+
+    public Set<String> configGroups() {
+        return configGroups;
     }
 
     /** Refresher when configs changed. */
