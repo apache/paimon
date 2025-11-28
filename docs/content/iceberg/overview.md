@@ -96,8 +96,8 @@ Paimon Iceberg compatibility currently supports the following data types.
 | `BINARY`       | `binary`          |
 | `VARBINARY`    | `binary`          |
 | `DATE`         | `date`            |
-| `TIMESTAMP` (precision 4-6)   | `timestamp`       |
-| `TIMESTAMP_LTZ` (precision 4-6) | `timestamptz`     |
+| `TIMESTAMP` (precision 3-6)   | `timestamp`       |
+| `TIMESTAMP_LTZ` (precision 3-6) | `timestamptz`     |
 | `TIMESTAMP` (precision 7-9)  | `timestamp_ns`    |
 | `TIMESTAMP_LTZ` (precision 7-9) | `timestamptz_ns`  |
 | `ARRAY`        | `list`            |
@@ -106,6 +106,6 @@ Paimon Iceberg compatibility currently supports the following data types.
 
 {{< hint info >}}
 **Note on Timestamp Types:**
-- `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 4 to 6 are mapped to standard Iceberg timestamp types
+- `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 3 to 6 are mapped to standard Iceberg timestamp types
 - `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 7 to 9 use nanosecond precision and require Iceberg v3 format
 {{< /hint >}}
