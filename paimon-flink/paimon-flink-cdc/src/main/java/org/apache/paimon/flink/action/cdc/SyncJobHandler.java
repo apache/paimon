@@ -48,6 +48,8 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.POSTGRES_C
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PULSAR_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.checkOneRequiredOption;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.checkRequiredOptions;
+import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.LOG_CORRUPT_RECORD;
+import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.SKIP_CORRUPT_RECORD;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Provide different function according to CDC source type. */
@@ -209,7 +211,13 @@ public class SyncJobHandler {
             case KAFKA:
             case PULSAR:
                 DataFormat dataFormat = provideDataFormat();
-                return dataFormat.createParser(typeMapping, computedColumns);
+                return dataFormat.createParser(
+                        typeMapping,
+                        computedColumns,
+                        cdcSourceConfig.getBoolean(
+                                SKIP_CORRUPT_RECORD.key(), SKIP_CORRUPT_RECORD.defaultValue()),
+                        cdcSourceConfig.getBoolean(
+                                LOG_CORRUPT_RECORD.key(), LOG_CORRUPT_RECORD.defaultValue()));
             case MONGODB:
                 return new MongoDBRecordParser(computedColumns, cdcSourceConfig);
             default:
