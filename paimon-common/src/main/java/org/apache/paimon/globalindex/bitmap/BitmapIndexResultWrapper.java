@@ -21,8 +21,12 @@ package org.apache.paimon.globalindex.bitmap;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringBitmap32;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 
 import static org.apache.paimon.utils.RoaringBitmap32.bitmapOfRange;
 
@@ -38,24 +42,44 @@ public class BitmapIndexResultWrapper implements GlobalIndexResult {
     }
 
     @Override
-    public Iterator<Long> iterator() {
-        Iterator<Integer> rowIds = result.get().iterator();
-        return new Iterator<Long>() {
-            @Override
-            public boolean hasNext() {
-                return rowIds.hasNext();
-            }
+    public List<Range> results() {
+        RoaringBitmap32 bitmap = result.get();
+        if (bitmap.isEmpty()) {
+            return Collections.emptyList();
+        }
 
-            @Override
-            public Long next() {
-                return rowIds.next() + start;
+        List<Range> ranges = new ArrayList<>();
+        Iterator<Integer> iterator = bitmap.iterator();
+
+        if (!iterator.hasNext()) {
+            return Collections.emptyList();
+        }
+
+        long rangeStart = iterator.next() + start;
+        long rangeEnd = rangeStart;
+
+        while (iterator.hasNext()) {
+            long current = iterator.next() + start;
+            if (current == rangeEnd + 1) {
+                // Extend the current range
+                rangeEnd = current;
+            } else {
+                // Save the current range and start a new one
+                ranges.add(new Range(rangeStart, rangeEnd));
+                rangeStart = current;
+                rangeEnd = current;
             }
-        };
+        }
+        // Add the last range
+        ranges.add(new Range(rangeStart, rangeEnd));
+
+        return ranges;
     }
 
     public static BitmapIndexResultWrapper fromRange(Range range) {
         return new BitmapIndexResultWrapper(
-                new BitmapIndexResult(() -> bitmapOfRange(0, range.to - range.from)), range.from);
+                new BitmapIndexResult(() -> bitmapOfRange(0, (int) (range.to - range.from))),
+                range.from);
     }
 
     public BitmapIndexResult getBitmapIndexResult() {

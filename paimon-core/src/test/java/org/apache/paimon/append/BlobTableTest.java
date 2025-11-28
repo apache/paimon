@@ -34,6 +34,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
@@ -165,7 +166,8 @@ public class BlobTableTest extends TableTestBase {
 
         Table table = getTableDefault();
         ReadBuilder readBuilder =
-                table.newReadBuilder().withRowIds(Collections.singletonList(100L));
+                table.newReadBuilder()
+                        .withRowRanges(Collections.singletonList(new Range(100L, 100L)));
         RecordReader<InternalRow> reader =
                 readBuilder.newRead().createReader(readBuilder.newScan().plan());
 

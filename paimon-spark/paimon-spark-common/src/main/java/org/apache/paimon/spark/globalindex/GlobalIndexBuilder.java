@@ -36,6 +36,7 @@ import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /** This is a class who truly build index file and generate index metas. */
@@ -49,7 +50,8 @@ public abstract class GlobalIndexBuilder {
 
     public CommitMessage build(DataSplit dataSplit) throws IOException {
         ReadBuilder builder = context.table().newReadBuilder();
-        builder.withRowIds(context.range().toListLong()).withReadType(context.readType());
+        builder.withRowRanges(Collections.singletonList(context.range()))
+                .withReadType(context.readType());
         RecordReader<InternalRow> rows = builder.newRead().createReader(dataSplit);
         List<GlobalIndexWriter.ResultEntry> resultEntries = writePaimonRows(context, rows);
         List<IndexFileMeta> indexFileMetas = convertToIndexMeta(context, resultEntries);

@@ -42,6 +42,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -243,8 +244,8 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     @Override
-    public ReadBuilder withRowIds(List<Long> indices) {
-        throw new UnsupportedOperationException("Format Table does not support withRowIds.");
+    public ReadBuilder withRowRanges(List<Range> rowRanges) {
+        throw new UnsupportedOperationException("Format Table does not support withRowRanges.");
     }
 
     @Override

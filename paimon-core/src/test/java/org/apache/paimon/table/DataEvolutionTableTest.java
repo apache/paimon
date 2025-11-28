@@ -519,8 +519,8 @@ public class DataEvolutionTableTest extends TableTestBase {
         ReadBuilder readBuilder = table.newReadBuilder();
 
         // Test 1: Filter by row IDs that exist in the first file (0, 1)
-        List<Long> rowIds1 = Arrays.asList(0L, 1L);
-        List<Split> splits1 = readBuilder.withRowIds(rowIds1).newScan().plan().splits();
+        List<Range> rowIds1 = Arrays.asList(new Range(0L, 1L));
+        List<Split> splits1 = readBuilder.withRowRanges(rowIds1).newScan().plan().splits();
         assertThat(splits1.size())
                 .isEqualTo(1); // Should return one split containing the first file
 
@@ -532,8 +532,8 @@ public class DataEvolutionTableTest extends TableTestBase {
         assertThat(file1.rowCount()).isEqualTo(2L);
 
         // Test 2: Filter by row IDs that exist in the second file (2, 3)
-        List<Long> rowIds2 = Arrays.asList(2L, 3L);
-        List<Split> splits2 = readBuilder.withRowIds(rowIds2).newScan().plan().splits();
+        List<Range> rowIds2 = Arrays.asList(new Range(2L, 3L));
+        List<Split> splits2 = readBuilder.withRowRanges(rowIds2).newScan().plan().splits();
         assertThat(splits2.size())
                 .isEqualTo(1); // Should return one split containing the second file
 
@@ -545,8 +545,8 @@ public class DataEvolutionTableTest extends TableTestBase {
         assertThat(file2.rowCount()).isEqualTo(2L);
 
         // Test 3: Filter by row IDs that exist in the third file (4, 5)
-        List<Long> rowIds3 = Arrays.asList(4L, 5L);
-        List<Split> splits3 = readBuilder.withRowIds(rowIds3).newScan().plan().splits();
+        List<Range> rowIds3 = Arrays.asList(new Range(4L, 5L));
+        List<Split> splits3 = readBuilder.withRowRanges(rowIds3).newScan().plan().splits();
         assertThat(splits3.size())
                 .isEqualTo(1); // Should return one split containing the third file
 
@@ -558,8 +558,8 @@ public class DataEvolutionTableTest extends TableTestBase {
         assertThat(file3.rowCount()).isEqualTo(2L);
 
         // Test 4: Filter by row IDs that span multiple files (1, 2, 4)
-        List<Long> rowIds4 = Arrays.asList(0L, 1L, 4L);
-        List<Split> splits4 = readBuilder.withRowIds(rowIds4).newScan().plan().splits();
+        List<Range> rowIds4 = Arrays.asList(new Range(0L, 1L), new Range(4L, 4L));
+        List<Split> splits4 = readBuilder.withRowRanges(rowIds4).newScan().plan().splits();
         assertThat(splits4.size())
                 .isEqualTo(1); // Should return one split containing all matching files
 
@@ -586,12 +586,12 @@ public class DataEvolutionTableTest extends TableTestBase {
         }
 
         // Test 5: Filter by row IDs that don't exist (10, 11)
-        List<Long> rowIds5 = Arrays.asList(10L, 11L);
-        List<Split> splits5 = readBuilder.withRowIds(rowIds5).newScan().plan().splits();
+        List<Range> rowIds5 = Arrays.asList(new Range(10L, 11L));
+        List<Split> splits5 = readBuilder.withRowRanges(rowIds5).newScan().plan().splits();
         assertThat(splits5.size()).isEqualTo(0); // Should return no files
 
         // Test 6: Filter by null indices (should return all files)
-        List<Split> splits6 = readBuilder.withRowIds(null).newScan().plan().splits();
+        List<Split> splits6 = readBuilder.withRowRanges(null).newScan().plan().splits();
         assertThat(splits6.size()).isEqualTo(1); // Should return one split containing all files
 
         // Verify the split contains all three files
@@ -615,12 +615,12 @@ public class DataEvolutionTableTest extends TableTestBase {
 
         // Test 7: Filter by empty indices (should return no files)
         List<Split> splits7 =
-                readBuilder.withRowIds(Collections.emptyList()).newScan().plan().splits();
+                readBuilder.withRowRanges(Collections.emptyList()).newScan().plan().splits();
         assertThat(splits7.size()).isEqualTo(0); // Should return no files
 
         // Test 8: Filter by row IDs that partially exist (0, 1, 10)
-        List<Long> rowIds8 = Arrays.asList(0L, 1L, 10L);
-        List<Split> splits8 = readBuilder.withRowIds(rowIds8).newScan().plan().splits();
+        List<Range> rowIds8 = Arrays.asList(new Range(0L, 1L), new Range(10L, 10L));
+        List<Split> splits8 = readBuilder.withRowRanges(rowIds8).newScan().plan().splits();
         assertThat(splits8.size())
                 .isEqualTo(1); // Should return one split containing the first file
 
@@ -631,8 +631,8 @@ public class DataEvolutionTableTest extends TableTestBase {
         assertThat(file8.firstRowId()).isEqualTo(0L);
         assertThat(file8.rowCount()).isEqualTo(2L);
 
-        List<Long> rowIds9 = Arrays.asList(0L, 2L);
-        List<Split> splits9 = readBuilder.withRowIds(rowIds9).newScan().plan().splits();
+        List<Range> rowIds9 = Arrays.asList(new Range(0L, 0L), new Range(2L, 2L));
+        List<Split> splits9 = readBuilder.withRowRanges(rowIds9).newScan().plan().splits();
 
         // Verify the actual data by reading from the filtered splits
         // Note: withRowIds filters at the file level, so we get all rows from matching files
@@ -658,17 +658,17 @@ public class DataEvolutionTableTest extends TableTestBase {
             commit.commit(commitables);
         }
 
-        List<Long> rowIds10 = Collections.singletonList(0L);
-        List<Split> split10 = readBuilder.withRowIds(rowIds10).newScan().plan().splits();
+        List<Range> rowIds10 = Collections.singletonList(new Range(0L, 0L));
+        List<Split> split10 = readBuilder.withRowRanges(rowIds10).newScan().plan().splits();
 
         // without projection， all datafiles needed to assemble a row should be scanned out
         List<DataFileMeta> fileMetas10 = ((DataSplit) split10.get(0)).dataFiles();
         assertThat(fileMetas10.size()).isEqualTo(2);
 
-        List<Long> rowIds11 = Collections.singletonList(0L);
+        List<Range> rowIds11 = Collections.singletonList(new Range(0L, 0L));
         List<Split> split11 =
                 readBuilder
-                        .withRowIds(rowIds11)
+                        .withRowRanges(rowIds11)
                         .withProjection(new int[] {0})
                         .newScan()
                         .plan()
@@ -739,8 +739,8 @@ public class DataEvolutionTableTest extends TableTestBase {
 
         // assert file
         ReadBuilder readBuilder = table.newReadBuilder();
-        List<Long> rowIds = Arrays.asList(0L, 3L);
-        List<Split> splits = readBuilder.withRowIds(rowIds).newScan().plan().splits();
+        List<Range> rowIds = Arrays.asList(new Range(0L, 0L), new Range(3L, 3L));
+        List<Split> splits = readBuilder.withRowRanges(rowIds).newScan().plan().splits();
         assertThat(splits.size()).isEqualTo(1);
         DataSplit dataSplit = (DataSplit) splits.get(0);
         assertThat(dataSplit.dataFiles().size()).isEqualTo(2);
@@ -875,10 +875,10 @@ public class DataEvolutionTableTest extends TableTestBase {
         Predicate predicate =
                 new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a100"));
 
-        List<Long> rowIds = globalIndexScan(table, predicate);
+        List<Range> rowIds = globalIndexScan(table, predicate);
         assertNotNull(rowIds);
         Assertions.assertThat(rowIds.size()).isEqualTo(1);
-        Assertions.assertThat(rowIds.get(0)).isEqualTo(100L);
+        Assertions.assertThat(rowIds.get(0)).isEqualTo(new Range(100L, 100L));
 
         Predicate predicate2 =
                 new PredicateBuilder(table.rowType())
@@ -892,9 +892,11 @@ public class DataEvolutionTableTest extends TableTestBase {
         rowIds = globalIndexScan(table, predicate2);
         assertNotNull(rowIds);
         Assertions.assertThat(rowIds.size()).isEqualTo(3);
-        Assertions.assertThat(rowIds).containsExactlyInAnyOrder(200L, 300L, 400L);
+        Assertions.assertThat(rowIds)
+                .containsExactlyInAnyOrder(
+                        new Range(200L, 200L), new Range(300L, 300L), new Range(400L, 400L));
 
-        readBuilder = table.newReadBuilder().withRowIds(rowIds);
+        readBuilder = table.newReadBuilder().withRowRanges(rowIds);
 
         List<String> readF1 = new ArrayList<>();
         readBuilder
@@ -911,11 +913,12 @@ public class DataEvolutionTableTest extends TableTestBase {
                 new PredicateBuilder(table.rowType()).notEqual(1, BinaryString.fromString("a500"));
         rowIds = globalIndexScan(table, predicate3);
         assertNotNull(rowIds);
-        Assertions.assertThat(rowIds.size()).isEqualTo(count - 1);
-        Assertions.assertThat(rowIds).doesNotContain(500L);
+        Assertions.assertThat(rowIds.size()).isEqualTo(2);
+        Assertions.assertThat(rowIds).contains(new Range(0L, 499L), new Range(501L, 99999L));
     }
 
-    private List<Long> globalIndexScan(FileStoreTable table, Predicate predicate) throws Exception {
+    private List<Range> globalIndexScan(FileStoreTable table, Predicate predicate)
+            throws Exception {
         GlobalIndexScanBuilder indexScanBuilder = table.newIndexScanBuilder();
         Set<Range> ranges = indexScanBuilder.shardList();
         GlobalIndexResult globalFileIndexResult = GlobalIndexResult.createEmpty();
@@ -929,9 +932,7 @@ public class DataEvolutionTableTest extends TableTestBase {
             }
         }
 
-        List<Long> rowIds = new ArrayList<>();
-        globalFileIndexResult.iterator().forEachRemaining(rowIds::add);
-        return rowIds;
+        return globalFileIndexResult.results();
     }
 
     protected Schema schemaDefault() {
