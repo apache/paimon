@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.write
 
+import org.apache.paimon.spark.PaimonCopyOnWriteScan
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.connector.write.{SupportsDynamicOverwrite, SupportsOverwrite, WriteBuilder}
@@ -31,6 +32,15 @@ abstract class BaseV2WriteBuilder(table: Table)
 
   protected var overwriteDynamic = false
   protected var overwritePartitions: Option[Map[String, String]] = None
+
+  protected var isOverwriteFiles = false
+  protected var copyOnWriteScan: Option[PaimonCopyOnWriteScan] = None
+
+  def overwriteFiles(scan: Option[PaimonCopyOnWriteScan]): WriteBuilder = {
+    this.isOverwriteFiles = true
+    this.copyOnWriteScan = scan
+    this
+  }
 
   override def overwrite(filters: Array[Filter]): WriteBuilder = {
     if (overwriteDynamic) {

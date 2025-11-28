@@ -20,21 +20,12 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.table.Table
 
-import org.apache.spark.sql.connector.catalog.SupportsRowLevelOperations
-import org.apache.spark.sql.connector.write.{RowLevelOperationBuilder, RowLevelOperationInfo}
+import org.apache.spark.sql.connector.write.{RowLevelOperation, RowLevelOperationBuilder, RowLevelOperationInfo}
 
-/** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
-case class SparkTable(override val table: Table)
-  extends PaimonSparkTableBase(table)
-  with SupportsRowLevelOperations {
-  override def newRowLevelOperationBuilder(
-      rowLevelOperationInfo: RowLevelOperationInfo): RowLevelOperationBuilder = {
-    new PaimonSparkRowLevelOperationBuilder(table, rowLevelOperationInfo)
+class PaimonSparkRowLevelOperationBuilder(table: Table, info: RowLevelOperationInfo)
+  extends RowLevelOperationBuilder {
+
+  override def build(): RowLevelOperation = {
+    new PaimonSparkCopyOnWriteOperation(table, info)
   }
 }
-
-case class SparkIcebergTable(table: Table) extends BaseTable
-
-case class SparkLanceTable(table: Table) extends BaseTable
-
-case class SparkObjectTable(table: Table) extends BaseTable
