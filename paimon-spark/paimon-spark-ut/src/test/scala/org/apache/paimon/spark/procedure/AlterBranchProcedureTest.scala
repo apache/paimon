@@ -28,70 +28,73 @@ class AlterBranchProcedureTest extends PaimonSparkTestBase with StreamTest {
 
   import testImplicits._
   test("Paimon Procedure: alter schema structure and test $branch syntax.") {
-    withTempDir {
-      checkpointDir =>
-        // define a change-log table and test `forEachBatch` api
-        spark.sql(s"""
-                     |CREATE TABLE T (a INT, b STRING)
-                     |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
-                     |""".stripMargin)
-        val location = loadTable("T").location().toString
+    withSparkSQLConf(("spark.paimon.write.use-v2-write", "false")) {
+      withTempDir {
+        checkpointDir =>
+          // define a change-log table and test `forEachBatch` api
+          spark.sql(s"""
+                       |CREATE TABLE T (a INT, b STRING)
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                       |""".stripMargin)
+          val location = loadTable("T").location().toString
 
-        val inputData = MemoryStream[(Int, String)]
-        val stream = inputData
-          .toDS()
-          .toDF("a", "b")
-          .writeStream
-          .option("checkpointLocation", checkpointDir.getCanonicalPath)
-          .foreachBatch {
-            (batch: Dataset[Row], _: Long) =>
-              batch.write.format("paimon").mode("append").save(location)
-          }
-          .start()
+          val inputData = MemoryStream[(Int, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
 
-        val query = () => spark.sql("SELECT * FROM T ORDER BY a")
-        try {
-          // snapshot-1
-          inputData.addData((1, "a"))
-          stream.processAllAvailable()
-          checkAnswer(query(), Row(1, "a") :: Nil)
+          val query = () => spark.sql("SELECT * FROM T ORDER BY a")
+          try {
+            // snapshot-1
+            inputData.addData((1, "a"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Nil)
 
-          // snapshot-2
-          inputData.addData((2, "b"))
-          stream.processAllAvailable()
-          checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
+            // snapshot-2
+            inputData.addData((2, "b"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "b") :: Nil)
 
-          // snapshot-3
-          inputData.addData((2, "b2"))
-          stream.processAllAvailable()
-          checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
+            // snapshot-3
+            inputData.addData((2, "b2"))
+            stream.processAllAvailable()
+            checkAnswer(query(), Row(1, "a") :: Row(2, "b2") :: Nil)
 
-          val table = loadTable("T")
-          val branchManager = table.branchManager()
+            val table = loadTable("T")
+            val branchManager = table.branchManager()
 
-          // create branch with tag
-          checkAnswer(
-            spark.sql("CALL paimon.sys.create_tag(table => 'test.T', tag => 's_2', snapshot => 2)"),
-            Row(true) :: Nil)
-          checkAnswer(
+            // create branch with tag
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.create_tag(table => 'test.T', tag => 's_2', snapshot => 2)"),
+              Row(true) :: Nil)
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.create_branch(table => 'test.T', branch => 'snapshot_branch', tag => 's_2')"),
+              Row(true) :: Nil)
+            assert(branchManager.branchExists("snapshot_branch"))
+
+            spark.sql("INSERT INTO T VALUES (1, 'APPLE'), (2,'DOG'), (2, 'horse')")
+            spark.sql("ALTER TABLE `T$branch_snapshot_branch` ADD COLUMNS(c INT)")
             spark.sql(
-              "CALL paimon.sys.create_branch(table => 'test.T', branch => 'snapshot_branch', tag => 's_2')"),
-            Row(true) :: Nil)
-          assert(branchManager.branchExists("snapshot_branch"))
+              "INSERT INTO `T$branch_snapshot_branch` VALUES " + "(1,'cherry', 100), (2,'bird', 200), (3, 'wolf', 400)")
 
-          spark.sql("INSERT INTO T VALUES (1, 'APPLE'), (2,'DOG'), (2, 'horse')")
-          spark.sql("ALTER TABLE `T$branch_snapshot_branch` ADD COLUMNS(c INT)")
-          spark.sql(
-            "INSERT INTO `T$branch_snapshot_branch` VALUES " + "(1,'cherry', 100), (2,'bird', 200), (3, 'wolf', 400)")
-
-          checkAnswer(
-            spark.sql("SELECT * FROM T ORDER BY a, b"),
-            Row(1, "APPLE") :: Row(2, "horse") :: Nil)
-          checkAnswer(
-            spark.sql("SELECT * FROM `T$branch_snapshot_branch` ORDER BY a, b,c"),
-            Row(1, "cherry", 100) :: Row(2, "bird", 200) :: Row(3, "wolf", 400) :: Nil)
-          assert(branchManager.branchExists("snapshot_branch"))
-        }
+            checkAnswer(
+              spark.sql("SELECT * FROM T ORDER BY a, b"),
+              Row(1, "APPLE") :: Row(2, "horse") :: Nil)
+            checkAnswer(
+              spark.sql("SELECT * FROM `T$branch_snapshot_branch` ORDER BY a, b,c"),
+              Row(1, "cherry", 100) :: Row(2, "bird", 200) :: Row(3, "wolf", 400) :: Nil)
+            assert(branchManager.branchExists("snapshot_branch"))
+          }
+      }
     }
   }
 }
