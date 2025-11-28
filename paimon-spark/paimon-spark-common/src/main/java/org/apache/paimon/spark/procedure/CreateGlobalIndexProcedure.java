@@ -210,7 +210,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             Options options)
             throws IOException {
         JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
-        List<Pair<GlobalIndexBuilderContext, byte[]>> waited = new ArrayList<>();
+        List<Pair<GlobalIndexBuilderContext, byte[]>> taskList = new ArrayList<>();
         for (Map.Entry<BinaryRow, Map<Range, DataSplit>> entry : preparedDS.entrySet()) {
             BinaryRow partition = entry.getKey();
             Map<Range, DataSplit> partitions = entry.getValue();
@@ -229,13 +229,13 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 options);
 
                 byte[] dsBytes = InstantiationUtil.serializeObject(partitionDS);
-                waited.add(Pair.of(builderContext, dsBytes));
+                taskList.add(Pair.of(builderContext, dsBytes));
             }
         }
 
         List<byte[]> commitMessageBytes =
                 javaSparkContext
-                        .parallelize(waited)
+                        .parallelize(taskList)
                         .map(
                                 pair -> {
                                     CommitMessageSerializer commitMessageSerializer =
