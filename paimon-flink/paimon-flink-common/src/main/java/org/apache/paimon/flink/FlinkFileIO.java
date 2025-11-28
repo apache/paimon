@@ -110,6 +110,11 @@ public class FlinkFileIO implements FileIO {
     }
 
     @Override
+    public boolean moveToTrash(Path path) throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public boolean mkdirs(Path path) throws IOException {
         org.apache.flink.core.fs.Path flinkPath = path(path);
         return getFileSystem(flinkPath).mkdirs(flinkPath);
