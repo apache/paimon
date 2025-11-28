@@ -66,7 +66,7 @@ public class CustomDecimalArrowConversion {
         public static class DecimalWriter extends ArrowFieldWriter {
             // decimal precision
             private final int precision;
-            // decimal scale
+            // decimal scale.
             private final int scale;
 
             public DecimalWriter(
