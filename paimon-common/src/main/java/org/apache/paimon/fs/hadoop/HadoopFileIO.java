@@ -20,6 +20,7 @@ package org.apache.paimon.fs.hadoop;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.HadoopAware;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -57,6 +58,7 @@ public class HadoopFileIO implements FileIO {
     protected SerializableConfiguration hadoopConf;
 
     private org.apache.paimon.options.Options options;
+    private CatalogContext context;
 
     protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
 
@@ -79,12 +81,18 @@ public class HadoopFileIO implements FileIO {
 
     @Override
     public void configure(CatalogContext context) {
-        this.hadoopConf = new SerializableConfiguration(context.hadoopConf());
+        this.context = context;
         this.options = context.options();
     }
 
     public Configuration hadoopConf() {
-        return hadoopConf.get();
+        if (context instanceof HadoopAware) {
+            return ((HadoopAware) context).hadoopConf();
+        } else {
+            throw new IllegalArgumentException(
+                    "ResolvingFileIO requires a HadoopAware context, but got: "
+                            + context.getClass().getName());
+        }
     }
 
     @Override
@@ -210,7 +218,7 @@ public class HadoopFileIO implements FileIO {
     }
 
     protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
-        Configuration conf = hadoopConf.get();
+        Configuration conf = hadoopConf();
         FileSystem fileSystem = path.getFileSystem(conf);
         fileSystem = HadoopSecuredFileSystem.trySecureFileSystem(fileSystem, options, conf);
         return fileSystem;

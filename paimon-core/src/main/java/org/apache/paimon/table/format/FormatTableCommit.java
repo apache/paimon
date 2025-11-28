@@ -87,8 +87,7 @@ public class FormatTableCommit implements BatchTableCommit {
                 Options options = new Options();
                 options.set(CatalogOptions.URI, syncHiveUri);
                 options.set(CatalogOptions.METASTORE, "hive");
-                CatalogContext context =
-                        CatalogContext.create(options, catalogContext.hadoopConf());
+                CatalogContext context = catalogContext.copy(options);
                 this.hiveCatalog = CatalogFactory.createCatalog(context);
             } catch (Exception e) {
                 throw new RuntimeException(
