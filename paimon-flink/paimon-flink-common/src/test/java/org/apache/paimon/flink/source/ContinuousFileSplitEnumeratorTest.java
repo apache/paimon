@@ -19,24 +19,15 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.EndOfScanException;
-import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 
-import org.apache.flink.api.connector.source.SourceSplit;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
-import org.apache.flink.core.testutils.ManuallyTriggeredScheduledExecutorService;
-import org.apache.flink.runtime.source.coordinator.ExecutorNotifier;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
-
-import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -46,10 +37,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.Callable;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
 
 import static org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext.SplitAssignmentState;
 import static org.apache.paimon.io.DataFileTestUtils.row;
@@ -57,7 +46,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Unit tests for the {@link ContinuousFileSplitEnumerator}. */
-public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBase {
+public class ContinuousFileSplitEnumeratorTest
+        extends FileSplitEnumeratorTestBase<FileStoreSourceSplit> {
 
     @Test
     public void testSplitAllocationIsOrdered() {
@@ -871,12 +861,6 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         enumerator.notifyCheckpointComplete(checkpointId);
     }
 
-    private void scanNextSnapshot(
-            TestingAsyncSplitEnumeratorContext<FileStoreSourceSplit> context) {
-        context.workerExecutor.triggerPeriodicScheduledTasks();
-        context.triggerAlCoordinatorAction();
-    }
-
     private static PendingSplitsCheckpoint checkpointWithoutException(
             ContinuousFileSplitEnumerator enumerator, long checkpointId) {
         try {
@@ -884,26 +868,6 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         } catch (Exception e) {
             return null;
         }
-    }
-
-    private static List<DataSplit> toDataSplits(Collection<FileStoreSourceSplit> splits) {
-        return splits.stream()
-                .map(FileStoreSourceSplit::split)
-                .map(split -> (DataSplit) split)
-                .collect(Collectors.toList());
-    }
-
-    private static DataSplit createDataSplit(
-            long snapshotId, int bucket, List<DataFileMeta> files) {
-        return DataSplit.builder()
-                .withSnapshot(snapshotId)
-                .withPartition(row(1))
-                .withBucket(bucket)
-                .withDataFiles(files)
-                .isStreaming(true)
-                .rawConvertible(false)
-                .withBucketPath("") // not used
-                .build();
     }
 
     private static class Builder {
@@ -967,108 +931,19 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         }
     }
 
-    private static class MockScan implements StreamTableScan {
-
-        private final TreeMap<Long, Plan> results;
-        private @Nullable Long nextSnapshotId;
-        private boolean allowEnd = true;
-        private Long nextSnapshotIdForConsumer;
-
-        public MockScan(TreeMap<Long, Plan> results) {
-            this.results = results;
-            this.nextSnapshotId = null;
-            this.nextSnapshotIdForConsumer = null;
-        }
-
-        @Override
-        public TableScan withMetricRegistry(MetricRegistry registry) {
-            return this;
-        }
-
-        @Override
-        public Plan plan() {
-            Map.Entry<Long, Plan> planEntry = results.pollFirstEntry();
-            if (planEntry == null) {
-                if (allowEnd) {
-                    throw new EndOfScanException();
-                } else {
-                    return SnapshotNotExistPlan.INSTANCE;
-                }
-            }
-            nextSnapshotId = planEntry.getKey() + 1;
-            return planEntry.getValue();
-        }
-
-        @Override
-        public List<PartitionEntry> listPartitionEntries() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Long checkpoint() {
-            return nextSnapshotId;
-        }
-
-        @Override
-        public void notifyCheckpointComplete(@Nullable Long nextSnapshot) {
-            nextSnapshotIdForConsumer = nextSnapshot;
-        }
-
-        @Nullable
-        @Override
-        public Long watermark() {
-            return null;
-        }
-
-        @Override
-        public void restore(Long state) {}
-
-        public void allowEnd(boolean allowEnd) {
-            this.allowEnd = allowEnd;
-        }
-
-        public Long getNextSnapshotIdForConsumer() {
-            return nextSnapshotIdForConsumer;
-        }
-    }
-
-    private static class TestingAsyncSplitEnumeratorContext<SplitT extends SourceSplit>
-            extends TestingSplitEnumeratorContext<SplitT> {
-
-        private final ManuallyTriggeredScheduledExecutorService workerExecutor;
-        private final ExecutorNotifier notifier;
-
-        public TestingAsyncSplitEnumeratorContext(int parallelism) {
-            super(parallelism);
-            this.workerExecutor = new ManuallyTriggeredScheduledExecutorService();
-            this.notifier = new ExecutorNotifier(workerExecutor, super.getExecutorService());
-        }
-
-        @Override
-        public <T> void callAsync(Callable<T> callable, BiConsumer<T, Throwable> handler) {
-            notifier.notifyReadyAsync(callable, handler);
-        }
-
-        @Override
-        public <T> void callAsync(
-                Callable<T> callable,
-                BiConsumer<T, Throwable> handler,
-                long initialDelay,
-                long period) {
-            notifier.notifyReadyAsync(callable, handler, initialDelay, period);
-        }
-
-        public void triggerAllWorkerAction() {
-            this.workerExecutor.triggerPeriodicScheduledTasks();
-            this.workerExecutor.triggerAll();
-        }
-
-        public void triggerAlCoordinatorAction() {
-            super.triggerAllActions();
-        }
-
-        public void triggerNextCoordinatorAction() {
-            super.getExecutorService().trigger();
-        }
+    @Override
+    protected FileStoreSourceSplit createSnapshotSplit(
+            int snapshotId, int bucket, List<DataFileMeta> files, int... partitions) {
+        return new FileStoreSourceSplit(
+                UUID.randomUUID().toString(),
+                DataSplit.builder()
+                        .withSnapshot(snapshotId)
+                        .withPartition(row(partitions))
+                        .withBucket(bucket)
+                        .withDataFiles(files)
+                        .isStreaming(true)
+                        .withBucketPath("/temp/xxx") // not used
+                        .build(),
+                0);
     }
 }

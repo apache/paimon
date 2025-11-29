@@ -84,6 +84,8 @@ public class ConfigOptionsDocGenerator {
                 new OptionsClassLocation(
                         "paimon-flink/paimon-flink-cdc", "org.apache.paimon.flink.kafka"),
                 new OptionsClassLocation(
+                        "paimon-flink/paimon-flink-cdc", "org.apache.paimon.flink.pipeline.cdc"),
+                new OptionsClassLocation(
                         "paimon-hive/paimon-hive-catalog", "org.apache.paimon.hive"),
                 new OptionsClassLocation(
                         "paimon-hive/paimon-hive-connector-common", "org.apache.paimon.hive"),

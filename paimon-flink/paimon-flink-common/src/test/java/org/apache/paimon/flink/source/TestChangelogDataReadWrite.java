@@ -152,10 +152,10 @@ public class TestChangelogDataReadWrite {
         return new KeyValueTableRead(() -> read, () -> rawFileRead, null);
     }
 
-    public List<DataFileMeta> writeFiles(
-            BinaryRow partition, int bucket, List<Tuple2<Long, Long>> kvs) throws Exception {
+    public <T> List<DataFileMeta> writeFiles(
+            BinaryRow partition, int bucket, List<Tuple2<Long, T>> kvs) throws Exception {
         RecordWriter<KeyValue> writer = createMergeTreeWriter(partition, bucket);
-        for (Tuple2<Long, Long> tuple2 : kvs) {
+        for (Tuple2<Long, T> tuple2 : kvs) {
             writer.write(
                     new KeyValue()
                             .replace(
