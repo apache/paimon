@@ -16,26 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.write
+package org.apache.paimon.spark
 
-import org.apache.paimon.options.Options
-import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.types.RowType
+import org.apache.paimon.table.Table
 
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.connector.catalog.SupportsRowLevelOperations
+import org.apache.spark.sql.connector.write.{RowLevelOperationBuilder, RowLevelOperationInfo}
 
-class PaimonV2WriteBuilder(table: FileStoreTable, dataSchema: StructType, options: Options)
-  extends BaseV2WriteBuilder(table) {
-
-  override def build = {
-    val paimonV2Write =
-      new PaimonV2Write(table, overwriteDynamic, overwritePartitions, dataSchema, options)
-    if (isOverwriteFiles) {
-      paimonV2Write.overwriteFiles(copyOnWriteScan)
-    } else {
-      paimonV2Write
-    }
+/** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
+case class SparkTable(override val table: Table)
+  extends PaimonSparkTableBase(table)
+  with SupportsRowLevelOperations {
+  override def newRowLevelOperationBuilder(
+      rowLevelOperationInfo: RowLevelOperationInfo): RowLevelOperationBuilder = {
+    new PaimonSparkRowLevelOperationBuilder(table, rowLevelOperationInfo)
   }
-
-  override def partitionRowType(): RowType = table.schema().logicalPartitionType()
 }

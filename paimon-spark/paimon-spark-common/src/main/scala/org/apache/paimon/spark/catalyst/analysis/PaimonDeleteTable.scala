@@ -32,7 +32,10 @@ object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.resolveOperators {
-      case d @ DeleteFromTable(PaimonRelation(table), condition) if d.resolved =>
+      case d @ DeleteFromTable(PaimonRelation(table), condition)
+          if d.resolved && (!table.useV2Write || table.coreOptions
+            .rowTrackingEnabled() || table.coreOptions
+            .deletionVectorsEnabled() || !table.getTable.primaryKeys().isEmpty) =>
         checkPaimonTable(table.getTable)
 
         table.getTable match {
