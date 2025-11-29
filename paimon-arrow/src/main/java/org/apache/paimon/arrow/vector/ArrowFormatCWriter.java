@@ -56,7 +56,7 @@ public class ArrowFormatCWriter implements AutoCloseable {
         this(new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive, allocator, null));
     }
 
-    private ArrowFormatCWriter(ArrowFormatWriter arrowFormatWriter) {
+    public ArrowFormatCWriter(ArrowFormatWriter arrowFormatWriter) {
         this.realWriter = arrowFormatWriter;
         BufferAllocator allocator = realWriter.getAllocator();
         array = ArrowArray.allocateNew(allocator);

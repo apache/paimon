@@ -64,11 +64,15 @@ public class ArrowUtils {
 
     public static VectorSchemaRoot createVectorSchemaRoot(
             RowType rowType, BufferAllocator allocator) {
-        return createVectorSchemaRoot(rowType, allocator, true);
+        return createVectorSchemaRoot(
+                rowType, allocator, true, ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
     }
 
     public static VectorSchemaRoot createVectorSchemaRoot(
-            RowType rowType, BufferAllocator allocator, boolean caseSensitive) {
+            RowType rowType,
+            BufferAllocator allocator,
+            boolean caseSensitive,
+            ArrowFieldTypeConversion.ArrowFieldTypeVisitor visitor) {
         List<Field> fields =
                 rowType.getFields().stream()
                         .map(
@@ -77,9 +81,24 @@ public class ArrowUtils {
                                                 toLowerCaseIfNeed(f.name(), caseSensitive),
                                                 f.id(),
                                                 f.type(),
-                                                0))
+                                                0,
+                                                visitor))
                         .collect(Collectors.toList());
         return VectorSchemaRoot.create(new Schema(fields), allocator);
+    }
+
+    public static FieldVector createVector(
+            DataField dataField,
+            BufferAllocator allocator,
+            boolean caseSensitive,
+            ArrowFieldTypeConversion.ArrowFieldTypeVisitor visitor) {
+        return toArrowField(
+                        toLowerCaseIfNeed(dataField.name(), caseSensitive),
+                        dataField.id(),
+                        dataField.type(),
+                        0,
+                        visitor)
+                .createVector(allocator);
     }
 
     public static FieldVector createVector(
@@ -88,12 +107,27 @@ public class ArrowUtils {
                         toLowerCaseIfNeed(dataField.name(), caseSensitive),
                         dataField.id(),
                         dataField.type(),
-                        0)
+                        0,
+                        ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR)
                 .createVector(allocator);
     }
 
     public static Field toArrowField(String fieldName, int fieldId, DataType dataType, int depth) {
-        FieldType fieldType = dataType.accept(ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
+        return toArrowField(
+                fieldName,
+                fieldId,
+                dataType,
+                depth,
+                ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
+    }
+
+    public static Field toArrowField(
+            String fieldName,
+            int fieldId,
+            DataType dataType,
+            int depth,
+            ArrowFieldTypeConversion.ArrowFieldTypeVisitor visitor) {
+        FieldType fieldType = dataType.accept(visitor);
         fieldType =
                 new FieldType(
                         fieldType.isNullable(),
@@ -107,7 +141,8 @@ public class ArrowUtils {
                             ListVector.DATA_VECTOR_NAME,
                             fieldId,
                             ((ArrayType) dataType).getElementType(),
-                            depth + 1);
+                            depth + 1,
+                            visitor);
             FieldType typeInner = field.getFieldType();
             field =
                     new Field(
@@ -128,7 +163,11 @@ public class ArrowUtils {
 
             Field keyField =
                     toArrowField(
-                            MapVector.KEY_NAME, fieldId, mapType.getKeyType().notNull(), depth + 1);
+                            MapVector.KEY_NAME,
+                            fieldId,
+                            mapType.getKeyType().notNull(),
+                            depth + 1,
+                            visitor);
             FieldType keyType = keyField.getFieldType();
             keyField =
                     new Field(
@@ -145,7 +184,12 @@ public class ArrowUtils {
                             keyField.getChildren());
 
             Field valueField =
-                    toArrowField(MapVector.VALUE_NAME, fieldId, mapType.getValueType(), depth + 1);
+                    toArrowField(
+                            MapVector.VALUE_NAME,
+                            fieldId,
+                            mapType.getValueType(),
+                            depth + 1,
+                            visitor);
             FieldType valueType = valueField.getFieldType();
             valueField =
                     new Field(
@@ -179,7 +223,7 @@ public class ArrowUtils {
             RowType rowType = (RowType) dataType;
             children = new ArrayList<>();
             for (DataField field : rowType.getFields()) {
-                children.add(toArrowField(field.name(), field.id(), field.type(), 0));
+                children.add(toArrowField(field.name(), field.id(), field.type(), 0, visitor));
             }
         }
         return new Field(fieldName, fieldType, children);

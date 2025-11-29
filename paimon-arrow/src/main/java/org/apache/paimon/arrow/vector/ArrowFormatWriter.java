@@ -18,6 +18,7 @@
 
 package org.apache.paimon.arrow.vector;
 
+import org.apache.paimon.arrow.ArrowFieldTypeConversion;
 import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
@@ -65,16 +66,36 @@ public class ArrowFormatWriter implements AutoCloseable {
             boolean caseSensitive,
             BufferAllocator allocator,
             @Nullable Long memoryUsedMaxInBytes) {
+        this(
+                rowType,
+                writeBatchSize,
+                caseSensitive,
+                new RootAllocator(),
+                memoryUsedMaxInBytes,
+                ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR,
+                ArrowFieldWriterFactoryVisitor.INSTANCE);
+    }
+
+    public ArrowFormatWriter(
+            RowType rowType,
+            int writeBatchSize,
+            boolean caseSensitive,
+            BufferAllocator allocator,
+            @Nullable Long memoryUsedMaxInBytes,
+            ArrowFieldTypeConversion.ArrowFieldTypeVisitor fieldTypeVisitor,
+            ArrowFieldWriterFactoryVisitor fieldWriterFactory) {
         this.allocator = allocator;
 
-        vectorSchemaRoot = ArrowUtils.createVectorSchemaRoot(rowType, allocator, caseSensitive);
+        vectorSchemaRoot =
+                ArrowUtils.createVectorSchemaRoot(
+                        rowType, allocator, caseSensitive, fieldTypeVisitor);
 
         fieldWriters = new ArrowFieldWriter[rowType.getFieldCount()];
 
         for (int i = 0; i < fieldWriters.length; i++) {
             DataType type = rowType.getFields().get(i).type();
             fieldWriters[i] =
-                    type.accept(ArrowFieldWriterFactoryVisitor.INSTANCE)
+                    type.accept(fieldWriterFactory)
                             .create(vectorSchemaRoot.getVector(i), type.isNullable());
         }
 
