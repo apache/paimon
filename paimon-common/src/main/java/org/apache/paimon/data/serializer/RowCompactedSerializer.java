@@ -150,17 +150,21 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
         return rowWriter.copyBuffer();
     }
 
-    public InternalRow deserialize(byte[] bytes) {
+    public InternalRow deserialize(MemorySlice memorySlice) {
         if (rowReader == null) {
             rowReader = new RowReader(calculateBitSetInBytes(getters.length));
         }
-        rowReader.pointTo(bytes);
+        rowReader.pointTo(memorySlice.segment(), memorySlice.offset());
         GenericRow row = new GenericRow(readers.length);
         row.setRowKind(rowReader.readRowKind());
         for (int i = 0; i < readers.length; i++) {
             row.setField(i, rowReader.isNullAt(i) ? null : readers[i].readField(rowReader, i));
         }
         return row;
+    }
+
+    public InternalRow deserialize(byte[] bytes) {
+        return deserialize(MemorySlice.wrap(bytes));
     }
 
     public Comparator<MemorySlice> createSliceComparator() {

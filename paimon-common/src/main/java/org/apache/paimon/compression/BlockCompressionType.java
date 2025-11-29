@@ -18,6 +18,8 @@
 
 package org.apache.paimon.compression;
 
+import java.util.Arrays;
+
 /** Block Compression type. */
 public enum BlockCompressionType {
     NONE(0),
@@ -44,5 +46,17 @@ public enum BlockCompressionType {
         }
 
         throw new IllegalArgumentException("Unknown persistentId " + persistentId);
+    }
+
+    public static BlockCompressionType getCompressionTypeByValue(String value) {
+        BlockCompressionType[] types = values();
+        for (BlockCompressionType type : types) {
+            if (type.name().equalsIgnoreCase(value)) {
+                return type;
+            }
+        }
+
+        throw new IllegalArgumentException(
+                "Unknown type " + value + ", options are: " + Arrays.toString(types));
     }
 }
