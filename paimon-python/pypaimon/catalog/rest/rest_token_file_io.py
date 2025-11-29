@@ -40,6 +40,21 @@ class RESTTokenFileIO(FileIO):
         self.log = logging.getLogger(__name__)
         super().__init__(path, catalog_options)
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Remove non-serializable objects
+        state.pop('lock', None)
+        state.pop('api_instance', None)
+        # token can be serialized, but we'll refresh it on deserialization
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Recreate lock after deserialization
+        self.lock = threading.Lock()
+        # api_instance will be recreated when needed
+        self.api_instance = None
+
     def _initialize_oss_fs(self, path) -> FileSystem:
         self.try_to_refresh_token()
         self.properties.update(self.token.token)
