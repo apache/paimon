@@ -34,12 +34,13 @@ from pypaimon.table.row.row_kind import RowKind
 class FormatBlobReader(RecordBatchReader):
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
-                 full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool):
+                 full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool,
+                 batch_size: int = 4096):
         self._file_io = file_io
         self._file_path = file_path
         self._push_down_predicate = push_down_predicate
         self._blob_as_descriptor = blob_as_descriptor
-
+        self._batch_size = batch_size
         # Get file size
         self._file_size = file_io.get_file_size(file_path)
 
@@ -92,6 +93,8 @@ class FormatBlobReader(RecordBatchReader):
                     pydict_data[field_name].append(blob_data)
 
                 records_in_batch += 1
+                if records_in_batch >= self._batch_size:
+                    break
 
         except StopIteration:
             # Stop immediately when StopIteration occurs
