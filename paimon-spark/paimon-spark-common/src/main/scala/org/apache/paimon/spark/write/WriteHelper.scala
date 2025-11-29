@@ -41,48 +41,8 @@ trait WriteHelper extends Logging {
       return
     }
 
-    reportToHms(messages)
     batchCreateTag()
     markDoneIfNeeded(messages)
-  }
-
-  private def reportToHms(messages: Seq[CommitMessage]): Unit = {
-    val config = coreOptions.toConfiguration
-    if (
-      config.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC).toMillis <= 0 ||
-      table.partitionKeys.isEmpty ||
-      !coreOptions.partitionedTableInMetastore ||
-      table.catalogEnvironment.partitionHandler() == null
-    ) {
-      return
-    }
-
-    val partitionComputer = new InternalRowPartitionComputer(
-      coreOptions.partitionDefaultName,
-      table.schema.logicalPartitionType,
-      table.partitionKeys.toArray(new Array[String](0)),
-      coreOptions.legacyPartitionName()
-    )
-    val hmsReporter = new PartitionStatisticsReporter(
-      table,
-      table.catalogEnvironment.partitionHandler()
-    )
-
-    val partitions = messages.map(_.partition()).distinct
-    val currentTime = System.currentTimeMillis()
-    try {
-      partitions.foreach {
-        partition =>
-          val partitionPath = PartitionPathUtils.generatePartitionPath(
-            partitionComputer.generatePartValues(partition))
-          hmsReporter.report(partitionPath, currentTime)
-      }
-    } catch {
-      case e: Throwable =>
-        logWarning("Failed to report to hms", e)
-    } finally {
-      hmsReporter.close()
-    }
   }
 
   private def batchCreateTag(): Unit = {
