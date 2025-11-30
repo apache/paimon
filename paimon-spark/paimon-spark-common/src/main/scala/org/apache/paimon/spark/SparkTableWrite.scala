@@ -89,7 +89,8 @@ case class SparkTableWrite(
             message.bucket(),
             postponePartitionBucketComputer.get.apply(message.partition()),
             message.newFilesIncrement(),
-            message.compactIncrement())
+            message.compactIncrement()
+          )
         } else {
           message
         }
