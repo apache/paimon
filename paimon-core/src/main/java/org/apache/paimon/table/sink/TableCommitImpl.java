@@ -20,6 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
@@ -37,7 +38,11 @@ import org.apache.paimon.utils.CompactedChangelogPathResolver;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.FileOperationThreadPool;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.IndexFilePathFactories;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.PartitionPathUtils;
+import org.apache.paimon.utils.PartitionStatisticsReporter;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
@@ -54,6 +59,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -87,6 +93,8 @@ public class TableCommitImpl implements InnerTableCommit {
     private final String tableName;
     private final boolean forceCreatingSnapshot;
     private final ThreadPoolExecutor fileCheckExecutor;
+    @Nullable private final PartitionStatisticsReporter reporter;
+    private final InternalRowPartitionComputer partitionComputer;
 
     @Nullable private Map<String, String> overwritePartition = null;
     private boolean batchCommitted = false;
@@ -102,7 +110,9 @@ public class TableCommitImpl implements InnerTableCommit {
             ExpireExecutionMode expireExecutionMode,
             String tableName,
             boolean forceCreatingSnapshot,
-            int threadNum) {
+            int threadNum,
+            PartitionStatisticsReporter partitionStatisticsReporter,
+            InternalRowPartitionComputer partitionComputer) {
         if (partitionExpire != null) {
             commit.withPartitionExpire(partitionExpire);
         }
@@ -111,6 +121,8 @@ public class TableCommitImpl implements InnerTableCommit {
         this.expireSnapshots = expireSnapshots;
         this.partitionExpire = partitionExpire;
         this.tagAutoManager = tagAutoManager;
+        this.partitionComputer = partitionComputer;
+        this.reporter = partitionStatisticsReporter;
 
         this.consumerExpireTime = consumerExpireTime;
         this.consumerManager = consumerManager;
@@ -256,6 +268,7 @@ public class TableCommitImpl implements InnerTableCommit {
                     maintainExecutor,
                     newSnapshots > 0 || expireForEmptyCommit);
         }
+        reportPartitionStats(committables);
     }
 
     public int filterAndCommitMultiple(List<ManifestCommittable> committables) {
@@ -395,6 +408,39 @@ public class TableCommitImpl implements InnerTableCommit {
     public void expireSnapshots() {
         if (expireSnapshots != null) {
             expireSnapshots.run();
+        }
+    }
+
+    private void reportPartitionStats(List<ManifestCommittable> committables) {
+        // pre-checks
+
+        if (reporter == null) {
+            return;
+        }
+        if (!batchCommitted) {
+            return;
+        }
+
+        long currentTime = System.currentTimeMillis();
+        LOG.info("Start to report partition statistics");
+        try {
+            // collect distinct partitions from all committables
+            List<BinaryRow> parts =
+                    committables.stream()
+                            .map(ManifestCommittable::fileCommittables)
+                            .flatMap(List::stream)
+                            .map(CommitMessage::partition)
+                            .distinct()
+                            .collect(Collectors.toList());
+            for (BinaryRow part : parts) {
+                LinkedHashMap<String, String> spec = partitionComputer.generatePartValues(part);
+                String partitionPath = PartitionPathUtils.generatePartitionPath(spec);
+                reporter.report(partitionPath, currentTime);
+            }
+        } catch (Throwable e) {
+            LOG.warn("Failed to report partition statistics after commit", e);
+        } finally {
+            IOUtils.closeQuietly(reporter);
         }
     }
 

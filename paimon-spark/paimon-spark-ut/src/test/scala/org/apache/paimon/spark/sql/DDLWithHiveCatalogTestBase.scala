@@ -18,12 +18,17 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.CachingCatalog
+import org.apache.paimon.client.ClientPool
 import org.apache.paimon.fs.Path
-import org.apache.paimon.spark.PaimonHiveTestBase
+import org.apache.paimon.hive.HiveCatalog
+import org.apache.paimon.spark.{PaimonHiveTestBase, SparkCatalog}
 import org.apache.paimon.table.FileStoreTable
 
+import org.apache.hadoop.hive.metastore.IMetaStoreClient
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{AnalysisException, Row}
+import org.apache.thrift.TException
 import org.junit.jupiter.api.Assertions
 
 abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
@@ -771,6 +776,69 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
           }
         }
     }
+  }
+
+  test("test report partition statistics: write/compaction") {
+    Seq(paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        withTable("paimon_tbl") {
+          spark.sql(s"""
+                       |CREATE TABLE paimon_tbl (id STRING, name STRING, pt STRING)
+                       |USING PAIMON
+                       |TBLPROPERTIES (
+                       |'partition.idle-time-to-report-statistic' = '1s',
+                       |'metastore.partitioned-table' = 'true',
+                       |'compaction.min.file-num' = '1'
+                       |) PARTITIONED BY (pt)
+                       |""".stripMargin)
+          spark.sql("insert into paimon_tbl values('1', 'jack', '2025')")
+
+          val tbl = "paimon_tbl"
+          val hiveCatalog = spark.sessionState.catalogManager.currentCatalog
+            .asInstanceOf[SparkCatalog]
+            .paimonCatalog()
+            .asInstanceOf[CachingCatalog]
+            .wrapped()
+          val clientField = classOf[HiveCatalog].getDeclaredField("clients")
+          clientField.setAccessible(true)
+
+          val clients =
+            clientField.get(hiveCatalog).asInstanceOf[ClientPool[IMetaStoreClient, TException]]
+
+          try {
+            val part = clients.run(
+              (client: IMetaStoreClient) => client.getPartition("default", tbl, "pt=2025"))
+            Assertions.assertEquals(1, part.getParameters.get("numFiles").toInt)
+          } catch {
+            case e: Exception => Assertions.fail(e.getMessage)
+          }
+
+          spark.sql("insert into paimon_tbl values('2', 'jack', '2025')")
+
+          try {
+            val part = clients.run(
+              (client: IMetaStoreClient) => client.getPartition("default", tbl, "pt=2025"))
+            Assertions.assertEquals(2, part.getParameters.get("numFiles").toInt)
+          } catch {
+            case e: Exception => Assertions.fail(e.getMessage)
+          }
+
+          spark.sql(s"""
+          CALL sys.compact(table => 'default.$tbl', partitions => "pt='2025'")""")
+
+          try {
+            val part = clients.run(
+              (client: IMetaStoreClient) => client.getPartition("default", tbl, "pt=2025"))
+            // The paimon latest snapshot should be 1, but the hive will get the partition statistic by hdfs client
+            // so it equal to 3. But it also triggered by paimon report action.
+            Assertions.assertEquals(3, part.getParameters.get("numFiles").toInt)
+          } catch {
+            case e: Exception => Assertions.fail(e.getMessage)
+          }
+        }
+    }
+
   }
 
   def getDatabaseProp(dbName: String, propertyName: String): String = {
