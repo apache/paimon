@@ -75,7 +75,7 @@ public class IncrementalChangelogReadProvider implements SplitReadProvider {
                     return unwrap(reader);
                 };
 
-        return SplitRead.convert(read, convertedFactory);
+        return SplitRead.convert(read, convertedFactory, null);
     }
 
     @Override

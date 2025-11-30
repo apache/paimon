@@ -31,6 +31,7 @@ import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.CompoundKeyValueFileReaderFactory;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
@@ -72,7 +73,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
 
-    private KeyValueFileReaderFactory(
+    protected KeyValueFileReaderFactory(
             FileIO fileIO,
             SchemaManager schemaManager,
             TableSchema schema,
@@ -121,9 +122,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         Supplier<FormatReaderMapping> formatSupplier =
                 () ->
                         formatReaderMappingBuilder.build(
-                                formatIdentifier,
-                                schema,
-                                schemaId == schema.id() ? schema : schemaManager.schema(schemaId));
+                                formatIdentifier, schema, getDataSchema(file));
 
         FormatReaderMapping formatReaderMapping =
                 reuseFormat
@@ -144,7 +143,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                                         fileIO, filePath, fileSize, orcPoolSize),
                         formatReaderMapping.getIndexMapping(),
                         formatReaderMapping.getCastMapping(),
-                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
+                        PartitionUtils.create(
+                                formatReaderMapping.getPartitionPair(), getReadPartition()),
                         false,
                         null,
                         -1,
@@ -157,6 +157,15 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         }
 
         return new KeyValueDataFileRecordReader(fileRecordReader, keyType, valueType, file.level());
+    }
+
+    protected TableSchema getDataSchema(DataFileMeta file) {
+        long schemaId = file.schemaId();
+        return schemaId == schema.id() ? schema : schemaManager.schema(schemaId);
+    }
+
+    protected BinaryRow getReadPartition() {
+        return partition;
     }
 
     public static Builder builder(
@@ -293,6 +302,36 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     options.fileReaderAsyncThreshold().getBytes(),
                     partition,
                     dvFactory);
+        }
+
+        public CompoundKeyValueFileReaderFactory build(
+                DeletionVector.Factory dvFactory,
+                boolean projectKeys,
+                @Nullable List<Predicate> filters,
+                ReadContext readContext) {
+            RowType finalReadKeyType = projectKeys ? this.readKeyType : keyType();
+            Function<TableSchema, List<DataField>> fieldsExtractor =
+                    schema -> {
+                        List<DataField> dataKeyFields = extractor.keyFields(schema);
+                        List<DataField> dataValueFields = extractor.valueFields(schema);
+                        return KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);
+                    };
+            List<DataField> readTableFields =
+                    KeyValue.createKeyValueFields(
+                            finalReadKeyType.getFields(), readValueType().getFields());
+            return new CompoundKeyValueFileReaderFactory(
+                    fileIO,
+                    schemaManager,
+                    schema,
+                    finalReadKeyType,
+                    readValueType(),
+                    new FormatReaderMapping.Builder(
+                            formatDiscover, readTableFields, fieldsExtractor, filters, null, null),
+                    pathFactory.createCompoundReadDataFilePathFactory(readContext),
+                    options.fileReaderAsyncThreshold().getBytes(),
+                    null,
+                    dvFactory,
+                    readContext);
         }
 
         public FileIO fileIO() {

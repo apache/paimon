@@ -18,29 +18,8 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.table.source.snapshot.StartingScanner;
+public class SplitContext {
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-
-/** Scanning plan containing snapshot ID and input splits. */
-public class DataFilePlan<T extends Split> implements TableScan.Plan {
-
-    private final List<T> splits;
-
-    public DataFilePlan(List<T> splits) {
-        this.splits = splits;
-    }
-
-    @Override
-    public List<Split> splits() {
-        return new ArrayList<>(splits);
-    }
-
-    public static TableScan.Plan fromResult(StartingScanner.Result result) {
-        return result instanceof StartingScanner.ScannedResult
-                ? ((StartingScanner.ScannedResult) result).plan()
-                : new DataFilePlan(Collections.emptyList());
-    }
+    public static final long DATA_SPLIT_MAGIC = -2394839472490812314L;
+    public static final int DATA_SPLIT_VERSION = 8;
 }
