@@ -53,7 +53,8 @@ object PaimonMergeIntoResolver extends PaimonMergeIntoResolverBase {
       mergeCondition = resolvedCond,
       matchedActions = resolvedMatched,
       notMatchedActions = resolvedNotMatched,
-      notMatchedBySourceActions = resolvedNotMatchedBySource)
+      notMatchedBySourceActions = resolvedNotMatchedBySource
+    )
   }
 
 }

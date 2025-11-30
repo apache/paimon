@@ -78,7 +78,8 @@ case class PaimonStrategy(spark: SparkSession)
           comment,
           properties,
           allowExisting,
-          replace) =>
+          replace
+        ) =>
       CreatePaimonViewExec(
         viewCatalog,
         ident,

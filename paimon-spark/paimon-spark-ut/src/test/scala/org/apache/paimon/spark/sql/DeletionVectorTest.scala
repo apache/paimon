@@ -149,8 +149,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
   bucketModes.foreach {
     bucket =>
-      test(
-        s"Paimon DeletionVector: update for append non-partitioned table with bucket = $bucket") {
+      test(s"Paimon DeletionVector: update for append non-partitioned table with bucket = $bucket") {
         withTable("T") {
           val bucketKey = if (bucket > 1) {
             ", 'bucket-key' = 'id'"
@@ -309,8 +308,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
   bucketModes.foreach {
     bucket =>
-      test(
-        s"Paimon DeletionVector: delete for append non-partitioned table with bucket = $bucket") {
+      test(s"Paimon DeletionVector: delete for append non-partitioned table with bucket = $bucket") {
         withTable("T") {
           val bucketKey = if (bucket > 1) {
             ", 'bucket-key' = 'id'"

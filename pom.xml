@@ -997,7 +997,7 @@ under the License.
                             <toggleOffOn />
 
                             <scalafmt>
-                                <version>3.4.3</version>
+                                <version>3.10.2</version>
                                 <file>${maven.multiModuleProjectDirectory}/.scalafmt.conf</file>
                             </scalafmt>
 

@@ -78,9 +78,7 @@ case class PaimonScan(
     }
   }
 
-  /**
-   * Extract the bucket number from the splits only if all splits have the same totalBuckets number.
-   */
+  /** Extract the bucket number from the splits only if all splits have the same totalBuckets number. */
   private def extractBucketNumber(): Option[Int] = {
     val splits = getOriginSplits
     if (splits.exists(!_.isInstanceOf[DataSplit])) {
