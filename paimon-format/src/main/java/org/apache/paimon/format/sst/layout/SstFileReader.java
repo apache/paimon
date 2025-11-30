@@ -19,8 +19,8 @@
 package org.apache.paimon.format.sst.layout;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.compression.BlockCompressionFactory;
-import org.apache.paimon.compression.BlockDecompressor;
+import org.apache.paimon.format.sst.compression.BlockCompressionFactory;
+import org.apache.paimon.format.sst.compression.BlockDecompressor;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.memory.MemorySegment;

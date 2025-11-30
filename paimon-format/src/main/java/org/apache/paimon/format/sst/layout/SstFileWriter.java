@@ -18,9 +18,9 @@
 
 package org.apache.paimon.format.sst.layout;
 
-import org.apache.paimon.compression.BlockCompressionFactory;
-import org.apache.paimon.compression.BlockCompressionType;
-import org.apache.paimon.compression.BlockCompressor;
+import org.apache.paimon.format.sst.compression.BlockCompressionFactory;
+import org.apache.paimon.format.sst.compression.BlockCompressionType;
+import org.apache.paimon.format.sst.compression.BlockCompressor;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
