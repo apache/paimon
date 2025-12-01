@@ -285,9 +285,14 @@ public class ParquetReaderUtil {
         if (type instanceof VariantType) {
             if (shreddingSchema != null) {
                 VariantType variantType = (VariantType) type;
+                DataType clippedParquetType =
+                        variantFields == null
+                                ? shreddingSchema
+                                : VariantAccessInfoUtils.clipVariantSchema(
+                                        shreddingSchema, variantFields);
                 ParquetGroupField parquetField =
                         (ParquetGroupField)
-                                constructField(dataField.newType(shreddingSchema), columnIO);
+                                constructField(dataField.newType(clippedParquetType), columnIO);
                 DataType readType =
                         variantFields == null
                                 ? variantType

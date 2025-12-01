@@ -77,6 +77,10 @@ public class VariantAccessInfo implements Serializable {
             this.castArgs = castArgs;
         }
 
+        public VariantField(DataField dataField, String path) {
+            this(dataField, path, VariantCastArgs.defaultArgs());
+        }
+
         public DataField dataField() {
             return dataField;
         }
