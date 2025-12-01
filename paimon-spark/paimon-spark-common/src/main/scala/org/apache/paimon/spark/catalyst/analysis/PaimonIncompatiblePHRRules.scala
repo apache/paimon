@@ -40,7 +40,10 @@ case class PaimonIncompatiblePHRRules(session: SparkSession) extends Rule[Logica
             val field = schema.find(f => resolver(f.name, name)).getOrElse {
               throw new RuntimeException(s"$name is not a valid partition column in $schema.")
             }
-            (name -> ident.get(index, field.dataType).toString)
+
+            val partVal: String =
+              if (ident.isNullAt(index)) null else ident.get(index, field.dataType).toString
+            (name -> partVal)
         }.toMap
         PaimonTruncateTableCommand(table, partitionSpec)
 
