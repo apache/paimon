@@ -63,7 +63,6 @@ under the License.
         <module>paimon-filesystems</module>
         <module>paimon-format</module>
         <module>paimon-lance</module>
-        <module>paimon-vector</module>
         <module>paimon-vfs</module>
         <module>paimon-bundle</module>
         <module>paimon-hive</module>
@@ -501,6 +500,16 @@ under the License.
             <id>paimon-iceberg</id>
             <modules>
                 <module>paimon-iceberg</module>
+            </modules>
+            <activation>
+                <jdk>11</jdk>
+            </activation>
+        </profile>
+
+        <profile>
+            <id>paimon-vector</id>
+            <modules>
+                <module>paimon-vector</module>
             </modules>
             <activation>
                 <jdk>11</jdk>
