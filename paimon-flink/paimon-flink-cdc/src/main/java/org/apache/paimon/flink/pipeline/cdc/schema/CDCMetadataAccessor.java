@@ -78,6 +78,24 @@ public class CDCMetadataAccessor implements MetadataAccessor {
         for (String databaseName : databaseNames) {
             try {
                 for (String tableName : catalog.listTables(databaseName)) {
+                    Identifier identifier = Identifier.create(databaseName, tableName);
+                    try {
+                        Table table = catalog.getTable(identifier);
+                        if (!(table instanceof FileStoreTable)) {
+                            LOG.info(
+                                    "listTables found table {}, but it is a {} instead of a FileStoreTable. Skipping this table.",
+                                    identifier,
+                                    table.getClass().getSimpleName());
+                            continue;
+                        }
+                    } catch (Catalog.TableNotExistException e) {
+                        LOG.warn(
+                                "Table {} does not exist. Perhaps it is dropped in the middle of this method. Skipping this table.",
+                                identifier,
+                                e);
+                        continue;
+                    }
+
                     tableIds.add(TableId.tableId(databaseName, tableName));
                 }
             } catch (Catalog.DatabaseNotExistException e) {

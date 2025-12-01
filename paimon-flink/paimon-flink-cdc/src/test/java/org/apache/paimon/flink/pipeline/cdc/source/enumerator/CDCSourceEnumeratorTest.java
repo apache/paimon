@@ -29,7 +29,6 @@ import org.apache.paimon.flink.source.FileSplitEnumeratorTestBase;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
@@ -76,7 +75,6 @@ public class CDCSourceEnumeratorTest
                     .option("bucket", String.valueOf(NUM_TABLES))
                     .option("bucket-key", "a")
                     .build();
-    private static final TableSchema TABLE_SCHEMA = TableSchema.create(1L, SCHEMA);
 
     private Catalog catalog;
 
@@ -502,7 +500,7 @@ public class CDCSourceEnumeratorTest
                 0,
                 identifier,
                 null,
-                TABLE_SCHEMA);
+                1L);
     }
 
     private static class TestCDCSourceEnumerator extends CDCSourceEnumerator {
@@ -523,10 +521,10 @@ public class CDCSourceEnumeratorTest
                 Split split,
                 FileStoreTable table,
                 Identifier identifier,
-                @Nullable TableSchema lastSchema) {
+                @Nullable Long lastSchemaId) {
             Preconditions.checkState(split instanceof DataSplit);
             return new TableAwareFileStoreSourceSplit(
-                    splitId, split, 0, identifier, lastSchema, TABLE_SCHEMA);
+                    splitId, split, 0, identifier, lastSchemaId, 1L);
         }
     }
 }

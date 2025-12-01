@@ -49,9 +49,9 @@ public class CDCSourceReader
             SourceReaderContext readerContext,
             FileStoreSourceReaderMetrics metrics,
             IOManager ioManager,
-            CDCSource.TableReadManager tableReadManager) {
+            CDCSource.TableManager tableManager) {
         super(
-                () -> new CDCSourceSplitReader(metrics, tableReadManager),
+                () -> new CDCSourceSplitReader(metrics, tableManager),
                 (element, output, state) ->
                         CDCRecordsWithSplitIds.emitRecord(
                                 readerContext, element, output, state, metrics),

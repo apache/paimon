@@ -20,7 +20,6 @@ package org.apache.paimon.flink.pipeline.cdc.source;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -42,32 +41,32 @@ import java.util.Objects;
  */
 public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
     private final Identifier identifier;
-    @Nullable private final TableSchema lastSchema;
-    private final TableSchema schema;
+    private final @Nullable Long lastSchemaId;
+    private final long schemaId;
 
     public TableAwareFileStoreSourceSplit(
             String id,
             Split split,
             long recordsToSkip,
             Identifier identifier,
-            @Nullable TableSchema lastSchema,
-            TableSchema schema) {
+            @Nullable Long lastSchemaId,
+            long schemaId) {
         super(id, split, recordsToSkip);
         this.identifier = identifier;
-        this.lastSchema = lastSchema;
-        this.schema = schema;
+        this.lastSchemaId = lastSchemaId;
+        this.schemaId = schemaId;
     }
 
     public Identifier getIdentifier() {
         return identifier;
     }
 
-    public @Nullable TableSchema getLastSchema() {
-        return lastSchema;
+    public @Nullable Long getLastSchemaId() {
+        return lastSchemaId;
     }
 
-    public TableSchema getSchema() {
-        return schema;
+    public long getSchemaId() {
+        return schemaId;
     }
 
     @Override
@@ -81,13 +80,14 @@ public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
                 && Objects.equals(split(), other.split())
                 && recordsToSkip() == other.recordsToSkip()
                 && identifier.equals(other.identifier)
-                && Objects.equals(lastSchema, other.lastSchema)
-                && schema.equals(other.schema);
+                && Objects.equals(lastSchemaId, other.lastSchemaId)
+                && schemaId == other.schemaId;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(splitId(), split(), recordsToSkip(), identifier, lastSchema, schema);
+        return Objects.hash(
+                splitId(), split(), recordsToSkip(), identifier, lastSchemaId, schemaId);
     }
 
     @Override
@@ -102,16 +102,17 @@ public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
                 + recordsToSkip()
                 + ", identifier="
                 + identifier
-                + ", lastSchema="
-                + lastSchema
-                + ", schema="
-                + schema
+                + ", lastSchemaId="
+                + lastSchemaId
+                + ", schemaId="
+                + schemaId
                 + '}';
     }
 
     /** The serializer for {@link TableAwareFileStoreSourceSplit}. */
     public static class Serializer
             implements SimpleVersionedSerializer<TableAwareFileStoreSourceSplit> {
+        private static final Long NULL_SCHEMA_ID = -1L;
 
         @Override
         public int getVersion() {
@@ -126,8 +127,9 @@ public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
             InstantiationUtil.serializeObject(view, split.split());
             view.writeLong(split.recordsToSkip());
             view.writeUTF(JsonSerdeUtil.toJson(split.getIdentifier()));
-            view.writeUTF(JsonSerdeUtil.toJson(split.getLastSchema()));
-            view.writeUTF(JsonSerdeUtil.toJson(split.getSchema()));
+            view.writeLong(
+                    split.getLastSchemaId() == null ? NULL_SCHEMA_ID : split.getLastSchemaId());
+            view.writeLong(split.getSchemaId());
             return out.toByteArray();
         }
 
@@ -145,10 +147,13 @@ public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
             }
             long recordsToSkip = view.readLong();
             Identifier identifier = JsonSerdeUtil.fromJson(view.readUTF(), Identifier.class);
-            TableSchema lastSchema = TableSchema.fromJson(view.readUTF());
-            TableSchema schema = TableSchema.fromJson(view.readUTF());
+            Long lastSchemaId = view.readLong();
+            if (lastSchemaId.equals(NULL_SCHEMA_ID)) {
+                lastSchemaId = null;
+            }
+            long schemaId = view.readLong();
             return new TableAwareFileStoreSourceSplit(
-                    splitId, split, recordsToSkip, identifier, lastSchema, schema);
+                    splitId, split, recordsToSkip, identifier, lastSchemaId, schemaId);
         }
     }
 }

@@ -58,6 +58,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -88,7 +90,6 @@ public class CDCSourceSplitReaderTest {
                     Collections.emptyList(),
                     Collections.emptyMap(),
                     null);
-    private static final TableSchema TABLE_SCHEMA = TableSchema.create(1L, SCHEMA);
 
     private String tablePath;
 
@@ -517,19 +518,14 @@ public class CDCSourceSplitReaderTest {
                         .withBucketPath("/temp/" + bucket) // no used
                         .build();
         return new TableAwareFileStoreSourceSplit(
-                id,
-                split,
-                recordsToSkip,
-                Identifier.create(DATABASE, TABLE),
-                TABLE_SCHEMA,
-                TABLE_SCHEMA);
+                id, split, recordsToSkip, Identifier.create(DATABASE, TABLE), 1L, 1L);
     }
 
     private static class TestCDCSourceSplitReader extends CDCSourceSplitReader {
         private final TableRead tableRead;
 
         public TestCDCSourceSplitReader(FileStoreSourceReaderMetrics metrics, TableRead tableRead) {
-            super(metrics, new TestTableReadManager(tableRead));
+            super(metrics, new TestTableManager(tableRead));
             this.tableRead = tableRead;
         }
 
@@ -544,7 +540,7 @@ public class CDCSourceSplitReaderTest {
         private RecordReader<InternalRow> lazyRecordReader;
 
         protected TestLazyRecordReader(Split split, TableRead tableRead) {
-            super(split, null, new TestTableReadManager(tableRead));
+            super(split, null, new TestTableManager(tableRead));
             this.tableRead = tableRead;
         }
 
@@ -557,12 +553,18 @@ public class CDCSourceSplitReaderTest {
         }
     }
 
-    private static class TestTableReadManager extends CDCSource.TableReadManager {
+    private static class TestTableManager extends CDCSource.TableManager {
         private final TableRead tableRead;
 
-        public TestTableReadManager(TableRead tableRead) {
+        public TestTableManager(TableRead tableRead) {
             super(null, null, null);
             this.tableRead = tableRead;
+        }
+
+        @Override
+        public @Nullable TableSchema getTableSchema(
+                Identifier identifier, @Nullable Long schemaId) {
+            return TableSchema.create(1L, SCHEMA);
         }
 
         @Override

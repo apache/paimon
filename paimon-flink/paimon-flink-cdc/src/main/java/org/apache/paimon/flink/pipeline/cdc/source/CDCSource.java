@@ -41,17 +41,23 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.cdc.common.configuration.Configuration;
 import org.apache.flink.cdc.common.event.Event;
+import org.apache.flink.cdc.common.event.SchemaChangeEvent;
+import org.apache.flink.cdc.common.event.TableId;
 import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.metrics.groups.SourceReaderMetricGroup;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.cdc.common.utils.SchemaMergingUtils.getSchemaDifference;
 import static org.apache.paimon.disk.IOManagerImpl.splitPaths;
 import static org.apache.paimon.flink.pipeline.cdc.util.CDCUtils.createCatalog;
+import static org.apache.paimon.flink.pipeline.cdc.util.PaimonToFlinkCDCTypeConverter.convertPaimonSchemaToFlinkCDCSchema;
 
 /** The {@link Source} that integrates with Flink CDC framework. */
 public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, CDCCheckpoint> {
@@ -118,23 +124,41 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
                 new FileStoreSourceReaderMetrics(metricGroup);
 
         Catalog catalog = createCatalog(catalogContext, flinkConfig);
-        TableReadManager tableReadManager = new TableReadManager(catalog, ioManager, metricGroup);
-        return new CDCSourceReader(context, sourceReaderMetrics, ioManager, tableReadManager);
+        TableManager manager = new TableManager(catalog, ioManager, metricGroup);
+        return new CDCSourceReader(context, sourceReaderMetrics, ioManager, manager);
     }
 
-    /** A manager for {@link TableRead}s. */
-    public static class TableReadManager {
+    /** A manager for information related to the tables. */
+    public static class TableManager {
         private final Map<Identifier, FileStoreTable> tableMap = new HashMap<>();
+        private final Map<Tuple2<Identifier, Long>, TableSchema> tableSchemaMap = new HashMap<>();
         private final Map<Tuple2<Identifier, Long>, TableRead> tableReadMap = new HashMap<>();
         private final Catalog catalog;
         private final IOManager ioManager;
         private final SourceReaderMetricGroup metricGroup;
 
-        protected TableReadManager(
+        protected TableManager(
                 Catalog catalog, IOManager ioManager, SourceReaderMetricGroup metricGroup) {
             this.catalog = catalog;
             this.ioManager = ioManager;
             this.metricGroup = metricGroup;
+        }
+
+        public @Nullable TableSchema getTableSchema(
+                Identifier identifier, @Nullable Long schemaId) {
+            if (schemaId == null) {
+                return null;
+            }
+
+            Tuple2<Identifier, Long> cacheKey = Tuple2.of(identifier, schemaId);
+            if (tableSchemaMap.containsKey(cacheKey)) {
+                return tableSchemaMap.get(cacheKey);
+            }
+
+            FileStoreTable table = getTable(identifier);
+            TableSchema tableSchema = table.schemaManager().schema(schemaId);
+            tableSchemaMap.put(cacheKey, tableSchema);
+            return tableSchema;
         }
 
         public TableRead getTableRead(Identifier identifier, TableSchema schema) {
@@ -151,6 +175,18 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
                             .withMetricRegistry(new FlinkMetricRegistry(metricGroup));
             tableReadMap.put(cacheKey, tableRead);
             return tableRead;
+        }
+
+        public List<SchemaChangeEvent> generateSchemaChangeEventList(
+                Identifier identifier, @Nullable Long lastSchemaId, long schemaId) {
+            if (lastSchemaId != null && lastSchemaId.equals(schemaId)) {
+                return Collections.emptyList();
+            }
+
+            return getSchemaDifference(
+                    TableId.tableId(identifier.getDatabaseName(), identifier.getTableName()),
+                    convertPaimonSchemaToFlinkCDCSchema(getTableSchema(identifier, lastSchemaId)),
+                    convertPaimonSchemaToFlinkCDCSchema(getTableSchema(identifier, schemaId)));
         }
 
         private FileStoreTable getTable(Identifier identifier) {

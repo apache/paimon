@@ -19,10 +19,7 @@
 package org.apache.paimon.flink.pipeline.cdc.source;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
@@ -51,14 +48,7 @@ public class TableAwareFileStoreSourceSplitSerializerTest {
                         .withBucketPath("/temp/2") // not used
                         .build();
         TableAwareFileStoreSourceSplit split =
-                new TableAwareFileStoreSourceSplit(
-                        "split-1",
-                        dataSplit,
-                        0L,
-                        identifier,
-                        null,
-                        TableSchema.create(
-                                1L, Schema.newBuilder().column("f0", DataTypes.INT()).build()));
+                new TableAwareFileStoreSourceSplit("split-1", dataSplit, 0L, identifier, null, 1L);
 
         TableAwareFileStoreSourceSplit.Serializer serializer =
                 new TableAwareFileStoreSourceSplit.Serializer();

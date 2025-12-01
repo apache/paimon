@@ -25,7 +25,6 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.pipeline.cdc.source.TableAwareFileStoreSourceSplit;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
@@ -272,16 +271,16 @@ public class CDCSourceEnumerator
         FileStoreTable table = tableStatusMap.get(tableAwarePlan.identifier).table;
         List<TableAwareFileStoreSourceSplit> splits = new ArrayList<>();
         for (Split split : plan.splits()) {
-            TableSchema lastSchema = tableStatusMap.get(tableAwarePlan.identifier).schema;
+            Long lastSchemaId = tableStatusMap.get(tableAwarePlan.identifier).schemaId;
             TableAwareFileStoreSourceSplit tableAwareFileStoreSourceSplit =
                     toTableAwareSplit(
                             splitIdGenerator.getNextId(),
                             split,
                             table,
                             tableAwarePlan.identifier,
-                            lastSchema);
-            tableStatusMap.get(tableAwarePlan.identifier).schema =
-                    tableAwareFileStoreSourceSplit.getSchema();
+                            lastSchemaId);
+            tableStatusMap.get(tableAwarePlan.identifier).schemaId =
+                    tableAwareFileStoreSourceSplit.getSchemaId();
             splits.add(tableAwareFileStoreSourceSplit);
         }
 
@@ -295,13 +294,12 @@ public class CDCSourceEnumerator
             Split split,
             FileStoreTable table,
             Identifier identifier,
-            @Nullable TableSchema lastSchema) {
+            @Nullable Long lastSchemaId) {
         Preconditions.checkState(split instanceof DataSplit);
         long snapshotId = ((DataSplit) split).snapshotId();
         long schemaId = table.snapshot(snapshotId).schemaId();
-        TableSchema schema = table.schemaManager().schema(schemaId);
         return new TableAwareFileStoreSourceSplit(
-                splitId, split, 0, identifier, lastSchema, schema);
+                splitId, split, 0, identifier, lastSchemaId, schemaId);
     }
 
     /**
@@ -411,7 +409,7 @@ public class CDCSourceEnumerator
     private static class TableStatus {
         private final FileStoreTable table;
         private final StreamDataTableScan scan;
-        private TableSchema schema;
+        private Long schemaId;
         private Integer subtaskId;
         private Long nextSnapshotId;
 

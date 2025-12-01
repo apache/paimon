@@ -59,7 +59,6 @@ import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.apache.flink.cdc.common.utils.SchemaMergingUtils.getSchemaDifference;
 import static org.apache.paimon.flink.pipeline.cdc.util.PaimonToFlinkCDCDataConverter.convertRowToDataChangeEvent;
 import static org.apache.paimon.flink.pipeline.cdc.util.PaimonToFlinkCDCTypeConverter.convertPaimonSchemaToFlinkCDCSchema;
 
@@ -73,7 +72,7 @@ public class CDCSourceSplitReader
 
     private final Pool<FileStoreRecordIterator> pool;
 
-    private final CDCSource.TableReadManager tableReadManager;
+    private final CDCSource.TableManager tableManager;
     private TableReaderInfo currentTableReaderInfo;
     @Nullable private LazyRecordReader currentReader;
     @Nullable private String currentSplitId;
@@ -85,14 +84,14 @@ public class CDCSourceSplitReader
     private final FileStoreSourceReaderMetrics metrics;
 
     public CDCSourceSplitReader(
-            FileStoreSourceReaderMetrics metrics, CDCSource.TableReadManager tableReadManager) {
+            FileStoreSourceReaderMetrics metrics, CDCSource.TableManager tableManager) {
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
         this.pool.add(new FileStoreRecordIterator());
         this.paused = false;
         this.metrics = metrics;
         this.wakeup = new AtomicBoolean(false);
-        this.tableReadManager = tableReadManager;
+        this.tableManager = tableManager;
     }
 
     @Override
@@ -210,11 +209,12 @@ public class CDCSourceSplitReader
             metrics.recordSnapshotUpdate(eventTime);
         }
 
-        currentTableReaderInfo =
-                new TableReaderInfo(
-                        nextSplit.getIdentifier(),
-                        nextSplit.getLastSchema(),
-                        nextSplit.getSchema());
+        Identifier identifier = nextSplit.getIdentifier();
+        TableSchema tableSchema = tableManager.getTableSchema(identifier, nextSplit.getSchemaId());
+        List<SchemaChangeEvent> schemaChangeEvents =
+                tableManager.generateSchemaChangeEventList(
+                        identifier, nextSplit.getLastSchemaId(), nextSplit.getSchemaId());
+        currentTableReaderInfo = new TableReaderInfo(identifier, tableSchema, schemaChangeEvents);
         currentSplitId = nextSplit.splitId();
         currentReader = createLazyRecordReader(nextSplit.split());
         currentNumRead = nextSplit.recordsToSkip();
@@ -226,7 +226,7 @@ public class CDCSourceSplitReader
 
     @VisibleForTesting
     protected LazyRecordReader createLazyRecordReader(Split split) {
-        return new LazyRecordReader(split, currentTableReaderInfo, tableReadManager);
+        return new LazyRecordReader(split, currentTableReaderInfo, tableManager);
     }
 
     private void seek(long toSkip) throws IOException {
@@ -278,7 +278,7 @@ public class CDCSourceSplitReader
             this.iterator = iterator;
             this.recordAndPosition.set(null, RecordAndPosition.NO_OFFSET, currentNumRead);
             this.tableReaderInfo = tableReaderInfo;
-            this.schemaChangeEventList.addAll(tableReaderInfo.generateSchemaChangeEventList());
+            this.schemaChangeEventList.addAll(tableReaderInfo.schemaChangeEvents);
             return this;
         }
 
@@ -329,22 +329,22 @@ public class CDCSourceSplitReader
 
         protected final Split split;
         private final TableReaderInfo currentTableReaderInfo;
-        private final CDCSource.TableReadManager tableReadManager;
+        private final CDCSource.TableManager tableManager;
         private RecordReader<InternalRow> lazyRecordReader;
 
         protected LazyRecordReader(
                 Split split,
                 TableReaderInfo currentTableReaderInfo,
-                CDCSource.TableReadManager tableReadManager) {
+                CDCSource.TableManager tableManager) {
             this.split = split;
             this.currentTableReaderInfo = currentTableReaderInfo;
-            this.tableReadManager = tableReadManager;
+            this.tableManager = tableManager;
         }
 
         public RecordReader<InternalRow> recordReader() throws IOException {
             if (lazyRecordReader == null) {
                 lazyRecordReader =
-                        tableReadManager
+                        tableManager
                                 .getTableRead(
                                         currentTableReaderInfo.identifier,
                                         currentTableReaderInfo.currentSchema)
@@ -357,18 +357,20 @@ public class CDCSourceSplitReader
     private static class TableReaderInfo {
         private final Identifier identifier;
         private final TableId tableId;
-        private final TableSchema lastSchema;
         private final TableSchema currentSchema;
+        private final List<SchemaChangeEvent> schemaChangeEvents;
         private final BinaryRecordDataGenerator generator;
         private final List<InternalRow.FieldGetter> fieldGetters;
 
         private TableReaderInfo(
-                Identifier identifier, TableSchema lastSchema, TableSchema currentSchema) {
+                Identifier identifier,
+                TableSchema currentSchema,
+                List<SchemaChangeEvent> schemaChangeEvents) {
             this.identifier = identifier;
             this.tableId = TableId.tableId(identifier.getDatabaseName(), identifier.getTableName());
 
-            this.lastSchema = lastSchema;
             this.currentSchema = currentSchema;
+            this.schemaChangeEvents = schemaChangeEvents;
 
             org.apache.flink.cdc.common.schema.Schema currentCDCSchema =
                     convertPaimonSchemaToFlinkCDCSchema(currentSchema);
@@ -378,13 +380,6 @@ public class CDCSourceSplitReader
             this.fieldGetters =
                     PaimonToFlinkCDCDataConverter.createFieldGetters(
                             currentCDCSchema.getColumnDataTypes());
-        }
-
-        private List<SchemaChangeEvent> generateSchemaChangeEventList() {
-            return getSchemaDifference(
-                    this.tableId,
-                    convertPaimonSchemaToFlinkCDCSchema(this.lastSchema),
-                    convertPaimonSchemaToFlinkCDCSchema(this.currentSchema));
         }
     }
 }

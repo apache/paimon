@@ -20,10 +20,7 @@ package org.apache.paimon.flink.pipeline.cdc.source.enumerator;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.pipeline.cdc.source.TableAwareFileStoreSourceSplit;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
@@ -53,15 +50,7 @@ public class CDCCheckpointSerializerTest {
                         .rawConvertible(false)
                         .withBucketPath("/temp/2") // not used
                         .build();
-        splits.add(
-                new TableAwareFileStoreSourceSplit(
-                        "1",
-                        dataSplit,
-                        0,
-                        identifier,
-                        null,
-                        TableSchema.create(
-                                1L, Schema.newBuilder().column("f0", DataTypes.INT()).build())));
+        splits.add(new TableAwareFileStoreSourceSplit("1", dataSplit, 0, identifier, null, 1L));
 
         Map<Identifier, Long> nextSnapshotIdMap = new HashMap<>();
         nextSnapshotIdMap.put(identifier, 3L);
