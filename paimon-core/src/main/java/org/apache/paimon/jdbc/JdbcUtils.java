@@ -237,6 +237,108 @@ public class JdbcUtils {
     static final String ACQUIRED_AT = "acquired_at";
     static final String EXPIRE_TIME = "expire_time_seconds";
 
+    // View table
+    public static final String VIEW_TABLE_NAME = "paimon_views";
+    public static final String VIEW_DATABASE = "database_name";
+    public static final String VIEW_NAME = "view_name";
+    public static final String VIEW_SCHEMA = "view_schema";
+
+    static final String CREATE_VIEW_TABLE =
+            "CREATE TABLE "
+                    + VIEW_TABLE_NAME
+                    + "("
+                    + CATALOG_KEY
+                    + " VARCHAR(255) NOT NULL,"
+                    + VIEW_DATABASE
+                    + " VARCHAR(255) NOT NULL,"
+                    + VIEW_NAME
+                    + " VARCHAR(255) NOT NULL,"
+                    + VIEW_SCHEMA
+                    + " TEXT NOT NULL,"
+                    + " PRIMARY KEY ("
+                    + CATALOG_KEY
+                    + ", "
+                    + VIEW_DATABASE
+                    + ", "
+                    + VIEW_NAME
+                    + ")"
+                    + ")";
+
+    static final String GET_VIEW_SQL =
+            "SELECT * FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " = ? ";
+
+    static final String LIST_VIEWS_SQL =
+            "SELECT * FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ?";
+
+    static final String INSERT_VIEW_SQL =
+            "INSERT INTO "
+                    + VIEW_TABLE_NAME
+                    + " ("
+                    + CATALOG_KEY
+                    + ", "
+                    + VIEW_DATABASE
+                    + ", "
+                    + VIEW_NAME
+                    + ", "
+                    + VIEW_SCHEMA
+                    + ") "
+                    + " VALUES (?,?,?,?)";
+
+    static final String DROP_VIEW_SQL =
+            "DELETE FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " = ? ";
+
+    static final String RENAME_VIEW_SQL =
+            "UPDATE "
+                    + VIEW_TABLE_NAME
+                    + " SET "
+                    + VIEW_DATABASE
+                    + " = ? , "
+                    + VIEW_NAME
+                    + " = ? "
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " = ? ";
+
+    static final String UPDATE_VIEW_SQL =
+            "UPDATE "
+                    + VIEW_TABLE_NAME
+                    + " SET "
+                    + VIEW_SCHEMA
+                    + " = ? "
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " = ? ";
+
     public static Properties extractJdbcConfiguration(
             Map<String, String> properties, String prefix) {
         Properties result = new Properties();
@@ -516,5 +618,125 @@ public class JdbcUtils {
         sqlStatement.append("(").append(values).append(")");
 
         return sqlStatement.toString();
+    }
+
+    /** Check if view exists. */
+    public static boolean viewExists(
+            JdbcClientPool connections, String storeKey, String databaseName, String viewName) {
+        return exists(connections, JdbcUtils.GET_VIEW_SQL, storeKey, databaseName, viewName);
+    }
+
+    /** Get view schema JSON. */
+    public static String getViewSchema(
+            JdbcClientPool connections, String storeKey, String databaseName, String viewName)
+            throws SQLException, InterruptedException {
+        return connections.run(
+                conn -> {
+                    try (PreparedStatement sql = conn.prepareStatement(JdbcUtils.GET_VIEW_SQL)) {
+                        sql.setString(1, storeKey);
+                        sql.setString(2, databaseName);
+                        sql.setString(3, viewName);
+                        ResultSet rs = sql.executeQuery();
+                        if (rs.next()) {
+                            String schema = rs.getString(VIEW_SCHEMA);
+                            rs.close();
+                            return schema;
+                        }
+                        rs.close();
+                        return null;
+                    }
+                });
+    }
+
+    /** Insert view. */
+    public static void insertView(
+            JdbcClientPool connections,
+            String storeKey,
+            String databaseName,
+            String viewName,
+            String viewSchemaJson) {
+        int insertedRecords =
+                execute(
+                        err -> {
+                            if (err instanceof SQLIntegrityConstraintViolationException
+                                    || (err.getMessage() != null
+                                            && err.getMessage().contains("constraint failed"))) {
+                                throw new RuntimeException(
+                                        String.format(
+                                                "View already exists: %s.%s",
+                                                databaseName, viewName));
+                            }
+                        },
+                        connections,
+                        JdbcUtils.INSERT_VIEW_SQL,
+                        storeKey,
+                        databaseName,
+                        viewName,
+                        viewSchemaJson);
+
+        if (insertedRecords != 1) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to insert view %s.%s: affected %d rows",
+                            databaseName, viewName, insertedRecords));
+        }
+    }
+
+    /** Update view. */
+    public static void updateView(
+            JdbcClientPool connections,
+            String storeKey,
+            String databaseName,
+            String viewName,
+            String viewSchemaJson) {
+        int updatedRecords =
+                execute(
+                        connections,
+                        JdbcUtils.UPDATE_VIEW_SQL,
+                        viewSchemaJson,
+                        storeKey,
+                        databaseName,
+                        viewName);
+
+        if (updatedRecords == 0) {
+            throw new RuntimeException(
+                    String.format("View does not exist: %s.%s", databaseName, viewName));
+        } else if (updatedRecords != 1) {
+            LOG.warn(
+                    "Update operation affected {} rows: the view table's primary key assumption has been violated",
+                    updatedRecords);
+        }
+    }
+
+    /** Rename view. */
+    public static void renameView(
+            JdbcClientPool connections, String storeKey, Identifier fromView, Identifier toView) {
+        int updatedRecords =
+                execute(
+                        err -> {
+                            if (err instanceof SQLIntegrityConstraintViolationException
+                                    || (err.getMessage() != null
+                                            && err.getMessage().contains("constraint failed"))) {
+                                throw new RuntimeException(
+                                        String.format("View already exists: %s", toView));
+                            }
+                        },
+                        connections,
+                        JdbcUtils.RENAME_VIEW_SQL,
+                        toView.getDatabaseName(),
+                        toView.getObjectName(),
+                        storeKey,
+                        fromView.getDatabaseName(),
+                        fromView.getObjectName());
+
+        if (updatedRecords == 1) {
+            LOG.info("Renamed view from {}, to {}", fromView, toView);
+        } else if (updatedRecords == 0) {
+            throw new RuntimeException(String.format("View does not exist: %s", fromView));
+        } else {
+            LOG.warn(
+                    "Rename operation affected {} rows: the view table's primary key assumption has been violated",
+                    updatedRecords);
+        }
     }
 }
