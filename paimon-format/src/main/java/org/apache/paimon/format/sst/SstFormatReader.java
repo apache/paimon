@@ -22,7 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.format.sst.layout.BlockEntry;
 import org.apache.paimon.format.sst.layout.BlockIterator;
-import org.apache.paimon.format.sst.layout.SstFileReader;
+import org.apache.paimon.format.sst.layout.SstFileScanReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
@@ -47,7 +47,7 @@ public class SstFormatReader implements FileRecordReader<InternalRow> {
      */
     private final DataEvolutionRow resultRow;
 
-    private final SstFileReader fileReader;
+    private final SstFileScanReader fileReader;
     private final SeekableInputStream inputStream;
     private final Path filePath;
     @Nullable private final List<Integer> selection;
@@ -70,7 +70,7 @@ public class SstFormatReader implements FileRecordReader<InternalRow> {
         this.filePath = filePath;
         // we could set block cache in the future if we want to pre-fetch some data blocks for scan
         this.fileReader =
-                new SstFileReader(
+                new SstFileScanReader(
                         inputStream,
                         keySerializer.createSliceComparator(),
                         fileSize,

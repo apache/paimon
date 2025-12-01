@@ -147,8 +147,6 @@ public abstract class BlockIterator implements Iterator<BlockEntry> {
 
     public abstract void innerSeekTo(int recordPosition);
 
-    public abstract BlockIterator detach();
-
     private BlockEntry readEntry() {
         requireNonNull(data, "data is null");
 

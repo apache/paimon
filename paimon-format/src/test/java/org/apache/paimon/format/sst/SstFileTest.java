@@ -20,9 +20,11 @@ package org.apache.paimon.format.sst;
 
 import org.apache.paimon.format.sst.compression.BlockCompressionFactory;
 import org.apache.paimon.format.sst.compression.BlockCompressionType;
+import org.apache.paimon.format.sst.layout.AbstractSstFileReader;
 import org.apache.paimon.format.sst.layout.BlockCache;
 import org.apache.paimon.format.sst.layout.BlockEntry;
-import org.apache.paimon.format.sst.layout.SstFileReader;
+import org.apache.paimon.format.sst.layout.SstFileLookupReader;
+import org.apache.paimon.format.sst.layout.SstFileScanReader;
 import org.apache.paimon.format.sst.layout.SstFileWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -31,7 +33,6 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySlice;
-import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.BloomFilter;
@@ -48,7 +49,7 @@ import java.util.Iterator;
 import java.util.Random;
 import java.util.UUID;
 
-/** Test for {@link SstFileReader} and {@link SstFileWriter}. */
+/** Test for {@link AbstractSstFileReader} and {@link SstFileWriter}. */
 public class SstFileTest {
     private static final Logger LOG = LoggerFactory.getLogger(SstFileTest.class);
 
@@ -106,8 +107,8 @@ public class SstFileTest {
         long fileSize = fileIO.getFileSize(file);
         try (SeekableInputStream inputStream = fileIO.newInputStream(file);
                 BlockCache blockCache = new BlockCache(file, inputStream, CACHE_MANAGER);
-                SstFileReader reader =
-                        new SstFileReader(
+                SstFileLookupReader reader =
+                        new SstFileLookupReader(
                                 inputStream,
                                 Comparator.comparingInt(slice -> slice.readInt(0)),
                                 fileSize,
@@ -168,8 +169,8 @@ public class SstFileTest {
         long fileSize = fileIO.getFileSize(file);
         try (SeekableInputStream inputStream = fileIO.newInputStream(file);
                 BlockCache blockCache = new BlockCache(file, inputStream, CACHE_MANAGER);
-                SstFileReader reader =
-                        new SstFileReader(
+                SstFileScanReader reader =
+                        new SstFileScanReader(
                                 inputStream,
                                 Comparator.comparingInt(slice -> slice.readInt(0)),
                                 fileSize,
@@ -186,8 +187,8 @@ public class SstFileTest {
         long fileSize = fileIO.getFileSize(file);
         try (SeekableInputStream inputStream = fileIO.newInputStream(file);
                 BlockCache blockCache = new BlockCache(file, inputStream, CACHE_MANAGER);
-                SstFileReader reader =
-                        new SstFileReader(
+                SstFileScanReader reader =
+                        new SstFileScanReader(
                                 inputStream,
                                 Comparator.comparingInt(slice -> slice.readInt(0)),
                                 fileSize,
@@ -254,8 +255,8 @@ public class SstFileTest {
         long fileSize = fileIO.getFileSize(file);
         try (SeekableInputStream inputStream = fileIO.newInputStream(file);
                 BlockCache blockCache = new BlockCache(file, inputStream, CACHE_MANAGER);
-                SstFileReader reader =
-                        new SstFileReader(
+                SstFileScanReader reader =
+                        new SstFileScanReader(
                                 inputStream,
                                 Comparator.comparingInt(slice -> slice.readInt(0)),
                                 fileSize,
@@ -288,42 +289,7 @@ public class SstFileTest {
         }
     }
 
-    @Test
-    public void testInterleavedLookupAndSeek() throws Exception {
-        writeData(5000, null);
-
-        long fileSize = fileIO.getFileSize(file);
-        try (SeekableInputStream inputStream = fileIO.newInputStream(file);
-                BlockCache blockCache = new BlockCache(file, inputStream, CACHE_MANAGER);
-                SstFileReader reader =
-                        new SstFileReader(
-                                inputStream,
-                                Comparator.comparingInt(slice -> slice.readInt(0)),
-                                fileSize,
-                                file,
-                                blockCache); ) {
-            MemorySliceOutput keyOut = new MemorySliceOutput(4);
-            int startPos;
-
-            // 1. First seek to somewhere
-            keyOut.reset();
-            keyOut.writeInt(1000);
-            startPos = reader.seekTo(keyOut.toSlice().getHeapMemory());
-
-            // 2. Lookup
-            keyOut.reset();
-            keyOut.writeInt(2000);
-            byte[] result = reader.lookup(keyOut.toSlice().getHeapMemory());
-            Assertions.assertNotNull(result);
-            MemorySliceInput input = MemorySlice.wrap(result).toInput();
-            Assertions.assertEquals(2000, input.readInt());
-
-            // 3. Continue to scan
-            Assertions.assertEquals(1000, startPos);
-        }
-    }
-
-    private static void assertScan(int startPosition, SstFileReader reader) throws Exception {
+    private static void assertScan(int startPosition, SstFileScanReader reader) throws Exception {
         int count = startPosition;
         Iterator<BlockEntry> iter;
         while ((iter = reader.readBatch()) != null) {

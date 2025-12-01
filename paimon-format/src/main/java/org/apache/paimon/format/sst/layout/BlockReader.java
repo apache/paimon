@@ -67,11 +67,6 @@ public class BlockReader {
         public void innerSeekTo(int record) {
             data.setPosition(record * recordSize);
         }
-
-        @Override
-        public BlockIterator detach() {
-            return new AlignedIterator(data.getSlice(), recordSize, comparator);
-        }
     }
 
     private static class UnalignedIterator extends BlockIterator {
@@ -87,11 +82,6 @@ public class BlockReader {
         @Override
         public void innerSeekTo(int record) {
             data.setPosition(index.readInt(record * 4));
-        }
-
-        @Override
-        public BlockIterator detach() {
-            return new UnalignedIterator(data.getSlice(), index, comparator);
         }
     }
 }

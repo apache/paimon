@@ -28,8 +28,6 @@ import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.MurmurHashUtils;
-import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -47,23 +45,23 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  * <p>Note that this class is NOT thread-safe.
  */
-public class SstFileReader implements Closeable {
+public abstract class AbstractSstFileReader implements Closeable {
 
-    private final Comparator<MemorySlice> comparator;
     private final long fileSize;
-    private final Path filePath;
-    private final Footer footer;
     private final FileInfo fileInfo;
-    private final MemorySlice firstKey;
     private final SeekableInputStream input;
-    private final BlockIterator indexBlockIterator;
-    private BlockIterator currentDataIterator;
     private final BlockCompressionFactory compressionFactory;
-    @Nullable private final BloomFilter bloomFilter;
-    /** Block cache can be useful in lookup or sequential scan with pre-fetch. */
-    @Nullable private final BlockCache blockCache;
 
-    public SstFileReader(
+    protected final Comparator<MemorySlice> comparator;
+    protected final Path filePath;
+    protected final Footer footer;
+    protected final MemorySlice firstKey;
+    protected final BlockIterator indexBlockIterator;
+    @Nullable protected final BloomFilter bloomFilter;
+    /** Block cache can be useful in lookup or sequential scan with pre-fetch. */
+    @Nullable protected final BlockCache blockCache;
+
+    public AbstractSstFileReader(
             SeekableInputStream input,
             Comparator<MemorySlice> comparator,
             long fileSize,
@@ -107,127 +105,7 @@ public class SstFileReader implements Closeable {
         return bloomFilter;
     }
 
-    /**
-     * Lookup the specified key in the file.
-     *
-     * @param key serialized key
-     * @return corresponding serialized value, null if not found.
-     */
-    public byte[] lookup(byte[] key) throws IOException {
-        if (bloomFilter != null && !bloomFilter.testHash(MurmurHashUtils.hashBytes(key))) {
-            return null;
-        }
-
-        MemorySlice keySlice = MemorySlice.wrap(key);
-        if (firstKey == null || comparator.compare(firstKey, keySlice) > 0) {
-            return null;
-        }
-        // lookup should not affect file read position
-        BlockIterator detachedIndexIter = indexBlockIterator.detach();
-        // seek the index to the block containing the key
-        detachedIndexIter.seekTo(keySlice);
-
-        // if indexIterator does not have a next, it means the key does not exist in this iterator
-        if (detachedIndexIter.hasNext()) {
-            // seek the current iterator to the key
-            BlockIterator current = getNextBlock(detachedIndexIter);
-            if (current.seekTo(keySlice)) {
-                return current.next().getValue().copyBytes();
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Seek to the position of the record whose key is equal to the key or is the smallest element
-     * greater than the given key.
-     *
-     * @param key the key to seek
-     * @return record position of the seeked record, -1 if not found.
-     */
-    public int seekTo(byte[] key) throws IOException {
-        if (footer.getRowCount() == 0) {
-            return -1;
-        }
-        MemorySlice keySlice = MemorySlice.wrap(key);
-        // find candidate index block
-        indexBlockIterator.seekTo(keySlice);
-        if (indexBlockIterator.hasNext()) {
-            // avoid fetching data block if the key is smaller than firstKey
-            if (comparator.compare(firstKey, keySlice) > 0) {
-                return 0;
-            }
-            IndexEntryHandle entryHandle =
-                    IndexEntryHandle.read(indexBlockIterator.next().getValue().toInput());
-            currentDataIterator =
-                    readBlock(new BlockHandle(entryHandle.getOffset(), entryHandle.getSize()))
-                            .iterator();
-            currentDataIterator.seekTo(keySlice);
-            int recordCount = currentDataIterator.getRecordCount();
-            int positionInBlock = currentDataIterator.getRecordPosition();
-            Preconditions.checkState(
-                    positionInBlock >= 0, "Position inside data block should >= 0, it's a bug.");
-            return entryHandle.getLastRecordPosition() - (recordCount - positionInBlock - 1);
-        }
-        return -1;
-    }
-
-    /**
-     * Read a batch of records from current position.
-     *
-     * @return a batch of entries, null if reaching file end
-     */
-    public BlockIterator readBatch() throws IOException {
-        BlockIterator result = null;
-        if (currentDataIterator == null || !currentDataIterator.hasNext()) {
-            // reach file end
-            if (!indexBlockIterator.hasNext()) {
-                return null;
-            }
-            currentDataIterator = getNextBlock(indexBlockIterator);
-        }
-        result = currentDataIterator;
-        currentDataIterator = null;
-        return result;
-    }
-
-    /**
-     * Seek to the specified record position.
-     *
-     * @param position position
-     */
-    public void seekTo(int position) throws IOException {
-        if (position < 0 || position >= footer.getRowCount()) {
-            throw new IndexOutOfBoundsException(
-                    String.format(
-                            "Index out of range, file %s only have %s rows, but trying to seek to %s",
-                            filePath, footer.getRowCount(), position));
-        }
-
-        // 1. seekTo the block entry exactly containing the position
-        indexBlockIterator.seekTo(
-                position,
-                Comparator.naturalOrder(),
-                entry -> IndexEntryHandle.read(entry.getValue().toInput()).getLastRecordPosition());
-
-        // 2. fetch the data block
-        Preconditions.checkState(indexBlockIterator.hasNext());
-        IndexEntryHandle entryHandle =
-                IndexEntryHandle.read(indexBlockIterator.next().getValue().toInput());
-        currentDataIterator =
-                readBlock(new BlockHandle(entryHandle.getOffset(), entryHandle.getSize()))
-                        .iterator();
-
-        // 3. seek to the inner position of data block
-        int positionInBlock =
-                position
-                        - (entryHandle.getLastRecordPosition()
-                                - currentDataIterator.getRecordCount()
-                                + 1);
-        currentDataIterator.seekTo(positionInBlock);
-    }
-
-    private BlockIterator getNextBlock(BlockIterator indexBlockIterator) throws IOException {
+    protected BlockIterator getNextBlock(BlockIterator indexBlockIterator) throws IOException {
         IndexEntryHandle entryHandle =
                 IndexEntryHandle.read(indexBlockIterator.next().getValue().toInput());
         BlockReader dataBlock =
@@ -251,7 +129,7 @@ public class SstFileReader implements Closeable {
         return MemorySlice.wrap(decompressFunc.apply(sliceBytes));
     }
 
-    private BlockReader readBlock(BlockHandle blockHandle) throws IOException {
+    protected BlockReader readBlock(BlockHandle blockHandle) throws IOException {
         // todo: reuse dataBlock in scan
         // 1. read trailer
         MemorySlice trailerSlice =
