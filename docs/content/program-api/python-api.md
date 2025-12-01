@@ -634,3 +634,27 @@ Key points about shard read:
 | f is not in [l1, l2]  | PredicateBuilder.is_not_in(f, [l1, l2])       |
 | lower <= f <= upper   | PredicateBuilder.between(f, lower, upper)     |
 
+## Supported Features
+
+The following shows the supported features of Python Paimon compared to Java Paimon:
+
+**Catalog Level**
+   - FileSystemCatalog
+   - RestCatalog
+
+**Table Level**
+   - Append Tables
+     - `bucket = -1` (unaware)
+     - `bucket > 0` (fixed)
+   - Primary Key Tables
+     - only support deduplicate
+     - `bucket = -2` (postpone)
+     - `bucket > 0` (fixed)
+     - read with deletion vectors enabled
+   - Read/Write Operations
+     - Batch read and write for append tables and primary key tables
+     - Predicate filtering
+     - Overwrite semantics
+     - Incremental reading of Delta data
+     - Reading and writing blob data
+     - `with_shard` feature
