@@ -30,30 +30,32 @@ import java.util.List
 class PaimonCommitTest extends PaimonSparkTestBase {
 
   test("test commit callback parameter compatibility") {
-    withTable("tb") {
-      spark.sql("""
-                  |CREATE TABLE tb (id int, dt string) using paimon
-                  |TBLPROPERTIES ('file.format'='parquet', 'primary-key'='id', 'bucket'='1')
-                  |""".stripMargin)
+    withSparkSQLConf(("spark.paimon.write.use-v2-write", "false")) {
+      withTable("tb") {
+        spark.sql("""
+                    |CREATE TABLE tb (id int, dt string) using paimon
+                    |TBLPROPERTIES ('file.format'='parquet', 'primary-key'='id', 'bucket'='1')
+                    |""".stripMargin)
 
-      val table = loadTable("tb")
-      val location = table.location().toString
+        val table = loadTable("tb")
+        val location = table.location().toString
 
-      val _spark = spark
-      import _spark.implicits._
-      val df = Seq((1, "a"), (2, "b")).toDF("a", "b")
-      df.write
-        .format("paimon")
-        .option(CoreOptions.COMMIT_CALLBACKS.key(), classOf[CustomCommitCallback].getName)
-        .option(
-          CoreOptions.COMMIT_CALLBACK_PARAM
-            .key()
-            .replace("#", classOf[CustomCommitCallback].getName),
-          "testid-100")
-        .mode("append")
-        .save(location)
+        val _spark = spark
+        import _spark.implicits._
+        val df = Seq((1, "a"), (2, "b")).toDF("a", "b")
+        df.write
+          .format("paimon")
+          .option(CoreOptions.COMMIT_CALLBACKS.key(), classOf[CustomCommitCallback].getName)
+          .option(
+            CoreOptions.COMMIT_CALLBACK_PARAM
+              .key()
+              .replace("#", classOf[CustomCommitCallback].getName),
+            "testid-100")
+          .mode("append")
+          .save(location)
 
-      Assertions.assertEquals(PaimonCommitTest.id, "testid-100")
+        Assertions.assertEquals(PaimonCommitTest.id, "testid-100")
+      }
     }
   }
 }
