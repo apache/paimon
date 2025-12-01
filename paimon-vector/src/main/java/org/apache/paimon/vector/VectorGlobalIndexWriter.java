@@ -26,6 +26,13 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 
+import io.github.jbellis.jvector.graph.GraphIndexBuilder;
+import io.github.jbellis.jvector.graph.OnHeapGraphIndex;
+import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
+
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -36,24 +43,17 @@ import java.util.List;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * Vector global index writer.
+ * Vector global index writer using JVector.
  *
- * <p>This is a framework implementation that provides the structure for vector indexing. In
- * production, integrate with JVector or other vector search engines.
+ * <p>This implementation uses JVector's HNSW (Hierarchical Navigable Small World) graph algorithm
+ * for efficient approximate nearest neighbor search.
  */
 public class VectorGlobalIndexWriter implements GlobalIndexWriter {
 
-    private static final String OPTION_VECTOR_DIM = "vector.dim";
-    private static final String OPTION_VECTOR_METRIC = "vector.metric";
-    private static final String OPTION_VECTOR_M = "vector.M";
-    private static final String OPTION_VECTOR_EF_CONSTRUCTION = "vector.ef-construction";
-
     private final GlobalIndexFileWriter fileWriter;
     private final DataType fieldType;
-    private final int dimension;
-    private final String similarityFunction;
-    private final int m;
-    private final int efConstruction;
+    private final VectorIndexOptions vectorOptions;
+    private final VectorSimilarityFunction similarityFunction;
 
     private final List<VectorWithRowId> vectors;
     private long minRowId = Long.MAX_VALUE;
@@ -66,11 +66,8 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
         this.vectors = new ArrayList<>();
 
         // Parse options
-        this.dimension = options.getInteger(OPTION_VECTOR_DIM, 128);
-        String metric = options.getString(OPTION_VECTOR_METRIC, "COSINE");
-        this.similarityFunction = parseMetric(metric);
-        this.m = options.getInteger(OPTION_VECTOR_M, 16);
-        this.efConstruction = options.getInteger(OPTION_VECTOR_EF_CONSTRUCTION, 100);
+        this.vectorOptions = new VectorIndexOptions(options);
+        this.similarityFunction = parseMetricToJVector(vectorOptions.metric());
 
         // Validate field type
         validateFieldType(fieldType);
@@ -81,12 +78,14 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                 type instanceof ArrayType, "Vector field type must be ARRAY, but was: " + type);
     }
 
-    private String parseMetric(String metric) {
+    private VectorSimilarityFunction parseMetricToJVector(String metric) {
         switch (metric.toUpperCase()) {
             case "COSINE":
+                return VectorSimilarityFunction.COSINE;
             case "DOT_PRODUCT":
+                return VectorSimilarityFunction.DOT_PRODUCT;
             case "EUCLIDEAN":
-                return metric.toUpperCase();
+                return VectorSimilarityFunction.EUCLIDEAN;
             default:
                 throw new IllegalArgumentException("Unsupported metric: " + metric);
         }
@@ -102,8 +101,11 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
         float[] vector = vectorKey.getVector();
 
         checkArgument(
-                vector.length == dimension,
-                "Vector dimension mismatch: expected " + dimension + ", but got " + vector.length);
+                vector.length == vectorOptions.dimension(),
+                "Vector dimension mismatch: expected "
+                        + vectorOptions.dimension()
+                        + ", but got "
+                        + vector.length);
 
         vectors.add(new VectorWithRowId(rowId, vector));
         minRowId = Math.min(minRowId, rowId);
@@ -117,13 +119,16 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                 return new ArrayList<>();
             }
 
-            // Build vector index
-            // TODO: Integrate with JVector or other vector search engine
-            // For now, serialize the raw vectors with metadata
-            byte[] indexBytes = serializeVectors();
+            // Build JVector HNSW index
+            OnHeapGraphIndex graphIndex = buildJVectorIndex();
+
+            // Serialize index and metadata
+            byte[] indexBytes = serializeIndexWithJVector(graphIndex);
             byte[] metaBytes = serializeMetadata();
 
-            // Write to file
+            // Write to file. todo: here could use OnDiskGraphIndex to write directly to file.
+            // RandomAccessVectorValues ravv
+            // OnDiskGraphIndex.write(index, ravv, indexPath);
             String fileName = fileWriter.newFileName(VectorGlobalIndexerFactory.IDENTIFIER);
             try (OutputStream out = fileWriter.newOutputStream(fileName)) {
                 out.write(indexBytes);
@@ -137,11 +142,64 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
         }
     }
 
-    private byte[] serializeVectors() throws IOException {
+    private OnHeapGraphIndex buildJVectorIndex() {
+        // Get the vectorization provider
+        var vectorTypeSupport = VectorizationProvider.getInstance().getVectorTypeSupport();
+
+        // Create list of VectorFloat for JVector
+        List<VectorFloat<?>> vectorFloats = new ArrayList<>();
+        for (VectorWithRowId vec : vectors) {
+            vectorFloats.add(vectorTypeSupport.createFloatVector(vec.vector));
+        }
+
+        // Create vector values adapter for JVector
+        RandomAccessVectorValues vectorValues =
+                new RandomAccessVectorValues() {
+                    @Override
+                    public int size() {
+                        return vectorFloats.size();
+                    }
+
+                    @Override
+                    public int dimension() {
+                        return vectorOptions.dimension();
+                    }
+
+                    @Override
+                    public VectorFloat<?> getVector(int i) {
+                        return vectorFloats.get(i);
+                    }
+
+                    @Override
+                    public boolean isValueShared() {
+                        return false;
+                    }
+
+                    @Override
+                    public RandomAccessVectorValues copy() {
+                        return this;
+                    }
+                };
+
+        // Build HNSW graph index using JVector
+        GraphIndexBuilder builder =
+                new GraphIndexBuilder(
+                        vectorValues,
+                        similarityFunction,
+                        vectorOptions.m(),
+                        vectorOptions.efConstruction(),
+                        1.0f, // alpha (diversityWeight)
+                        1.0f // neighborOverflow
+                        );
+
+        return builder.build(vectorValues);
+    }
+
+    private byte[] serializeIndexWithJVector(OnHeapGraphIndex graphIndex) throws IOException {
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         try (DataOutputStream dataOut = new DataOutputStream(byteOut)) {
             // Write version
-            dataOut.writeInt(1);
+            dataOut.writeInt(2); // Version 2 with JVector index
 
             // Write row IDs
             dataOut.writeInt(vectors.size());
@@ -149,11 +207,32 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                 dataOut.writeLong(vector.rowId);
             }
 
-            // Write vectors
+            // Write vectors (still needed for graph index reconstruction)
             for (VectorWithRowId vector : vectors) {
                 dataOut.writeInt(vector.vector.length);
                 for (float v : vector.vector) {
                     dataOut.writeFloat(v);
+                }
+            }
+
+            // Write JVector graph structure
+            dataOut.writeInt(graphIndex.size());
+            dataOut.writeInt(graphIndex.maxDegree());
+
+            // Serialize graph neighbors for each node
+            for (int i = 0; i < graphIndex.size(); i++) {
+                var view = graphIndex.getView();
+                var neighbors = view.getNeighborsIterator(i);
+
+                // Count neighbors
+                List<Integer> neighborList = new ArrayList<>();
+                while (neighbors.hasNext()) {
+                    neighborList.add(neighbors.nextInt());
+                }
+
+                dataOut.writeInt(neighborList.size());
+                for (int neighbor : neighborList) {
+                    dataOut.writeInt(neighbor);
                 }
             }
         }
@@ -163,10 +242,10 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
     private byte[] serializeMetadata() throws IOException {
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         try (DataOutputStream dataOut = new DataOutputStream(byteOut)) {
-            dataOut.writeInt(dimension);
-            dataOut.writeUTF(similarityFunction);
-            dataOut.writeInt(m);
-            dataOut.writeInt(efConstruction);
+            dataOut.writeInt(vectorOptions.dimension());
+            dataOut.writeUTF(similarityFunction.name());
+            dataOut.writeInt(vectorOptions.m());
+            dataOut.writeInt(vectorOptions.efConstruction());
         }
         return byteOut.toByteArray();
     }
