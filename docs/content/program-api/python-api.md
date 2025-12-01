@@ -569,3 +569,8 @@ Key points about shard read:
 | f is not in [l1, l2]  | PredicateBuilder.is_not_in(f, [l1, l2])       |
 | lower <= f <= upper   | PredicateBuilder.between(f, lower, upper)     |
 
+## Options
+
+Table options supported by the python API.
+
+{{< generated/python_configuration >}}
