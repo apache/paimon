@@ -68,9 +68,14 @@ public class SstFormatReader implements FileRecordReader<InternalRow> {
         this.resultRow = createResultRow(projectedRowType, keyType, valueType);
         this.inputStream = fileIO.newInputStream(filePath);
         this.filePath = filePath;
+        // we could set block cache in the future if we want to pre-fetch some data blocks for scan
         this.fileReader =
                 new SstFileReader(
-                        inputStream, keySerializer.createSliceComparator(), fileSize, filePath);
+                        inputStream,
+                        keySerializer.createSliceComparator(),
+                        fileSize,
+                        filePath,
+                        null);
         this.selection = selection;
     }
 

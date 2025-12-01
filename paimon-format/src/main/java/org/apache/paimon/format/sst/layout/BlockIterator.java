@@ -72,11 +72,6 @@ public abstract class BlockIterator implements Iterator<BlockEntry> {
         return seekTo(targetKey, comparator, BlockEntry::getKey);
     }
 
-    public void reset() {
-        data.setPosition(0);
-        recordPosition = 0;
-    }
-
     /**
      * Seeks to the first entry with a value that is either equal to or greater than the specified
      * value. After this call, the next invocation of {@link BlockIterator#next()} will return that

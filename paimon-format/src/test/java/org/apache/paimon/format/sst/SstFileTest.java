@@ -18,6 +18,9 @@
 
 package org.apache.paimon.format.sst;
 
+import org.apache.paimon.format.sst.compression.BlockCompressionFactory;
+import org.apache.paimon.format.sst.compression.BlockCompressionType;
+import org.apache.paimon.format.sst.layout.BlockCache;
 import org.apache.paimon.format.sst.layout.BlockEntry;
 import org.apache.paimon.format.sst.layout.SstFileReader;
 import org.apache.paimon.format.sst.layout.SstFileWriter;
@@ -26,9 +29,11 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.memory.MemorySliceOutput;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.BloomFilter;
 
 import org.junit.jupiter.api.Assertions;
@@ -49,6 +54,7 @@ public class SstFileTest {
 
     // 256 records per block
     private static final int BLOCK_SIZE = (10) * 256;
+    private static final CacheManager CACHE_MANAGER = new CacheManager(MemorySize.ofMebiBytes(10));
     @TempDir java.nio.file.Path tempPath;
 
     protected FileIO fileIO;
@@ -63,9 +69,12 @@ public class SstFileTest {
     }
 
     private void writeData(int recordCount, BloomFilter.Builder bloomFilter) throws Exception {
+        BlockCompressionFactory compressionFactory =
+                BlockCompressionFactory.create(BlockCompressionType.LZ4);
         try (PositionOutputStream outputStream = fileIO.newOutputStream(file, true);
                 SstFileWriter writer =
-                        new SstFileWriter(outputStream, BLOCK_SIZE, bloomFilter, null); ) {
+                        new SstFileWriter(
+                                outputStream, BLOCK_SIZE, bloomFilter, compressionFactory); ) {
             MemorySliceOutput keyOut = new MemorySliceOutput(4);
             MemorySliceOutput valueOut = new MemorySliceOutput(4);
             long start = System.currentTimeMillis();
@@ -83,15 +92,27 @@ public class SstFileTest {
     @Test
     public void testLookup() throws Exception {
         writeData(5000, null);
+        innerTestLookup();
+    }
 
+    @Test
+    public void testLookupWithBloomFilter() throws Exception {
+        BloomFilter.Builder bloomFilter = BloomFilter.builder(5000, 0.05);
+        writeData(5000, bloomFilter);
+        innerTestLookup();
+    }
+
+    private void innerTestLookup() throws Exception {
         long fileSize = fileIO.getFileSize(file);
         try (SeekableInputStream inputStream = fileIO.newInputStream(file);
+                BlockCache blockCache = new BlockCache(file, inputStream, CACHE_MANAGER);
                 SstFileReader reader =
                         new SstFileReader(
                                 inputStream,
                                 Comparator.comparingInt(slice -> slice.readInt(0)),
                                 fileSize,
-                                file); ) {
+                                file,
+                                blockCache); ) {
             Random random = new Random();
             MemorySliceOutput keyOut = new MemorySliceOutput(4);
 
@@ -125,14 +146,18 @@ public class SstFileTest {
             Assertions.assertEquals(4999, MemorySlice.wrap(queried2).readInt(0));
 
             // 2. lookup key smaller than first key
-            keyOut.reset();
-            keyOut.writeInt(-10);
-            Assertions.assertNull(reader.lookup(keyOut.toSlice().getHeapMemory()));
+            for (int i = 0; i < 100; i++) {
+                keyOut.reset();
+                keyOut.writeInt(-10 - i);
+                Assertions.assertNull(reader.lookup(keyOut.toSlice().getHeapMemory()));
+            }
 
             // 3. lookup key greater than last key
-            keyOut.reset();
-            keyOut.writeInt(10000);
-            Assertions.assertNull(reader.lookup(keyOut.toSlice().getHeapMemory()));
+            for (int i = 0; i < 100; i++) {
+                keyOut.reset();
+                keyOut.writeInt(10000 + i);
+                Assertions.assertNull(reader.lookup(keyOut.toSlice().getHeapMemory()));
+            }
         }
     }
 
@@ -142,12 +167,14 @@ public class SstFileTest {
 
         long fileSize = fileIO.getFileSize(file);
         try (SeekableInputStream inputStream = fileIO.newInputStream(file);
+                BlockCache blockCache = new BlockCache(file, inputStream, CACHE_MANAGER);
                 SstFileReader reader =
                         new SstFileReader(
                                 inputStream,
                                 Comparator.comparingInt(slice -> slice.readInt(0)),
                                 fileSize,
-                                file); ) {
+                                file,
+                                blockCache); ) {
             assertScan(0, reader);
         }
     }
@@ -158,12 +185,14 @@ public class SstFileTest {
 
         long fileSize = fileIO.getFileSize(file);
         try (SeekableInputStream inputStream = fileIO.newInputStream(file);
+                BlockCache blockCache = new BlockCache(file, inputStream, CACHE_MANAGER);
                 SstFileReader reader =
                         new SstFileReader(
                                 inputStream,
                                 Comparator.comparingInt(slice -> slice.readInt(0)),
                                 fileSize,
-                                file); ) {
+                                file,
+                                blockCache); ) {
             MemorySliceOutput keyOut = new MemorySliceOutput(4);
             int startPos;
 
@@ -224,12 +253,14 @@ public class SstFileTest {
 
         long fileSize = fileIO.getFileSize(file);
         try (SeekableInputStream inputStream = fileIO.newInputStream(file);
+                BlockCache blockCache = new BlockCache(file, inputStream, CACHE_MANAGER);
                 SstFileReader reader =
                         new SstFileReader(
                                 inputStream,
                                 Comparator.comparingInt(slice -> slice.readInt(0)),
                                 fileSize,
-                                file); ) {
+                                file,
+                                blockCache); ) {
 
             // 1. seek to each block
             for (int start = BLOCK_SIZE / 10 / 2; start < 5000; start += BLOCK_SIZE / 10) {
@@ -263,12 +294,14 @@ public class SstFileTest {
 
         long fileSize = fileIO.getFileSize(file);
         try (SeekableInputStream inputStream = fileIO.newInputStream(file);
+                BlockCache blockCache = new BlockCache(file, inputStream, CACHE_MANAGER);
                 SstFileReader reader =
                         new SstFileReader(
                                 inputStream,
                                 Comparator.comparingInt(slice -> slice.readInt(0)),
                                 fileSize,
-                                file); ) {
+                                file,
+                                blockCache); ) {
             MemorySliceOutput keyOut = new MemorySliceOutput(4);
             int startPos;
 

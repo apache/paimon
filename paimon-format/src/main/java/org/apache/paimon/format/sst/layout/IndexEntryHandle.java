@@ -22,7 +22,18 @@ import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.memory.MemorySliceOutput;
 
-/** Handle of each index entry. */
+/**
+ * Handle of each index entry. The entries of an IndexBlock is a set of special sorted key-value
+ * pairs. Its layout is as below:
+ *
+ * <pre>
+ *     +--------------------------------------------------------+
+ *     |  Key  |          Last key of the Data Block            |
+ *     +--------------------------------------------------------+
+ *     | Value | Block Offset | Block Size |  Last Record Pos   |
+ *     +--------------------------------------------------------+
+ * </pre>
+ */
 public class IndexEntryHandle {
     private static final int MAX_ENCODED_LENGTH = 9 + 5 + 5;
     private final long offset;

@@ -36,6 +36,7 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Comparator;
+import java.util.function.Function;
 
 import static org.apache.paimon.format.sst.layout.SstFileUtils.crc32c;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -59,21 +60,25 @@ public class SstFileReader implements Closeable {
     private BlockIterator currentDataIterator;
     private final BlockCompressionFactory compressionFactory;
     @Nullable private final BloomFilter bloomFilter;
+    /** Block cache can be useful in lookup or sequential scan with pre-fetch. */
+    @Nullable private final BlockCache blockCache;
 
     public SstFileReader(
             SeekableInputStream input,
             Comparator<MemorySlice> comparator,
             long fileSize,
-            Path filePath)
+            Path filePath,
+            @Nullable BlockCache blockCache)
             throws IOException {
         this.comparator = comparator;
         this.fileSize = fileSize;
         this.filePath = filePath;
         this.input = input;
+        this.blockCache = blockCache;
 
         Footer footer =
                 Footer.readFooter(
-                        readSlice(fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH)
+                        readSlice(fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH, true)
                                 .toInput());
         this.footer = footer;
         this.compressionFactory = BlockCompressionFactory.create(footer.getCompressionType());
@@ -82,7 +87,7 @@ public class SstFileReader implements Closeable {
         BlockHandle fileInfoHandle = footer.getFileInfoHandle();
         this.fileInfo =
                 FileInfo.readFileInfo(
-                        readSlice(fileInfoHandle.offset(), fileInfoHandle.size()).toInput());
+                        readSlice(fileInfoHandle.offset(), fileInfoHandle.size(), true).toInput());
         this.firstKey =
                 this.fileInfo.getFirstKey() == null
                         ? null
@@ -90,10 +95,11 @@ public class SstFileReader implements Closeable {
     }
 
     private BloomFilter readBloomFilter(BloomFilterHandle bloomFilterHandle) throws IOException {
+        // todo: replace with `FileBasedBloomFilter` to refresh cache on visit
         BloomFilter bloomFilter = null;
         if (bloomFilterHandle != null) {
             MemorySegment memorySegment =
-                    readSlice(bloomFilterHandle.offset(), bloomFilterHandle.size()).segment();
+                    readSlice(bloomFilterHandle.offset(), bloomFilterHandle.size(), true).segment();
             bloomFilter =
                     new BloomFilter(bloomFilterHandle.expectedEntries(), memorySegment.size());
             bloomFilter.setMemorySegment(memorySegment, 0);
@@ -145,7 +151,6 @@ public class SstFileReader implements Closeable {
         }
         MemorySlice keySlice = MemorySlice.wrap(key);
         // find candidate index block
-        indexBlockIterator.reset();
         indexBlockIterator.seekTo(keySlice);
         if (indexBlockIterator.hasNext()) {
             // avoid fetching data block if the key is smaller than firstKey
@@ -200,7 +205,6 @@ public class SstFileReader implements Closeable {
         }
 
         // 1. seekTo the block entry exactly containing the position
-        indexBlockIterator.reset();
         indexBlockIterator.seekTo(
                 position,
                 Comparator.naturalOrder(),
@@ -231,24 +235,39 @@ public class SstFileReader implements Closeable {
         return dataBlock.iterator();
     }
 
-    private MemorySlice readSlice(long offset, int size) throws IOException {
-        // todo: support page cache
+    private MemorySlice readSlice(long offset, int size, boolean isIndex) throws IOException {
+        return readSlice(offset, size, Function.identity(), isIndex);
+    }
+
+    private MemorySlice readSlice(
+            long offset, int size, Function<byte[], byte[]> decompressFunc, boolean isIndex)
+            throws IOException {
+        if (blockCache != null) {
+            return MemorySlice.wrap(blockCache.getBlock(offset, size, decompressFunc, isIndex));
+        }
         input.seek(offset);
         byte[] sliceBytes = new byte[size];
         IOUtils.readFully(input, sliceBytes);
-        return MemorySlice.wrap(sliceBytes);
+        return MemorySlice.wrap(decompressFunc.apply(sliceBytes));
     }
 
     private BlockReader readBlock(BlockHandle blockHandle) throws IOException {
         // todo: reuse dataBlock in scan
         // 1. read trailer
         MemorySlice trailerSlice =
-                readSlice(blockHandle.offset() + blockHandle.size(), BlockTrailer.ENCODED_LENGTH);
+                readSlice(
+                        blockHandle.offset() + blockHandle.size(),
+                        BlockTrailer.ENCODED_LENGTH,
+                        true);
         BlockTrailer blockTrailer = BlockTrailer.readBlockTrailer(trailerSlice.toInput());
         // 2. read block
-        MemorySlice blockSlice = readSlice(blockHandle.offset(), blockHandle.size());
-        byte[] decompressed = decompressBlock(blockSlice.getHeapMemory(), blockTrailer);
-        return new BlockReader(MemorySlice.wrap(decompressed), comparator);
+        MemorySlice blockSlice =
+                readSlice(
+                        blockHandle.offset(),
+                        blockHandle.size(),
+                        data -> decompressBlock(data, blockTrailer),
+                        false);
+        return new BlockReader(blockSlice, comparator);
     }
 
     private byte[] decompressBlock(byte[] compressedBytes, BlockTrailer blockTrailer) {

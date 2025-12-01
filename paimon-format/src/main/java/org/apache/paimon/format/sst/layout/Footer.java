@@ -43,7 +43,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *     +---------------------------------------------------------------+
  *     |   MetaBlock Offset : 8 bytes   |    MetaBlock size : 4 bytes  |
  *     +---------------------------------------------------------------+
- *     | RowCnt : 8 bytes | DataSize : 4 bytes | CompressType : 1 byte |
+ *     | RowCnt : 4 bytes | DataSize : 8 bytes | CompressType : 1 byte |
  *     +---------------------------------------------------------------+
  *     |       Version : 4 bytes        |     Magic Number : 4 bytes   |
  *     +---------------------------------------------------------------+
