@@ -56,6 +56,9 @@ public abstract class AbstractRecordParser
     protected final TypeMapping typeMapping;
     protected final List<ComputedColumn> computedColumns;
 
+    private boolean skipCorruptRecord = false;
+    private boolean logCorruptRecord = false;
+
     public AbstractRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         this.typeMapping = typeMapping;
         this.computedColumns = computedColumns;
@@ -72,8 +75,22 @@ public abstract class AbstractRecordParser
             Optional<RichCdcMultiplexRecord> recordOpt = extractRecords().stream().findFirst();
             return recordOpt.map(RichCdcMultiplexRecord::buildSchema).orElse(null);
         } catch (Exception e) {
-            logInvalidSourceRecord(record);
-            throw e;
+            if (skipCorruptRecord) {
+                logCorruptRecordMetadata(record, "schema build");
+                if (logCorruptRecord) {
+                    logInvalidSourceRecord(record);
+                    LOG.warn(
+                            "Skipping corrupt or unparsable source record during schema build.", e);
+                } else {
+                    LOG.warn(
+                            "Skipping corrupt or unparsable source record during schema build (record details not logged due to PII concerns).",
+                            e);
+                }
+                return null;
+            } else {
+                logInvalidSourceRecord(record);
+                throw e;
+            }
         }
     }
 
@@ -83,8 +100,20 @@ public abstract class AbstractRecordParser
             setRoot(value);
             extractRecords().forEach(out::collect);
         } catch (Exception e) {
-            logInvalidSourceRecord(value);
-            throw e;
+            if (skipCorruptRecord) {
+                logCorruptRecordMetadata(value, "record processing");
+                if (logCorruptRecord) {
+                    logInvalidSourceRecord(value);
+                    LOG.warn("Skipping corrupt or unparsable source record.", e);
+                } else {
+                    LOG.warn(
+                            "Skipping corrupt or unparsable source record (record details not logged due to PII concerns).",
+                            e);
+                }
+            } else {
+                logInvalidSourceRecord(value);
+                throw e;
+            }
         }
     }
 
@@ -129,8 +158,49 @@ public abstract class AbstractRecordParser
     protected abstract String getDatabaseName();
 
     private void logInvalidSourceRecord(CdcSourceRecord record) {
-        LOG.error("Invalid source record:\n{}", record.toString());
+        StringBuilder msg = new StringBuilder("Invalid source record");
+        if (record.getTopic() != null) {
+            msg.append(" from topic: ").append(record.getTopic());
+        }
+        if (record.getPartition() != null) {
+            msg.append(", partition: ").append(record.getPartition());
+        }
+        if (record.getOffset() != null) {
+            msg.append(", offset: ").append(record.getOffset());
+        }
+        LOG.error("{}\n{}", msg.toString(), record.toString());
+    }
+
+    private void logCorruptRecordMetadata(CdcSourceRecord record, String context) {
+        String topic = record.getTopic();
+        if (topic != null) {
+            LOG.warn("Corrupt record detected during {} from topic: {}", context, topic);
+        } else {
+            LOG.warn("Corrupt record detected during {} (no topic information available)", context);
+        }
     }
 
     protected abstract String format();
+
+    /**
+     * Configure whether to skip corrupt records that fail parsing.
+     *
+     * @param skip if true, corrupt records will be skipped instead of causing job failure
+     * @return this parser instance for chaining
+     */
+    public AbstractRecordParser withSkipCorruptRecord(boolean skip) {
+        this.skipCorruptRecord = skip;
+        return this;
+    }
+
+    /**
+     * Configure whether to log details about corrupt records.
+     *
+     * @param log if true, corrupt records will be logged with details (may contain PII)
+     * @return this parser instance for chaining
+     */
+    public AbstractRecordParser withLogCorruptRecord(boolean log) {
+        this.logCorruptRecord = log;
+        return this;
+    }
 }
