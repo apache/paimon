@@ -114,6 +114,11 @@ public class OSSFileIO extends HadoopCompliantFileIO {
     }
 
     @Override
+    public boolean moveToTrash(Path path) throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
             throws IOException {
         if (!overwrite && this.exists(path)) {
