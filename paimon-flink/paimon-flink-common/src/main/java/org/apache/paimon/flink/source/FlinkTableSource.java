@@ -161,6 +161,9 @@ public abstract class FlinkTableSource
             throw new RuntimeException(
                     "Failed to handle scan.partitions = " + options.get(SCAN_PARTITIONS));
         }
+        if (partitions.isEmpty()) {
+            return null;
+        }
 
         // Partition filter will be used to filter Manifest stats, the stats schema is
         // partition type. See SnapshotReaderImpl#withFilter
