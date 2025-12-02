@@ -50,6 +50,9 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -320,6 +323,61 @@ public class TableCommitTest {
                     .isInstanceOf(RuntimeException.class)
                     .hasMessageContaining("changed from 1 to 2 without overwrite");
         }
+    }
+
+    @Test
+    public void testGiveUpCommitWhenAppendFoundTotalBucketsChanged() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        String commitUser1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(commitUser1);
+        TableCommitImpl commit1 = table.newCommit(commitUser1);
+        for (int i = 1; i < 10; i++) {
+            write1.write(GenericRow.of(i, (long) i));
+        }
+
+        // mock rescale
+        String commitUser2 = UUID.randomUUID().toString();
+        options = new Options(table.options());
+        options.set(CoreOptions.BUCKET, 2);
+        FileStoreTable rescaleTable = table.copy(tableSchema.copy(options.toMap()));
+        try (TableWriteImpl<?> write = rescaleTable.newWrite(commitUser2);
+                TableCommitImpl commit =
+                        rescaleTable.newCommit(commitUser2).withOverwrite(Collections.emptyMap())) {
+            for (int i = 1; i < 10; i++) {
+                write.write(GenericRow.of(i, (long) i));
+            }
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+
+        assertThatThrownBy(() -> commit1.commit(1, write1.prepareCommit(false, 1)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("changed from 2 to 1 without overwrite");
+        write1.close();
+        commit1.close();
     }
 
     @Test

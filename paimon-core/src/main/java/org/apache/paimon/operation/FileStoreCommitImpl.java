@@ -327,6 +327,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 if (containsFileDeletionOrDeletionVectors(appendSimpleEntries, appendIndexFiles)) {
                     commitKind = CommitKind.OVERWRITE;
                     conflictCheck = mustConflictCheck();
+                } else if (latestSnapshot != null
+                        && !latestSnapshot.commitUser().equals(commitUser)) {
+                    conflictCheck = mustConflictCheck();
                 }
 
                 boolean discardDuplicate = discardDuplicateFiles && commitKind == CommitKind.APPEND;
