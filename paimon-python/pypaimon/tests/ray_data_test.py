@@ -61,8 +61,8 @@ class RayDataTest(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up test environment."""
         try:
-                if ray.is_initialized():
-                    ray.shutdown()
+            if ray.is_initialized():
+                ray.shutdown()
         except Exception:
             pass
         try:
@@ -537,7 +537,7 @@ class RayDataTest(unittest.TestCase):
     def test_ray_data_primary_key_multiple_splits_same_bucket(self):
         """Test Ray Data read from PrimaryKey table with small target_split_size."""
         from pypaimon.common.core_options import CoreOptions
-        
+
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
