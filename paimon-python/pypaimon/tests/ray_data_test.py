@@ -61,8 +61,8 @@ class RayDataTest(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up test environment."""
         try:
-            if ray.is_initialized():
-                ray.shutdown()
+                if ray.is_initialized():
+                    ray.shutdown()
         except Exception:
             pass
         try:
@@ -602,6 +602,51 @@ class RayDataTest(unittest.TestCase):
             "Name column should reflect updates"
         )
         self.assertEqual(list(df_sorted['value']), [150, 250, 300, 400], "Value column should reflect updates")
+
+    def test_ray_data_invalid_parallelism(self):
+        """Test that invalid parallelism values raise ValueError."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table('default.test_ray_invalid_parallelism', schema, False)
+        table = self.catalog.get_table('default.test_ray_invalid_parallelism')
+
+        # Write some data
+        data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        # Test with parallelism = 0
+        with self.assertRaises(ValueError) as context:
+            table_read.to_ray(splits, parallelism=0)
+        self.assertIn("parallelism must be at least 1", str(context.exception))
+
+        # Test with parallelism < 0
+        with self.assertRaises(ValueError) as context:
+            table_read.to_ray(splits, parallelism=-1)
+        self.assertIn("parallelism must be at least 1", str(context.exception))
+
+        # Test with parallelism = -10
+        with self.assertRaises(ValueError) as context:
+            table_read.to_ray(splits, parallelism=-10)
+        self.assertIn("parallelism must be at least 1", str(context.exception))
 
 
 if __name__ == '__main__':

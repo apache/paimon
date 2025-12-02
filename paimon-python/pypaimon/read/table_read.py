@@ -138,6 +138,10 @@ class TableRead:
             )
             return ray.data.from_arrow(empty_table)
 
+        # Validate parallelism parameter
+        if parallelism < 1:
+            raise ValueError(f"parallelism must be at least 1, got {parallelism}")
+
         if parallelism == 1:
             # Single-task read (simple mode)
             return ray.data.from_arrow(self.to_arrow(splits))

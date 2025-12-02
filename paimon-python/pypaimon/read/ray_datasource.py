@@ -99,6 +99,10 @@ class PaimonDatasource(Datasource):
         from ray.data.datasource import ReadTask
         from ray.data.block import BlockMetadata
 
+        # Validate parallelism parameter
+        if parallelism < 1:
+            raise ValueError(f"parallelism must be at least 1, got {parallelism}")
+
         # Get schema for metadata
         if self._schema is None:
             self._schema = PyarrowFieldParser.from_paimon_schema(self.table_read.read_type)
