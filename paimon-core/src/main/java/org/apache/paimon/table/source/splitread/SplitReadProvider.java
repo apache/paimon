@@ -33,6 +33,8 @@ public interface SplitReadProvider {
     /** Split reader provider context. */
     class Context {
 
+        public static final Context DEFAULT = Context.builder().build();
+
         private final boolean forceKeepDelete;
 
         private Context(boolean forceKeepDelete) {
