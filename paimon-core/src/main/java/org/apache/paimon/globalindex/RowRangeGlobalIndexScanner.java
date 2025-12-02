@@ -47,12 +47,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Scanner for shard-based global indexes. */
-public class ShardGlobalIndexScanner implements Closeable {
+public class RowRangeGlobalIndexScanner implements Closeable {
 
     private final Options options;
     private final GlobalIndexEvaluator globalIndexEvaluator;
 
-    public ShardGlobalIndexScanner(
+    public RowRangeGlobalIndexScanner(
             FileStoreTable fileStoreTable,
             long rowRangeStart,
             long rowRangeEnd,

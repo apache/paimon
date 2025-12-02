@@ -31,7 +31,7 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
-import org.apache.paimon.globalindex.ShardGlobalIndexScanner;
+import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -948,7 +948,8 @@ public class DataEvolutionTableTest extends TableTestBase {
         Set<Range> ranges = indexScanBuilder.shardList();
         GlobalIndexResult globalFileIndexResult = GlobalIndexResult.createEmpty();
         for (Range range : ranges) {
-            try (ShardGlobalIndexScanner scanner = indexScanBuilder.withRowRange(range).build()) {
+            try (RowRangeGlobalIndexScanner scanner =
+                    indexScanBuilder.withRowRange(range).build()) {
                 Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate);
                 if (!globalIndexResult.isPresent()) {
                     throw new RuntimeException("Can't find index result by scan");
