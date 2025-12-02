@@ -18,10 +18,14 @@
 
 package org.apache.paimon.data.variant;
 
+import java.io.Serializable;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 
 /** Several parameters used by `VariantGet.cast`. Packed together to simplify parameter passing. */
-public class VariantCastArgs {
+public class VariantCastArgs implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final boolean failOnError;
     private final ZoneId zoneId;
@@ -37,6 +41,10 @@ public class VariantCastArgs {
 
     public ZoneId zoneId() {
         return zoneId;
+    }
+
+    public static VariantCastArgs defaultArgs() {
+        return new VariantCastArgs(true, ZoneOffset.UTC);
     }
 
     @Override

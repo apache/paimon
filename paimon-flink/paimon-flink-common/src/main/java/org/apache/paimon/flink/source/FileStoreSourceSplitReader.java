@@ -345,7 +345,7 @@ public class FileStoreSourceSplitReader
      * An empty implementation of {@link RecordsWithSplitIds}. It is used to indicate that the
      * {@link FileStoreSourceSplitReader} is paused or wakeup.
      */
-    private static class EmptyRecordsWithSplitIds<T> implements RecordsWithSplitIds<T> {
+    public static class EmptyRecordsWithSplitIds<T> implements RecordsWithSplitIds<T> {
 
         @Nullable
         @Override

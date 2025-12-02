@@ -137,7 +137,8 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
             checkAnswer(
               sql(
                 s"SELECT * FROM paimon_incremental_between_timestamp('$catalogName.$dbName.t', '$t1String', '$t3String') ORDER BY id"),
-              Seq(Row(2), Row(3), Row(4)))
+              Seq(Row(2), Row(3), Row(4))
+            )
           }
         }
     }

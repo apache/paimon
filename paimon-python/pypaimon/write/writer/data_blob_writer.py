@@ -19,7 +19,7 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 import pyarrow as pa
 
@@ -75,8 +75,8 @@ class DataBlobWriter(DataWriter):
     # Constant for checking rolling condition periodically
     CHECK_ROLLING_RECORD_CNT = 1000
 
-    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int):
-        super().__init__(table, partition, bucket, max_seq_number)
+    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: Dict[str, str] = None):
+        super().__init__(table, partition, bucket, max_seq_number, options)
 
         # Determine blob column from table schema
         self.blob_column_name = self._get_blob_columns_from_schema()
@@ -100,7 +100,8 @@ class DataBlobWriter(DataWriter):
             partition=self.partition,
             bucket=self.bucket,
             max_seq_number=max_seq_number,
-            blob_column=self.blob_column_name
+            blob_column=self.blob_column_name,
+            options=options
         )
 
         logger.info(f"Initialized DataBlobWriter with blob column: {self.blob_column_name}")
@@ -245,7 +246,7 @@ class DataBlobWriter(DataWriter):
         if data.num_rows == 0:
             return None
 
-        file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
+        file_name = f"{CoreOptions.data_file_prefix(self.options)}{uuid.uuid4()}-0.{self.file_format}"
         file_path = self._generate_file_path(file_name)
 
         # Write file based on format

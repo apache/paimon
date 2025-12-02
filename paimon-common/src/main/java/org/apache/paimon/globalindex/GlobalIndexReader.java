@@ -23,23 +23,22 @@ import org.apache.paimon.predicate.TransformPredicate;
 
 import java.io.Closeable;
 import java.util.List;
-import java.util.Optional;
 
 /** Index reader for global index, return {@link GlobalIndexResult}. */
-public interface GlobalIndexReader extends FunctionVisitor<Optional<GlobalIndexResult>>, Closeable {
+public interface GlobalIndexReader extends FunctionVisitor<GlobalIndexResult>, Closeable {
 
     @Override
-    default Optional<GlobalIndexResult> visitAnd(List<Optional<GlobalIndexResult>> children) {
+    default GlobalIndexResult visitAnd(List<GlobalIndexResult> children) {
         throw new UnsupportedOperationException("Should not invoke this");
     }
 
     @Override
-    default Optional<GlobalIndexResult> visitOr(List<Optional<GlobalIndexResult>> children) {
+    default GlobalIndexResult visitOr(List<GlobalIndexResult> children) {
         throw new UnsupportedOperationException("Should not invoke this");
     }
 
     @Override
-    default Optional<GlobalIndexResult> visit(TransformPredicate predicate) {
+    default GlobalIndexResult visit(TransformPredicate predicate) {
         throw new UnsupportedOperationException("Should not invoke this");
     }
 }

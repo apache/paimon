@@ -107,10 +107,14 @@ function collect_checks() {
 function get_all_supported_checks() {
     _OLD_IFS=$IFS
     IFS=$'\n'
-    SUPPORT_CHECKS=()
+    SUPPORT_CHECKS=("flake8_check" "pytest_check" "mixed_check") # control the calling sequence
     for fun in $(declare -F); do
         if [[ `regexp_match "$fun" "_check$"` = true ]]; then
-            SUPPORT_CHECKS+=("${fun:11}")
+            check_name="${fun:11}"
+            # Only add if not already in SUPPORT_CHECKS
+            if [[ ! `contains_element "${SUPPORT_CHECKS[*]}" "$check_name"` = true ]]; then
+                SUPPORT_CHECKS+=("$check_name")
+            fi
         fi
     done
     IFS=$_OLD_IFS

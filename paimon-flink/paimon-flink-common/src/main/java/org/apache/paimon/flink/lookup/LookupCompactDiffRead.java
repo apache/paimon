@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
@@ -53,6 +54,12 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
     public void applyReadType(RowType readType) {
         fullPhaseMergeRead.withReadType(readType);
         incrementalDiffRead.withReadType(readType);
+    }
+
+    @Override
+    public void applyVariantAccess(VariantAccessInfo[] variantAccess) {
+        fullPhaseMergeRead.withVariantAccess(variantAccess);
+        incrementalDiffRead.withVariantAccess(variantAccess);
     }
 
     @Override

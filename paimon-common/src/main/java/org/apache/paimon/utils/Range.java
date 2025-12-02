@@ -18,10 +18,13 @@
 
 package org.apache.paimon.utils;
 
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /** Range represents from (inclusive) and to (inclusive). */
-public class Range {
+public class Range implements Serializable {
 
     public final long from;
     public final long to;
@@ -47,6 +50,14 @@ public class Range {
 
     public boolean isAfter(Range other) {
         return from > other.to;
+    }
+
+    public List<Long> toListLong() {
+        List<Long> longs = new ArrayList<>();
+        for (long i = from; i <= to; i++) {
+            longs.add(i);
+        }
+        return longs;
     }
 
     @Override

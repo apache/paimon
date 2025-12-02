@@ -70,6 +70,7 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
                 BytesColumnVector vector = (BytesColumnVector) column;
                 byte[] bytes = getters.getString(columnId).toBytes();
                 vector.setVal(rowId, bytes, 0, bytes.length);
+                return bytes.length;
             };
 
     private static final FieldWriter BYTES_WRITER =
@@ -77,36 +78,57 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
                 BytesColumnVector vector = (BytesColumnVector) column;
                 byte[] bytes = getters.getBinary(columnId);
                 vector.setVal(rowId, bytes, 0, bytes.length);
+                return bytes.length;
             };
 
     private static final FieldWriter BOOLEAN_WRITER =
-            (rowId, column, getters, columnId) ->
-                    ((LongColumnVector) column).vector[rowId] =
-                            getters.getBoolean(columnId) ? 1 : 0;
+            (rowId, column, getters, columnId) -> {
+                ((LongColumnVector) column).vector[rowId] = getters.getBoolean(columnId) ? 1 : 0;
+                // Boolean takes 1 byte
+                return 1;
+            };
 
     private static final FieldWriter INT_WRITER =
-            (rowId, column, getters, columnId) ->
-                    ((LongColumnVector) column).vector[rowId] = getters.getInt(columnId);
+            (rowId, column, getters, columnId) -> {
+                ((LongColumnVector) column).vector[rowId] = getters.getInt(columnId);
+                // Integer takes 4 bytes
+                return 4;
+            };
 
     private static final FieldWriter TINYINT_WRITER =
-            (rowId, column, getters, columnId) ->
-                    ((LongColumnVector) column).vector[rowId] = getters.getByte(columnId);
+            (rowId, column, getters, columnId) -> {
+                ((LongColumnVector) column).vector[rowId] = getters.getByte(columnId);
+                // Byte takes 1 byte
+                return 1;
+            };
 
     private static final FieldWriter SMALLINT_WRITER =
-            (rowId, column, getters, columnId) ->
-                    ((LongColumnVector) column).vector[rowId] = getters.getShort(columnId);
+            (rowId, column, getters, columnId) -> {
+                ((LongColumnVector) column).vector[rowId] = getters.getShort(columnId);
+                // Short takes 2 bytes
+                return 2;
+            };
 
     private static final FieldWriter BIGINT_WRITER =
-            (rowId, column, getters, columnId) ->
-                    ((LongColumnVector) column).vector[rowId] = getters.getLong(columnId);
+            (rowId, column, getters, columnId) -> {
+                ((LongColumnVector) column).vector[rowId] = getters.getLong(columnId);
+                // Long takes 8 bytes
+                return 8;
+            };
 
     private static final FieldWriter FLOAT_WRITER =
-            (rowId, column, getters, columnId) ->
-                    ((DoubleColumnVector) column).vector[rowId] = getters.getFloat(columnId);
+            (rowId, column, getters, columnId) -> {
+                ((DoubleColumnVector) column).vector[rowId] = getters.getFloat(columnId);
+                // Float takes 4 bytes
+                return 4;
+            };
 
     private static final FieldWriter DOUBLE_WRITER =
-            (rowId, column, getters, columnId) ->
-                    ((DoubleColumnVector) column).vector[rowId] = getters.getDouble(columnId);
+            (rowId, column, getters, columnId) -> {
+                ((DoubleColumnVector) column).vector[rowId] = getters.getDouble(columnId);
+                // Double takes 8 bytes
+                return 8;
+            };
 
     private final boolean legacyTimestampLtzType;
 
@@ -186,6 +208,8 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
                     getters.getTimestamp(columnId, timestampType.getPrecision()).toSQLTimestamp();
             TimestampColumnVector vector = (TimestampColumnVector) column;
             vector.set(rowId, timestamp);
+            // Timestamp consists of milliseconds (long - 8 bytes) and nanos (int - 4 bytes)
+            return 12;
         };
     }
 
@@ -203,11 +227,13 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
                         LocalZoneTimestamp.fromEpochMillis(
                                 localTimestamp.getMillisecond(),
                                 localTimestamp.getNanoOfMillisecond());
-                timestamp = java.sql.Timestamp.from(localZoneTimestamp.toInstant());
+                timestamp = Timestamp.from(localZoneTimestamp.toInstant());
             }
 
             TimestampColumnVector vector = (TimestampColumnVector) column;
             vector.set(rowId, timestamp);
+            // Timestamp consists of milliseconds (long - 8 bytes) and nanos (int - 4 bytes)
+            return 12;
         };
     }
 
@@ -230,6 +256,11 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
                             columnId, decimalType.getPrecision(), decimalType.getScale());
             HiveDecimal hiveDecimal = HiveDecimal.create(decimal.toBigDecimal());
             vector.set(rowId, hiveDecimal);
+            // Decimal size using a rough estimate
+            int precision = decimalType.getPrecision();
+            return (precision <= 2)
+                    ? 1
+                    : (precision <= 4) ? 2 : (precision <= 9) ? 4 : (precision <= 18) ? 8 : 16;
         };
     }
 
@@ -247,6 +278,7 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
                     listColumnVector.childCount,
                     listColumnVector.offsets[rowId] != 0);
 
+            int totalSize = 0;
             for (int i = 0; i < arrayData.size(); i++) {
                 ColumnVector fieldColumn = listColumnVector.child;
                 int fieldIndex = (int) listColumnVector.offsets[rowId] + i;
@@ -254,9 +286,10 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
                     fieldColumn.noNulls = false;
                     fieldColumn.isNull[fieldIndex] = true;
                 } else {
-                    elementWriter.write(fieldIndex, fieldColumn, arrayData, i);
+                    totalSize += elementWriter.write(fieldIndex, fieldColumn, arrayData, i);
                 }
             }
+            return totalSize;
         };
     }
 
@@ -281,6 +314,7 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
                     mapColumnVector.childCount,
                     mapColumnVector.offsets[rowId] != 0);
 
+            int totalSize = 0;
             for (int i = 0; i < keyArray.size(); i++) {
                 int fieldIndex = (int) mapColumnVector.offsets[rowId] + i;
 
@@ -289,7 +323,7 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
                     keyColumn.noNulls = false;
                     keyColumn.isNull[fieldIndex] = true;
                 } else {
-                    keyWriter.write(fieldIndex, keyColumn, keyArray, i);
+                    totalSize += keyWriter.write(fieldIndex, keyColumn, keyArray, i);
                 }
 
                 ColumnVector valueColumn = mapColumnVector.values;
@@ -297,9 +331,10 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
                     valueColumn.noNulls = false;
                     valueColumn.isNull[fieldIndex] = true;
                 } else {
-                    valueWriter.write(fieldIndex, valueColumn, valueArray, i);
+                    totalSize += valueWriter.write(fieldIndex, valueColumn, valueArray, i);
                 }
             }
+            return totalSize;
         };
     }
 
@@ -312,15 +347,17 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
         return (rowId, column, getters, columnId) -> {
             StructColumnVector structColumnVector = (StructColumnVector) column;
             InternalRow structRow = getters.getRow(columnId, structColumnVector.fields.length);
+            int totalSize = 0;
             for (int i = 0; i < structRow.getFieldCount(); i++) {
                 ColumnVector fieldColumn = structColumnVector.fields[i];
                 if (structRow.isNullAt(i)) {
                     fieldColumn.noNulls = false;
                     fieldColumn.isNull[rowId] = true;
                 } else {
-                    fieldWriters.get(i).write(rowId, fieldColumn, structRow, i);
+                    totalSize += fieldWriters.get(i).write(rowId, fieldColumn, structRow, i);
                 }
             }
+            return totalSize;
         };
     }
 

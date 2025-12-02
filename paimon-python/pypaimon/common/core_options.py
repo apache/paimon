@@ -50,6 +50,7 @@ class CoreOptions(str, Enum):
     FILE_BLOB_AS_DESCRIPTOR = "blob-as-descriptor"
     TARGET_FILE_SIZE = "target-file-size"
     BLOB_TARGET_FILE_SIZE = "blob.target-file-size"
+    DATA_FILE_PREFIX = "data-file.prefix"
     # Scan options
     SCAN_FALLBACK_BRANCH = "scan.fallback-branch"
     INCREMENTAL_BETWEEN_TIMESTAMP = "incremental-between-timestamp"
@@ -63,6 +64,10 @@ class CoreOptions(str, Enum):
     DATA_FILE_EXTERNAL_PATHS = "data-file.external-paths"
     DATA_FILE_EXTERNAL_PATHS_STRATEGY = "data-file.external-paths.strategy"
     DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS = "data-file.external-paths.specific-fs"
+
+    @staticmethod
+    def data_file_prefix(options: dict) -> str:
+        return options.get(CoreOptions.DATA_FILE_PREFIX, "data-")
 
     @staticmethod
     def blob_as_descriptor(options: dict) -> bool:

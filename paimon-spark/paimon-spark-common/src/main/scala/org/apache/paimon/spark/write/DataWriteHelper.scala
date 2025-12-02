@@ -31,9 +31,7 @@ trait DataWriteHelper extends Logging {
 
   val fullCompactionDeltaCommits: Option[Int]
 
-  /**
-   * For batch write, batchId is -1, for streaming write, batchId is the current batch id (>= 0).
-   */
+  /** For batch write, batchId is -1, for streaming write, batchId is the current batch id (>= 0). */
   val batchId: Long
 
   private val needFullCompaction: Boolean = {
