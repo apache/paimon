@@ -124,11 +124,15 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
 
             // Serialize index and metadata
             byte[] indexBytes = serializeIndexWithJVector(graphIndex);
-            byte[] metaBytes = serializeMetadata();
+            VectorIndexMetadata metadata =
+                    new VectorIndexMetadata(
+                            vectorOptions.dimension(),
+                            vectorOptions.metric(),
+                            vectorOptions.m(),
+                            vectorOptions.efConstruction());
+            byte[] metaBytes = VectorIndexMetadata.serializeMetadata(metadata);
 
-            // Write to file. todo: here could use OnDiskGraphIndex to write directly to file.
-            // RandomAccessVectorValues ravv
-            // OnDiskGraphIndex.write(index, ravv, indexPath);
+            // Write to file.
             String fileName = fileWriter.newFileName(VectorGlobalIndexerFactory.IDENTIFIER);
             try (OutputStream out = fileWriter.newOutputStream(fileName)) {
                 out.write(indexBytes);
@@ -154,32 +158,8 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
 
         // Create vector values adapter for JVector
         RandomAccessVectorValues vectorValues =
-                new RandomAccessVectorValues() {
-                    @Override
-                    public int size() {
-                        return vectorFloats.size();
-                    }
-
-                    @Override
-                    public int dimension() {
-                        return vectorOptions.dimension();
-                    }
-
-                    @Override
-                    public VectorFloat<?> getVector(int i) {
-                        return vectorFloats.get(i);
-                    }
-
-                    @Override
-                    public boolean isValueShared() {
-                        return false;
-                    }
-
-                    @Override
-                    public RandomAccessVectorValues copy() {
-                        return this;
-                    }
-                };
+                new PaimonRandomAccessVectorValues(
+                        vectorFloats.size(), vectorOptions.dimension(), vectorFloats, false);
 
         // Build HNSW graph index using JVector
         GraphIndexBuilder builder =
@@ -199,7 +179,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
         ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
         try (DataOutputStream dataOut = new DataOutputStream(byteOut)) {
             // Write version
-            dataOut.writeInt(2); // Version 2 with JVector index
+            dataOut.writeInt(1); // Version 1 with JVector index
 
             // Write row IDs
             dataOut.writeInt(vectors.size());

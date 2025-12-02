@@ -29,7 +29,6 @@ import org.apache.paimon.types.DataType;
 
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
-import io.github.jbellis.jvector.graph.OnHeapGraphIndex;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.util.Bits;
@@ -122,16 +121,9 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
 
             // Parse metadata
             byte[] metaBytes = meta.metadata();
-            VectorIndexMetadata metadata = deserializeMetadata(metaBytes);
+            VectorIndexMetadata metadata = VectorIndexMetadata.deserializeMetadata(metaBytes);
 
-            // Rebuild graph index if version 2 (with JVector)
-            OnHeapGraphIndex graphIndex = null;
-            if (version == 2 && dataIn.available() > 0) {
-                // Read graph structure
-                int graphSize = dataIn.readInt();
-                int maxDegree = dataIn.readInt();
-
-                // Rebuild the graph index from vectors
+            if (dataIn.available() > 0) {
                 var vectorTypeSupport = VectorizationProvider.getInstance().getVectorTypeSupport();
                 List<VectorFloat<?>> vectorFloats = new ArrayList<>();
                 for (float[] vec : vectors) {
@@ -140,64 +132,29 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
 
                 // Create RandomAccessVectorValues
                 RandomAccessVectorValues vectorValues =
-                        new RandomAccessVectorValues() {
-                            @Override
-                            public int size() {
-                                return vectorFloats.size();
-                            }
-
-                            @Override
-                            public int dimension() {
-                                return metadata.dimension;
-                            }
-
-                            @Override
-                            public VectorFloat<?> getVector(int i) {
-                                return vectorFloats.get(i);
-                            }
-
-                            @Override
-                            public boolean isValueShared() {
-                                return false;
-                            }
-
-                            @Override
-                            public RandomAccessVectorValues copy() {
-                                return this;
-                            }
-                        };
+                        new PaimonRandomAccessVectorValues(
+                                vectorFloats.size(), metadata.dimension(), vectorFloats, false);
 
                 // Rebuild graph using stored structure or rebuild from scratch
                 VectorSimilarityFunction similarityFunction =
-                        VectorSimilarityFunction.valueOf(metadata.similarityFunction);
-                var builder =
+                        VectorSimilarityFunction.valueOf(metadata.similarityFunction());
+                try (GraphIndexBuilder builder =
                         new GraphIndexBuilder(
                                 vectorValues,
                                 similarityFunction,
-                                metadata.m,
-                                metadata.efConstruction,
+                                metadata.m(),
+                                metadata.efConstruction(),
                                 1.0f, // todo: need conf
-                                1.0f); // todo: need conf
-                graphIndex = builder.build(vectorValues);
+                                1.0f)) { // todo: need conf
+                    return new IndexShard(
+                            rowIds,
+                            vectors,
+                            metadata,
+                            meta.rowIdRange().from,
+                            builder.build(vectorValues));
+                }
             }
-
-            return new IndexShard(rowIds, vectors, metadata, meta.rowIdRange().from, graphIndex);
-        }
-    }
-
-    private VectorIndexMetadata deserializeMetadata(byte[] metaBytes) throws IOException {
-        if (metaBytes == null || metaBytes.length == 0) {
-            return new VectorIndexMetadata(
-                    this.dimension, this.similarityFunction, this.m, this.efConstruction);
-        }
-
-        ByteArrayInputStream byteIn = new ByteArrayInputStream(metaBytes);
-        try (DataInputStream dataIn = new DataInputStream(byteIn)) {
-            int dimension = dataIn.readInt();
-            String metricName = dataIn.readUTF();
-            int m = dataIn.readInt();
-            int efConstruction = dataIn.readInt();
-            return new VectorIndexMetadata(dimension, metricName, m, efConstruction);
+            return new IndexShard(rowIds, vectors, metadata, meta.rowIdRange().from, null);
         }
     }
 
@@ -222,43 +179,21 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
 
                 // Use JVector's GraphSearcher for efficient ANN search
                 VectorSimilarityFunction similarityFunction =
-                        VectorSimilarityFunction.valueOf(shard.metadata.similarityFunction);
+                        VectorSimilarityFunction.valueOf(shard.metadata.similarityFunction());
 
                 // Create vector values for search context
-                var vectorTypeSupport2 = VectorizationProvider.getInstance().getVectorTypeSupport();
+                var vectorTypeSupportForIndex =
+                        VectorizationProvider.getInstance().getVectorTypeSupport();
                 List<VectorFloat<?>> vectorFloats = new ArrayList<>();
                 for (float[] vec : shard.vectors) {
-                    vectorFloats.add(vectorTypeSupport2.createFloatVector(vec));
+                    vectorFloats.add(vectorTypeSupportForIndex.createFloatVector(vec));
                 }
-
                 RandomAccessVectorValues vectorValues =
-                        new RandomAccessVectorValues() {
-                            @Override
-                            public int size() {
-                                return vectorFloats.size();
-                            }
-
-                            @Override
-                            public int dimension() {
-                                return shard.metadata.dimension;
-                            }
-
-                            @Override
-                            public VectorFloat<?> getVector(int i) {
-                                return vectorFloats.get(i);
-                            }
-
-                            @Override
-                            public boolean isValueShared() {
-                                return false;
-                            }
-
-                            @Override
-                            public RandomAccessVectorValues copy() {
-                                return this;
-                            }
-                        };
-
+                        new PaimonRandomAccessVectorValues(
+                                vectorFloats.size(),
+                                shard.metadata.dimension(),
+                                vectorFloats,
+                                false);
                 // Search using static method
                 SearchResult result =
                         GraphSearcher.search(
@@ -272,7 +207,9 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                 // Collect row IDs from results
                 var nodes = result.getNodes();
                 for (int i = 0; i < nodes.length && i < k; i++) {
-                    int nodeId = nodes[i].node;
+                    // todo: could get score here: nodeScore.score
+                    SearchResult.NodeScore nodeScore = nodes[i];
+                    int nodeId = nodeScore.node;
                     if (nodeId >= 0 && nodeId < shard.rowIds.length) {
                         resultIds.add(shard.rowIds[nodeId]);
                     }
@@ -359,40 +296,5 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
     @Override
     public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
         throw new UnsupportedOperationException("Vector index does not support notIn predicate");
-    }
-
-    private static class IndexShard {
-        final long[] rowIds;
-        final List<float[]> vectors;
-        final VectorIndexMetadata metadata;
-        final long rowRangeStart;
-        final OnHeapGraphIndex graphIndex;
-
-        IndexShard(
-                long[] rowIds,
-                List<float[]> vectors,
-                VectorIndexMetadata metadata,
-                long rowRangeStart,
-                OnHeapGraphIndex graphIndex) {
-            this.rowIds = rowIds;
-            this.vectors = vectors;
-            this.metadata = metadata;
-            this.rowRangeStart = rowRangeStart;
-            this.graphIndex = graphIndex;
-        }
-    }
-
-    private static class VectorIndexMetadata {
-        final int dimension;
-        final String similarityFunction;
-        final int m;
-        final int efConstruction;
-
-        VectorIndexMetadata(int dimension, String similarityFunction, int m, int efConstruction) {
-            this.dimension = dimension;
-            this.similarityFunction = similarityFunction;
-            this.m = m;
-            this.efConstruction = efConstruction;
-        }
     }
 }
