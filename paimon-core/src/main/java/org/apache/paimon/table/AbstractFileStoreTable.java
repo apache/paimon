@@ -376,8 +376,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
         AbstractFileStoreTable copied =
-                FileStoreTableFactory.createFileStoreTable(
-                        fileIO, path, newTableSchema, newTableSchema.options(), catalogEnvironment);
+                newTableSchema.primaryKeys().isEmpty()
+                        ? new AppendOnlyFileStoreTable(
+                                fileIO, path, newTableSchema, catalogEnvironment)
+                        : new PrimaryKeyFileStoreTable(
+                                fileIO, path, newTableSchema, catalogEnvironment);
         if (snapshotCache != null) {
             copied.setSnapshotCache(snapshotCache);
         }

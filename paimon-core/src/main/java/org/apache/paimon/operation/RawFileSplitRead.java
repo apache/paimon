@@ -45,6 +45,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
@@ -149,7 +150,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
+    public RecordReader<InternalRow> createReader(Split s) throws IOException {
+        DataSplit split = (DataSplit) s;
         if (!split.beforeFiles().isEmpty()) {
             LOG.info("Ignore split before files: {}", split.beforeFiles());
         }

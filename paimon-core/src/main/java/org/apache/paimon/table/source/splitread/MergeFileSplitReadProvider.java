@@ -21,7 +21,6 @@ package org.apache.paimon.table.source.splitread;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
-import org.apache.paimon.table.source.CompoundDataSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
@@ -49,20 +48,16 @@ public class MergeFileSplitReadProvider implements SplitReadProvider {
 
     private SplitRead<InternalRow> create(Supplier<MergeFileSplitRead> supplier) {
         final MergeFileSplitRead read = supplier.get().withReadKeyType(RowType.of());
-        return SplitRead.convert(
-                read,
-                split -> unwrap(read.createReader(split)),
-                split -> unwrap(read.createRecordReader(split)));
-    }
-
-    @Override
-    public boolean match(DataSplit split, boolean forceKeepDelete) {
-        return split.beforeFiles().isEmpty();
+        return SplitRead.convert(read, split -> unwrap(read.createReader(split)));
     }
 
     @Override
     public boolean match(Split split, Context context) {
-        return split instanceof CompoundDataSplit;
+        if (!(split instanceof DataSplit)) {
+            return false;
+        }
+        DataSplit dataSplit = (DataSplit) split;
+        return dataSplit.beforeFiles().isEmpty();
     }
 
     @Override

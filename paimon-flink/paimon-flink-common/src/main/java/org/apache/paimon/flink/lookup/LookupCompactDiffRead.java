@@ -46,7 +46,7 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
         super(schema);
         this.incrementalDiffRead = new IncrementalCompactDiffSplitRead(mergeRead);
         this.fullPhaseMergeRead =
-                SplitRead.convert(mergeRead, split -> unwrap(mergeRead.createReader(split)), null);
+                SplitRead.convert(mergeRead, split -> unwrap(mergeRead.createReader(split)));
     }
 
     @Override

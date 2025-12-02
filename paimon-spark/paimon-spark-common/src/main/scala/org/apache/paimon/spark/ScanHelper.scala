@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions._
 import org.apache.paimon.io.DataFileMeta
 import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackDataSplit
-import org.apache.paimon.table.source.{CompoundDataSplit, DataSplit, DeletionFile, Split}
+import org.apache.paimon.table.source.{DataSplit, DeletionFile, Split}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.PaimonSparkSession
@@ -75,7 +75,6 @@ trait ScanHelper extends SQLConfHelper with Logging {
   def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
     val (toReshuffle, reserved) = splits.partition {
       case _: FallbackDataSplit => false
-      case _: CompoundDataSplit => false
       case split: DataSplit => split.beforeFiles().isEmpty && split.rawConvertible()
       case _ => false
     }

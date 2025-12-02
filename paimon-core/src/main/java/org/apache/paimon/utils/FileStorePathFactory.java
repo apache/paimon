@@ -26,9 +26,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexInDataFileDirPathFactory;
 import org.apache.paimon.index.IndexPathFactory;
-import org.apache.paimon.io.CompoundReadDataFilePathFactory;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.io.ReadContext;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 
@@ -173,21 +171,6 @@ public class FileStorePathFactory {
                 fileSuffixIncludeCompression,
                 fileCompression,
                 createExternalPathProvider(partition, bucket));
-    }
-
-    public DataFilePathFactory createCompoundReadDataFilePathFactory(ReadContext readContext) {
-        if (externalPaths != null && !externalPaths.isEmpty()) {
-            throw new IllegalArgumentException("Chain table does not support external path.");
-        }
-        return new CompoundReadDataFilePathFactory(
-                root,
-                formatIdentifier,
-                dataFilePrefix,
-                changelogFilePrefix,
-                fileSuffixIncludeCompression,
-                fileCompression,
-                null,
-                readContext);
     }
 
     public DataFilePathFactory createFormatTableDataFilePathFactory(

@@ -117,7 +117,9 @@ public final class AppendTableRead extends AbstractDataTableRead {
     public RecordReader<InternalRow> reader(Split split) throws IOException {
         DataSplit dataSplit = (DataSplit) split;
         for (SplitReadProvider readProvider : readProviders) {
-            if (readProvider.match(dataSplit, false)) {
+            if (readProvider.match(
+                    dataSplit,
+                    SplitReadProvider.Context.builder().withForceKeepDelete(false).build())) {
                 return readProvider.get().get().createReader(dataSplit);
             }
         }
