@@ -36,10 +36,10 @@ public class VectorIndexOptions {
                     .stringType()
                     .defaultValue("EUCLIDEAN")
                     .withDescription(
-                            "The similarity metric for vector search (COSINE, DOT_PRODUCT, EUCLIDEAN)");
+                            "The similarity metric for vector search (COSINE, DOT_PRODUCT, EUCLIDEAN, MAX_INNER_PRODUCT)");
 
     public static final ConfigOption<Integer> VECTOR_M =
-            ConfigOptions.key("vector.M")
+            ConfigOptions.key("vector.m")
                     .intType()
                     .defaultValue(16)
                     .withDescription(

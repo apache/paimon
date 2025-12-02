@@ -28,7 +28,7 @@ import org.apache.paimon.utils.Range;
 
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.lucene99.Lucene99Codec;
-import org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsFormat;
+import org.apache.lucene.codecs.lucene99.Lucene99HnswScalarQuantizedVectorsFormat;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.document.StoredField;
@@ -165,15 +165,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
 
         try {
             // Configure index writer
-            IndexWriterConfig config = new IndexWriterConfig();
-            config.setRAMBufferSizeMB(256); // Increase buffer for better performance
-            config.setCodec(
-                    new Lucene99Codec() {
-                        @Override
-                        public KnnVectorsFormat getKnnVectorsFormatForField(String field) {
-                            return new Lucene99HnswVectorsFormat(m, efConstruction);
-                        }
-                    });
+            IndexWriterConfig config = getIndexWriterConfig(m, efConstruction);
 
             try (IndexWriter writer = new IndexWriter(directory, config)) {
                 // Add each vector as a document
@@ -202,6 +194,19 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
             directory.close();
             deleteDirectory(tempDir);
         }
+    }
+
+    private static IndexWriterConfig getIndexWriterConfig(int m, int efConstruction) {
+        IndexWriterConfig config = new IndexWriterConfig();
+        config.setRAMBufferSizeMB(256); // Increase buffer for better performance
+        config.setCodec(
+                new Lucene99Codec(Lucene99Codec.Mode.BEST_SPEED) {
+                    @Override
+                    public KnnVectorsFormat getKnnVectorsFormatForField(String field) {
+                        return new Lucene99HnswScalarQuantizedVectorsFormat(m, efConstruction);
+                    }
+                });
+        return config;
     }
 
     private void deleteDirectory(java.nio.file.Path path) throws IOException {

@@ -18,9 +18,7 @@
 
 package org.apache.paimon.vector;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
@@ -41,17 +39,6 @@ public class VectorIndexMetadata implements Serializable {
         this.similarityFunction = similarityFunction;
         this.m = m;
         this.efConstruction = efConstruction;
-    }
-
-    public static VectorIndexMetadata deserializeMetadata(byte[] metaBytes) throws IOException {
-        ByteArrayInputStream byteIn = new ByteArrayInputStream(metaBytes);
-        try (DataInputStream dataIn = new DataInputStream(byteIn)) {
-            int dimension = dataIn.readInt();
-            String metricName = dataIn.readUTF();
-            int m = dataIn.readInt();
-            int efConstruction = dataIn.readInt();
-            return new VectorIndexMetadata(dimension, metricName, m, efConstruction);
-        }
     }
 
     public static byte[] serializeMetadata(VectorIndexMetadata vectorIndexMetadata)

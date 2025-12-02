@@ -300,7 +300,7 @@ public class VectorGlobalIndexTest {
     @Test
     public void testHNSWParameters() throws IOException {
         Options options = createDefaultOptions();
-        options.setInteger("vector.M", 32); // Larger M for better recall
+        options.setInteger("vector.m", 32); // Larger M for better recall
         options.setInteger("vector.ef-construction", 200); // Larger ef for better quality
 
         int dimension = 64;
@@ -383,7 +383,7 @@ public class VectorGlobalIndexTest {
         int dimension = 128;
         options.setInteger("vector.dim", dimension);
         options.setString("vector.metric", "COSINE");
-        options.setInteger("vector.M", 24);
+        options.setInteger("vector.m", 24);
         options.setInteger("vector.ef-construction", 150);
 
         // Simulate a multi-shard scenario with incremental writes
@@ -507,7 +507,7 @@ public class VectorGlobalIndexTest {
         int dimension = 2;
         options.setInteger("vector.dim", dimension);
         options.setString("vector.metric", "EUCLIDEAN");
-        options.setInteger("vector.M", 16);
+        options.setInteger("vector.m", 16);
         options.setInteger("vector.ef-construction", 100);
 
         // Create semantic vectors representing "documents"
@@ -605,7 +605,7 @@ public class VectorGlobalIndexTest {
         Options options = new Options();
         options.setInteger("vector.dim", 128);
         options.setString("vector.metric", "COSINE");
-        options.setInteger("vector.M", 16);
+        options.setInteger("vector.m", 16);
         options.setInteger("vector.ef-construction", 100);
         return options;
     }
