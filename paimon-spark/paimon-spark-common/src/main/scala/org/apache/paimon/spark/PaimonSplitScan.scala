@@ -56,7 +56,6 @@ case class PaimonSplitScan(
     Array(
       PaimonNumSplitMetric(),
       PaimonSplitSizeMetric(),
-      PaimonAvgSplitSizeMetric(),
       PaimonResultedTableFilesMetric()
     )
   }
