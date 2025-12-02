@@ -307,6 +307,7 @@ under the License.
                                     <include>com.github.davidmoten:hilbert-curve</include>
                                     <include>com.github.davidmoten:guava-mini</include>
                                     <include>org.apache.datasketches:*</include>
+                                    <include>io.airlift:aircompressor</include>
                                 </includes>
                             </artifactSet>
                             <filters>

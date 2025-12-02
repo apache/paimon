@@ -16,11 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.sst.layout;
+package org.apache.paimon.sst;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.format.sst.compression.BlockCompressionFactory;
-import org.apache.paimon.format.sst.compression.BlockDecompressor;
+import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.compression.BlockDecompressor;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.memory.MemorySegment;
@@ -36,7 +36,7 @@ import java.io.IOException;
 import java.util.Comparator;
 import java.util.function.Function;
 
-import static org.apache.paimon.format.sst.layout.SstFileUtils.crc32c;
+import static org.apache.paimon.sst.SstFileUtils.crc32c;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -177,7 +177,9 @@ public abstract class AbstractSstFileReader implements Closeable {
 
     @Override
     public void close() throws IOException {
-        // maybe close cache here.
+        if (blockCache != null) {
+            blockCache.close();
+        }
     }
 
     @VisibleForTesting

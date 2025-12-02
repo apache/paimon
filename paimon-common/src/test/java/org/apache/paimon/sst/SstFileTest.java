@@ -16,16 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.sst;
+package org.apache.paimon.sst;
 
-import org.apache.paimon.format.sst.compression.BlockCompressionFactory;
-import org.apache.paimon.format.sst.compression.BlockCompressionType;
-import org.apache.paimon.format.sst.layout.AbstractSstFileReader;
-import org.apache.paimon.format.sst.layout.BlockCache;
-import org.apache.paimon.format.sst.layout.BlockEntry;
-import org.apache.paimon.format.sst.layout.SstFileLookupReader;
-import org.apache.paimon.format.sst.layout.SstFileScanReader;
-import org.apache.paimon.format.sst.layout.SstFileWriter;
+import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -35,21 +29,27 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
+import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.utils.BloomFilter;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
 /** Test for {@link AbstractSstFileReader} and {@link SstFileWriter}. */
+@ExtendWith(ParameterizedTestExtension.class)
 public class SstFileTest {
     private static final Logger LOG = LoggerFactory.getLogger(SstFileTest.class);
 
@@ -58,9 +58,29 @@ public class SstFileTest {
     private static final CacheManager CACHE_MANAGER = new CacheManager(MemorySize.ofMebiBytes(10));
     @TempDir java.nio.file.Path tempPath;
 
-    protected FileIO fileIO;
-    protected Path file;
-    protected Path parent;
+    private final boolean bloomFilterEnabled;
+    private final CompressOptions compress;
+
+    private FileIO fileIO;
+    private Path file;
+    private Path parent;
+
+    public SstFileTest(List<Object> var) {
+        this.bloomFilterEnabled = (Boolean) var.get(0);
+        this.compress = new CompressOptions((String) var.get(1), 1);
+    }
+
+    @SuppressWarnings("unused")
+    @Parameters(name = "enableBf&compress-{0}")
+    public static List<List<Object>> getVarSeg() {
+        return Arrays.asList(
+                Arrays.asList(true, "none"),
+                Arrays.asList(false, "none"),
+                Arrays.asList(false, "lz4"),
+                Arrays.asList(true, "lz4"),
+                Arrays.asList(false, "zstd"),
+                Arrays.asList(true, "zstd"));
+    }
 
     @BeforeEach
     public void beforeEach() {
@@ -69,9 +89,12 @@ public class SstFileTest {
         this.file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
     }
 
-    private void writeData(int recordCount, BloomFilter.Builder bloomFilter) throws Exception {
-        BlockCompressionFactory compressionFactory =
-                BlockCompressionFactory.create(BlockCompressionType.LZ4);
+    private void writeData(int recordCount, boolean withBloomFilter) throws Exception {
+        BloomFilter.Builder bloomFilter = null;
+        if (withBloomFilter) {
+            bloomFilter = BloomFilter.builder(recordCount, 0.05);
+        }
+        BlockCompressionFactory compressionFactory = BlockCompressionFactory.create(compress);
         try (PositionOutputStream outputStream = fileIO.newOutputStream(file, true);
                 SstFileWriter writer =
                         new SstFileWriter(
@@ -90,16 +113,9 @@ public class SstFileTest {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testLookup() throws Exception {
-        writeData(5000, null);
-        innerTestLookup();
-    }
-
-    @Test
-    public void testLookupWithBloomFilter() throws Exception {
-        BloomFilter.Builder bloomFilter = BloomFilter.builder(5000, 0.05);
-        writeData(5000, bloomFilter);
+        writeData(5000, bloomFilterEnabled);
         innerTestLookup();
     }
 
@@ -162,9 +178,9 @@ public class SstFileTest {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testFullScan() throws Exception {
-        writeData(5000, null);
+        writeData(5000, false);
 
         long fileSize = fileIO.getFileSize(file);
         try (SeekableInputStream inputStream = fileIO.newInputStream(file);
@@ -180,9 +196,9 @@ public class SstFileTest {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testSeekAndScan() throws Exception {
-        writeData(5000, null);
+        writeData(5000, false);
 
         long fileSize = fileIO.getFileSize(file);
         try (SeekableInputStream inputStream = fileIO.newInputStream(file);
@@ -248,9 +264,9 @@ public class SstFileTest {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testSeekToPositionAndScan() throws Exception {
-        writeData(5000, null);
+        writeData(5000, false);
 
         long fileSize = fileIO.getFileSize(file);
         try (SeekableInputStream inputStream = fileIO.newInputStream(file);

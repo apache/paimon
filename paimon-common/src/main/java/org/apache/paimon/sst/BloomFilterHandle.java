@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.sst.layout;
+package org.apache.paimon.sst;
 
 import java.util.Objects;
 

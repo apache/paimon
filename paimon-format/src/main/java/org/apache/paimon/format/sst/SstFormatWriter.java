@@ -18,13 +18,13 @@
 
 package org.apache.paimon.format.sst;
 
+import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.compression.BlockCompressionType;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.format.FormatWriter;
-import org.apache.paimon.format.sst.compression.BlockCompressionFactory;
-import org.apache.paimon.format.sst.compression.BlockCompressionType;
-import org.apache.paimon.format.sst.layout.SstFileWriter;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.sst.SstFileWriter;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.ProjectedRow;

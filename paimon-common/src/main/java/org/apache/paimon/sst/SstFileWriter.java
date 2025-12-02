@@ -16,11 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.sst.layout;
+package org.apache.paimon.sst;
 
-import org.apache.paimon.format.sst.compression.BlockCompressionFactory;
-import org.apache.paimon.format.sst.compression.BlockCompressionType;
-import org.apache.paimon.format.sst.compression.BlockCompressor;
+import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.compression.BlockCompressionType;
+import org.apache.paimon.compression.BlockCompressor;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
@@ -36,13 +37,34 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 
-import static org.apache.paimon.format.sst.layout.SstFileUtils.crc32c;
 import static org.apache.paimon.memory.MemorySegmentUtils.allocateReuseBytes;
+import static org.apache.paimon.sst.SstFileUtils.crc32c;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
 
 /**
- * An SST FileWriter which directly accepts keys and values as bytes. Please refer to {@link
- * org.apache.paimon.format.sst.SstFileFormat SST File Format} for more information.
+ * A {@link FileFormat} for SST Files. SST Files are row-oriented and designed to serve frequent
+ * point queries and range queries by key. The SST File layout is as below: (For layouts of each
+ * block type, please refer to corresponding classes)
+ *
+ * <pre>
+ *     +-----------------------------------+------+
+ *     |             Footer                |      |
+ *     +-----------------------------------+      |
+ *     |            File Info              |      |
+ *     +-----------------------------------+      +--> Loaded on open
+ *     |        Bloom Filter Block         |      |
+ *     +-----------------------------------+      |
+ *     |           Index Block             |      |
+ *     +-----------------------------------+------+
+ *     |          Metadata Block           |      |
+ *     +-----------------------------------+      |
+ *     |            Data Block             |      |
+ *     +-----------------------------------+      +--> Loaded on need
+ *                    ......                      |
+ *     +-----------------------------------+      |
+ *     |            Data Block             |      |
+ *     +-----------------------------------+------+
+ * </pre>
  */
 public class SstFileWriter implements Closeable {
 

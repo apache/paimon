@@ -42,29 +42,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A {@link FileFormat} for SST Files. SST Files are row-oriented and designed to serve frequent
- * point queries and range queries by key. The SST File layout is as below: (For layouts of each
- * block type, please refer to corresponding classes)
- *
- * <pre>
- *     +-----------------------------------+------+
- *     |             Footer                |      |
- *     +-----------------------------------+      |
- *     |            File Info              |      |
- *     +-----------------------------------+      +--> Loaded on open
- *     |        Bloom Filter Block         |      |
- *     +-----------------------------------+      |
- *     |           Index Block             |      |
- *     +-----------------------------------+------+
- *     |          Metadata Block           |      |
- *     +-----------------------------------+      |
- *     |            Data Block             |      |
- *     +-----------------------------------+      +--> Loaded on need
- *                    ......                      |
- *     +-----------------------------------+      |
- *     |            Data Block             |      |
- *     +-----------------------------------+------+
- * </pre>
+ * A {@link FileFormat} for SST Files. Please refer to {@link org.apache.paimon.sst.SstFileWriter}
+ * for more information.
  */
 public class SstFileFormat extends FileFormat {
     private final Options options;

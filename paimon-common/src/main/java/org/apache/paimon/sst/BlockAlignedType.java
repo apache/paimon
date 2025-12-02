@@ -16,27 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.sst.compression;
+package org.apache.paimon.sst;
 
-/**
- * A {@code BufferDecompressionException} is thrown when the target data cannot be decompressed,
- * such as data corruption, insufficient target buffer space for decompression, etc.
- */
-public class BufferDecompressionException extends RuntimeException {
+/** Aligned type for block. */
+public enum BlockAlignedType {
+    ALIGNED((byte) 0),
+    UNALIGNED((byte) 1);
 
-    public BufferDecompressionException() {
-        super();
+    private final byte b;
+
+    BlockAlignedType(byte b) {
+        this.b = b;
     }
 
-    public BufferDecompressionException(String message) {
-        super(message);
+    public byte toByte() {
+        return b;
     }
 
-    public BufferDecompressionException(String message, Throwable e) {
-        super(message, e);
-    }
-
-    public BufferDecompressionException(Throwable e) {
-        super(e);
+    public static BlockAlignedType fromByte(byte b) {
+        for (BlockAlignedType type : BlockAlignedType.values()) {
+            if (type.toByte() == b) {
+                return type;
+            }
+        }
+        throw new IllegalStateException("Illegal block aligned type: " + b);
     }
 }

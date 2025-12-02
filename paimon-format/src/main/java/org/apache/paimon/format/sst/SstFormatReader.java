@@ -20,15 +20,15 @@ package org.apache.paimon.format.sst;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
-import org.apache.paimon.format.sst.layout.BlockEntry;
-import org.apache.paimon.format.sst.layout.BlockIterator;
-import org.apache.paimon.format.sst.layout.SstFileScanReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.reader.DataEvolutionRow;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.sst.BlockEntry;
+import org.apache.paimon.sst.BlockIterator;
+import org.apache.paimon.sst.SstFileScanReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 

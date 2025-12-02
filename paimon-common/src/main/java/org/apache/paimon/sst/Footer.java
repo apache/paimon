@@ -16,9 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.sst.layout;
+package org.apache.paimon.sst;
 
-import org.apache.paimon.format.sst.compression.BlockCompressionType;
+import org.apache.paimon.compression.BlockCompressionType;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.memory.MemorySliceOutput;
@@ -27,7 +27,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 
-import static org.apache.paimon.format.sst.layout.SstFileWriter.MAGIC_NUMBER;
+import static org.apache.paimon.sst.SstFileWriter.MAGIC_NUMBER;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
