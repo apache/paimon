@@ -481,9 +481,9 @@ public class SparkWriteITCase {
 
     @Test
     public void testTruncatePartitionValueNull() {
-        spark.sql("CREATE TABLE t (pt STRING, data STRING) PARTITIONED BY (pt) ");
+        spark.sql("CREATE TABLE T (pt STRING, data STRING) PARTITIONED BY (pt) ");
 
-        spark.sql("INSERT INTO t VALUES('1', 'a'), (null, 'b')");
+        spark.sql("INSERT INTO T VALUES('1', 'a'), (null, 'b')");
 
         spark.sql("TRUNCATE TABLE T PARTITION (pt = null)");
 
