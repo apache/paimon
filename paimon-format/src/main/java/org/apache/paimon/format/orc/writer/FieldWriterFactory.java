@@ -257,7 +257,10 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
             HiveDecimal hiveDecimal = HiveDecimal.create(decimal.toBigDecimal());
             vector.set(rowId, hiveDecimal);
             // Decimal size using a rough estimate
-            return decimal.toBigDecimal().toString().length();
+            int precision = decimalType.getPrecision();
+            return (precision <= 2)
+                    ? 1
+                    : (precision <= 4) ? 2 : (precision <= 9) ? 4 : (precision <= 18) ? 8 : 16;
         };
     }
 

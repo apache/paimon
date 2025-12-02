@@ -58,12 +58,9 @@ public class OrcBulkWriter implements FormatWriter {
 
     @Override
     public void addElement(InternalRow element) throws IOException {
-        synchronized (this) {
-            currentBatchMemoryUsage += vectorizer.vectorize(element, rowBatch);
-            if (rowBatch.size == rowBatch.getMaxSize()
-                    || (rowBatch.size % 10 == 0 && currentBatchMemoryUsage >= this.memoryLimit)) {
-                flush();
-            }
+        currentBatchMemoryUsage += vectorizer.vectorize(element, rowBatch);
+        if (rowBatch.size == rowBatch.getMaxSize() || currentBatchMemoryUsage >= this.memoryLimit) {
+            flush();
         }
     }
 
