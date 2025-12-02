@@ -19,15 +19,12 @@
 package org.apache.paimon.spark
 
 import org.apache.spark.sql.PaimonUtils
-import org.apache.spark.sql.connector.metric.{CustomAvgMetric, CustomSumMetric, CustomTaskMetric}
-
-import java.text.DecimalFormat
+import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 
 object PaimonMetrics {
   // scan metrics
   val NUM_SPLITS = "numSplits"
-  val SPLIT_SIZE = "splitSize"
-  val AVG_SPLIT_SIZE = "avgSplitSize"
+  val PARTITION_SIZE = "partitionSize"
   val PLANNING_DURATION = "planningDuration"
   val SCANNED_SNAPSHOT_ID = "scannedSnapshotId"
   val SCANNED_MANIFESTS = "scannedManifests"
@@ -50,52 +47,47 @@ object PaimonMetrics {
 sealed trait PaimonTaskMetric extends CustomTaskMetric
 
 // Base custom metrics
-sealed trait PaimonSumMetric extends CustomSumMetric {
-  protected def aggregateTaskMetrics0(taskMetrics: Array[Long]): Long = {
-    var sum: Long = 0L
-    for (taskMetric <- taskMetrics) {
-      sum += taskMetric
-    }
-    sum
-  }
-
-  override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = {
-    String.valueOf(aggregateTaskMetrics0(taskMetrics))
-  }
+trait PaimonCustomMetric extends CustomMetric {
+  def stringValue(l: Long): String = l.toString
 }
 
-sealed trait PaimonAvgMetric extends CustomAvgMetric {
-  protected def aggregateTaskMetrics0(taskMetrics: Array[Long]): Double = {
-    if (taskMetrics.length > 0) {
-      var sum = 0L
-      for (taskMetric <- taskMetrics) {
-        sum += taskMetric
-      }
-      sum.toDouble / taskMetrics.length
-    } else {
-      0d
-    }
-  }
-
-  override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = {
-    val average = aggregateTaskMetrics0(taskMetrics)
-    new DecimalFormat("#0.000").format(average)
-  }
+trait PaimonSizeMetric extends PaimonCustomMetric {
+  override def stringValue(l: Long): String = PaimonUtils.bytesToString(l)
 }
 
-sealed trait PaimonMinMaxMetric extends CustomAvgMetric {
+trait PaimonTimingMetric extends PaimonCustomMetric {
+  override def stringValue(l: Long): String = PaimonUtils.msDurationToString(l)
+}
+
+sealed trait PaimonSumMetric extends PaimonCustomMetric {
+  override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = {
+    stringValue(taskMetrics.sum)
+  }
+}
+sealed trait PaimonSizeSumMetric extends PaimonSumMetric with PaimonSizeMetric
+sealed trait PaimonTimingSumMetric extends PaimonSumMetric with PaimonTimingMetric
+
+sealed trait PaimonSummaryMetric extends PaimonCustomMetric {
   def description0(): String
 
-  override def description(): String = s"${description0()} total (min, med, max)"
+  override def description(): String = s"${description0()} total (min, avg, med, max)"
 
   override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = {
-    val total = taskMetrics.sum
-    val min = taskMetrics.min
-    val med = taskMetrics.sorted.apply(taskMetrics.length / 2)
-    val max = taskMetrics.max
-    s"$total ($min, $med, $max)"
+    if (taskMetrics.length == 0) {
+      s"None"
+    } else {
+      val sorted = taskMetrics.sorted
+      val total = sorted.sum
+      val min = sorted.head
+      val avg = total / sorted.length
+      val med = sorted.apply(sorted.length / 2)
+      val max = sorted.last
+      s"\n${stringValue(total)} (${stringValue(min)}, ${stringValue(avg)}, ${stringValue(med)}, ${stringValue(max)})"
+    }
   }
 }
+sealed trait PaimonSizeSummaryMetric extends PaimonSummaryMetric with PaimonSizeMetric
+sealed trait PaimonTimingSummaryMetric extends PaimonSummaryMetric with PaimonTimingMetric
 
 // Scan metrics
 case class PaimonNumSplitMetric() extends PaimonSumMetric {
@@ -107,34 +99,18 @@ case class PaimonNumSplitsTaskMetric(override val value: Long) extends PaimonTas
   override def name(): String = PaimonMetrics.NUM_SPLITS
 }
 
-case class PaimonSplitSizeMetric() extends PaimonSumMetric {
-  override def name(): String = PaimonMetrics.SPLIT_SIZE
-  override def description(): String = "size of splits read"
-  override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = {
-    PaimonUtils.bytesToString(aggregateTaskMetrics0(taskMetrics))
-  }
+case class PaimonPartitionSizeMetric() extends PaimonSizeSummaryMetric {
+  override def name(): String = PaimonMetrics.PARTITION_SIZE
+  override def description0(): String = "partition size"
 }
 
-case class PaimonSplitSizeTaskMetric(override val value: Long) extends PaimonTaskMetric {
-  override def name(): String = PaimonMetrics.SPLIT_SIZE
+case class PaimonPartitionSizeTaskMetric(override val value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.PARTITION_SIZE
 }
 
-case class PaimonAvgSplitSizeMetric() extends PaimonAvgMetric {
-  override def name(): String = PaimonMetrics.AVG_SPLIT_SIZE
-  override def description(): String = "avg size of splits read"
-  override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = {
-    val average = aggregateTaskMetrics0(taskMetrics).round
-    PaimonUtils.bytesToString(average)
-  }
-}
-
-case class PaimonAvgSplitSizeTaskMetric(override val value: Long) extends PaimonTaskMetric {
-  override def name(): String = PaimonMetrics.AVG_SPLIT_SIZE
-}
-
-case class PaimonPlanningDurationMetric() extends PaimonSumMetric {
+case class PaimonPlanningDurationMetric() extends PaimonTimingSumMetric {
   override def name(): String = PaimonMetrics.PLANNING_DURATION
-  override def description(): String = "planing duration (ms)"
+  override def description(): String = "planing duration"
 }
 
 case class PaimonPlanningDurationTaskMetric(value: Long) extends PaimonTaskMetric {
@@ -178,7 +154,7 @@ case class PaimonResultedTableFilesTaskMetric(value: Long) extends PaimonTaskMet
 }
 
 // Write metrics
-case class PaimonNumWritersMetric() extends PaimonMinMaxMetric {
+case class PaimonNumWritersMetric() extends PaimonSummaryMetric {
   override def name(): String = PaimonMetrics.NUM_WRITERS
   override def description0(): String = "number of writers"
 }
@@ -188,9 +164,9 @@ case class PaimonNumWritersTaskMetric(value: Long) extends PaimonTaskMetric {
 }
 
 // Commit metrics
-case class PaimonCommitDurationMetric() extends PaimonSumMetric {
+case class PaimonCommitDurationMetric() extends PaimonTimingSumMetric {
   override def name(): String = PaimonMetrics.COMMIT_DURATION
-  override def description(): String = "commit duration (ms)"
+  override def description(): String = "commit duration"
 }
 
 case class PaimonCommitDurationTaskMetric(value: Long) extends PaimonTaskMetric {
