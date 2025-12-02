@@ -154,6 +154,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
+    private boolean appendCommitCheckConflict = false;
 
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
@@ -247,6 +248,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
+    public FileStoreCommit appendCommitCheckConflict(boolean appendCommitCheckConflict) {
+        this.appendCommitCheckConflict = appendCommitCheckConflict;
+        return this;
+    }
+
+    @Override
     public List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables) {
         // nothing to filter, fast exit
         if (committables.isEmpty()) {
@@ -326,6 +333,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 ConflictCheck conflictCheck = noConflictCheck();
                 if (containsFileDeletionOrDeletionVectors(appendSimpleEntries, appendIndexFiles)) {
                     commitKind = CommitKind.OVERWRITE;
+                    conflictCheck = mustConflictCheck();
+                } else if (latestSnapshot != null && appendCommitCheckConflict) {
                     conflictCheck = mustConflictCheck();
                 }
 
