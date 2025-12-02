@@ -20,8 +20,7 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.table.Table;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 
@@ -29,14 +28,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
-
 /** {@link PartitionLoader} for specified static partitions. */
 public class StaticPartitionLoader extends PartitionLoader {
 
     private final List<Map<String, String>> scanPartitions;
 
-    protected StaticPartitionLoader(Table table, List<Map<String, String>> scanPartitions) {
+    protected StaticPartitionLoader(
+            FileStoreTable table, List<Map<String, String>> scanPartitions) {
         super(table);
         this.scanPartitions = scanPartitions;
     }
@@ -44,13 +42,12 @@ public class StaticPartitionLoader extends PartitionLoader {
     @Override
     public void open() {
         partitions = new ArrayList<>();
-        RowType partitionType = table.rowType().project(table.partitionKeys());
-        String defaultPartitionName = Options.fromMap(table.options()).get(PARTITION_DEFAULT_NAME);
+        RowType partitionType = table.schema().logicalPartitionType();
         InternalRowSerializer serializer = new InternalRowSerializer(partitionType);
         for (Map<String, String> spec : scanPartitions) {
             GenericRow row =
                     InternalRowPartitionComputer.convertSpecToInternalRow(
-                            spec, partitionType, defaultPartitionName);
+                            spec, partitionType, table.coreOptions().partitionDefaultName());
             partitions.add(serializer.toBinaryRow(row).copy());
         }
     }

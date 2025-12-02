@@ -24,7 +24,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.table.Table;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.Preconditions;
@@ -44,15 +44,15 @@ public abstract class PartitionLoader implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private static final String MAX_PT = "max_pt()";
-    private static final String MAX_TWO_PT = "max_two_pt()";
+    protected static final String MAX_PT = "max_pt()";
+    protected static final String MAX_TWO_PT = "max_two_pt()";
 
-    protected final Table table;
+    protected final FileStoreTable table;
     private final RowDataToObjectArrayConverter partitionConverter;
 
     protected transient List<BinaryRow> partitions;
 
-    protected PartitionLoader(Table table) {
+    protected PartitionLoader(FileStoreTable table) {
         this.table = table;
         this.partitionConverter =
                 new RowDataToObjectArrayConverter(table.rowType().project(table.partitionKeys()));
@@ -76,7 +76,7 @@ public abstract class PartitionLoader implements Serializable {
         partitionKeys.stream().filter(k -> !projectFields.contains(k)).forEach(projectFields::add);
     }
 
-    public Predicate createSpecificPartFilter(List<BinaryRow> partitions) {
+    public Predicate createSpecificPartFilter() {
         Predicate partFilter = null;
         for (BinaryRow partition : partitions) {
             if (partFilter == null) {
@@ -105,7 +105,7 @@ public abstract class PartitionLoader implements Serializable {
     public abstract boolean checkRefresh();
 
     @Nullable
-    public static PartitionLoader of(Table table) {
+    public static PartitionLoader of(FileStoreTable table) {
         Options options = Options.fromMap(table.options());
         String scanPartitions = options.get(FlinkConnectorOptions.SCAN_PARTITIONS);
         if (scanPartitions == null) {
