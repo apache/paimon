@@ -30,7 +30,7 @@ import org.apache.paimon.types.DataType;
 import java.io.IOException;
 import java.util.List;
 
-/** Vector global indexer using JVector. */
+/** Vector global indexer. */
 public class VectorGlobalIndexer implements GlobalIndexer {
 
     private final DataType fieldType;
@@ -49,6 +49,6 @@ public class VectorGlobalIndexer implements GlobalIndexer {
     @Override
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
-        return new VectorGlobalIndexReader(fileReader, files, fieldType, options);
+        return new VectorGlobalIndexReader(fileReader, files);
     }
 }

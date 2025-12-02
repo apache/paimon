@@ -47,8 +47,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link VectorGlobalIndexWriter} and {@link VectorGlobalIndexReader} with JVector. */
-public class VectorGlobalIndexWriterReaderTest {
+/** Test for {@link VectorGlobalIndexWriter} and {@link VectorGlobalIndexReader}. */
+public class VectorGlobalIndexTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -121,8 +121,7 @@ public class VectorGlobalIndexWriterReaderTest {
                         result.rowRange(),
                         result.meta()));
 
-        VectorGlobalIndexReader reader =
-                new VectorGlobalIndexReader(fileReader, metas, vectorType, options);
+        VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
         // Test search - query with first vector should return itself
         GlobalIndexResult searchResult = reader.search(testVectors.get(0), 5);
@@ -171,8 +170,7 @@ public class VectorGlobalIndexWriterReaderTest {
                         result.rowRange(),
                         result.meta()));
 
-        VectorGlobalIndexReader reader =
-                new VectorGlobalIndexReader(fileReader, metas, vectorType, options);
+        VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
         // Search with base vector should return similar vectors
         GlobalIndexResult searchResult = reader.search(baseVector, 10);
@@ -216,8 +214,7 @@ public class VectorGlobalIndexWriterReaderTest {
                             result.rowRange(),
                             result.meta()));
 
-            VectorGlobalIndexReader reader =
-                    new VectorGlobalIndexReader(fileReader, metas, vectorType, options);
+            VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
             // Verify search works with this metric
             GlobalIndexResult searchResult = reader.search(testVectors.get(0), 3);
@@ -259,8 +256,7 @@ public class VectorGlobalIndexWriterReaderTest {
                             result.rowRange(),
                             result.meta()));
 
-            VectorGlobalIndexReader reader =
-                    new VectorGlobalIndexReader(fileReader, metas, vectorType, options);
+            VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
             // Verify search works with this dimension
             GlobalIndexResult searchResult = reader.search(testVectors.get(0), 5);
@@ -333,8 +329,7 @@ public class VectorGlobalIndexWriterReaderTest {
                         result.rowRange(),
                         result.meta()));
 
-        VectorGlobalIndexReader reader =
-                new VectorGlobalIndexReader(fileReader, metas, vectorType, options);
+        VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
         // Verify search works with custom HNSW parameters
         GlobalIndexResult searchResult = reader.search(testVectors.get(0), 5);
@@ -372,8 +367,7 @@ public class VectorGlobalIndexWriterReaderTest {
                         result.rowRange(),
                         result.meta()));
 
-        VectorGlobalIndexReader reader =
-                new VectorGlobalIndexReader(fileReader, metas, vectorType, options);
+        VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
         // Search with k larger than number of vectors
         GlobalIndexResult searchResult = reader.search(testVectors.get(0), 200);
@@ -445,8 +439,7 @@ public class VectorGlobalIndexWriterReaderTest {
                     }
                 };
 
-        VectorGlobalIndexReader reader =
-                new VectorGlobalIndexReader(fileReader, allMetas, vectorType, options);
+        VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, allMetas);
 
         // Test 1: Search with various k values
         int[] kValues = {1, 5, 10, 20, 50};
@@ -550,8 +543,7 @@ public class VectorGlobalIndexWriterReaderTest {
                         result.rowRange(),
                         result.meta()));
 
-        VectorGlobalIndexReader reader =
-                new VectorGlobalIndexReader(fileReader, metas, vectorType, options);
+        VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
         // Test 1: Query with vector similar to "Apple" - should find Apple and Banana
         // Query: [0.85, 0.15] is between Apple and Banana
