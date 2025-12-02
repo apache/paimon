@@ -178,8 +178,13 @@ class PaimonDatasource(Datasource):
                 if hasattr(split, 'file_paths') and split.file_paths
             ))
 
-            # If predicate exists, we can't accurately estimate num_rows before filtering
-            num_rows = None if predicate is not None else (total_rows if total_rows > 0 else None)
+            # For PrimaryKey tables, we can't accurately estimate num_rows before merge
+            if table and table.is_primary_key_table:
+                num_rows = None  # Let Ray calculate actual row count after merge
+            elif predicate is not None:
+                num_rows = None  # Can't estimate with predicate filtering
+            else:
+                num_rows = total_rows if total_rows > 0 else None
             size_bytes = total_size if total_size > 0 else None
 
             metadata = BlockMetadata(

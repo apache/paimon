@@ -355,7 +355,7 @@ print(duckdb_con.query("SELECT * FROM duckdb_table WHERE f0 = 1").fetchdf())
 
 This requires `ray` to be installed.
 
-You can convert the splits into a Ray dataset and handle it by Ray API:
+You can convert the splits into a Ray Dataset and handle it by Ray Data API for distributed processing:
 
 ```python
 table_read = read_builder.new_read()
@@ -374,6 +374,84 @@ print(ray_dataset.to_pandas())
 # 2   3  c
 # 3   4  d
 # ...
+```
+
+#### Parallelism Control
+
+The `to_ray()` method supports a `parallelism` parameter to control distributed reading:
+
+- `parallelism=1` (default): Single-task read (simple mode), suitable for small datasets
+- `parallelism > 1`: Distributed read with specified parallelism, enabling parallel processing across multiple Ray workers
+
+{{< hint info >}}
+**Note**: For PrimaryKey tables, merge-on-read is performed within each split. Since Paimon's split planning ensures that files with overlapping key ranges (same primary keys) are grouped into the same split, merge-on-read works correctly for PrimaryKey tables in both single-task and distributed modes.
+{{< /hint >}}
+
+```python
+# Simple mode (single task)
+ray_dataset = table_read.to_ray(splits, parallelism=1)
+
+# Distributed mode with 4 parallel tasks
+ray_dataset = table_read.to_ray(splits, parallelism=4)
+```
+
+#### Ray Data Operations
+
+Once converted to a Ray Dataset, you can use all Ray Data operations:
+
+```python
+# Map operation (transform data)
+def process_row(row):
+    row['value'] = row['value'] * 2
+    return row
+
+mapped_dataset = ray_dataset.map(process_row)
+
+# Filter operation
+filtered_dataset = ray_dataset.filter(lambda row: row['score'] > 80)
+
+# Group by and aggregate
+grouped = ray_dataset.groupby("category").sum("amount")
+
+# Convert to Pandas
+df = ray_dataset.to_pandas()
+```
+
+
+#### Complete Example
+
+```python
+from pypaimon import CatalogFactory
+
+# Create catalog and get table
+catalog = CatalogFactory.create({'warehouse': '/path/to/warehouse'})
+table = catalog.get_table('database_name.table_name')
+
+# Build read with predicate and projection
+read_builder = table.new_read_builder()
+predicate_builder = read_builder.new_predicate_builder()
+predicate = predicate_builder.equal('status', 'active')
+read_builder = read_builder.with_filter(predicate)
+read_builder = read_builder.with_projection(['id', 'name', 'value'])
+
+# Get splits and read to Ray Dataset
+table_read = read_builder.new_read()
+table_scan = read_builder.new_scan()
+splits = table_scan.plan().splits()
+
+# Convert to Ray Dataset with distributed reading
+ray_dataset = table_read.to_ray(splits, parallelism=4)
+
+# Use Ray Data operations
+processed = ray_dataset.map(lambda row: {
+    'id': row['id'],
+    'name': row['name'].upper(),
+    'value': row['value'] * 2
+})
+
+# Convert to Pandas for further analysis
+df = processed.to_pandas()
+print(df)
 ```
 
 ### Incremental Read
