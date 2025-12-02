@@ -61,8 +61,8 @@ class RayDataTest(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up test environment."""
         try:
-            if ray.is_initialized():
-                ray.shutdown()
+                if ray.is_initialized():
+                    ray.shutdown()
         except Exception:
             pass
         try:
@@ -361,6 +361,190 @@ class RayDataTest(unittest.TestCase):
 
         self.assertEqual(list(df_distributed_sorted['id']), list(df_simple_sorted['id']), "IDs should match")
         self.assertEqual(list(df_distributed_sorted['value']), list(df_simple_sorted['value']), "Values should match")
+
+    def test_ray_data_primary_key_basic(self):
+        """Test Ray Data read from PrimaryKey table."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('value', pa.int64()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(pa_schema, primary_keys=['id'], options={'bucket': '2'})
+        self.catalog.create_table('default.test_ray_pk_basic', schema, False)
+        table = self.catalog.get_table('default.test_ray_pk_basic')
+
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            'value': [100, 200, 300, 400, 500],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        # TODO: support pk merge feature in distributed mode
+        ray_dataset = table_read.to_ray(splits, use_distributed_read=False)
+        self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
+        self.assertEqual(ray_dataset.count(), 5, "Should have 5 rows")
+
+        df = ray_dataset.to_pandas()
+        self.assertEqual(len(df), 5, "DataFrame should have 5 rows")
+        # Sort by id to ensure order-independent comparison
+        df_sorted = df.sort_values(by='id').reset_index(drop=True)
+        self.assertEqual(list(df_sorted['id']), [1, 2, 3, 4, 5], "ID column should match")
+        self.assertEqual(
+            list(df_sorted['name']),
+            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            "Name column should match"
+        )
+
+    def test_ray_data_primary_key_update(self):
+        """Test Ray Data read from PrimaryKey table with updates (upsert behavior)."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('value', pa.int64()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(pa_schema, primary_keys=['id'], options={'bucket': '2'})
+        self.catalog.create_table('default.test_ray_pk_update', schema, False)
+        table = self.catalog.get_table('default.test_ray_pk_update')
+
+        initial_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'value': [100, 200, 300],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        updated_data = pa.Table.from_pydict({
+            'id': [1, 2, 4],  # id=1,2 updated, id=4 new
+            'name': ['Alice-Updated', 'Bob-Updated', 'David'],
+            'value': [150, 250, 400],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(updated_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        simple_read_result = table_read.to_arrow(splits)
+        simple_df = simple_read_result.to_pandas()
+        simple_df_sorted = simple_df.sort_values(by='id').reset_index(drop=True)
+        
+        self.assertEqual(len(simple_df_sorted), 4, "Simple read should have 4 rows after upsert")
+        self.assertEqual(list(simple_df_sorted['id']), [1, 2, 3, 4], "ID column should match")
+        
+        # TODO: support pk merge feature in distributed mode
+        ray_dataset = table_read.to_ray(splits, use_distributed_read=False)
+
+        self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
+        self.assertEqual(ray_dataset.count(), 4, "Should have 4 rows after upsert")
+
+        df = ray_dataset.to_pandas()
+        df_sorted = df.sort_values(by='id').reset_index(drop=True)
+        self.assertEqual(list(df_sorted['id']), [1, 2, 3, 4], "ID column should match")
+        self.assertEqual(
+            list(df_sorted['name']),
+            ['Alice-Updated', 'Bob-Updated', 'Charlie', 'David'],
+            "Name column should reflect updates"
+        )
+        self.assertEqual(list(df_sorted['value']), [150, 250, 300, 400], "Value column should reflect updates")
+
+    def test_ray_data_primary_key_with_predicate(self):
+        """Test Ray Data read from PrimaryKey table with predicate filtering."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('category', pa.string()),
+            ('amount', pa.int64()),
+            ('dt', pa.string()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id', 'dt'],
+            partition_keys=['dt'],
+            options={'bucket': '2'}
+        )
+        self.catalog.create_table('default.test_ray_pk_predicate', schema, False)
+        table = self.catalog.get_table('default.test_ray_pk_predicate')
+
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'category': ['A', 'B', 'A', 'C', 'B'],
+            'amount': [100, 200, 150, 300, 250],
+            'dt': ['2024-01-01', '2024-01-01', '2024-01-02', '2024-01-02', '2024-01-03'],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        predicate = predicate_builder.equal('category', 'A')
+        read_builder = read_builder.with_filter(predicate)
+
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        # TODO: support pk merge feature in distributed mode
+        ray_dataset = table_read.to_ray(splits, use_distributed_read=False)
+
+        # Verify filtered results
+        self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows after filtering")
+        df = ray_dataset.to_pandas()
+        self.assertEqual(set(df['category'].tolist()), {'A'}, "All rows should have category='A'")
+        self.assertEqual(set(df['id'].tolist()), {1, 3}, "Should have IDs 1 and 3")
+
+        # Read with predicate on partition
+        read_builder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        predicate = predicate_builder.equal('dt', '2024-01-01')
+        read_builder = read_builder.with_filter(predicate)
+
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        # TODO: support pk merge feature in distributed mode
+        ray_dataset = table_read.to_ray(splits, use_distributed_read=False)
+
+        # Verify filtered results by partition
+        self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows in partition 2024-01-01")
+        df = ray_dataset.to_pandas()
+        self.assertEqual(set(df['dt'].tolist()), {'2024-01-01'}, "All rows should be in partition 2024-01-01")
 
 
 if __name__ == '__main__':
