@@ -28,11 +28,10 @@ import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
-
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, AttributeSet, Expression, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -198,8 +197,14 @@ case class MergeIntoPaimonDataEvolutionTable(
     val updateColumnsSorted = updateColumns.toSeq.sortBy(
       s => targetTable.output.map(x => x.toString()).indexOf(s.toString()))
 
-    val assignments = redundantColumns.map(column => Assignment(column, column))
-    val output = updateColumnsSorted ++ redundantColumns
+    // Different Spark versions might produce duplicate attributes between `output` and
+    // `metadataOutput`,so manually deduplicate by `exprId`.
+    val metadataColumns = (targetRelation.output ++ targetRelation.metadataOutput)
+      .filter(attr => attr.name.equals(ROW_ID_NAME)).groupBy(_.exprId)
+      .map { case (_, attrs) => attrs.head }.toSeq
+
+    val assignments = metadataColumns.map(column => Assignment(column, column))
+    val output = updateColumnsSorted ++ metadataColumns
     val realUpdateActions = matchedActions
       .map(s => s.asInstanceOf[UpdateAction])
       .map(
@@ -216,11 +221,9 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
 
     val allReadFieldsOnTarget = allFields.filter(
-      field =>
-        targetTable.output.exists(
-          attr => attr.toString().equals(field.toString()))) ++ redundantColumns
-    val allReadFieldsOnSource = allFields.filter(
-      field => sourceTable.output.exists(attr => attr.toString().equals(field.toString())))
+      field => targetTable.output.exists(attr => attr.exprId.equals(field.exprId))) ++ metadataColumns
+    val allReadFieldsOnSource =
+      allFields.filter(field => sourceTable.output.exists(attr => attr.exprId.equals(field.exprId)))
 
     val targetReadPlan =
       touchedFileTargetRelation.copy(targetRelation.table, allReadFieldsOnTarget.toSeq)
