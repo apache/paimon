@@ -69,12 +69,11 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
     }
 
     @Override
-    public ShardGlobalIndexScanner build() {
+    public RowRangeGlobalIndexScanner build() {
         Objects.requireNonNull(rowRangeStart, "rowRangeStart must not be null");
         Objects.requireNonNull(rowRangeEnd, "rowRangeEnd must not be null");
         List<IndexManifestEntry> entries = scan();
-        return new ShardGlobalIndexScanner(
-                fileStoreTable, partition, rowRangeStart, rowRangeEnd, entries);
+        return new RowRangeGlobalIndexScanner(fileStoreTable, rowRangeStart, rowRangeEnd, entries);
     }
 
     @Override

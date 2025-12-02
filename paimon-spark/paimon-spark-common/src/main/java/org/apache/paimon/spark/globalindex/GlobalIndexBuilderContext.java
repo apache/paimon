@@ -107,8 +107,7 @@ public class GlobalIndexBuilderContext implements Serializable {
 
     public GlobalIndexFileReadWrite globalIndexFileReadWrite() {
         FileIO fileIO = table.fileIO();
-        IndexPathFactory indexPathFactory =
-                table.store().pathFactory().indexFileFactory(partition(), 0);
+        IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
         return new GlobalIndexFileReadWrite(fileIO, indexPathFactory);
     }
 }
