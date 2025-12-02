@@ -372,7 +372,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, use_distributed_read=True)
+        ray_dataset = table_read.to_ray(splits, parallelism=2)
 
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 8, "Should have 8 rows")
@@ -413,7 +413,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, use_distributed_read=True)
+        ray_dataset = table_read.to_ray(splits, parallelism=2)
 
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 3, "Should have 3 rows")

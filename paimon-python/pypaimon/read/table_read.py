@@ -126,7 +126,7 @@ class TableRead:
         con.register(table_name, self.to_arrow(splits))
         return con
 
-    def to_ray(self, splits: List[Split], use_distributed_read: bool = True) -> "ray.data.dataset.Dataset":
+    def to_ray(self, splits: List[Split], parallelism: int = 1) -> "ray.data.dataset.Dataset":
         """Convert Paimon table data to Ray Dataset."""
         import ray
 
@@ -138,12 +138,14 @@ class TableRead:
             )
             return ray.data.from_arrow(empty_table)
 
-        if use_distributed_read:
+        if parallelism == 1:
+            # Single-task read (simple mode)
+            return ray.data.from_arrow(self.to_arrow(splits))
+        else:
+            # Distributed read with specified parallelism
             from pypaimon.read.ray_datasource import PaimonDatasource
             datasource = PaimonDatasource(self, splits)
-            return ray.data.read_datasource(datasource)
-        else:
-            return ray.data.from_arrow(self.to_arrow(splits))
+            return ray.data.read_datasource(datasource, parallelism=parallelism)
 
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:

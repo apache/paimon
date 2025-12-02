@@ -108,7 +108,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, use_distributed_read=True)
+        ray_dataset = table_read.to_ray(splits, parallelism=2)
 
         # Verify Ray dataset
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
@@ -168,7 +168,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, use_distributed_read=True)
+        ray_dataset = table_read.to_ray(splits, parallelism=2)
 
         # Verify filtered results
         self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows after filtering")
@@ -214,7 +214,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, use_distributed_read=True)
+        ray_dataset = table_read.to_ray(splits, parallelism=2)
 
         # Verify projection
         self.assertEqual(ray_dataset.count(), 3, "Should have 3 rows")
@@ -255,7 +255,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, use_distributed_read=True)
+        ray_dataset = table_read.to_ray(splits, parallelism=2)
 
         # Apply map operation (double the value)
         def double_value(row):
@@ -302,7 +302,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, use_distributed_read=True)
+        ray_dataset = table_read.to_ray(splits, parallelism=2)
 
         # Apply filter operation (score >= 80)
         filtered_dataset = ray_dataset.filter(lambda row: row['score'] >= 80)
@@ -345,8 +345,8 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset_distributed = table_read.to_ray(splits, use_distributed_read=True)
-        ray_dataset_simple = table_read.to_ray(splits, use_distributed_read=False)
+        ray_dataset_distributed = table_read.to_ray(splits, parallelism=2)
+        ray_dataset_simple = table_read.to_ray(splits, parallelism=1)
 
         # Both should produce the same results
         self.assertEqual(ray_dataset_distributed.count(), 3, "Distributed mode should have 3 rows")
@@ -394,7 +394,7 @@ class RayDataTest(unittest.TestCase):
         splits = table_scan.plan().splits()
 
         # TODO: support pk merge feature in distributed mode
-        ray_dataset = table_read.to_ray(splits, use_distributed_read=False)
+        ray_dataset = table_read.to_ray(splits, parallelism=1)
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 5, "Should have 5 rows")
 
@@ -462,7 +462,7 @@ class RayDataTest(unittest.TestCase):
         self.assertEqual(list(simple_df_sorted['id']), [1, 2, 3, 4], "ID column should match")
         
         # TODO: support pk merge feature in distributed mode
-        ray_dataset = table_read.to_ray(splits, use_distributed_read=False)
+        ray_dataset = table_read.to_ray(splits, parallelism=1)
 
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 4, "Should have 4 rows after upsert")
@@ -520,7 +520,7 @@ class RayDataTest(unittest.TestCase):
         splits = table_scan.plan().splits()
 
         # TODO: support pk merge feature in distributed mode
-        ray_dataset = table_read.to_ray(splits, use_distributed_read=False)
+        ray_dataset = table_read.to_ray(splits, parallelism=1)
 
         # Verify filtered results
         self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows after filtering")
@@ -539,7 +539,7 @@ class RayDataTest(unittest.TestCase):
         splits = table_scan.plan().splits()
 
         # TODO: support pk merge feature in distributed mode
-        ray_dataset = table_read.to_ray(splits, use_distributed_read=False)
+        ray_dataset = table_read.to_ray(splits, parallelism=1)
 
         # Verify filtered results by partition
         self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows in partition 2024-01-01")

@@ -121,7 +121,7 @@ def main():
         print(f"Number of splits: {len(splits)}")
 
         # Convert to Ray Dataset
-        ray_dataset = table_read.to_ray(splits, use_distributed_read=True)
+        ray_dataset = table_read.to_ray(splits, parallelism=2)
         print("✓ Ray Dataset created successfully")
         print(f"  - Total rows: {ray_dataset.count()}")
         # Note: num_blocks() requires materialized dataset, so we skip it for simplicity
@@ -135,7 +135,7 @@ def main():
         print("\n" + "="*60)
         print("Step 3: Comparison with simple read mode")
         print("="*60)
-        ray_dataset_simple = table_read.to_ray(splits, use_distributed_read=False)
+        ray_dataset_simple = table_read.to_ray(splits, parallelism=1)
         df_simple = ray_dataset_simple.to_pandas()
 
         print(f"Distributed mode rows: {ray_dataset.count()}")
@@ -193,7 +193,7 @@ def main():
         table_scan_filtered = read_builder_filtered.new_scan()
         splits_filtered = table_scan_filtered.plan().splits()
 
-        ray_dataset_filtered = table_read_filtered.to_ray(splits_filtered, use_distributed_read=True)
+        ray_dataset_filtered = table_read_filtered.to_ray(splits_filtered, parallelism=2)
         df_filtered_at_read = ray_dataset_filtered.to_pandas()
         print(f"✓ Filtered at read time: {ray_dataset_filtered.count()} rows")
         print(f"  - All categories are 'A': {all(df_filtered_at_read['category'] == 'A')}")
@@ -207,7 +207,7 @@ def main():
         table_scan_projected = read_builder_projected.new_scan()
         splits_projected = table_scan_projected.plan().splits()
 
-        ray_dataset_projected = table_read_projected.to_ray(splits_projected, use_distributed_read=True)
+        ray_dataset_projected = table_read_projected.to_ray(splits_projected, parallelism=2)
         df_projected = ray_dataset_projected.to_pandas()
         print(f"✓ Projected columns: {list(df_projected.columns)}")
         print("  - Expected: ['id', 'name', 'value']")
