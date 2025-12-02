@@ -115,7 +115,7 @@ case class PaimonPartitionReader(
       val splitSize = dataSplits.map(_.dataFiles().asScala.map(_.fileSize).sum).sum
       Array(
         PaimonNumSplitsTaskMetric(numSplits),
-        PaimonSplitSizeTaskMetric(splitSize)
+        PaimonPartitionSizeTaskMetric(splitSize)
       )
     } else {
       Array.empty[CustomTaskMetric]

@@ -24,7 +24,7 @@ import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 object PaimonMetrics {
   // scan metrics
   val NUM_SPLITS = "numSplits"
-  val SPLIT_SIZE = "splitSize"
+  val PARTITION_SIZE = "partitionSize"
   val PLANNING_DURATION = "planningDuration"
   val SCANNED_SNAPSHOT_ID = "scannedSnapshotId"
   val SCANNED_MANIFESTS = "scannedManifests"
@@ -99,13 +99,13 @@ case class PaimonNumSplitsTaskMetric(override val value: Long) extends PaimonTas
   override def name(): String = PaimonMetrics.NUM_SPLITS
 }
 
-case class PaimonSplitSizeMetric() extends PaimonSizeSummaryMetric {
-  override def name(): String = PaimonMetrics.SPLIT_SIZE
-  override def description0(): String = "size of splits read"
+case class PaimonPartitionSizeMetric() extends PaimonSizeSummaryMetric {
+  override def name(): String = PaimonMetrics.PARTITION_SIZE
+  override def description0(): String = "partition size"
 }
 
-case class PaimonSplitSizeTaskMetric(override val value: Long) extends PaimonTaskMetric {
-  override def name(): String = PaimonMetrics.SPLIT_SIZE
+case class PaimonPartitionSizeTaskMetric(override val value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.PARTITION_SIZE
 }
 
 case class PaimonPlanningDurationMetric() extends PaimonTimingSumMetric {

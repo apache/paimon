@@ -73,7 +73,7 @@ abstract class PaimonFormatTableBaseScan(
   override def supportedCustomMetrics: Array[CustomMetric] = {
     Array(
       PaimonNumSplitMetric(),
-      PaimonSplitSizeMetric(),
+      PaimonPartitionSizeMetric(),
       PaimonResultedTableFilesMetric()
     )
   }

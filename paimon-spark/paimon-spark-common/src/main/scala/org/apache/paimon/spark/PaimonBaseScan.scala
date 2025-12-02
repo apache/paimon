@@ -110,7 +110,7 @@ abstract class PaimonBaseScan(
   override def supportedCustomMetrics: Array[CustomMetric] = {
     Array(
       PaimonNumSplitMetric(),
-      PaimonSplitSizeMetric(),
+      PaimonPartitionSizeMetric(),
       PaimonPlanningDurationMetric(),
       PaimonScannedSnapshotIdMetric(),
       PaimonScannedManifestsMetric(),
