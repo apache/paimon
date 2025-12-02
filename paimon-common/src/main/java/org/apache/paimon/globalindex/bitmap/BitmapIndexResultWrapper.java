@@ -26,8 +26,6 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.util.Iterator;
 
-import static org.apache.paimon.utils.RoaringBitmap32.bitmapOfRange;
-
 /** A {@link GlobalIndexResult} wrapper for {@link BitmapIndexResult}. */
 public class BitmapIndexResultWrapper implements GlobalIndexResult {
 
