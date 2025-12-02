@@ -41,4 +41,8 @@ public interface GlobalIndexReader extends FunctionVisitor<GlobalIndexResult>, C
     default GlobalIndexResult visit(TransformPredicate predicate) {
         throw new UnsupportedOperationException("Should not invoke this");
     }
+
+    default GlobalIndexResult visit(float[] query, int k) {
+        throw new UnsupportedOperationException("Should not invoke this");
+    }
 }

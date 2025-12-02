@@ -44,7 +44,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -78,7 +77,8 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
      * @param k number of results
      * @return global index result containing row IDs
      */
-    public GlobalIndexResult search(float[] query, int k) {
+    @Override
+    public GlobalIndexResult visit(float[] query, int k) {
         Set<Long> resultIds = new HashSet<>();
 
         for (IndexSearcher searcher : searchers) {
@@ -199,72 +199,72 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
 
     // Implementation of FunctionVisitor methods
     @Override
-    public Optional<GlobalIndexResult> visitIsNotNull(FieldRef fieldRef) {
+    public GlobalIndexResult visitIsNotNull(FieldRef fieldRef) {
         throw new UnsupportedOperationException(
                 "Vector index does not support isNotNull predicate");
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIsNull(FieldRef fieldRef) {
+    public GlobalIndexResult visitIsNull(FieldRef fieldRef) {
         throw new UnsupportedOperationException("Vector index does not support isNull predicate");
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitStartsWith(FieldRef fieldRef, Object literal) {
+    public GlobalIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
         throw new UnsupportedOperationException(
                 "Vector index does not support startsWith predicate");
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitEndsWith(FieldRef fieldRef, Object literal) {
+    public GlobalIndexResult visitEndsWith(FieldRef fieldRef, Object literal) {
         throw new UnsupportedOperationException("Vector index does not support endsWith predicate");
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitContains(FieldRef fieldRef, Object literal) {
+    public GlobalIndexResult visitContains(FieldRef fieldRef, Object literal) {
         throw new UnsupportedOperationException("Vector index does not support contains predicate");
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLessThan(FieldRef fieldRef, Object literal) {
+    public GlobalIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
         throw new UnsupportedOperationException("Vector index does not support lessThan predicate");
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+    public GlobalIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
         throw new UnsupportedOperationException(
                 "Vector index does not support greaterOrEqual predicate");
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitNotEqual(FieldRef fieldRef, Object literal) {
+    public GlobalIndexResult visitNotEqual(FieldRef fieldRef, Object literal) {
         throw new UnsupportedOperationException("Vector index does not support notEqual predicate");
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLessOrEqual(FieldRef fieldRef, Object literal) {
+    public GlobalIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
         throw new UnsupportedOperationException(
                 "Vector index does not support lessOrEqual predicate");
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitEqual(FieldRef fieldRef, Object literal) {
+    public GlobalIndexResult visitEqual(FieldRef fieldRef, Object literal) {
         throw new UnsupportedOperationException("Vector index does not support equal predicate");
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitGreaterThan(FieldRef fieldRef, Object literal) {
+    public GlobalIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
         throw new UnsupportedOperationException(
                 "Vector index does not support greaterThan predicate");
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIn(FieldRef fieldRef, List<Object> literals) {
+    public GlobalIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
         throw new UnsupportedOperationException("Vector index does not support in predicate");
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
+    public GlobalIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
         throw new UnsupportedOperationException("Vector index does not support notIn predicate");
     }
 }
