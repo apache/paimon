@@ -122,4 +122,27 @@ class SchemaValidationTest {
                 .hasMessageContaining(
                         "The record level time field type should be one of INT, BIGINT, or TIMESTAMP, but field type is STRING.");
     }
+
+    @Test
+    void testValidateFullCompactionDeltaCommitsWithLookupChangelogProducer() {
+        Map<String, String> options = new HashMap<>();
+
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        options.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(
+                        "'full-compaction.delta-commits' property is not supported for 'lookup' changelog producer type");
+
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
+        options.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+
+        assertThatNoException().isThrownBy(() -> validateTableSchemaExec(options));
+
+        options.clear();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+
+        assertThatNoException().isThrownBy(() -> validateTableSchemaExec(options));
+    }
 }
