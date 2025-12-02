@@ -16,21 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.source;
+package org.apache.paimon.flink.pipeline.cdc.source.reader;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.FlinkRowData;
-import org.apache.paimon.flink.FlinkRowDataWithBlob;
+import org.apache.paimon.flink.pipeline.cdc.source.CDCSource;
+import org.apache.paimon.flink.pipeline.cdc.source.TableAwareFileStoreSourceSplit;
+import org.apache.paimon.flink.pipeline.cdc.util.PaimonToFlinkCDCDataConverter;
+import org.apache.paimon.flink.source.FileStoreSourceSplitReader;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.types.DataTypeRoot;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pool;
 
+import org.apache.flink.cdc.common.event.Event;
+import org.apache.flink.cdc.common.event.SchemaChangeEvent;
+import org.apache.flink.cdc.common.event.TableId;
+import org.apache.flink.cdc.common.types.DataType;
+import org.apache.flink.cdc.runtime.typeutils.BinaryRecordDataGenerator;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
@@ -38,7 +45,6 @@ import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.MutableRecordAndPosition;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
-import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,27 +53,27 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Queue;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** The {@link SplitReader} implementation for the file store source. */
-public class FileStoreSourceSplitReader
-        implements SplitReader<BulkFormat.RecordIterator<RowData>, FileStoreSourceSplit> {
+import static org.apache.paimon.flink.pipeline.cdc.util.PaimonToFlinkCDCDataConverter.convertRowToDataChangeEvent;
+import static org.apache.paimon.flink.pipeline.cdc.util.PaimonToFlinkCDCTypeConverter.convertPaimonSchemaToFlinkCDCSchema;
 
-    private static final Logger LOG = LoggerFactory.getLogger(FileStoreSourceSplitReader.class);
+/** The {@link SplitReader} implementation for the {@link CDCSource}. */
+public class CDCSourceSplitReader
+        implements SplitReader<BulkFormat.RecordIterator<Event>, TableAwareFileStoreSourceSplit> {
 
-    private final TableRead tableRead;
+    private static final Logger LOG = LoggerFactory.getLogger(CDCSourceSplitReader.class);
 
-    @Nullable private final RecordLimiter limiter;
-
-    private final Queue<FileStoreSourceSplit> splits;
+    private final Queue<TableAwareFileStoreSourceSplit> splits;
 
     private final Pool<FileStoreRecordIterator> pool;
 
+    private final CDCSource.TableManager tableManager;
+    private TableReaderInfo currentTableReaderInfo;
     @Nullable private LazyRecordReader currentReader;
     @Nullable private String currentSplitId;
     private long currentNumRead;
@@ -76,29 +82,22 @@ public class FileStoreSourceSplitReader
     private boolean paused;
     private final AtomicBoolean wakeup;
     private final FileStoreSourceReaderMetrics metrics;
-    private final boolean blobAsDescriptor;
 
-    public FileStoreSourceSplitReader(
-            TableRead tableRead,
-            @Nullable RecordLimiter limiter,
-            FileStoreSourceReaderMetrics metrics,
-            @Nullable RowType readType,
-            boolean blobAsDescriptor) {
-        this.tableRead = tableRead;
-        this.limiter = limiter;
+    public CDCSourceSplitReader(
+            FileStoreSourceReaderMetrics metrics, CDCSource.TableManager tableManager) {
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
-        this.pool.add(new FileStoreRecordIterator(readType));
+        this.pool.add(new FileStoreRecordIterator());
         this.paused = false;
         this.metrics = metrics;
         this.wakeup = new AtomicBoolean(false);
-        this.blobAsDescriptor = blobAsDescriptor;
+        this.tableManager = tableManager;
     }
 
     @Override
-    public RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> fetch() throws IOException {
+    public RecordsWithSplitIds<BulkFormat.RecordIterator<Event>> fetch() throws IOException {
         if (paused) {
-            return new EmptyRecordsWithSplitIds<>();
+            return new FileStoreSourceSplitReader.EmptyRecordsWithSplitIds<>();
         }
 
         checkSplitOrStartNext();
@@ -108,7 +107,7 @@ public class FileStoreSourceSplitReader
         FileStoreRecordIterator iterator = poll();
         if (iterator == null) {
             LOG.info("Skip waiting for object pool due to wakeup");
-            return new EmptyRecordsWithSplitIds<>();
+            return new FileStoreSourceSplitReader.EmptyRecordsWithSplitIds<>();
         }
 
         RecordIterator<InternalRow> nextBatch;
@@ -116,20 +115,14 @@ public class FileStoreSourceSplitReader
             nextBatch = currentFirstBatch;
             currentFirstBatch = null;
         } else {
-            nextBatch =
-                    reachLimit()
-                            ? null
-                            : Objects.requireNonNull(currentReader).recordReader().readBatch();
+            nextBatch = Objects.requireNonNull(currentReader).recordReader().readBatch();
         }
         if (nextBatch == null) {
             pool.recycler().recycle(iterator);
             return finishSplit();
         }
-        return FlinkRecordsWithSplitIds.forRecords(currentSplitId, iterator.replace(nextBatch));
-    }
-
-    private boolean reachLimit() {
-        return limiter != null && limiter.reachLimit();
+        return CDCRecordsWithSplitIds.forRecords(
+                currentSplitId, iterator.replace(nextBatch, currentTableReaderInfo));
     }
 
     @Nullable
@@ -150,7 +143,7 @@ public class FileStoreSourceSplitReader
     }
 
     @Override
-    public void handleSplitsChanges(SplitsChange<FileStoreSourceSplit> splitsChange) {
+    public void handleSplitsChanges(SplitsChange<TableAwareFileStoreSourceSplit> splitsChange) {
         if (!(splitsChange instanceof SplitsAddition)) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -165,16 +158,16 @@ public class FileStoreSourceSplitReader
      * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.7-.
      */
     public void pauseOrResumeSplits(
-            Collection<FileStoreSourceSplit> splitsToPause,
-            Collection<FileStoreSourceSplit> splitsToResume) {
-        for (FileStoreSourceSplit split : splitsToPause) {
+            Collection<TableAwareFileStoreSourceSplit> splitsToPause,
+            Collection<TableAwareFileStoreSourceSplit> splitsToResume) {
+        for (TableAwareFileStoreSourceSplit split : splitsToPause) {
             if (split.splitId().equals(currentSplitId)) {
                 paused = true;
                 break;
             }
         }
 
-        for (FileStoreSourceSplit split : splitsToResume) {
+        for (TableAwareFileStoreSourceSplit split : splitsToResume) {
             if (split.splitId().equals(currentSplitId)) {
                 paused = false;
                 break;
@@ -202,9 +195,9 @@ public class FileStoreSourceSplitReader
             return;
         }
 
-        final FileStoreSourceSplit nextSplit = splits.poll();
+        final TableAwareFileStoreSourceSplit nextSplit = splits.poll();
         if (nextSplit == null) {
-            throw new IOException("Cannot fetch from another split - no split remaining");
+            return;
         }
 
         // update metric when split changes
@@ -216,15 +209,24 @@ public class FileStoreSourceSplitReader
             metrics.recordSnapshotUpdate(eventTime);
         }
 
+        Identifier identifier = nextSplit.getIdentifier();
+        TableSchema tableSchema = tableManager.getTableSchema(identifier, nextSplit.getSchemaId());
+        List<SchemaChangeEvent> schemaChangeEvents =
+                tableManager.generateSchemaChangeEventList(
+                        identifier, nextSplit.getLastSchemaId(), nextSplit.getSchemaId());
+        currentTableReaderInfo = new TableReaderInfo(identifier, tableSchema, schemaChangeEvents);
         currentSplitId = nextSplit.splitId();
-        currentReader = new LazyRecordReader(nextSplit.split());
+        currentReader = createLazyRecordReader(nextSplit.split());
         currentNumRead = nextSplit.recordsToSkip();
-        if (limiter != null) {
-            limiter.add(currentNumRead);
-        }
+
         if (currentNumRead > 0) {
             seek(currentNumRead);
         }
+    }
+
+    @VisibleForTesting
+    protected LazyRecordReader createLazyRecordReader(Split split) {
+        return new LazyRecordReader(split, currentTableReaderInfo, tableManager);
     }
 
     private void seek(long toSkip) throws IOException {
@@ -247,7 +249,7 @@ public class FileStoreSourceSplitReader
         }
     }
 
-    private FlinkRecordsWithSplitIds finishSplit() throws IOException {
+    private CDCRecordsWithSplitIds finishSplit() throws IOException {
         if (currentReader != null) {
             if (currentReader.lazyRecordReader != null) {
                 currentReader.lazyRecordReader.close();
@@ -255,45 +257,49 @@ public class FileStoreSourceSplitReader
             currentReader = null;
         }
 
-        final FlinkRecordsWithSplitIds finishRecords =
-                FlinkRecordsWithSplitIds.finishedSplit(currentSplitId);
+        final CDCRecordsWithSplitIds finishRecords =
+                CDCRecordsWithSplitIds.finishedSplit(currentSplitId);
         currentSplitId = null;
         return finishRecords;
     }
 
-    private class FileStoreRecordIterator implements BulkFormat.RecordIterator<RowData> {
+    private class FileStoreRecordIterator implements BulkFormat.RecordIterator<Event> {
 
         private RecordIterator<InternalRow> iterator;
 
-        private final MutableRecordAndPosition<RowData> recordAndPosition =
+        private final MutableRecordAndPosition<Event> recordAndPosition =
                 new MutableRecordAndPosition<>();
-        @Nullable private final Integer blobField;
 
-        private FileStoreRecordIterator(@Nullable RowType rowType) {
-            this.blobField = rowType == null ? null : blobFieldIndex(rowType);
-        }
+        private TableReaderInfo tableReaderInfo;
+        private final Queue<SchemaChangeEvent> schemaChangeEventList = new LinkedList<>();
 
-        private Integer blobFieldIndex(RowType rowType) {
-            for (int i = 0; i < rowType.getFieldCount(); i++) {
-                if (rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
-                    return i;
-                }
-            }
-            return null;
-        }
-
-        public FileStoreRecordIterator replace(RecordIterator<InternalRow> iterator) {
+        public FileStoreRecordIterator replace(
+                RecordIterator<InternalRow> iterator, TableReaderInfo tableReaderInfo) {
             this.iterator = iterator;
             this.recordAndPosition.set(null, RecordAndPosition.NO_OFFSET, currentNumRead);
+            this.tableReaderInfo = tableReaderInfo;
+            this.schemaChangeEventList.addAll(tableReaderInfo.schemaChangeEvents);
             return this;
         }
 
         @Nullable
         @Override
-        public RecordAndPosition<RowData> next() {
-            if (reachLimit()) {
+        public RecordAndPosition<Event> next() {
+            Event event = nextEvent();
+            if (event == null) {
                 return null;
             }
+
+            recordAndPosition.setNext(event);
+            currentNumRead++;
+            return recordAndPosition;
+        }
+
+        private Event nextEvent() {
+            if (!schemaChangeEventList.isEmpty()) {
+                return schemaChangeEventList.poll();
+            }
+
             InternalRow row;
             try {
                 row = iterator.next();
@@ -304,15 +310,11 @@ public class FileStoreSourceSplitReader
                 return null;
             }
 
-            recordAndPosition.setNext(
-                    blobField == null
-                            ? new FlinkRowData(row)
-                            : new FlinkRowDataWithBlob(row, blobField, blobAsDescriptor));
-            currentNumRead++;
-            if (limiter != null) {
-                limiter.increment();
-            }
-            return recordAndPosition;
+            return convertRowToDataChangeEvent(
+                    tableReaderInfo.tableId,
+                    row,
+                    tableReaderInfo.fieldGetters,
+                    tableReaderInfo.generator);
         }
 
         @Override
@@ -323,45 +325,61 @@ public class FileStoreSourceSplitReader
     }
 
     /** Lazy to create {@link RecordReader} to improve performance for limit. */
-    private class LazyRecordReader {
+    protected static class LazyRecordReader {
 
-        private final Split split;
-
+        protected final Split split;
+        private final TableReaderInfo currentTableReaderInfo;
+        private final CDCSource.TableManager tableManager;
         private RecordReader<InternalRow> lazyRecordReader;
 
-        private LazyRecordReader(Split split) {
+        protected LazyRecordReader(
+                Split split,
+                TableReaderInfo currentTableReaderInfo,
+                CDCSource.TableManager tableManager) {
             this.split = split;
+            this.currentTableReaderInfo = currentTableReaderInfo;
+            this.tableManager = tableManager;
         }
 
         public RecordReader<InternalRow> recordReader() throws IOException {
             if (lazyRecordReader == null) {
-                lazyRecordReader = tableRead.createReader(split);
+                lazyRecordReader =
+                        tableManager
+                                .getTableRead(
+                                        currentTableReaderInfo.identifier,
+                                        currentTableReaderInfo.currentSchema)
+                                .createReader(split);
             }
             return lazyRecordReader;
         }
     }
 
-    /**
-     * An empty implementation of {@link RecordsWithSplitIds}. It is used to indicate that the
-     * {@link FileStoreSourceSplitReader} is paused or wakeup.
-     */
-    public static class EmptyRecordsWithSplitIds<T> implements RecordsWithSplitIds<T> {
+    private static class TableReaderInfo {
+        private final Identifier identifier;
+        private final TableId tableId;
+        private final TableSchema currentSchema;
+        private final List<SchemaChangeEvent> schemaChangeEvents;
+        private final BinaryRecordDataGenerator generator;
+        private final List<InternalRow.FieldGetter> fieldGetters;
 
-        @Nullable
-        @Override
-        public String nextSplit() {
-            return null;
-        }
+        private TableReaderInfo(
+                Identifier identifier,
+                TableSchema currentSchema,
+                List<SchemaChangeEvent> schemaChangeEvents) {
+            this.identifier = identifier;
+            this.tableId = TableId.tableId(identifier.getDatabaseName(), identifier.getTableName());
 
-        @Nullable
-        @Override
-        public T nextRecordFromSplit() {
-            return null;
-        }
+            this.currentSchema = currentSchema;
+            this.schemaChangeEvents = schemaChangeEvents;
 
-        @Override
-        public Set<String> finishedSplits() {
-            return Collections.emptySet();
+            org.apache.flink.cdc.common.schema.Schema currentCDCSchema =
+                    convertPaimonSchemaToFlinkCDCSchema(currentSchema);
+            this.generator =
+                    new BinaryRecordDataGenerator(
+                            currentCDCSchema.getColumnDataTypes().toArray(new DataType[0]));
+            this.fieldGetters =
+                    PaimonToFlinkCDCDataConverter.createFieldGetters(
+                            currentCDCSchema.getColumnDataTypes());
         }
     }
 }
