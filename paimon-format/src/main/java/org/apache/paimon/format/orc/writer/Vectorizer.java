@@ -59,7 +59,8 @@ public abstract class Vectorizer<T> implements Serializable {
      *
      * @param element The input element
      * @param batch The batch to write the ColumnVectors
+     * @return The memory size in bytes used by the element
      * @throws IOException if there is an error while transforming the input.
      */
-    public abstract void vectorize(T element, VectorizedRowBatch batch) throws IOException;
+    public abstract long vectorize(T element, VectorizedRowBatch batch) throws IOException;
 }
