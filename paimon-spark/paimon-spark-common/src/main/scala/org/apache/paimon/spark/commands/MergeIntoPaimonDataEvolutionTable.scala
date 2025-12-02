@@ -28,6 +28,7 @@ import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
+
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
@@ -200,8 +201,10 @@ case class MergeIntoPaimonDataEvolutionTable(
     // Different Spark versions might produce duplicate attributes between `output` and
     // `metadataOutput`,so manually deduplicate by `exprId`.
     val metadataColumns = (targetRelation.output ++ targetRelation.metadataOutput)
-      .filter(attr => attr.name.equals(ROW_ID_NAME)).groupBy(_.exprId)
-      .map { case (_, attrs) => attrs.head }.toSeq
+      .filter(attr => attr.name.equals(ROW_ID_NAME))
+      .groupBy(_.exprId)
+      .map { case (_, attrs) => attrs.head }
+      .toSeq
 
     val assignments = metadataColumns.map(column => Assignment(column, column))
     val output = updateColumnsSorted ++ metadataColumns
@@ -221,7 +224,8 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
 
     val allReadFieldsOnTarget = allFields.filter(
-      field => targetTable.output.exists(attr => attr.exprId.equals(field.exprId))) ++ metadataColumns
+      field =>
+        targetTable.output.exists(attr => attr.exprId.equals(field.exprId))) ++ metadataColumns
     val allReadFieldsOnSource =
       allFields.filter(field => sourceTable.output.exists(attr => attr.exprId.equals(field.exprId)))
 
