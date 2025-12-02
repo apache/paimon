@@ -410,6 +410,8 @@ case class PaimonSparkWriter(
       writeBuilder
         .asInstanceOf[BatchWriteBuilderImpl]
         .copyWithNewTable(PostponeUtils.tableForCommit(table))
+        // Need to check conflict
+        .appendCommitCheckConflict(true)
     } else {
       writeBuilder
     }

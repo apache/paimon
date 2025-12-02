@@ -50,6 +50,8 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -67,6 +69,7 @@ import java.util.stream.LongStream;
 import static java.util.Collections.singletonMap;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link TableCommit}. */
@@ -322,8 +325,10 @@ public class TableCommitTest {
         }
     }
 
-    @Test
-    public void testGiveUpCommitWhenAppendFoundTotalBucketsChanged() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testGiveUpCommitWhenAppendFoundTotalBucketsChanged(boolean checkAppend)
+            throws Exception {
         String path = tempDir.toString();
         RowType rowType =
                 RowType.of(
@@ -370,9 +375,17 @@ public class TableCommitTest {
             commit.commit(1, write.prepareCommit(false, 1));
         }
 
-        assertThatThrownBy(() -> commit1.commit(1, write1.prepareCommit(false, 1)))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("changed from 2 to 1 without overwrite");
+        if (checkAppend) {
+            commit1.appendCommitCheckConflict(true);
+            assertThatThrownBy(() -> commit1.commit(1, write1.prepareCommit(false, 1)))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("changed from 2 to 1 without overwrite");
+        } else {
+            // the commit result is error, but here verify that no check if
+            // appendCommitCheckConflict was not set
+            assertThatCode(() -> commit1.commit(1, write1.prepareCommit(false, 1)))
+                    .doesNotThrowAnyException();
+        }
         write1.close();
         commit1.close();
     }
