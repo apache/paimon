@@ -71,9 +71,8 @@ object SparkDataFileMeta {
       .groupBy(file => (file.partition, file.bucket))
       .map {
         case ((partition, bucket), files) =>
-          val (dataFiles, deletionFiles) = files.map {
-            file => (file.dataFileMeta, file.deletionFile.orNull)
-          }.unzip
+          val (dataFiles, deletionFiles) =
+            files.map(file => (file.dataFileMeta, file.deletionFile.orNull)).unzip
           new DataSplit.Builder()
             .withPartition(partition)
             .withBucket(bucket)

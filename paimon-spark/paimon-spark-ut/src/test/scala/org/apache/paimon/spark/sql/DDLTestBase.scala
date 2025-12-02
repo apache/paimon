@@ -398,8 +398,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
   test("Paimon DDL: select table with timestamp and timestamp_ntz with filter") {
     Seq(true, false).foreach {
       datetimeJava8APIEnabled =>
-        withSparkSQLConf(
-          "spark.sql.datetime.java8API.enabled" -> datetimeJava8APIEnabled.toString) {
+        withSparkSQLConf("spark.sql.datetime.java8API.enabled" -> datetimeJava8APIEnabled.toString) {
           withTable("paimon_tbl") {
             // Spark support create table with timestamp_ntz since 3.4
             if (gteqSpark3_4) {
