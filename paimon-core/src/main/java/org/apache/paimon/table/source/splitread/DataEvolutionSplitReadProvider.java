@@ -22,6 +22,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.DataEvolutionSplitRead;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.LazyField;
 
 import java.util.HashSet;
@@ -48,8 +49,12 @@ public class DataEvolutionSplitReadProvider implements SplitReadProvider {
     }
 
     @Override
-    public boolean match(DataSplit split, boolean forceKeepDelete) {
-        List<DataFileMeta> files = split.dataFiles();
+    public boolean match(Split split, Context context) {
+        if (!(split instanceof DataSplit)) {
+            return false;
+        }
+        DataSplit dataSplit = (DataSplit) split;
+        List<DataFileMeta> files = dataSplit.dataFiles();
         if (files.size() < 2) {
             return false;
         }

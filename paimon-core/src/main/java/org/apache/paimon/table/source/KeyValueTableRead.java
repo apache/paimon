@@ -159,7 +159,11 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     public RecordReader<InternalRow> reader(Split split) throws IOException {
         DataSplit dataSplit = (DataSplit) split;
         for (SplitReadProvider readProvider : readProviders) {
-            if (readProvider.match(dataSplit, forceKeepDelete)) {
+            if (readProvider.match(
+                    dataSplit,
+                    SplitReadProvider.Context.builder()
+                            .withForceKeepDelete(forceKeepDelete)
+                            .build())) {
                 return readProvider.get().get().createReader(dataSplit);
             }
         }

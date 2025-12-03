@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LazyField;
 
@@ -51,8 +52,12 @@ public class MergeFileSplitReadProvider implements SplitReadProvider {
     }
 
     @Override
-    public boolean match(DataSplit split, boolean forceKeepDelete) {
-        return split.beforeFiles().isEmpty();
+    public boolean match(Split split, Context context) {
+        if (!(split instanceof DataSplit)) {
+            return false;
+        }
+        DataSplit dataSplit = (DataSplit) split;
+        return dataSplit.beforeFiles().isEmpty();
     }
 
     @Override

@@ -80,7 +80,7 @@ public class DataEvolutionSplitReadProviderTest {
     public void testMatchWithNoFiles() {
         DataSplit split = mock(DataSplit.class);
         when(split.dataFiles()).thenReturn(Collections.emptyList());
-        assertThat(provider.match(split, false)).isFalse();
+        assertThat(provider.match(split, SplitReadProvider.Context.DEFAULT)).isFalse();
     }
 
     @Test
@@ -88,7 +88,7 @@ public class DataEvolutionSplitReadProviderTest {
         DataSplit split = mock(DataSplit.class);
         DataFileMeta file1 = mock(DataFileMeta.class);
         when(split.dataFiles()).thenReturn(Collections.singletonList(file1));
-        assertThat(provider.match(split, false)).isFalse();
+        assertThat(provider.match(split, SplitReadProvider.Context.DEFAULT)).isFalse();
     }
 
     @Test
@@ -103,7 +103,7 @@ public class DataEvolutionSplitReadProviderTest {
         when(file1.fileName()).thenReturn("test1.parquet");
         when(file2.fileName()).thenReturn("test2.parquet");
 
-        assertThat(provider.match(split, false)).isFalse();
+        assertThat(provider.match(split, SplitReadProvider.Context.DEFAULT)).isFalse();
     }
 
     @Test
@@ -118,7 +118,7 @@ public class DataEvolutionSplitReadProviderTest {
         when(file1.fileName()).thenReturn("test1.parquet");
         when(file2.fileName()).thenReturn("test2.parquet");
 
-        assertThat(provider.match(split, false)).isFalse();
+        assertThat(provider.match(split, SplitReadProvider.Context.DEFAULT)).isFalse();
     }
 
     @Test
@@ -136,7 +136,13 @@ public class DataEvolutionSplitReadProviderTest {
         when(file2.fileName()).thenReturn("test2.parquet");
 
         // The forceKeepDelete parameter is not used in match, so test both values
-        assertThat(provider.match(split, true)).isTrue();
-        assertThat(provider.match(split, false)).isTrue();
+        assertThat(
+                        provider.match(
+                                split,
+                                SplitReadProvider.Context.builder()
+                                        .withForceKeepDelete(true)
+                                        .build()))
+                .isTrue();
+        assertThat(provider.match(split, SplitReadProvider.Context.DEFAULT)).isTrue();
     }
 }

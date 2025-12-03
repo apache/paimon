@@ -23,7 +23,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
 
@@ -62,10 +62,10 @@ public interface SplitRead<T> {
     }
 
     /** Create a {@link RecordReader} from split. */
-    RecordReader<T> createReader(DataSplit split) throws IOException;
+    RecordReader<T> createReader(Split split) throws IOException;
 
     static <L, R> SplitRead<R> convert(
-            SplitRead<L> read, IOFunction<DataSplit, RecordReader<R>> convertedFactory) {
+            SplitRead<L> read, IOFunction<Split, RecordReader<R>> splitConvert) {
         return new SplitRead<R>() {
             @Override
             public SplitRead<R> forceKeepDelete() {
@@ -104,8 +104,8 @@ public interface SplitRead<T> {
             }
 
             @Override
-            public RecordReader<R> createReader(DataSplit split) throws IOException {
-                return convertedFactory.apply(split);
+            public RecordReader<R> createReader(Split split) throws IOException {
+                return splitConvert.apply(split);
             }
         };
     }

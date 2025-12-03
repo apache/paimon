@@ -42,6 +42,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -144,11 +145,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
-        List<DataFileMeta> files = split.dataFiles();
-        BinaryRow partition = split.partition();
+    public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        DataSplit dataSplit = (DataSplit) split;
+        List<DataFileMeta> files = dataSplit.dataFiles();
+        BinaryRow partition = dataSplit.partition();
         DataFilePathFactory dataFilePathFactory =
-                pathFactory.createDataFilePathFactory(partition, split.bucket());
+                pathFactory.createDataFilePathFactory(partition, dataSplit.bucket());
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
         Builder formatBuilder =
