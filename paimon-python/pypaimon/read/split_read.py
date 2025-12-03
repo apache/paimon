@@ -38,6 +38,7 @@ from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
+from pypaimon.read.reader.format_lance_reader import FormatLanceReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.read.reader.key_value_unwrap_reader import \
@@ -104,6 +105,9 @@ class SplitRead(ABC):
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path,
                                                 read_file_fields, read_arrow_predicate)
+        elif file_format == CoreOptions.FILE_FORMAT_LANCE:
+            format_reader = FormatLanceReader(self.table.file_io, file_path, read_file_fields,
+                                              read_arrow_predicate, batch_size=4096)
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
