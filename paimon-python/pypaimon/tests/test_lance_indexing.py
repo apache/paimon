@@ -42,7 +42,7 @@ class VectorIndexBuilderTest(unittest.TestCase):
     def test_ivf_pq_index_creation(self):
         """Test IVF_PQ index builder initialization."""
         builder = VectorIndexBuilder('vector', 'ivf_pq', 'l2')
-        
+
         self.assertEqual(builder.vector_column, 'vector')
         self.assertEqual(builder.index_type, 'ivf_pq')
         self.assertEqual(builder.metric, 'l2')
@@ -51,7 +51,7 @@ class VectorIndexBuilderTest(unittest.TestCase):
     def test_hnsw_index_creation(self):
         """Test HNSW index builder initialization."""
         builder = VectorIndexBuilder('vector', 'hnsw', 'cosine')
-        
+
         self.assertEqual(builder.vector_column, 'vector')
         self.assertEqual(builder.index_type, 'hnsw')
         self.assertEqual(builder.metric, 'cosine')
@@ -82,7 +82,7 @@ class VectorIndexBuilderTest(unittest.TestCase):
     def test_hnsw_memory_estimation(self):
         """Test HNSW memory usage estimation."""
         memory = VectorIndexBuilder._estimate_hnsw_memory(20, 7, 1_000_000)
-        
+
         # 1M vectors * 3.5 layers * 10 edges * 8 bytes
         # ≈ 280MB
         self.assertGreater(memory, 0)
@@ -96,7 +96,7 @@ class ScalarIndexTest(unittest.TestCase):
     def test_btree_index_initialization(self):
         """Test BTree index builder initialization."""
         builder = ScalarIndexBuilder('price', 'btree')
-        
+
         self.assertEqual(builder.column, 'price')
         self.assertEqual(builder.index_type, 'btree')
 
@@ -104,7 +104,7 @@ class ScalarIndexTest(unittest.TestCase):
     def test_bitmap_index_initialization(self):
         """Test Bitmap index builder initialization."""
         builder = ScalarIndexBuilder('category', 'bitmap')
-        
+
         self.assertEqual(builder.column, 'category')
         self.assertEqual(builder.index_type, 'bitmap')
 
@@ -119,7 +119,7 @@ class ScalarIndexTest(unittest.TestCase):
         """Test index type recommendation for low cardinality."""
         data = ['A'] * 950 + ['B'] * 50  # 2% unique
         index_type = ScalarIndexBuilder.recommend_index_type(data)
-        
+
         self.assertEqual(index_type, 'bitmap')
 
     @unittest.skipUnless(HAS_LANCE_INDEXING, "Lance indexing modules not available")
@@ -127,7 +127,7 @@ class ScalarIndexTest(unittest.TestCase):
         """Test index type recommendation for high cardinality."""
         data = list(range(1000))  # 100% unique
         index_type = ScalarIndexBuilder.recommend_index_type(data)
-        
+
         self.assertEqual(index_type, 'btree')
 
 
@@ -139,7 +139,7 @@ class BitmapIndexHandlerTest(unittest.TestCase):
         """Test bitmap building from column data."""
         data = ['A', 'B', 'A', 'C', 'B', 'A']
         bitmaps = BitmapIndexHandler.build_bitmaps(data)
-        
+
         self.assertEqual(set(bitmaps['A']), {0, 2, 5})
         self.assertEqual(set(bitmaps['B']), {1, 4})
         self.assertEqual(set(bitmaps['C']), {3})
@@ -150,7 +150,7 @@ class BitmapIndexHandlerTest(unittest.TestCase):
         b1 = {0, 1, 2, 3}
         b2 = {1, 2, 4, 5}
         result = BitmapIndexHandler.bitmap_and(b1, b2)
-        
+
         self.assertEqual(result, {1, 2})
 
     @unittest.skipUnless(HAS_LANCE_INDEXING, "Lance indexing modules not available")
@@ -159,7 +159,7 @@ class BitmapIndexHandlerTest(unittest.TestCase):
         b1 = {0, 1, 2}
         b2 = {2, 3, 4}
         result = BitmapIndexHandler.bitmap_or(b1, b2)
-        
+
         self.assertEqual(result, {0, 1, 2, 3, 4})
 
     @unittest.skipUnless(HAS_LANCE_INDEXING, "Lance indexing modules not available")
@@ -167,7 +167,7 @@ class BitmapIndexHandlerTest(unittest.TestCase):
         """Test bitmap NOT operation."""
         bitmap = {0, 2, 4}
         result = BitmapIndexHandler.bitmap_not(bitmap, 5)
-        
+
         self.assertEqual(result, {1, 3})
 
 
@@ -179,7 +179,7 @@ class BTreeIndexHandlerTest(unittest.TestCase):
         """Test range search with inclusive bounds."""
         data = [10, 20, 30, 40, 50, 60, 70, 80, 90]
         result = BTreeIndexHandler.range_search(data, 30, 70, inclusive=True)
-        
+
         # Should include rows with values 30, 40, 50, 60, 70
         expected = {2, 3, 4, 5, 6}
         self.assertEqual(set(result), expected)
@@ -189,7 +189,7 @@ class BTreeIndexHandlerTest(unittest.TestCase):
         """Test range search with exclusive bounds."""
         data = [10, 20, 30, 40, 50, 60, 70, 80, 90]
         result = BTreeIndexHandler.range_search(data, 30, 70, inclusive=False)
-        
+
         # Should exclude boundaries
         expected = {3, 4, 5}
         self.assertEqual(set(result), expected)
@@ -199,7 +199,7 @@ class BTreeIndexHandlerTest(unittest.TestCase):
         """Test range search with only lower bound."""
         data = [10, 20, 30, 40, 50]
         result = BTreeIndexHandler.range_search(data, min_val=30, inclusive=True)
-        
+
         expected = {2, 3, 4}
         self.assertEqual(set(result), expected)
 
@@ -208,7 +208,7 @@ class BTreeIndexHandlerTest(unittest.TestCase):
         """Test range search with only upper bound."""
         data = [10, 20, 30, 40, 50]
         result = BTreeIndexHandler.range_search(data, max_val=30, inclusive=True)
-        
+
         expected = {0, 1, 2}
         self.assertEqual(set(result), expected)
 
@@ -221,7 +221,7 @@ class PredicateOptimizerTest(unittest.TestCase):
         """Test parsing simple equality predicate."""
         optimizer = PredicateOptimizer()
         expressions = optimizer.parse_predicate("status = 'active'")
-        
+
         self.assertIsNotNone(expressions)
         self.assertEqual(len(expressions), 1)
         self.assertEqual(expressions[0].column, 'status')
@@ -232,7 +232,7 @@ class PredicateOptimizerTest(unittest.TestCase):
         """Test parsing range predicates."""
         optimizer = PredicateOptimizer()
         expressions = optimizer.parse_predicate("price > 100")
-        
+
         self.assertIsNotNone(expressions)
         self.assertEqual(len(expressions), 1)
         self.assertEqual(expressions[0].operator, PredicateOperator.GT)
@@ -243,7 +243,7 @@ class PredicateOptimizerTest(unittest.TestCase):
         """Test parsing AND combined predicates."""
         optimizer = PredicateOptimizer()
         expressions = optimizer.parse_predicate("category = 'A' AND price > 100")
-        
+
         self.assertIsNotNone(expressions)
         self.assertEqual(len(expressions), 2)
 
@@ -252,7 +252,7 @@ class PredicateOptimizerTest(unittest.TestCase):
         """Test parsing IN predicates."""
         optimizer = PredicateOptimizer()
         expressions = optimizer.parse_predicate("status IN ('active', 'pending')")
-        
+
         self.assertIsNotNone(expressions)
         self.assertEqual(len(expressions), 1)
         self.assertEqual(expressions[0].operator, PredicateOperator.IN)
@@ -262,7 +262,7 @@ class PredicateOptimizerTest(unittest.TestCase):
         """Test parsing NULL predicates."""
         optimizer = PredicateOptimizer()
         expressions = optimizer.parse_predicate("deleted_at IS NULL")
-        
+
         self.assertIsNotNone(expressions)
         self.assertEqual(expressions[0].operator, PredicateOperator.IS_NULL)
 
@@ -272,7 +272,7 @@ class PredicateOptimizerTest(unittest.TestCase):
         optimizer = PredicateOptimizer()
         optimizer.register_index('price', 'btree')
         optimizer.register_index('category', 'bitmap')
-        
+
         self.assertEqual(optimizer.indexes['price'], 'btree')
         self.assertEqual(optimizer.indexes['category'], 'bitmap')
 
@@ -282,15 +282,15 @@ class PredicateOptimizerTest(unittest.TestCase):
         optimizer = PredicateOptimizer()
         optimizer.register_index('price', 'btree')
         optimizer.register_index('category', 'bitmap')
-        
+
         # BTree can be used for range queries
         expr_range = PredicateExpression('price', PredicateOperator.GT, 100)
         self.assertTrue(optimizer.can_use_index(expr_range))
-        
+
         # Bitmap can be used for equality
         expr_eq = PredicateExpression('category', PredicateOperator.EQ, 'A')
         self.assertTrue(optimizer.can_use_index(expr_eq))
-        
+
         # Bitmap cannot be used for range
         expr_bitmap_range = PredicateExpression('category', PredicateOperator.GT, 'A')
         self.assertFalse(optimizer.can_use_index(expr_bitmap_range))
@@ -301,11 +301,11 @@ class PredicateOptimizerTest(unittest.TestCase):
         optimizer = PredicateOptimizer()
         optimizer.register_index('price', 'btree')
         optimizer.register_index('category', 'bitmap')
-        
+
         expr1 = PredicateExpression('price', PredicateOperator.GT, 100)
         hint1 = optimizer.get_filter_hint(expr1)
         self.assertIn('BTREE', hint1)
-        
+
         expr2 = PredicateExpression('category', PredicateOperator.EQ, 'A')
         hint2 = optimizer.get_filter_hint(expr2)
         self.assertIn('BITMAP', hint2)
@@ -315,11 +315,11 @@ class PredicateOptimizerTest(unittest.TestCase):
         """Test selectivity estimation."""
         optimizer = PredicateOptimizer()
         optimizer.register_statistics('id', {'cardinality': 1000})
-        
+
         expr_eq = PredicateExpression('id', PredicateOperator.EQ, 1)
         selectivity_eq = optimizer._estimate_selectivity(expr_eq)
         self.assertAlmostEqual(selectivity_eq, 0.001, places=3)
-        
+
         expr_range = PredicateExpression('id', PredicateOperator.GT, 500)
         selectivity_range = optimizer._estimate_selectivity(expr_range)
         self.assertAlmostEqual(selectivity_range, 0.25, places=2)

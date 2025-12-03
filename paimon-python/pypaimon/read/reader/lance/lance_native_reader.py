@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 class LanceNativeReader:
     """
     Wrapper for Lance native reader to read Lance format files.
-    
+
     This class handles reading data from Lance-formatted files using the
     pylance library (Lance Python bindings).
     """
@@ -46,7 +46,7 @@ class LanceNativeReader:
                  storage_options: Optional[Dict[str, str]] = None):
         """
         Initialize Lance native reader.
-        
+
         Args:
             file_path: Path to the Lance file
             columns: List of columns to read (None means all columns)
@@ -57,11 +57,11 @@ class LanceNativeReader:
         self.columns = columns
         self.batch_size = batch_size
         self.storage_options = storage_options or {}
-        
+
         self._table = None
         self._reader = None
         self._batch_index = 0
-        
+
         try:
             import lance
             self._lance = lance
@@ -70,13 +70,11 @@ class LanceNativeReader:
                 "Lance library is not installed. "
                 "Please install it with: pip install lance"
             )
-        
+
         self._initialize_reader()
 
     def _initialize_reader(self) -> None:
         """Initialize the Lance reader and load table metadata."""
-        import pyarrow as pa
-        
         try:
             # Open Lance dataset using lancedb API
             import lancedb
@@ -86,7 +84,7 @@ class LanceNativeReader:
             logger.info(f"Successfully opened Lance file: {self.file_path}")
             logger.debug(f"Schema: {self._table.schema}")
             logger.debug(f"Number of rows: {len(self._table)}")
-            
+
         except ImportError:
             # Fallback: Try using lance directly if lancedb not available
             try:
@@ -102,37 +100,39 @@ class LanceNativeReader:
     def read_batch(self) -> Optional[Any]:
         """
         Read next batch of data from Lance file.
-        
+
         Returns:
             PyArrow RecordBatch with data, or None if EOF reached
         """
         try:
             if self._table is None:
                 return None
-            
+
             total_rows = len(self._table)
             if self._batch_index >= total_rows:
                 return None
-            
+
             # Calculate batch boundaries
             end_row = min(self._batch_index + self.batch_size, total_rows)
-            
+
             # Read batch with optional column projection
             if self.columns:
                 batch_table = self._table.select(self.columns)\
                     .slice(self._batch_index, end_row - self._batch_index)
             else:
-                batch_table = self._table.slice(self._batch_index, 
-                                               end_row - self._batch_index)
-            
+                batch_table = self._table.slice(
+                    self._batch_index,
+                    end_row - self._batch_index
+                )
+
             self._batch_index = end_row
-            
+
             # Convert to single RecordBatch
             if batch_table.num_rows > 0:
                 return batch_table.to_batches()[0]
             else:
                 return None
-                
+
         except Exception as e:
             logger.error(f"Error reading batch from Lance file: {e}")
             raise

@@ -16,21 +16,32 @@
 # limitations under the License.
 ################################################################################
 
-"""Lance format support modules including vector indexing, scalar indexing, predicate optimization, and type validation."""
+"""Lance format support modules.
+
+Includes vector indexing (IVF_PQ, HNSW), scalar indexing
+(BTree, Bitmap), predicate optimization, and type validation.
+"""
+# flake8: noqa: F401
 
 try:
     from pypaimon.read.reader.lance.vector_index import VectorIndexBuilder
-    from pypaimon.read.reader.lance.scalar_index import ScalarIndexBuilder, BitmapIndexHandler, BTreeIndexHandler
-    from pypaimon.read.reader.lance.predicate_pushdown import PredicateOptimizer, PredicateExpression, PredicateOperator
+    from pypaimon.read.reader.lance.scalar_index import (
+        ScalarIndexBuilder, BitmapIndexHandler, BTreeIndexHandler
+    )
+    from pypaimon.read.reader.lance.predicate_pushdown import (
+        PredicateOptimizer, PredicateExpression, PredicateOperator
+    )
     from pypaimon.read.reader.lance.incremental_index import (
-        IncrementalIndexManager, IndexMetadata, UpdateStrategy, IndexUpdateScheduler
+        IncrementalIndexManager, IndexMetadata, UpdateStrategy,
+        IndexUpdateScheduler
     )
     from pypaimon.read.reader.lance.type_validation import (
         TypeValidator, DataType, IndexTypeCompatibility, SchemaBuilder
     )
     from pypaimon.read.reader.lance.lance_utils import LanceUtils
-    from pypaimon.read.reader.lance.lance_native_reader import LanceNativeReader
-    
+    from pypaimon.read.reader.lance.lance_native_reader import (
+        LanceNativeReader
+    )
     __all__ = [
         'VectorIndexBuilder',
         'ScalarIndexBuilder',
@@ -40,7 +51,7 @@ try:
         'PredicateExpression',
         'PredicateOperator',
         'LanceUtils',
-        'LanceNativeReader', 
+        'LanceNativeReader',
         'IncrementalIndexManager',
         'IndexMetadata',
         'UpdateStrategy',

@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class LanceNativeWriter:
     """
     Wrapper for Lance native writer to write Lance format files.
-    
+
     This class handles writing data to Lance-formatted files using the
     pylance/lancedb library (Lance Python bindings).
     """
@@ -38,7 +38,7 @@ class LanceNativeWriter:
                  storage_options: Optional[Dict[str, str]] = None):
         """
         Initialize Lance native writer.
-        
+
         Args:
             file_path: Path to the output Lance file
             mode: Write mode ('w' for write/overwrite, 'a' for append)
@@ -47,12 +47,12 @@ class LanceNativeWriter:
         self.file_path = file_path
         self.mode = mode
         self.storage_options = storage_options or {}
-        
+
         self._table = None
         self._writer = None
         self._row_count = 0
         self._bytes_written = 0
-        
+
         try:
             import lancedb
             self._lancedb = lancedb
@@ -69,23 +69,23 @@ class LanceNativeWriter:
     def write_batch(self, batch: Any) -> None:
         """
         Write a PyArrow RecordBatch to the Lance file.
-        
+
         Args:
             batch: PyArrow RecordBatch to write
         """
         try:
             import pyarrow as pa
-            
+
             if batch is None or batch.num_rows == 0:
                 logger.debug("Skipping empty batch")
                 return
-            
+
             # Convert RecordBatch to Table
             table = pa.table({
                 name: batch.column(name)
                 for name in batch.schema.names
             })
-            
+
             # Write or append data
             if self._table is None:
                 # First write - create new dataset
@@ -93,10 +93,10 @@ class LanceNativeWriter:
             else:
                 # Append to existing table
                 self._table = pa.concat_tables([self._table, table])
-            
+
             self._row_count += batch.num_rows
             logger.debug(f"Written {batch.num_rows} rows, total: {self._row_count}")
-            
+
         except Exception as e:
             logger.error(f"Error writing batch to Lance: {e}")
             raise
@@ -104,7 +104,7 @@ class LanceNativeWriter:
     def write_table(self, table: Any) -> None:
         """
         Write a PyArrow Table to the Lance file.
-        
+
         Args:
             table: PyArrow Table to write
         """
@@ -112,16 +112,16 @@ class LanceNativeWriter:
             if table is None or table.num_rows == 0:
                 logger.debug("Skipping empty table")
                 return
-            
+
             if self._table is None:
                 self._table = table
             else:
                 import pyarrow as pa
                 self._table = pa.concat_tables([self._table, table])
-            
+
             self._row_count += table.num_rows
             logger.debug(f"Written {table.num_rows} rows, total: {self._row_count}")
-            
+
         except Exception as e:
             logger.error(f"Error writing table to Lance: {e}")
             raise
@@ -129,7 +129,7 @@ class LanceNativeWriter:
     def get_written_position(self) -> int:
         """
         Get the number of rows written so far.
-        
+
         Returns:
             Number of rows written
         """
@@ -152,12 +152,12 @@ class LanceNativeWriter:
                     # Fallback: write directly using arrow IO
                     import pyarrow.parquet as pq
                     pq.write_table(self._table, self.file_path)
-                
+
                 logger.info(f"Successfully wrote Lance file: {self.file_path} with {self._row_count} rows")
-            
+
             self._table = None
             self._writer = None
-            
+
         except Exception as e:
             logger.error(f"Error closing Lance writer: {e}")
             raise

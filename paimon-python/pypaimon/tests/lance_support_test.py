@@ -19,9 +19,6 @@
 """Tests for Lance format support."""
 
 import unittest
-import tempfile
-import os
-from typing import Optional
 
 try:
     import pyarrow as pa  # noqa: F401
@@ -48,14 +45,14 @@ class LanceUtilsTest(unittest.TestCase):
             'lance.vector-search': 'true',
             'lance.index-type': 'ivf_pq'
         }
-        
+
         self.assertTrue(CoreOptions.lance_enable_vector_search(options))
         self.assertEqual(CoreOptions.lance_index_type(options), 'ivf_pq')
 
     def test_lance_options_defaults(self):
         """Test Lance option defaults."""
         options = {}
-        
+
         self.assertFalse(CoreOptions.lance_enable_vector_search(options))
         self.assertEqual(CoreOptions.lance_index_type(options), 'ivf_pq')
 
@@ -65,7 +62,7 @@ class LanceUtilsTest(unittest.TestCase):
         # Test with list of integers
         row_ids = [0, 1, 2, 5, 6, 7, 10]
         ranges = LanceUtils.convert_row_ranges_to_list(row_ids)
-        
+
         expected = [(0, 3), (5, 8), (10, 11)]
         self.assertEqual(ranges, expected)
 
@@ -86,7 +83,7 @@ class LanceUtilsTest(unittest.TestCase):
         """Test contiguous row ranges."""
         row_ids = [0, 1, 2, 3, 4]
         ranges = LanceUtils.convert_row_ranges_to_list(row_ids)
-        
+
         expected = [(0, 5)]
         self.assertEqual(ranges, expected)
 
@@ -98,7 +95,7 @@ class FormatLanceReaderTest(unittest.TestCase):
     def test_format_reader_import(self):
         """Test that FormatLanceReader can be imported."""
         try:
-            from pypaimon.read.reader.format_lance_reader import FormatLanceReader
+            from pypaimon.read.reader.format_lance_reader import FormatLanceReader  # noqa: F401
             self.assertTrue(True)
         except ImportError as e:
             self.fail(f"Failed to import FormatLanceReader: {e}")
@@ -107,7 +104,7 @@ class FormatLanceReaderTest(unittest.TestCase):
     def test_lance_native_reader_import(self):
         """Test that LanceNativeReader can be imported."""
         try:
-            from pypaimon.read.reader.lance.lance_native_reader import LanceNativeReader
+            from pypaimon.read.reader.lance.lance_native_reader import LanceNativeReader  # noqa: F401
             self.assertTrue(True)
         except ImportError as e:
             self.fail(f"Failed to import LanceNativeReader: {e}")
@@ -120,7 +117,7 @@ class FormatLanceWriterTest(unittest.TestCase):
     def test_format_writer_import(self):
         """Test that LanceFormatWriter can be imported."""
         try:
-            from pypaimon.write.writer.lance_format_writer import LanceFormatWriter
+            from pypaimon.write.writer.lance_format_writer import LanceFormatWriter  # noqa: F401
             self.assertTrue(True)
         except ImportError as e:
             self.fail(f"Failed to import LanceFormatWriter: {e}")
@@ -129,7 +126,7 @@ class FormatLanceWriterTest(unittest.TestCase):
     def test_lance_native_writer_import(self):
         """Test that LanceNativeWriter can be imported."""
         try:
-            from pypaimon.write.writer.lance.lance_native_writer import LanceNativeWriter
+            from pypaimon.write.writer.lance.lance_native_writer import LanceNativeWriter  # noqa: F401
             self.assertTrue(True)
         except ImportError as e:
             self.fail(f"Failed to import LanceNativeWriter: {e}")
@@ -142,7 +139,7 @@ class LanceSplitReadIntegrationTest(unittest.TestCase):
     def test_split_read_import(self):
         """Test that SplitRead includes Lance support."""
         try:
-            from pypaimon.read.split_read import FormatLanceReader
+            from pypaimon.read.split_read import FormatLanceReader  # noqa: F401
             self.assertTrue(True)
         except ImportError:
             # It's okay if FormatLanceReader is not in __init__
