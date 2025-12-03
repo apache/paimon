@@ -199,7 +199,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       s => targetTable.output.map(x => x.toString()).indexOf(s.toString()))
 
     // Different Spark versions might produce duplicate attributes between `output` and
-    // `metadataOutput`,so manually deduplicate by `exprId`.
+    // `metadataOutput`, so manually deduplicate by `exprId`.
     val metadataColumns = (targetRelation.output ++ targetRelation.metadataOutput)
       .filter(attr => attr.name.equals(ROW_ID_NAME))
       .groupBy(_.exprId)
