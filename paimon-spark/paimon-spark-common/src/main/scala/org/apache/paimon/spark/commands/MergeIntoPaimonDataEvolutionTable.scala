@@ -46,7 +46,7 @@ import scala.collection.Searching.{search, Found, InsertionPoint}
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
-/** Command for Merge Into for Data Evolution paimom table. */
+/** Command for Merge Into for Data Evolution paimon table. */
 case class MergeIntoPaimonDataEvolutionTable(
     v2Table: SparkTable,
     targetTable: LogicalPlan,
@@ -198,8 +198,16 @@ case class MergeIntoPaimonDataEvolutionTable(
     val updateColumnsSorted = updateColumns.toSeq.sortBy(
       s => targetTable.output.map(x => x.toString()).indexOf(s.toString()))
 
-    val assignments = redundantColumns.map(column => Assignment(column, column))
-    val output = updateColumnsSorted ++ redundantColumns
+    // Different Spark versions might produce duplicate attributes between `output` and
+    // `metadataOutput`, so manually deduplicate by `exprId`.
+    val metadataColumns = (targetRelation.output ++ targetRelation.metadataOutput)
+      .filter(attr => attr.name.equals(ROW_ID_NAME))
+      .groupBy(_.exprId)
+      .map { case (_, attrs) => attrs.head }
+      .toSeq
+
+    val assignments = metadataColumns.map(column => Assignment(column, column))
+    val output = updateColumnsSorted ++ metadataColumns
     val realUpdateActions = matchedActions
       .map(s => s.asInstanceOf[UpdateAction])
       .map(
@@ -217,10 +225,9 @@ case class MergeIntoPaimonDataEvolutionTable(
 
     val allReadFieldsOnTarget = allFields.filter(
       field =>
-        targetTable.output.exists(
-          attr => attr.toString().equals(field.toString()))) ++ redundantColumns
-    val allReadFieldsOnSource = allFields.filter(
-      field => sourceTable.output.exists(attr => attr.toString().equals(field.toString())))
+        targetTable.output.exists(attr => attr.exprId.equals(field.exprId))) ++ metadataColumns
+    val allReadFieldsOnSource =
+      allFields.filter(field => sourceTable.output.exists(attr => attr.exprId.equals(field.exprId)))
 
     val targetReadPlan =
       touchedFileTargetRelation.copy(targetRelation.table, allReadFieldsOnTarget.toSeq)

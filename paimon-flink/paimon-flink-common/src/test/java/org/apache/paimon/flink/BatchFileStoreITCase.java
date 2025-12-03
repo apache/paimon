@@ -456,9 +456,11 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         Map<String, String> expireOptions = new HashMap<>();
         expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
         expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
-        FileStoreTable table = (FileStoreTable) paimonTable(tableName);
+        FileStoreTable table = paimonTable(tableName);
         table.copy(expireOptions).newCommit("").expireSnapshots();
         assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+
+        sql("ALTER TABLE T SET('deletion-vectors.modifiable' = 'true')");
 
         assertThat(
                         batchSql(
@@ -1015,5 +1017,24 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         batchSql(
                                 "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */"))
                 .hasSize(0);
+    }
+
+    @Test
+    public void testLevel0FileCanBeReadForFilesTable() {
+        sql(
+                "CREATE TABLE test_table (a int PRIMARY KEY NOT ENFORCED, b string) "
+                        + "WITH ('deletion-vectors.enabled' = 'true', 'write-only' = 'true');");
+        sql("INSERT INTO test_table VALUES (1, 'A')");
+        assertThat(sql("SELECT * FROM `test_table$files`")).isNotEmpty();
+    }
+
+    @Test
+    public void testLevel0FileCanBeReadForPartitionsTable() {
+        sql(
+                "CREATE TABLE test_table (a int PRIMARY KEY NOT ENFORCED, b string, dt string) "
+                        + "PARTITIONED BY (dt)"
+                        + "WITH ('deletion-vectors.enabled' = 'true', 'write-only' = 'true');");
+        sql("INSERT INTO test_table VALUES (1, 'A', '2024-12-01')");
+        assertThat(sql("SELECT * FROM `test_table$partitions`")).isNotEmpty();
     }
 }

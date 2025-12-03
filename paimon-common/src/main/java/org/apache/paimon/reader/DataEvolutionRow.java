@@ -58,6 +58,19 @@ public class DataEvolutionRow implements InternalRow {
         }
     }
 
+    public void setRows(InternalRow[] rows) {
+        if (rows.length != this.rows.length) {
+            throw new IllegalArgumentException(
+                    "The length of input rows "
+                            + rows.length
+                            + " is not equal to the expected length "
+                            + this.rows.length);
+        }
+        for (int i = 0; i < rows.length; i++) {
+            setRow(i, rows[i]);
+        }
+    }
+
     private InternalRow chooseRow(int pos) {
         return rows[(rowOffsets[pos])];
     }
@@ -83,7 +96,7 @@ public class DataEvolutionRow implements InternalRow {
 
     @Override
     public boolean isNullAt(int pos) {
-        if (rowOffsets[pos] == -1) {
+        if (rowOffsets[pos] < 0) {
             return true;
         }
         return chooseRow(pos).isNullAt(offsetInRow(pos));

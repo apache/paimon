@@ -27,13 +27,13 @@ SYSTEM_BRANCH_PREFIX = 'branch-'
 @dataclass
 class Identifier:
 
-    database_name: str = json_field("database", default=None)
-    object_name: str = json_field("object", default=None)
-    branch_name: Optional[str] = json_field("branch", default=None)
+    database: str = json_field("database", default=None)
+    object: str = json_field("object", default=None)
+    branch: Optional[str] = json_field("branch", default=None)
 
     @classmethod
-    def create(cls, database_name: str, object_name: str) -> "Identifier":
-        return cls(database_name, object_name)
+    def create(cls, database: str, object: str) -> "Identifier":
+        return cls(database, object)
 
     @classmethod
     def from_string(cls, full_name: str) -> "Identifier":
@@ -46,21 +46,21 @@ class Identifier:
             raise ValueError("Invalid identifier format: {}".format(full_name))
 
     def get_full_name(self) -> str:
-        if self.branch_name:
-            return "{}.{}.{}".format(self.database_name, self.object_name, self.branch_name)
-        return "{}.{}".format(self.database_name, self.object_name)
+        if self.branch:
+            return "{}.{}.{}".format(self.database, self.object, self.branch)
+        return "{}.{}".format(self.database, self.object)
 
     def get_database_name(self) -> str:
-        return self.database_name
+        return self.database
 
     def get_table_name(self) -> str:
-        return self.object_name
+        return self.object
 
     def get_object_name(self) -> str:
-        return self.object_name
+        return self.object
 
     def get_branch_name(self) -> Optional[str]:
-        return self.branch_name
+        return self.branch
 
     def is_system_table(self) -> bool:
-        return self.object_name.startswith('$')
+        return self.object.startswith('$')

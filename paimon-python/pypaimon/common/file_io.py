@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
 import logging
 import os
 import subprocess
@@ -26,8 +25,13 @@ from urllib.parse import splitport, urlparse
 import pyarrow
 from packaging.version import parse
 from pyarrow._fs import FileSystem
-
 from pypaimon.common.config import OssOptions, S3Options
+from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
+from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.row_kind import RowKind
+from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 class FileIO:
@@ -35,6 +39,7 @@ class FileIO:
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
         scheme, netloc, _ = self.parse_location(path)
+        self.uri_reader_factory = UriReaderFactory(catalog_options)
         if scheme in {"oss"}:
             self.filesystem = self._initialize_oss_fs(path)
         elif scheme in {"s3", "s3a", "s3n"}:
@@ -145,71 +150,81 @@ class FileIO:
 
         return LocalFileSystem()
 
-    def new_input_stream(self, path: Path):
-        return self.filesystem.open_input_file(str(path))
+    def new_input_stream(self, path: str):
+        path_str = self.to_filesystem_path(path)
+        return self.filesystem.open_input_file(path_str)
 
-    def new_output_stream(self, path: Path):
-        parent_dir = path.parent
-        if str(parent_dir) and not self.exists(parent_dir):
-            self.mkdirs(parent_dir)
+    def new_output_stream(self, path: str):
+        path_str = self.to_filesystem_path(path)
+        parent_dir = Path(path_str).parent
+        if str(parent_dir) and not self.exists(str(parent_dir)):
+            self.mkdirs(str(parent_dir))
 
-        return self.filesystem.open_output_stream(str(path))
+        return self.filesystem.open_output_stream(path_str)
 
-    def get_file_status(self, path: Path):
-        file_infos = self.filesystem.get_file_info([str(path)])
+    def get_file_status(self, path: str):
+        path_str = self.to_filesystem_path(path)
+        file_infos = self.filesystem.get_file_info([path_str])
         return file_infos[0]
 
-    def list_status(self, path: Path):
-        selector = pyarrow.fs.FileSelector(str(path), recursive=False, allow_not_found=True)
+    def list_status(self, path: str):
+        path_str = self.to_filesystem_path(path)
+        selector = pyarrow.fs.FileSelector(path_str, recursive=False, allow_not_found=True)
         return self.filesystem.get_file_info(selector)
 
-    def list_directories(self, path: Path):
+    def list_directories(self, path: str):
         file_infos = self.list_status(path)
         return [info for info in file_infos if info.type == pyarrow.fs.FileType.Directory]
 
-    def exists(self, path: Path) -> bool:
+    def exists(self, path: str) -> bool:
         try:
-            file_info = self.filesystem.get_file_info([str(path)])[0]
-            return file_info.type != pyarrow.fs.FileType.NotFound
+            path_str = self.to_filesystem_path(path)
+            file_info = self.filesystem.get_file_info([path_str])[0]
+            result = file_info.type != pyarrow.fs.FileType.NotFound
+            return result
         except Exception:
             return False
 
-    def delete(self, path: Path, recursive: bool = False) -> bool:
+    def delete(self, path: str, recursive: bool = False) -> bool:
         try:
-            file_info = self.filesystem.get_file_info([str(path)])[0]
+            path_str = self.to_filesystem_path(path)
+            file_info = self.filesystem.get_file_info([path_str])[0]
             if file_info.type == pyarrow.fs.FileType.Directory:
                 if recursive:
-                    self.filesystem.delete_dir_contents(str(path))
+                    self.filesystem.delete_dir_contents(path_str)
                 else:
-                    self.filesystem.delete_dir(str(path))
+                    self.filesystem.delete_dir(path_str)
             else:
-                self.filesystem.delete_file(str(path))
+                self.filesystem.delete_file(path_str)
             return True
         except Exception as e:
             self.logger.warning(f"Failed to delete {path}: {e}")
             return False
 
-    def mkdirs(self, path: Path) -> bool:
+    def mkdirs(self, path: str) -> bool:
         try:
-            self.filesystem.create_dir(str(path), recursive=True)
+            path_str = self.to_filesystem_path(path)
+            self.filesystem.create_dir(path_str, recursive=True)
             return True
         except Exception as e:
             self.logger.warning(f"Failed to create directory {path}: {e}")
             return False
 
-    def rename(self, src: Path, dst: Path) -> bool:
+    def rename(self, src: str, dst: str) -> bool:
         try:
-            dst_parent = dst.parent
-            if str(dst_parent) and not self.exists(dst_parent):
-                self.mkdirs(dst_parent)
+            dst_str = self.to_filesystem_path(dst)
+            dst_parent = Path(dst_str).parent
+            if str(dst_parent) and not self.exists(str(dst_parent)):
+                self.mkdirs(str(dst_parent))
 
-            self.filesystem.move(str(src), str(dst))
+            src_str = self.to_filesystem_path(src)
+            self.filesystem.move(src_str, dst_str)
             return True
         except Exception as e:
             self.logger.warning(f"Failed to rename {src} to {dst}: {e}")
             return False
 
-    def delete_quietly(self, path: Path):
+    def delete_quietly(self, path: str):
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug(f"Ready to delete {path}")
 
@@ -219,11 +234,11 @@ class FileIO:
         except Exception:
             self.logger.warning(f"Exception occurs when deleting file {path}", exc_info=True)
 
-    def delete_files_quietly(self, files: List[Path]):
+    def delete_files_quietly(self, files: List[str]):
         for file_path in files:
             self.delete_quietly(file_path)
 
-    def delete_directory_quietly(self, directory: Path):
+    def delete_directory_quietly(self, directory: str):
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug(f"Ready to delete {directory}")
 
@@ -233,29 +248,29 @@ class FileIO:
         except Exception:
             self.logger.warning(f"Exception occurs when deleting directory {directory}", exc_info=True)
 
-    def get_file_size(self, path: Path) -> int:
+    def get_file_size(self, path: str) -> int:
         file_info = self.get_file_status(path)
         if file_info.size is None:
             raise ValueError(f"File size not available for {path}")
         return file_info.size
 
-    def is_dir(self, path: Path) -> bool:
+    def is_dir(self, path: str) -> bool:
         file_info = self.get_file_status(path)
         return file_info.type == pyarrow.fs.FileType.Directory
 
-    def check_or_mkdirs(self, path: Path):
+    def check_or_mkdirs(self, path: str):
         if self.exists(path):
             if not self.is_dir(path):
                 raise ValueError(f"The path '{path}' should be a directory.")
         else:
             self.mkdirs(path)
 
-    def read_file_utf8(self, path: Path) -> str:
+    def read_file_utf8(self, path: str) -> str:
         with self.new_input_stream(path) as input_stream:
             return input_stream.read().decode('utf-8')
 
-    def try_to_write_atomic(self, path: Path, content: str) -> bool:
-        temp_path = path.with_suffix(path.suffix + ".tmp") if path.suffix else Path(str(path) + ".tmp")
+    def try_to_write_atomic(self, path: str, content: str) -> bool:
+        temp_path = path + ".tmp"
         success = False
         try:
             self.write_file(temp_path, content, False)
@@ -265,29 +280,32 @@ class FileIO:
                 self.delete_quietly(temp_path)
             return success
 
-    def write_file(self, path: Path, content: str, overwrite: bool = False):
+    def write_file(self, path: str, content: str, overwrite: bool = False):
         with self.new_output_stream(path) as output_stream:
             output_stream.write(content.encode('utf-8'))
 
-    def overwrite_file_utf8(self, path: Path, content: str):
+    def overwrite_file_utf8(self, path: str, content: str):
         with self.new_output_stream(path) as output_stream:
             output_stream.write(content.encode('utf-8'))
 
-    def copy_file(self, source_path: Path, target_path: Path, overwrite: bool = False):
+    def copy_file(self, source_path: str, target_path: str, overwrite: bool = False):
         if not overwrite and self.exists(target_path):
             raise FileExistsError(f"Target file {target_path} already exists and overwrite=False")
 
-        self.filesystem.copy_file(str(source_path), str(target_path))
+        source_str = self.to_filesystem_path(source_path)
+        target_str = self.to_filesystem_path(target_path)
+        self.filesystem.copy_file(source_str, target_str)
 
-    def copy_files(self, source_directory: Path, target_directory: Path, overwrite: bool = False):
+    def copy_files(self, source_directory: str, target_directory: str, overwrite: bool = False):
         file_infos = self.list_status(source_directory)
         for file_info in file_infos:
             if file_info.type == pyarrow.fs.FileType.File:
-                source_file = Path(file_info.path)
-                target_file = target_directory / source_file.name
+                source_file = file_info.path
+                file_name = source_file.split('/')[-1]
+                target_file = f"{target_directory.rstrip('/')}/{file_name}" if target_directory else file_name
                 self.copy_file(source_file, target_file, overwrite)
 
-    def read_overwritten_file_utf8(self, path: Path) -> Optional[str]:
+    def read_overwritten_file_utf8(self, path: str) -> Optional[str]:
         retry_number = 0
         exception = None
         while retry_number < 5:
@@ -314,7 +332,7 @@ class FileIO:
 
         return None
 
-    def write_parquet(self, path: Path, data: pyarrow.Table, compression: str = 'snappy', **kwargs):
+    def write_parquet(self, path: str, data: pyarrow.Table, compression: str = 'snappy', **kwargs):
         try:
             import pyarrow.parquet as pq
 
@@ -325,7 +343,7 @@ class FileIO:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Parquet file {path}: {e}") from e
 
-    def write_orc(self, path: Path, data: pyarrow.Table, compression: str = 'zstd', **kwargs):
+    def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd', **kwargs):
         try:
             """Write ORC file using PyArrow ORC writer."""
             import sys
@@ -347,7 +365,7 @@ class FileIO:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
 
-    def write_avro(self, path: Path, data: pyarrow.Table, avro_schema: Optional[Dict[str, Any]] = None, **kwargs):
+    def write_avro(self, path: str, data: pyarrow.Table, avro_schema: Optional[Dict[str, Any]] = None, **kwargs):
         import fastavro
         if avro_schema is None:
             from pypaimon.schema.data_types import PyarrowFieldParser
@@ -364,3 +382,95 @@ class FileIO:
 
         with self.new_output_stream(path) as output_stream:
             fastavro.writer(output_stream, avro_schema, records, **kwargs)
+
+    def write_blob(self, path: str, data: pyarrow.Table, blob_as_descriptor: bool, **kwargs):
+        try:
+            # Validate input constraints
+            if data.num_columns != 1:
+                raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
+            # Check for null values
+            column = data.column(0)
+            if column.null_count > 0:
+                raise RuntimeError("Blob format does not support null values")
+            # Convert PyArrow schema to Paimon DataFields
+            # For blob files, we expect exactly one blob column
+            field = data.schema[0]
+            if pyarrow.types.is_large_binary(field.type):
+                fields = [DataField(0, field.name, AtomicType("BLOB"))]
+            else:
+                # Convert other types as needed
+                paimon_type = PyarrowFieldParser.to_paimon_type(field.type, field.nullable)
+                fields = [DataField(0, field.name, paimon_type)]
+            # Convert PyArrow Table to records
+            records_dict = data.to_pydict()
+            num_rows = data.num_rows
+            field_name = fields[0].name
+            with self.new_output_stream(path) as output_stream:
+                writer = BlobFormatWriter(output_stream)
+                # Write each row
+                for i in range(num_rows):
+                    col_data = records_dict[field_name][i]
+                    # Convert to appropriate type based on field type
+                    if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
+                        if blob_as_descriptor:
+                            blob_descriptor = BlobDescriptor.deserialize(col_data)
+                            uri_reader = self.uri_reader_factory.create(blob_descriptor.uri)
+                            blob_data = Blob.from_descriptor(uri_reader, blob_descriptor)
+                        elif isinstance(col_data, bytes):
+                            blob_data = BlobData(col_data)
+                        else:
+                            # Convert to bytes if needed
+                            if hasattr(col_data, 'as_py'):
+                                col_data = col_data.as_py()
+                            if isinstance(col_data, str):
+                                col_data = col_data.encode('utf-8')
+                            blob_data = BlobData(col_data)
+                        row_values = [blob_data]
+                    else:
+                        row_values = [col_data]
+                    # Create GenericRow and write
+                    row = GenericRow(row_values, fields, RowKind.INSERT)
+                    writer.add_element(row)
+                writer.close()
+
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
+
+    def to_filesystem_path(self, path: str) -> str:
+        from pyarrow.fs import S3FileSystem
+        import re
+
+        parsed = urlparse(path)
+        normalized_path = re.sub(r'/+', '/', parsed.path) if parsed.path else ''
+
+        if parsed.scheme and len(parsed.scheme) == 1 and not parsed.netloc:
+            # This is likely a Windows drive letter, not a URI scheme
+            return str(path)
+
+        if parsed.scheme == 'file' and parsed.netloc and parsed.netloc.endswith(':'):
+            # file://C:/path format - netloc is 'C:', need to reconstruct path with drive letter
+            drive_letter = parsed.netloc.rstrip(':')
+            path_part = normalized_path.lstrip('/')
+            return f"{drive_letter}:/{path_part}" if path_part else f"{drive_letter}:"
+
+        if isinstance(self.filesystem, S3FileSystem):
+            # For S3, return "bucket/path" format
+            if parsed.scheme:
+                if parsed.netloc:
+                    # Has netloc (bucket): return "bucket/path" format
+                    path_part = normalized_path.lstrip('/')
+                    return f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc
+                else:
+                    # Has scheme but no netloc: return path without scheme
+                    result = normalized_path.lstrip('/')
+                    return result if result else '.'
+            return str(path)
+
+        if parsed.scheme:
+            # Handle empty path: return '.' for current directory
+            if not normalized_path:
+                return '.'
+            return normalized_path
+
+        return str(path)

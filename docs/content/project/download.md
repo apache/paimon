@@ -40,7 +40,6 @@ This documentation is a guide for downloading Paimon Jars.
 | Flink 1.18       | [paimon-flink-1.18-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.18/{{< version >}}/)                                 |
 | Flink 1.17       | [paimon-flink-1.17-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.17/{{< version >}}/)                                 |
 | Flink 1.16       | [paimon-flink-1.16-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.16/{{< version >}}/)                                 |
-| Flink 1.15       | [paimon-flink-1.15-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.15/{{< version >}}/)                                 |
 | Flink Action     | [paimon-flink-action-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-action/{{< version >}}/)                             |
 | Spark 4.0        | [paimon-spark-4.0_2.13-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-4.0_2.13/{{< version >}}/)                         |
 | Spark 3.5        | [paimon-spark-3.5_2.12-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.5_2.12/{{< version >}}/)                         |
@@ -66,7 +65,6 @@ This documentation is a guide for downloading Paimon Jars.
 | Flink 1.18       | [paimon-flink-1.18-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.18/{{< version >}}/paimon-flink-1.18-{{< version >}}.jar)                                                 |
 | Flink 1.17       | [paimon-flink-1.17-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.17/{{< version >}}/paimon-flink-1.17-{{< version >}}.jar)                                                 |
 | Flink 1.16       | [paimon-flink-1.16-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.16/{{< version >}}/paimon-flink-1.16-{{< version >}}.jar)                                                 |
-| Flink 1.15       | [paimon-flink-1.15-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.15/{{< version >}}/paimon-flink-1.15-{{< version >}}.jar)                                                 |
 | Flink Action     | [paimon-flink-action-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-action/{{< version >}}/paimon-flink-action-{{< version >}}.jar)                                           |
 | Spark 4.0        | [paimon-spark-4.0_2.13-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-4.0_2.13/{{< version >}}/paimon-spark-4.0_2.13-{{< version >}}.jar)                                     |
 | Spark 3.5        | [paimon-spark-3.5_2.12-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.5_2.12/{{< version >}}/paimon-spark-3.5_2.12-{{< version >}}.jar)                                     |

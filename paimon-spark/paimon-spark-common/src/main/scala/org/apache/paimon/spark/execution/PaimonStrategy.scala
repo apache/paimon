@@ -18,18 +18,18 @@
 
 package org.apache.paimon.spark.execution
 
-import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkUtils}
-import org.apache.paimon.spark.catalog.SupportView
+import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
+import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
 import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand}
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.analysis.ResolvedNamespace
+import org.apache.spark.sql.catalyst.analysis.{ResolvedNamespace, ResolvedTable}
 import org.apache.spark.sql.catalyst.expressions.{Expression, GenericInternalRow, PredicateHelper}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, ShowCreateTable}
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
-import org.apache.spark.sql.execution.{SparkPlan, SparkStrategy}
+import org.apache.spark.sql.execution.{PaimonDescribeTableExec, SparkPlan, SparkStrategy}
 import org.apache.spark.sql.execution.shim.PaimonCreateTableAsSelectStrategy
 
 import scala.collection.JavaConverters._
@@ -78,7 +78,8 @@ case class PaimonStrategy(spark: SparkSession)
           comment,
           properties,
           allowExisting,
-          replace) =>
+          replace
+        ) =>
       CreatePaimonViewExec(
         viewCatalog,
         ident,
@@ -106,6 +107,19 @@ case class PaimonStrategy(spark: SparkSession)
 
     case DescribeRelation(ResolvedPaimonView(viewCatalog, ident), _, isExtended, output) =>
       DescribePaimonViewExec(output, viewCatalog, ident, isExtended) :: Nil
+
+    case DescribeRelation(r: ResolvedTable, partitionSpec, isExtended, output) =>
+      (r.table, r.catalog) match {
+        case (sparkTable: SparkTable, sparkCatalog: SparkBaseCatalog) =>
+          PaimonDescribeTableExec(
+            output,
+            sparkCatalog,
+            r.identifier,
+            sparkTable,
+            partitionSpec,
+            isExtended) :: Nil
+        case _ => Nil
+      }
 
     case _ => Nil
   }

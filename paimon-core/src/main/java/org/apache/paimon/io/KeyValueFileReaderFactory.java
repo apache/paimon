@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormatDiscover;
@@ -93,6 +94,14 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.partition = partition;
         this.formatReaderMappings = new HashMap<>();
         this.dvFactory = dvFactory;
+    }
+
+    public TableSchema schema() {
+        return schema;
+    }
+
+    public DataFilePathFactory pathFactory() {
+        return pathFactory;
     }
 
     @Override
@@ -245,7 +254,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
         public KeyValueFileReaderFactory build(
                 BinaryRow partition, int bucket, DeletionVector.Factory dvFactory) {
-            return build(partition, bucket, dvFactory, true, Collections.emptyList());
+            return build(partition, bucket, dvFactory, true, Collections.emptyList(), null);
         }
 
         public KeyValueFileReaderFactory build(
@@ -253,7 +262,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 int bucket,
                 DeletionVector.Factory dvFactory,
                 boolean projectKeys,
-                @Nullable List<Predicate> filters) {
+                @Nullable List<Predicate> filters,
+                @Nullable VariantAccessInfo[] variantAccess) {
             RowType finalReadKeyType = projectKeys ? this.readKeyType : keyType;
             Function<TableSchema, List<DataField>> fieldsExtractor =
                     schema -> {
@@ -272,7 +282,13 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     finalReadKeyType,
                     readValueType,
                     new FormatReaderMapping.Builder(
-                            formatDiscover, readTableFields, fieldsExtractor, filters, null, null),
+                            formatDiscover,
+                            readTableFields,
+                            fieldsExtractor,
+                            filters,
+                            null,
+                            null,
+                            variantAccess),
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     options.fileReaderAsyncThreshold().getBytes(),
                     partition,

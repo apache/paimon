@@ -34,6 +34,14 @@ public interface FormatReaderFactory {
 
     FileRecordReader<InternalRow> createReader(Context context) throws IOException;
 
+    default FileRecordReader<InternalRow> createReader(Context context, long offset, long length)
+            throws IOException {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Format %s does not support create reader with offset and length.",
+                        getClass().getName()));
+    }
+
     /** Context for creating reader. */
     interface Context {
 

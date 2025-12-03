@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.{stats, CoreOptions}
+import org.apache.paimon.{stats, CoreOptions, Snapshot}
 import org.apache.paimon.annotation.VisibleForTesting
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.metric.SparkMetricRegistry
@@ -27,9 +27,8 @@ import org.apache.paimon.spark.statistics.StatisticsHelper
 import org.apache.paimon.table.{DataTable, InnerTable}
 import org.apache.paimon.table.source.{InnerTableScan, Split}
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil
-import org.apache.paimon.table.system.FilesTable
-import org.apache.paimon.utils.{SnapshotManager, TagManager}
 
+import PaimonImplicits._
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
@@ -111,9 +110,9 @@ abstract class PaimonBaseScan(
   override def supportedCustomMetrics: Array[CustomMetric] = {
     Array(
       PaimonNumSplitMetric(),
-      PaimonSplitSizeMetric(),
-      PaimonAvgSplitSizeMetric(),
+      PaimonPartitionSizeMetric(),
       PaimonPlanningDurationMetric(),
+      PaimonScannedSnapshotIdMetric(),
       PaimonScannedManifestsMetric(),
       PaimonSkippedTableFilesMetric(),
       PaimonResultedTableFilesMetric()
@@ -130,48 +129,21 @@ abstract class PaimonBaseScan(
     } else {
       ""
     }
+
+    val reservedFiltersStr = if (reservedFilters.nonEmpty) {
+      ", ReservedFilters: [" + reservedFilters.mkString(",") + "]"
+    } else {
+      ""
+    }
+
     val pushedTopNFilterStr = if (pushDownTopN.nonEmpty) {
       s", PushedTopNFilter: [${pushDownTopN.get.toString}]"
     } else {
       ""
     }
 
-    val latestSnapshotId = if (table.latestSnapshot().isPresent) {
-      Some(table.latestSnapshot().get.id)
-    } else {
-      None
-    }
-
-    val latestSnapshotIdStr = if (latestSnapshotId.isDefined) {
-      s", LatestSnapshotId: [${latestSnapshotId.get}]"
-    } else {
-      ""
-    }
-
-    val currentSnapshot =
-      try {
-        table match {
-          case dataTable: DataTable =>
-            TimeTravelUtil.tryTravelToSnapshot(
-              coreOptions.toConfiguration,
-              dataTable.snapshotManager(),
-              dataTable.tagManager())
-          case _ =>
-            Optional.empty()
-        }
-      } catch {
-        case _: Exception => Optional.empty()
-      }
-
-    val currentSnapshotIdStr = if (currentSnapshot.isPresent) {
-      s", currentSnapshotId: [${currentSnapshot.get().id}]"
-    } else if (latestSnapshotId.isDefined) {
-      s", currentSnapshotId: [${latestSnapshotId.get}]"
-    } else {
-      ""
-    }
-
-    s"PaimonScan: [${table.name}]" + latestSnapshotIdStr + currentSnapshotIdStr + pushedFiltersStr + pushedTopNFilterStr +
+    s"PaimonScan: [${table.name}]" +
+      pushedFiltersStr + reservedFiltersStr + pushedTopNFilterStr +
       pushDownLimit.map(limit => s", Limit: [$limit]").getOrElse("")
   }
 }

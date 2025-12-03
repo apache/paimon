@@ -69,6 +69,7 @@ public class OrcFileFormat extends FileFormat {
     private final org.apache.hadoop.conf.Configuration writerConf;
     private final int readBatchSize;
     private final int writeBatchSize;
+    private final MemorySize writeBatchMemory;
     private final boolean deletionVectorsEnabled;
     private final boolean legacyTimestampLtzType;
 
@@ -81,6 +82,7 @@ public class OrcFileFormat extends FileFormat {
         this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
         this.readBatchSize = formatContext.readBatchSize();
         this.writeBatchSize = formatContext.writeBatchSize();
+        this.writeBatchMemory = formatContext.writeBatchMemory();
         this.deletionVectorsEnabled = formatContext.options().get(DELETION_VECTORS_ENABLED);
         this.legacyTimestampLtzType = formatContext.options().get(ORC_TIMESTAMP_LTZ_LEGACY_TYPE);
     }
@@ -149,7 +151,8 @@ public class OrcFileFormat extends FileFormat {
                 new RowDataVectorizer(
                         typeDescription, refinedType.getFields(), legacyTimestampLtzType);
 
-        return new OrcWriterFactory(vectorizer, orcProperties, writerConf, writeBatchSize);
+        return new OrcWriterFactory(
+                vectorizer, orcProperties, writerConf, writeBatchSize, writeBatchMemory);
     }
 
     private Properties getOrcProperties(Options options, FormatContext formatContext) {

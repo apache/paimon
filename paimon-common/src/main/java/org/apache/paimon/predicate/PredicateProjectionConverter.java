@@ -24,7 +24,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** A {@link PredicateVisitor} which converts {@link Predicate} with projection. */
+/**
+ * A {@link PredicateVisitor} which converts {@link Predicate} with projection.
+ *
+ * <p>TODO: merge PredicateBuilder.transformFieldMapping.
+ */
 public class PredicateProjectionConverter implements PredicateVisitor<Optional<Predicate>> {
 
     private final Map<Integer, Integer> reversed;
@@ -62,5 +66,25 @@ public class PredicateProjectionConverter implements PredicateVisitor<Optional<P
             }
         }
         return Optional.of(new CompoundPredicate(predicate.function(), converted));
+    }
+
+    @Override
+    public Optional<Predicate> visit(TransformPredicate predicate) {
+        List<Object> inputs = predicate.transform.inputs();
+        List<Object> newInputs = new ArrayList<>(inputs.size());
+        for (Object input : inputs) {
+            if (input instanceof FieldRef) {
+                FieldRef fieldRef = (FieldRef) input;
+                Integer mappedIndex = reversed.get(fieldRef.index());
+                if (mappedIndex != null) {
+                    newInputs.add(new FieldRef(mappedIndex, fieldRef.name(), fieldRef.type()));
+                } else {
+                    return Optional.empty();
+                }
+            } else {
+                newInputs.add(input);
+            }
+        }
+        return Optional.of(predicate.copyWithNewInputs(newInputs));
     }
 }

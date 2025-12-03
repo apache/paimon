@@ -119,7 +119,22 @@ public class CsvFileFormat extends FileFormat {
                     context.filePath(),
                     dataSchemaRowType,
                     projectedRowType,
-                    options);
+                    options,
+                    0,
+                    null);
+        }
+
+        @Override
+        public FileRecordReader<InternalRow> createReader(Context context, long offset, long length)
+                throws IOException {
+            return new CsvFileReader(
+                    context.fileIO(),
+                    context.filePath(),
+                    dataSchemaRowType,
+                    projectedRowType,
+                    options,
+                    offset,
+                    length);
         }
     }
 

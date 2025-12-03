@@ -18,6 +18,10 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.data.variant.VariantPathSegment.ArrayExtraction;
+import org.apache.paimon.data.variant.VariantPathSegment.ObjectExtraction;
+import org.apache.paimon.types.DataType;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonFactory;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
@@ -134,13 +138,9 @@ public final class GenericVariant implements Variant, Serializable {
         }
     }
 
-    @Override
-    public String toJson() {
-        return toJson(ZoneOffset.UTC);
-    }
-
     // Stringify the variant in JSON format.
     // Throw `MALFORMED_VARIANT` if the variant is malformed.
+    @Override
     public String toJson(ZoneId zoneId) {
         StringBuilder sb = new StringBuilder();
         toJsonImpl(value, metadata, pos, sb, zoneId);
@@ -152,39 +152,19 @@ public final class GenericVariant implements Variant, Serializable {
         return toJson();
     }
 
-    public Object variantGet(String path) {
+    public Object variantGet(String path, DataType dataType, VariantCastArgs castArgs) {
         GenericVariant v = this;
-        PathSegment[] parsedPath = PathSegment.parse(path);
-        for (PathSegment pathSegment : parsedPath) {
-            if (pathSegment.isKey() && v.getType() == Type.OBJECT) {
-                v = v.getFieldByKey(pathSegment.getKey());
-            } else if (pathSegment.isIndex() && v.getType() == Type.ARRAY) {
-                v = v.getElementAtIndex(pathSegment.getIndex());
+        VariantPathSegment[] parsedPath = VariantPathSegment.parse(path);
+        for (VariantPathSegment pathSegment : parsedPath) {
+            if (pathSegment instanceof ObjectExtraction && v.getType() == Type.OBJECT) {
+                v = v.getFieldByKey(((ObjectExtraction) pathSegment).getKey());
+            } else if (pathSegment instanceof ArrayExtraction && v.getType() == Type.ARRAY) {
+                v = v.getElementAtIndex(((ArrayExtraction) pathSegment).getIndex());
             } else {
                 return null;
             }
         }
-
-        switch (v.getType()) {
-            case OBJECT:
-            case ARRAY:
-                return v.toJson();
-            case STRING:
-                return v.getString();
-            case LONG:
-                return v.getLong();
-            case DOUBLE:
-                return v.getDouble();
-            case DECIMAL:
-                return v.getDecimal();
-            case BOOLEAN:
-                return v.getBoolean();
-            case NULL:
-                return null;
-            default:
-                // todo: support other types
-                throw new IllegalArgumentException("Unsupported type: " + v.getType());
-        }
+        return VariantGet.cast(v, dataType, castArgs);
     }
 
     @Override

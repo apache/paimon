@@ -20,7 +20,6 @@ package org.apache.paimon.flink.source;
 
 import org.apache.flink.connector.file.src.util.CheckpointedPosition;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
-import org.apache.flink.table.data.RowData;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -40,7 +39,7 @@ public final class FileStoreSourceSplitState {
         this.recordsToSkip = split.recordsToSkip();
     }
 
-    public void setPosition(RecordAndPosition<RowData> position) {
+    public void setPosition(RecordAndPosition<?> position) {
         checkArgument(position.getOffset() == CheckpointedPosition.NO_OFFSET);
         this.recordsToSkip = position.getRecordSkipCount();
     }
@@ -51,5 +50,15 @@ public final class FileStoreSourceSplitState {
 
     public FileStoreSourceSplit toSourceSplit() {
         return split.updateWithRecordsToSkip(recordsToSkip);
+    }
+
+    @Override
+    public String toString() {
+        return "FileStoreSourceSplitState{"
+                + "split="
+                + split
+                + ", recordsToSkip="
+                + recordsToSkip
+                + '}';
     }
 }

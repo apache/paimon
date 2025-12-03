@@ -63,17 +63,17 @@ class KeyValueDataWriter(DataWriter):
         num_rows = data.num_rows
         enhanced_table = data
 
-        for pk_key in reversed(self.trimmed_primary_key):
+        for pk_key in reversed(self.trimmed_primary_keys):
             if pk_key in data.column_names:
                 key_column = data.column(pk_key)
                 enhanced_table = enhanced_table.add_column(0, f'_KEY_{pk_key}', key_column)
 
         sequence_column = pa.array([self.sequence_generator.next() for _ in range(num_rows)], type=pa.int64())
-        enhanced_table = enhanced_table.add_column(len(self.trimmed_primary_key), '_SEQUENCE_NUMBER', sequence_column)
+        enhanced_table = enhanced_table.add_column(len(self.trimmed_primary_keys), '_SEQUENCE_NUMBER', sequence_column)
 
         # Extract or generate RowKind column
         value_kind_column = self._extract_row_kind_column(data, num_rows)
-        enhanced_table = enhanced_table.add_column(len(self.trimmed_primary_key) + 1, '_VALUE_KIND',
+        enhanced_table = enhanced_table.add_column(len(self.trimmed_primary_keys) + 1, '_VALUE_KIND',
                                                    value_kind_column)
 
         # Remove temporary '__row_kind__' column if it exists
@@ -143,7 +143,7 @@ class KeyValueDataWriter(DataWriter):
             return data
 
         # Build primary key column names (prefixed with _KEY_)
-        pk_columns = [f'_KEY_{pk}' for pk in self.trimmed_primary_key]
+        pk_columns = [f'_KEY_{pk}' for pk in self.trimmed_primary_keys]
 
         # First pass: find the last index for each primary key
         last_index_for_key = {}
@@ -176,7 +176,7 @@ class KeyValueDataWriter(DataWriter):
         Returns:
             Sorted record batch
         """
-        sort_keys = [(key, 'ascending') for key in self.trimmed_primary_key]
+        sort_keys = [(key, 'ascending') for key in self.trimmed_primary_keys]
         if '_SEQUENCE_NUMBER' in data.column_names:
             sort_keys.append(('_SEQUENCE_NUMBER', 'ascending'))
 

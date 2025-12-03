@@ -25,6 +25,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.orc.writer.OrcBulkWriter;
 import org.apache.paimon.format.orc.writer.Vectorizer;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.options.MemorySize;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -57,6 +58,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
 
     private OrcFile.WriterOptions writerOptions;
     private final int writeBatchSize;
+    private final MemorySize writeBatchMemory;
 
     /**
      * Creates a new OrcBulkWriterFactory using the provided Vectorizer implementation.
@@ -66,7 +68,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
      */
     @VisibleForTesting
     OrcWriterFactory(Vectorizer<InternalRow> vectorizer) {
-        this(vectorizer, new Properties(), new Configuration(false), 1024);
+        this(vectorizer, new Properties(), new Configuration(false), 1024, MemorySize.ZERO);
     }
 
     /**
@@ -81,7 +83,8 @@ public class OrcWriterFactory implements FormatWriterFactory {
             Vectorizer<InternalRow> vectorizer,
             Properties writerProperties,
             Configuration configuration,
-            int writeBatchSize) {
+            int writeBatchSize,
+            MemorySize writeBatchMemory) {
         this.vectorizer = checkNotNull(vectorizer);
         this.writerProperties = checkNotNull(writerProperties);
         this.confMap = new HashMap<>();
@@ -91,6 +94,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
             confMap.put(entry.getKey(), entry.getValue());
         }
         this.writeBatchSize = writeBatchSize;
+        this.writeBatchMemory = writeBatchMemory;
     }
 
     @Override
@@ -117,7 +121,11 @@ public class OrcWriterFactory implements FormatWriterFactory {
         // the key of writer in the ORC memory manager, thus we need to make it unique.
         Path unusedPath = new Path(UUID.randomUUID().toString());
         return new OrcBulkWriter(
-                vectorizer, new WriterImpl(null, unusedPath, opts), out, writeBatchSize);
+                vectorizer,
+                new WriterImpl(null, unusedPath, opts),
+                out,
+                writeBatchSize,
+                writeBatchMemory);
     }
 
     @VisibleForTesting

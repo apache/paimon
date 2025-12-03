@@ -19,13 +19,14 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSplitScan}
-import org.apache.paimon.spark.PaimonMetrics.{RESULTED_TABLE_FILES, SKIPPED_TABLE_FILES}
+import org.apache.paimon.spark.PaimonMetrics.{RESULTED_TABLE_FILES, SCANNED_SNAPSHOT_ID, SKIPPED_TABLE_FILES}
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
+import org.apache.spark.sql.execution.CommandResultExec
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.junit.jupiter.api.Assertions
 
@@ -44,24 +45,29 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
       sql(s"INSERT INTO T VALUES (3, 'c', 'p2'), (4, 'c', 'p3')")
       sql(s"INSERT INTO T VALUES (5, 'd', 'p2')")
 
-      def checkMetrics(s: String, skippedTableFiles: Long, resultedTableFiles: Long): Unit = {
+      def checkMetrics(
+          s: String,
+          scannedSnapshotId: Long,
+          skippedTableFiles: Long,
+          resultedTableFiles: Long): Unit = {
         val scan = getPaimonScan(s)
         // call getInputPartitions to trigger scan
         scan.lazyInputPartitions
         val metrics = scan.reportDriverMetrics()
+        Assertions.assertEquals(scannedSnapshotId, metric(metrics, SCANNED_SNAPSHOT_ID))
         Assertions.assertEquals(skippedTableFiles, metric(metrics, SKIPPED_TABLE_FILES))
         Assertions.assertEquals(resultedTableFiles, metric(metrics, RESULTED_TABLE_FILES))
       }
 
-      checkMetrics(s"SELECT * FROM T", 0, 5)
-      checkMetrics(s"SELECT * FROM T WHERE pt = 'p2'", 2, 3)
+      checkMetrics(s"SELECT * FROM T", 3, 0, 5)
+      checkMetrics(s"SELECT * FROM T WHERE pt = 'p2'", 3, 2, 3)
 
       sql(s"DELETE FROM T WHERE pt = 'p1'")
-      checkMetrics(s"SELECT * FROM T", 0, 4)
+      checkMetrics(s"SELECT * FROM T", 4, 0, 4)
 
       sql("CALL sys.compact(table => 'T', partitions => 'pt=\"p2\"')")
-      checkMetrics(s"SELECT * FROM T", 0, 2)
-      checkMetrics(s"SELECT * FROM T WHERE pt = 'p2'", 1, 1)
+      checkMetrics(s"SELECT * FROM T", 5, 0, 2)
+      checkMetrics(s"SELECT * FROM T WHERE pt = 'p2'", 5, 1, 1)
     }
   }
 
@@ -108,6 +114,24 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
 
     Assertions.assertEquals(3, recordsWritten)
     Assertions.assertTrue(bytesWritten > 0)
+  }
+
+  test(s"Paimon Metric: v2 write metric") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+      sql("CREATE TABLE T (id INT, name STRING, pt STRING) PARTITIONED BY (pt)")
+      val df = sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p2')")
+      val metrics =
+        df.queryExecution.executedPlan.asInstanceOf[CommandResultExec].commandPhysicalPlan.metrics
+      val statusStore = spark.sharedState.statusStore
+      val lastExecId = statusStore.executionsList().last.executionId
+      val executionMetrics = statusStore.executionMetrics(lastExecId)
+
+      assert(executionMetrics(metrics("appendedTableFiles").id) == "2")
+      assert(executionMetrics(metrics("appendedRecords").id) == "2")
+      assert(executionMetrics(metrics("appendedChangelogFiles").id) == "0")
+      assert(executionMetrics(metrics("partitionsWritten").id) == "2")
+      assert(executionMetrics(metrics("bucketsWritten").id) == "2")
+    }
   }
 
   def metric(metrics: Array[CustomTaskMetric], name: String): Long = {

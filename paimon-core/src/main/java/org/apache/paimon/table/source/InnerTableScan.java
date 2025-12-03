@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -57,6 +58,10 @@ public interface InnerTableScan extends TableScan {
     }
 
     default InnerTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
+        return this;
+    }
+
+    default InnerTableScan withRowRanges(List<Range> rowRanges) {
         return this;
     }
 

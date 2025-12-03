@@ -19,6 +19,8 @@
 import collections
 from typing import Callable, List, Optional
 
+import pyarrow as pa
+import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
@@ -74,5 +76,76 @@ class ShardBatchReader(ConcatBatchReader):
                                    min(self.split_end_row, self.cur_end) - self.split_start_row)
             elif cur_begin < self.split_end_row <= self.cur_end:
                 return batch.slice(0, self.split_end_row - cur_begin)
+            else:
+                # return empty RecordBatch if the batch size has not reached split_start_row
+                return pa.RecordBatch.from_arrays([], [])
         else:
             return batch
+
+
+class MergeAllBatchReader(RecordBatchReader):
+    """
+    A reader that accepts multiple reader suppliers and concatenates all their arrow batches
+    into one big batch. This is useful when you want to merge all data from multiple sources
+    into a single batch for processing.
+    """
+
+    def __init__(self, reader_suppliers: List[Callable], batch_size: int = 4096):
+        self.reader_suppliers = reader_suppliers
+        self.merged_batch: Optional[RecordBatch] = None
+        self.reader = None
+        self._batch_size = batch_size
+
+    def read_arrow_batch(self) -> Optional[RecordBatch]:
+        if self.reader:
+            return self.reader.read_next_batch()
+
+        all_batches = []
+
+        # Read all batches from all reader suppliers
+        for supplier in self.reader_suppliers:
+            reader = supplier()
+            try:
+                while True:
+                    batch = reader.read_arrow_batch()
+                    if batch is None:
+                        break
+                    all_batches.append(batch)
+            finally:
+                reader.close()
+
+        # Concatenate all batches into one big batch
+        if all_batches:
+            # For PyArrow < 17.0.0, use Table.concat_tables approach
+            # Convert batches to tables and concatenate
+            tables = [pa.Table.from_batches([batch]) for batch in all_batches]
+            if len(tables) == 1:
+                # Single table, just get the first batch
+                self.merged_batch = tables[0].to_batches()[0]
+            else:
+                # Multiple tables, concatenate them
+                concatenated_table = pa.concat_tables(tables)
+                # Convert back to a single batch by taking all batches and combining
+                all_concatenated_batches = concatenated_table.to_batches()
+                if len(all_concatenated_batches) == 1:
+                    self.merged_batch = all_concatenated_batches[0]
+                else:
+                    # If still multiple batches, we need to manually combine them
+                    # This shouldn't happen with concat_tables, but just in case
+                    combined_arrays = []
+                    for i in range(len(all_concatenated_batches[0].columns)):
+                        column_arrays = [batch.column(i) for batch in all_concatenated_batches]
+                        combined_arrays.append(pa.concat_arrays(column_arrays))
+                    self.merged_batch = pa.RecordBatch.from_arrays(
+                        combined_arrays,
+                        names=all_concatenated_batches[0].schema.names
+                    )
+        else:
+            self.merged_batch = None
+        dataset = ds.InMemoryDataset(self.merged_batch)
+        self.reader = dataset.scanner(batch_size=self._batch_size).to_reader()
+        return self.reader.read_next_batch()
+
+    def close(self) -> None:
+        self.merged_batch = None
+        self.reader = None

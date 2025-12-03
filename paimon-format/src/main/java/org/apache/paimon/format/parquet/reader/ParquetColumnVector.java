@@ -19,10 +19,12 @@
 package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.columnar.heap.AbstractArrayBasedVector;
+import org.apache.paimon.data.columnar.heap.CastedRowColumnVector;
 import org.apache.paimon.data.columnar.heap.HeapIntVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
+import org.apache.paimon.data.variant.PaimonShreddingUtils.FieldToExtract;
 import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetGroupField;
@@ -34,6 +36,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.createReadableColumnVector;
+
 /** Parquet Column tree. */
 public class ParquetColumnVector {
     private final ParquetField column;
@@ -42,8 +46,11 @@ public class ParquetColumnVector {
 
     // Describes the file schema of the Parquet variant column. When it is not null, `children`
     // contains only one child that reads the underlying file content. This `ParquetColumnVector`
-    // should assemble Spark variant values from the file content.
+    // should assemble variant values from the file content.
     private VariantSchema variantSchema;
+    // Only meaningful if `variantSchema` is not null. See `PaimonShreddingUtils.getFieldsToExtract`
+    // for its meaning.
+    private FieldToExtract[] fieldsToExtract;
 
     /**
      * Repetition & Definition levels These are allocated only for leaf columns; for non-leaf
@@ -86,6 +93,8 @@ public class ParquetColumnVector {
             children.add(contentVector);
             variantSchema =
                     PaimonShreddingUtils.buildVariantSchema((RowType) fileContentCol.getType());
+            fieldsToExtract =
+                    PaimonShreddingUtils.getFieldsToExtract(column.variantFields(), variantSchema);
             repetitionLevels = contentVector.repetitionLevels;
             definitionLevels = contentVector.definitionLevels;
         } else if (isPrimitive) {
@@ -159,9 +168,19 @@ public class ParquetColumnVector {
      */
     void assemble() {
         if (variantSchema != null) {
+            assert column.variantFileType().isPresent();
             children.get(0).assemble();
-            WritableColumnVector fileContent = children.get(0).getValueVector();
-            PaimonShreddingUtils.assembleVariantBatch(fileContent, vector, variantSchema);
+            CastedRowColumnVector fileContent =
+                    (CastedRowColumnVector)
+                            createReadableColumnVector(
+                                    column.variantFileType().get().getType(),
+                                    children.get(0).getValueVector());
+            if (fieldsToExtract == null) {
+                PaimonShreddingUtils.assembleVariantBatch(fileContent, vector, variantSchema);
+            } else {
+                PaimonShreddingUtils.assembleVariantStructBatch(
+                        fileContent, vector, variantSchema, fieldsToExtract, column.getType());
+            }
             return;
         }
 

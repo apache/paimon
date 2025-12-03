@@ -24,9 +24,8 @@ import org.apache.paimon.data.Segments;
 import org.apache.paimon.data.SimpleCollectingOutputView;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataPagedOutputSerializer;
 import org.apache.paimon.manifest.ManifestEntrySegments.RichSegments;
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.memory.MemorySegmentSource;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
 import org.apache.paimon.types.RowType;
@@ -77,18 +76,15 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
 
     @Override
     protected ManifestEntrySegments createSegments(Path path, @Nullable Long fileSize) {
-        Map<Triple<BinaryRow, Integer, Integer>, SimpleCollectingOutputView> segments =
+        Map<Triple<BinaryRow, Integer, Integer>, DataPagedOutputSerializer> segments =
                 new HashMap<>();
         Function<InternalRow, BinaryRow> partitionGetter = partitionGetter();
         Function<InternalRow, Integer> bucketGetter = bucketGetter();
         Function<InternalRow, Integer> totalBucketGetter = totalBucketGetter();
-        MemorySegmentSource segmentSource =
-                () -> MemorySegment.allocateHeapMemory(cache.pageSize());
-        Supplier<SimpleCollectingOutputView> outViewSupplier =
-                () ->
-                        new SimpleCollectingOutputView(
-                                new ArrayList<>(), segmentSource, cache.pageSize());
+        int pageSize = cache.pageSize();
         InternalRowSerializer formatSerializer = this.formatSerializer.get();
+        Supplier<DataPagedOutputSerializer> outputSupplier =
+                () -> new DataPagedOutputSerializer(formatSerializer, 2048, pageSize);
         try (CloseableIterator<InternalRow> iterator = reader.apply(path, fileSize)) {
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
@@ -96,15 +92,15 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
                 int bucket = bucketGetter.apply(row);
                 int totalBucket = totalBucketGetter.apply(row);
                 Triple<BinaryRow, Integer, Integer> key = Triple.of(partition, bucket, totalBucket);
-                SimpleCollectingOutputView view =
-                        segments.computeIfAbsent(key, k -> outViewSupplier.get());
-                formatSerializer.serializeToPages(row, view);
+                DataPagedOutputSerializer output =
+                        segments.computeIfAbsent(key, k -> outputSupplier.get());
+                output.write(row);
             }
             List<RichSegments> result = new ArrayList<>();
-            for (Map.Entry<Triple<BinaryRow, Integer, Integer>, SimpleCollectingOutputView> entry :
+            for (Map.Entry<Triple<BinaryRow, Integer, Integer>, DataPagedOutputSerializer> entry :
                     segments.entrySet()) {
                 Triple<BinaryRow, Integer, Integer> key = entry.getKey();
-                SimpleCollectingOutputView view = entry.getValue();
+                SimpleCollectingOutputView view = entry.getValue().close();
                 Segments seg =
                         Segments.create(view.fullSegments(), view.getCurrentPositionInSegment());
                 result.add(new RichSegments(key.f0, key.f1, key.f2, seg));

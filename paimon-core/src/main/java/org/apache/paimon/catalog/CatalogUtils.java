@@ -25,6 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -58,6 +59,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.AUTO_CREATE;
+import static org.apache.paimon.CoreOptions.FORMAT_TABLE_IMPLEMENTATION;
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.CoreOptions.PARTITION_GENERATE_LEGACY_NAME;
 import static org.apache.paimon.CoreOptions.PATH;
@@ -141,7 +143,7 @@ public class CatalogUtils {
         }
     }
 
-    public static void validateCreateTable(Schema schema) {
+    public static void validateCreateTable(Schema schema, boolean dataTokenEnabled) {
         Options options = Options.fromMap(schema.options());
         checkArgument(
                 !options.get(AUTO_CREATE),
@@ -155,6 +157,14 @@ public class CatalogUtils {
                     options.get(PRIMARY_KEY) == null,
                     "Cannot define %s for format table.",
                     PRIMARY_KEY.key());
+            if (dataTokenEnabled && options.get(PATH) == null) {
+                checkArgument(
+                        options.get(FORMAT_TABLE_IMPLEMENTATION)
+                                != CoreOptions.FormatTableImplementation.ENGINE,
+                        "Cannot define %s is engine for format table when data token is enabled and not define %s.",
+                        FORMAT_TABLE_IMPLEMENTATION.key(),
+                        PATH.key());
+            }
         }
         for (DataField field : schema.fields()) {
             validateDefaultValue(field.type(), field.defaultValue());
@@ -215,7 +225,8 @@ public class CatalogUtils {
             TableMetadata.Loader metadataLoader,
             @Nullable CatalogLockFactory lockFactory,
             @Nullable CatalogLockContext lockContext,
-            @Nullable CatalogContext catalogContext)
+            @Nullable CatalogContext catalogContext,
+            boolean isRestCatalog)
             throws Catalog.TableNotExistException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
             return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), catalog);
@@ -228,7 +239,7 @@ public class CatalogUtils {
         Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
 
         if (options.type() == TableType.FORMAT_TABLE) {
-            return toFormatTable(identifier, schema, dataFileIO);
+            return toFormatTable(identifier, schema, dataFileIO, catalogContext);
         }
 
         if (options.type() == TableType.OBJECT_TABLE) {
@@ -256,9 +267,9 @@ public class CatalogUtils {
                 new CatalogEnvironment(
                         tableIdentifier,
                         metadata.uuid(),
-                        catalog.catalogLoader(),
-                        lockFactory,
-                        lockContext,
+                        isRestCatalog && metadata.isExternal() ? null : catalog.catalogLoader(),
+                        isRestCatalog ? null : lockFactory,
+                        isRestCatalog ? null : lockContext,
                         catalogContext,
                         catalog.supportsVersionManagement());
         Path path = new Path(schema.options().get(PATH.key()));
@@ -322,6 +333,8 @@ public class CatalogUtils {
                         snapshot = optional.get();
                     }
                 } catch (Catalog.TableNotExistException ignored) {
+                } catch (NotImplementedException ignored) {
+                    // does not support supportsVersionManagement for external paimon table
                 }
             }
             tableAndSnapshots.add(Pair.of(table, snapshot));
@@ -366,7 +379,10 @@ public class CatalogUtils {
     }
 
     private static FormatTable toFormatTable(
-            Identifier identifier, TableSchema schema, Function<Path, FileIO> fileIO) {
+            Identifier identifier,
+            TableSchema schema,
+            Function<Path, FileIO> fileIO,
+            CatalogContext catalogContext) {
         Map<String, String> options = schema.options();
         FormatTable.Format format =
                 FormatTable.parseFormat(
@@ -383,6 +399,7 @@ public class CatalogUtils {
                 .format(format)
                 .options(options)
                 .comment(schema.comment())
+                .catalogContext(catalogContext)
                 .build();
     }
 

@@ -100,6 +100,7 @@ Current supported aggregate functions and data types are:
   The listagg function concatenates multiple string values into a single string.
   It supports STRING data type.
   Each field not part of the primary keys can be given a list agg delimiter, specified by the fields.<field-name>.list-agg-delimiter table property, otherwise it will use "," as default.
+  You can use `fields.<field-name>.distinct=true` to deduplicate values split by the `fields.<field-name>.list-agg-delimiter`.
 
 ### bool_and
   The bool_and function evaluates whether all values in a boolean set are true.

@@ -20,6 +20,7 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -30,6 +31,7 @@ import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -37,8 +39,10 @@ import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -54,6 +58,7 @@ import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
 import static org.apache.paimon.predicate.PredicateBuilder.fieldIdxToPartitionIdx;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAndByPartition;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link ReadBuilder} for {@link FormatTable}. */
 public class FormatReadBuilder implements ReadBuilder {
@@ -120,6 +125,11 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withVariantAccess(VariantAccessInfo[] variantAccessInfo) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public ReadBuilder withProjection(int[] projection) {
         if (projection == null) {
             return this;
@@ -151,13 +161,13 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public TableRead newRead() {
-        return new FormatTableRead(readType(), this, filter, limit);
+        return new FormatTableRead(readType(), table.rowType(), this, filter, limit);
     }
 
     protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
         Path filePath = dataSplit.dataPath();
         FormatReaderContext formatReaderContext =
-                new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
+                new FormatReaderContext(table.fileIO(), filePath, dataSplit.fileSize(), null);
         // Skip pushing down partition filters to reader.
         List<Predicate> readFilters =
                 excludePredicateWithFields(
@@ -172,18 +182,31 @@ public class FormatReadBuilder implements ReadBuilder {
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
                         table.partitionKeys(), readType().getFields(), table.partitionType());
-
-        return new DataFileRecordReader(
-                readType(),
-                readerFactory,
-                formatReaderContext,
-                null,
-                null,
-                PartitionUtils.create(partitionMapping, dataSplit.partition()),
-                false,
-                null,
-                0,
-                Collections.emptyMap());
+        try {
+            FileRecordReader<InternalRow> reader;
+            Long length = dataSplit.length();
+            if (length != null) {
+                reader =
+                        readerFactory.createReader(formatReaderContext, dataSplit.offset(), length);
+            } else {
+                checkArgument(dataSplit.offset() == 0, "Offset must be 0.");
+                reader = readerFactory.createReader(formatReaderContext);
+            }
+            return new DataFileRecordReader(
+                    readType(),
+                    reader,
+                    null,
+                    null,
+                    PartitionUtils.create(partitionMapping, dataSplit.partition()),
+                    false,
+                    null,
+                    0,
+                    Collections.emptyMap(),
+                    null);
+        } catch (Exception e) {
+            FileUtils.checkExists(formatReaderContext.fileIO(), formatReaderContext.filePath());
+            throw e;
+        }
     }
 
     private static RowType getRowTypeWithoutPartition(RowType rowType, List<String> partitionKeys) {
@@ -218,6 +241,11 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
         throw new UnsupportedOperationException("Format Table does not support withShard.");
+    }
+
+    @Override
+    public ReadBuilder withRowRanges(List<Range> rowRanges) {
+        throw new UnsupportedOperationException("Format Table does not support withRowRanges.");
     }
 
     @Override

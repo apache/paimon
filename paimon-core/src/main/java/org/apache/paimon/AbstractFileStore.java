@@ -277,7 +277,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                         newKeyComparator(),
                         bucketMode(),
                         options.deletionVectorsEnabled(),
-                        newIndexFileHandler());
+                        newIndexFileHandler(),
+                        newScan());
         return new FileStoreCommitImpl(
                 snapshotCommit,
                 fileIO,
@@ -309,6 +310,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.commitMaxRetryWait(),
                 options.commitStrictModeLastSafeSnapshot().orElse(null),
                 options.rowTrackingEnabled(),
+                options.commitDiscardDuplicateFiles(),
                 conflictDetection);
     }
 
@@ -359,20 +361,23 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     public abstract Comparator<InternalRow> newKeyComparator();
 
+    @Override
+    public InternalRowPartitionComputer partitionComputer() {
+        return new InternalRowPartitionComputer(
+                options.partitionDefaultName(),
+                schema.logicalPartitionType(),
+                schema.partitionKeys().toArray(new String[0]),
+                options.legacyPartitionName());
+    }
+
     private List<CommitCallback> createCommitCallbacks(String commitUser, FileStoreTable table) {
-        List<CommitCallback> callbacks =
-                new ArrayList<>(CallbackUtils.loadCommitCallbacks(options, table));
+        List<CommitCallback> callbacks = new ArrayList<>();
 
         if (options.partitionedTableInMetastore() && !schema.partitionKeys().isEmpty()) {
             PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
             if (partitionHandler != null) {
-                InternalRowPartitionComputer partitionComputer =
-                        new InternalRowPartitionComputer(
-                                options.partitionDefaultName(),
-                                schema.logicalPartitionType(),
-                                schema.partitionKeys().toArray(new String[0]),
-                                options.legacyPartitionName());
-                callbacks.add(new AddPartitionCommitCallback(partitionHandler, partitionComputer));
+                callbacks.add(
+                        new AddPartitionCommitCallback(partitionHandler, partitionComputer()));
             }
         }
 
@@ -396,6 +401,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             callbacks.add(new IcebergCommitCallback(table, commitUser));
         }
 
+        callbacks.addAll(CallbackUtils.loadCommitCallbacks(options, table));
         return callbacks;
     }
 

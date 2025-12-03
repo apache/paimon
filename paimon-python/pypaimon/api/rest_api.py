@@ -219,15 +219,15 @@ class RESTApi:
     def create_table(self, identifier: Identifier, schema: Schema) -> None:
         request = CreateTableRequest(identifier, schema)
         return self.client.post(
-            self.resource_paths.tables(identifier.database_name),
+            self.resource_paths.tables(identifier.get_database_name()),
             request,
             self.rest_auth_function)
 
     def get_table(self, identifier: Identifier) -> GetTableResponse:
         return self.client.get(
             self.resource_paths.table(
-                identifier.database_name,
-                identifier.object_name),
+                identifier.get_database_name(),
+                identifier.get_object_name()),
             GetTableResponse,
             self.rest_auth_function,
         )
@@ -235,8 +235,8 @@ class RESTApi:
     def drop_table(self, identifier: Identifier) -> GetTableResponse:
         return self.client.delete(
             self.resource_paths.table(
-                identifier.database_name,
-                identifier.object_name),
+                identifier.get_database_name(),
+                identifier.get_object_name()),
             self.rest_auth_function,
         )
 
@@ -250,8 +250,8 @@ class RESTApi:
     def load_table_token(self, identifier: Identifier) -> GetTableTokenResponse:
         return self.client.get(
             self.resource_paths.table_token(
-                identifier.database_name,
-                identifier.object_name),
+                identifier.get_database_name(),
+                identifier.get_object_name()),
             GetTableTokenResponse,
             self.rest_auth_function,
         )
@@ -282,7 +282,7 @@ class RESTApi:
         request = CommitTableRequest(table_uuid, snapshot, statistics)
         response = self.client.post_with_response_type(
             self.resource_paths.commit_table(
-                identifier.database_name, identifier.object_name),
+                identifier.get_database_name(), identifier.get_object_name()),
             request,
             CommitTableResponse,
             self.rest_auth_function

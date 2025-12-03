@@ -291,6 +291,10 @@ public class IcebergMigrator implements Migrator {
     }
 
     private List<TableSchema> icebergSchemasToPaimonSchemas(IcebergMetadata icebergMetadata) {
+        Map<String, String> options =
+                icebergMetadata.properties() == null
+                        ? Collections.emptyMap()
+                        : icebergMetadata.properties();
         return icebergMetadata.schemas().stream()
                 .map(
                         icebergSchema -> {
@@ -299,12 +303,13 @@ public class IcebergMigrator implements Migrator {
                                     icebergSchema.schemaId());
                             return TableSchema.create(
                                     icebergSchema.schemaId(),
-                                    icebergSchemaToPaimonSchema(icebergSchema));
+                                    icebergSchemaToPaimonSchema(icebergSchema, options));
                         })
                 .collect(Collectors.toList());
     }
 
-    private Schema icebergSchemaToPaimonSchema(IcebergSchema icebergSchema) {
+    private Schema icebergSchemaToPaimonSchema(
+            IcebergSchema icebergSchema, Map<String, String> options) {
 
         // get iceberg current partition spec
         int currentPartitionSpecId = icebergMetadata.defaultSpecId();
@@ -321,8 +326,7 @@ public class IcebergMigrator implements Migrator {
                         .map(IcebergPartitionField::name)
                         .collect(Collectors.toList());
 
-        return new Schema(
-                dataFields, partitionKeys, Collections.emptyList(), Collections.emptyMap(), null);
+        return new Schema(dataFields, partitionKeys, Collections.emptyList(), options, null);
     }
 
     private void checkAndFilterManifestFiles(

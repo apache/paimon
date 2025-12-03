@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
@@ -28,6 +29,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.SplitReadConfig;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -48,6 +50,8 @@ public final class AppendTableRead extends AbstractDataTableRead {
     private Predicate predicate = null;
     private TopN topN = null;
     private Integer limit = null;
+    @Nullable private List<Range> rowRanges;
+    @Nullable private VariantAccessInfo[] variantAccess;
 
     public AppendTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
@@ -76,12 +80,26 @@ public final class AppendTableRead extends AbstractDataTableRead {
         read.withFilter(predicate);
         read.withTopN(topN);
         read.withLimit(limit);
+        read.withRowRanges(rowRanges);
+        read.withVariantAccess(variantAccess);
     }
 
     @Override
     public void applyReadType(RowType readType) {
         initialized().forEach(r -> r.withReadType(readType));
         this.readType = readType;
+    }
+
+    @Override
+    public void applyVariantAccess(VariantAccessInfo[] variantAccess) {
+        initialized().forEach(r -> r.withVariantAccess(variantAccess));
+        this.variantAccess = variantAccess;
+    }
+
+    @Override
+    public void applyRowRanges(List<Range> rowRanges) {
+        initialized().forEach(r -> r.withRowRanges(rowRanges));
+        this.rowRanges = rowRanges;
     }
 
     @Override
@@ -109,7 +127,7 @@ public final class AppendTableRead extends AbstractDataTableRead {
     public RecordReader<InternalRow> reader(Split split) throws IOException {
         DataSplit dataSplit = (DataSplit) split;
         for (SplitReadProvider readProvider : readProviders) {
-            if (readProvider.match(dataSplit, false)) {
+            if (readProvider.match(dataSplit, new SplitReadProvider.Context(false))) {
                 return readProvider.get().get().createReader(dataSplit);
             }
         }

@@ -23,6 +23,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 
+import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.compress.CompressionCodec;
 import org.apache.hadoop.io.compress.CompressionCodecFactory;
@@ -68,11 +69,7 @@ public class HadoopCompressionUtils {
                 return inputStream;
             }
 
-            CompressionCodecFactory codecFactory =
-                    new CompressionCodecFactory(new Configuration(false));
-
-            CompressionCodec codec =
-                    codecFactory.getCodec(new org.apache.hadoop.fs.Path(filePath.toString()));
+            CompressionCodec codec = getCompressionCodec(filePath);
             if (codec != null) {
                 return codec.createInputStream(inputStream);
             }
@@ -80,6 +77,16 @@ public class HadoopCompressionUtils {
         } catch (Exception | UnsatisfiedLinkError e) {
             throw new RuntimeException("Failed to create decompression stream", e);
         }
+    }
+
+    public static boolean isCompressed(Path filePath) {
+        return getCompressionCodec(filePath) != null;
+    }
+
+    public static CompressionCodec getCompressionCodec(Path filePath) {
+        CompressionCodecFactory codecFactory =
+                new CompressionCodecFactory(new Configuration(false));
+        return codecFactory.getCodec(new org.apache.hadoop.fs.Path(filePath.toString()));
     }
 
     /**
@@ -101,6 +108,12 @@ public class HadoopCompressionUtils {
             Class<?> codecClass = Class.forName(codecName);
             CompressionCodec codec =
                     (CompressionCodec) codecClass.getDeclaredConstructor().newInstance();
+
+            // To fix npe when the codec implements Configurable
+            if (codec instanceof Configurable) {
+                ((Configurable) codec).setConf(new Configuration());
+            }
+
             codec.createOutputStream(new java.io.ByteArrayOutputStream());
             return Optional.of(codec);
         } catch (Exception | UnsatisfiedLinkError e) {

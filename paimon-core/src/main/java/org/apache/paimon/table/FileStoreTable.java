@@ -23,6 +23,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
+import org.apache.paimon.globalindex.GlobalIndexScanBuilderImpl;
 import org.apache.paimon.operation.LocalOrphanFilesClean;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.TableSchema;
@@ -36,6 +38,7 @@ import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.TagManager;
 
@@ -62,6 +65,8 @@ public interface FileStoreTable extends DataTable {
     void setSnapshotCache(Cache<Path, Snapshot> cache);
 
     void setStatsCache(Cache<String, Statistics> cache);
+
+    void setDVMetaCache(DVMetaCache cache);
 
     @Override
     default RowType rowType() {
@@ -126,6 +131,11 @@ public interface FileStoreTable extends DataTable {
     boolean supportStreamingReadOverwrite();
 
     RowKeyExtractor createRowKeyExtractor();
+
+    /** Returns a new global index scan builder. */
+    default GlobalIndexScanBuilder newIndexScanBuilder() {
+        return new GlobalIndexScanBuilderImpl(this);
+    }
 
     /**
      * Get {@link DataTable} with branch identified by {@code branchName}. Note that this method

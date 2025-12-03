@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
@@ -31,8 +32,10 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
+import java.util.List;
 
 import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
 
@@ -52,6 +55,17 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
     public void applyReadType(RowType readType) {
         fullPhaseMergeRead.withReadType(readType);
         incrementalDiffRead.withReadType(readType);
+    }
+
+    @Override
+    public void applyVariantAccess(VariantAccessInfo[] variantAccess) {
+        fullPhaseMergeRead.withVariantAccess(variantAccess);
+        incrementalDiffRead.withVariantAccess(variantAccess);
+    }
+
+    @Override
+    public void applyRowRanges(List<Range> rowRanges) {
+        throw new UnsupportedOperationException("Does not support row ranges.");
     }
 
     @Override

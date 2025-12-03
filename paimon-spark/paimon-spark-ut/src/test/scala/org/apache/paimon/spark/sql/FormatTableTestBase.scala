@@ -18,9 +18,11 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.catalog.{DelegateCatalog, Identifier}
 import org.apache.paimon.fs.Path
+import org.apache.paimon.hive.HiveCatalog
 import org.apache.paimon.spark.PaimonHiveTestBase
+import org.apache.paimon.spark.PaimonHiveTestBase.hiveUri
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.utils.CompressUtils
 
@@ -45,10 +47,48 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Format table: check partition sync") {
+    val tableName = "t"
+    withTable(tableName) {
+      val hiveCatalog =
+        paimonCatalog.asInstanceOf[DelegateCatalog].wrapped().asInstanceOf[HiveCatalog]
+      sql(s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (`ds` bigint)")
+      sql(s"INSERT INTO $tableName VALUES (1, 2023)")
+      var ds = 2023L
+      checkAnswer(sql(s"SELECT * FROM $tableName"), Seq(Row(1, ds)))
+      var partitions = hiveCatalog.listPartitionsFromHms(Identifier.create(hiveDbName, tableName))
+      assert(partitions.size == 0)
+      sql(s"DROP TABLE $tableName")
+      sql(
+        s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (`ds` bigint, `hh` int) TBLPROPERTIES ('format-table.commit-hive-sync-url'='$hiveUri')")
+      ds = 2024L
+      val hh = 10
+      sql(s"INSERT OVERWRITE $tableName PARTITION(ds=$ds, hh) VALUES (1, $hh)")
+      checkAnswer(sql(s"SELECT * FROM $tableName"), Seq(Row(1, ds, hh)))
+      partitions = hiveCatalog.listPartitionsFromHms(Identifier.create(hiveDbName, tableName))
+      assert(partitions.get(0).getValues.get(0).equals(ds.toString))
+      assert(partitions.get(0).getSd.getLocation.split("/").last.equals(s"hh=$hh"))
+      sql(s"DROP TABLE $tableName")
+      sql(s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (`ds` bigint) " +
+        s"TBLPROPERTIES ('format-table.commit-hive-sync-url'='$hiveUri', 'format-table.partition-path-only-value'='true')")
+      ds = 2025L
+      sql(s"INSERT INTO $tableName VALUES (1, $ds)")
+      partitions = hiveCatalog.listPartitionsFromHms(Identifier.create(hiveDbName, tableName))
+      assert(partitions.get(0).getSd.getLocation.split("/").last.equals(ds.toString))
+    }
+  }
+
   test("Format table: write partitioned table") {
-    for (format <- Seq("csv", "orc", "parquet", "json")) {
+    for (
+      (format, compression) <- Seq(
+        ("csv", "gzip"),
+        ("orc", "zlib"),
+        ("parquet", "zstd"),
+        ("json", "none"))
+    ) {
       withTable("t") {
-        sql(s"CREATE TABLE t (id INT, p1 INT, p2 INT) USING $format PARTITIONED BY (p1, p2)")
+        sql(
+          s"CREATE TABLE t (id INT, p1 INT, p2 INT) USING $format PARTITIONED BY (p1, p2) TBLPROPERTIES ('file.compression'='$compression')")
         sql("INSERT INTO t VALUES (1, 2, 3)")
 
         // check show create table
@@ -71,9 +111,16 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
   }
 
   test("Format table: show partitions") {
-    for (format <- Seq("csv", "orc", "parquet", "json")) {
+    for (
+      (format, compression) <- Seq(
+        ("csv", "gzip"),
+        ("orc", "zlib"),
+        ("parquet", "zstd"),
+        ("json", "none"))
+    ) {
       withTable("t") {
-        sql(s"CREATE TABLE t (id INT, p1 INT, p2 STRING) USING $format PARTITIONED BY (p1, p2)")
+        sql(
+          s"CREATE TABLE t (id INT, p1 INT, p2 STRING) USING $format PARTITIONED BY (p1, p2) TBLPROPERTIES ('file.compression'='$compression')")
         sql("INSERT INTO t VALUES (1, 1, '1')")
         sql("INSERT INTO t VALUES (2, 1, '1')")
         sql("INSERT INTO t VALUES (3, 2, '1')")
@@ -135,6 +182,17 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
       sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv OPTIONS ('csv.field-delimiter' ';')")
       val row = sql("SHOW CREATE TABLE t1").collect()(0)
       assert(row.toString().contains("'csv.field-delimiter' = ';'"))
+    }
+  }
+
+  test("Format table: broadcast join for small table") {
+    withTable("t") {
+      sql("CREATE TABLE t1 (f0 INT, f1 INT) USING CSV")
+      sql("CREATE TABLE t2 (f0 INT, f2 INT) USING CSV")
+      sql("INSERT INTO t1 VALUES (1, 1)")
+      sql("INSERT INTO t2 VALUES (1, 1)")
+      val df = sql("SELECT t1.f0, t1.f1, t2.f2 FROM t1, t2 WHERE t1.f0 = t2.f0")
+      assert(df.queryExecution.executedPlan.toString().contains("BroadcastExchange"))
     }
   }
 }

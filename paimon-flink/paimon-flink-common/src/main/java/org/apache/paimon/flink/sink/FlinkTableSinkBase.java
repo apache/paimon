@@ -26,6 +26,7 @@ import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.flink.log.LogSinkProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -44,6 +45,7 @@ import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.CLUSTERING_COLUMNS;
+import static org.apache.paimon.CoreOptions.CLUSTERING_INCREMENTAL;
 import static org.apache.paimon.CoreOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
@@ -117,7 +119,14 @@ public abstract class FlinkTableSinkBase
             throw new UnsupportedOperationException(
                     "Paimon doesn't support streaming INSERT OVERWRITE.");
         }
-
+        if (table instanceof FormatTable) {
+            FormatTable formatTable = (FormatTable) table;
+            return new PaimonDataStreamSinkProvider(
+                    (dataStream) ->
+                            new FlinkFormatTableDataStreamSink(
+                                            formatTable, overwrite, staticPartitions)
+                                    .sinkFrom(dataStream));
+        }
         LogSinkProvider logSinkProvider = null;
         if (logStoreTableFactory != null) {
             logSinkProvider = logStoreTableFactory.createSinkProvider(this.context, context);
@@ -134,12 +143,14 @@ public abstract class FlinkTableSinkBase
                             .forRowData(
                                     new DataStream<>(
                                             dataStream.getExecutionEnvironment(),
-                                            dataStream.getTransformation()))
-                            .clusteringIfPossible(
-                                    conf.get(CLUSTERING_COLUMNS),
-                                    conf.get(CLUSTERING_STRATEGY),
-                                    conf.get(CLUSTERING_SORT_IN_CLUSTER),
-                                    conf.get(CLUSTERING_SAMPLE_FACTOR));
+                                            dataStream.getTransformation()));
+                    if (!conf.get(CLUSTERING_INCREMENTAL)) {
+                        builder.clusteringIfPossible(
+                                conf.get(CLUSTERING_COLUMNS),
+                                conf.get(CLUSTERING_STRATEGY),
+                                conf.get(CLUSTERING_SORT_IN_CLUSTER),
+                                conf.get(CLUSTERING_SAMPLE_FACTOR));
+                    }
                     if (overwrite) {
                         builder.overwrite(staticPartitions);
                     }

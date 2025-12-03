@@ -61,6 +61,13 @@ public class HeapShortVector extends AbstractHeapVector implements WritableShort
     }
 
     @Override
+    public void appendShort(short v) {
+        reserve(elementsAppended + 1);
+        setShort(elementsAppended, v);
+        elementsAppended++;
+    }
+
+    @Override
     public void fill(short value) {
         Arrays.fill(vector, value);
     }

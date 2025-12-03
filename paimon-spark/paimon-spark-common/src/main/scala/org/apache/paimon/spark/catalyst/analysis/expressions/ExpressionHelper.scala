@@ -26,7 +26,6 @@ import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.{Column, SparkSession}
 import org.apache.spark.sql.PaimonUtils.{normalizeExprs, translateFilterV2}
-import org.apache.spark.sql.catalyst.QueryPlanningTracker
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper, SubqueryExpression}
 import org.apache.spark.sql.catalyst.optimizer.ConstantFolding
@@ -67,25 +66,6 @@ trait ExpressionHelper extends ExpressionHelperBase {
       None
     } else {
       Some(PredicateBuilder.and(predicates: _*))
-    }
-  }
-
-  def resolveFilter(
-      spark: SparkSession,
-      relation: DataSourceV2Relation,
-      conditionSql: String): Expression = {
-    val unResolvedExpression = spark.sessionState.sqlParser.parseExpression(conditionSql)
-    val filter = Filter(unResolvedExpression, relation)
-    spark.sessionState.analyzer.executeAndCheck(filter, new QueryPlanningTracker) match {
-      case filter: Filter =>
-        try {
-          ConstantFolding.apply(filter).asInstanceOf[Filter].condition
-        } catch {
-          case _: Throwable => filter.condition
-        }
-      case _ =>
-        throw new RuntimeException(
-          s"Could not resolve expression $conditionSql in relation: $relation")
     }
   }
 }
@@ -208,6 +188,25 @@ trait ExpressionHelperBase extends PredicateHelper {
     case other =>
       throw new UnsupportedOperationException(
         s"Unsupported update expression: $other, only support update with PrimitiveType and StructType.")
+  }
+
+  def resolveFilter(
+      spark: SparkSession,
+      relation: DataSourceV2Relation,
+      conditionSql: String): Expression = {
+    val unResolvedExpression = spark.sessionState.sqlParser.parseExpression(conditionSql)
+    val filter = Filter(unResolvedExpression, relation)
+    spark.sessionState.analyzer.execute(filter) match {
+      case filter: Filter =>
+        try {
+          ConstantFolding.apply(filter).asInstanceOf[Filter].condition
+        } catch {
+          case _: Throwable => filter.condition
+        }
+      case _ =>
+        throw new RuntimeException(
+          s"Could not resolve expression $conditionSql in relation: $relation")
+    }
   }
 
   def splitPruePartitionAndOtherPredicates(
