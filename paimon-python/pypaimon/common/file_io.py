@@ -383,6 +383,19 @@ class FileIO:
         with self.new_output_stream(path) as output_stream:
             fastavro.writer(output_stream, avro_schema, records, **kwargs)
 
+    def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
+        import lance
+        from pypaimon.read.reader.lance_utils import to_lance_specified
+        file_path_for_lance, storage_options = to_lance_specified(self, path)
+
+        writer = lance.file.LanceFileWriter(file_path_for_lance, data.schema, storage_options=storage_options, **kwargs)
+        try:
+            # Write all batches
+            for batch in data.to_batches():
+                writer.write_batch(batch)
+        finally:
+            writer.close()
+
     def write_blob(self, path: str, data: pyarrow.Table, blob_as_descriptor: bool, **kwargs):
         try:
             # Validate input constraints
