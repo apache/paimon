@@ -35,11 +35,6 @@ import java.util.Objects;
 /** A compressed bitmap for 64-bit integer aggregated by tree. */
 public class RoaringNavigableMap64 {
 
-    static {
-        Roaring64NavigableMap.SERIALIZATION_MODE =
-                Roaring64NavigableMap.SERIALIZATION_MODE_PORTABLE;
-    }
-
     private final Roaring64NavigableMap roaring64NavigableMap;
 
     public RoaringNavigableMap64() {
@@ -116,7 +111,7 @@ public class RoaringNavigableMap64 {
         try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 DataOutputStream dos = new DataOutputStream(bos)) {
             roaring64NavigableMap.runOptimize();
-            roaring64NavigableMap.serialize(dos);
+            roaring64NavigableMap.serializePortable(dos);
             return bos.toByteArray();
         }
     }
@@ -124,7 +119,7 @@ public class RoaringNavigableMap64 {
     public void deserialize(byte[] rbmBytes) throws IOException {
         try (ByteArrayInputStream bis = new ByteArrayInputStream(rbmBytes);
                 DataInputStream dis = new DataInputStream(bis)) {
-            roaring64NavigableMap.deserialize(dis);
+            roaring64NavigableMap.deserializePortable(dis);
         }
     }
 
