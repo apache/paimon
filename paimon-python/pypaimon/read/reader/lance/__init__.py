@@ -15,3 +15,27 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+
+"""Lance format support modules including vector indexing, scalar indexing, and predicate optimization."""
+
+try:
+    from pypaimon.read.reader.lance.vector_index import VectorIndexBuilder
+    from pypaimon.read.reader.lance.scalar_index import ScalarIndexBuilder, BitmapIndexHandler, BTreeIndexHandler
+    from pypaimon.read.reader.lance.predicate_pushdown import PredicateOptimizer, PredicateExpression, PredicateOperator
+    from pypaimon.read.reader.lance.lance_utils import LanceUtils
+    from pypaimon.read.reader.lance.lance_native_reader import LanceNativeReader
+    
+    __all__ = [
+        'VectorIndexBuilder',
+        'ScalarIndexBuilder',
+        'BitmapIndexHandler',
+        'BTreeIndexHandler',
+        'PredicateOptimizer',
+        'PredicateExpression',
+        'PredicateOperator',
+        'LanceUtils',
+        'LanceNativeReader',
+    ]
+except ImportError:
+    # Lance library not available
+    __all__ = []
