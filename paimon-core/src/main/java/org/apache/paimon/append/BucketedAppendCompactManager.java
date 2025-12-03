@@ -38,7 +38,6 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
@@ -47,6 +46,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
 import static java.util.Collections.emptyList;
+import static org.apache.paimon.table.source.AppendOnlySplitGenerator.DATA_FILE_COMPARATOR;
 
 /** Compact manager for {@link AppendOnlyFileStore}. */
 public class BucketedAppendCompactManager extends CompactFutureManager {
@@ -78,7 +78,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             @Nullable CompactionMetrics.Reporter metricsReporter) {
         this.executor = executor;
         this.dvMaintainer = dvMaintainer;
-        this.toCompact = new PriorityQueue<>(fileComparator(false));
+        this.toCompact = new PriorityQueue<>(DATA_FILE_COMPARATOR);
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.targetFileSize = targetFileSize;
@@ -356,36 +356,5 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     /** Compact rewriter for append-only table. */
     public interface CompactRewriter {
         List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception;
-    }
-
-    /**
-     * New files may be created during the compaction process, then the results of the compaction
-     * may be put after the new files, and this order will be disrupted. We need to ensure this
-     * order, so we force the order by sequence.
-     */
-    public static Comparator<DataFileMeta> fileComparator(boolean ignoreOverlap) {
-        return (o1, o2) -> {
-            if (o1 == o2) {
-                return 0;
-            }
-
-            if (!ignoreOverlap && isOverlap(o1, o2)) {
-                LOG.warn(
-                        String.format(
-                                "There should no overlap in append files, but Range1(%s, %s), Range2(%s, %s),"
-                                        + " check if you have multiple write jobs.",
-                                o1.minSequenceNumber(),
-                                o1.maxSequenceNumber(),
-                                o2.minSequenceNumber(),
-                                o2.maxSequenceNumber()));
-            }
-
-            return Long.compare(o1.minSequenceNumber(), o2.minSequenceNumber());
-        };
-    }
-
-    private static boolean isOverlap(DataFileMeta o1, DataFileMeta o2) {
-        return o2.minSequenceNumber() <= o1.maxSequenceNumber()
-                && o2.maxSequenceNumber() >= o1.minSequenceNumber();
     }
 }

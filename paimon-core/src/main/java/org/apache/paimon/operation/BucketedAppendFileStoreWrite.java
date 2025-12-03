@@ -68,7 +68,14 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
                 options,
                 dvMaintainerFactory,
                 tableName);
+        super.withIgnorePreviousFiles(options.writeOnly());
         this.commitUser = commitUser;
+    }
+
+    @Override
+    public void withIgnorePreviousFiles(boolean ignorePrevious) {
+        // for append table, we need all writers to be empty if write only
+        super.withIgnorePreviousFiles(options.writeOnly());
     }
 
     @Override
