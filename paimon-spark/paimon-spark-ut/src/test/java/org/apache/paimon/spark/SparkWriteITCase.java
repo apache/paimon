@@ -481,13 +481,13 @@ public class SparkWriteITCase {
 
     @Test
     public void testTruncatePartitionValueNull() {
-        spark.sql("CREATE TABLE t (pt STRING, data STRING) PARTITIONED BY (pt) ");
+        spark.sql("CREATE TABLE TRUNC_T (pt STRING, data STRING) PARTITIONED BY (pt) ");
 
-        spark.sql("INSERT INTO t VALUES('1', 'a'), (null, 'b')");
+        spark.sql("INSERT INTO TRUNC_T VALUES('1', 'a'), (null, 'b')");
 
-        spark.sql("TRUNCATE TABLE T PARTITION (pt = null)");
+        spark.sql("TRUNCATE TABLE TRUNC_T PARTITION (pt = null)");
 
-        List<Row> rows = spark.sql("SELECT * FROM T ORDER BY pt").collectAsList();
+        List<Row> rows = spark.sql("SELECT * FROM TRUNC_T ORDER BY pt").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,a]]");
     }
 

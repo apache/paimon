@@ -32,7 +32,7 @@ public interface GlobalIndexScanBuilder {
 
     GlobalIndexScanBuilder withRowRange(Range rowRange);
 
-    ShardGlobalIndexScanner build();
+    RowRangeGlobalIndexScanner build();
 
     Set<Range> shardList();
 }

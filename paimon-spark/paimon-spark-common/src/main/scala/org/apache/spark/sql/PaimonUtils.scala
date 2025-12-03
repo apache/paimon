@@ -92,6 +92,10 @@ object PaimonUtils {
     SparkUtils.bytesToString(size)
   }
 
+  def msDurationToString(size: Long): String = {
+    SparkUtils.msDurationToString(size)
+  }
+
   def setInputFileName(inputFileName: String): Unit = {
     InputFileBlockHolder.set(inputFileName, 0, -1)
   }

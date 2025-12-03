@@ -18,7 +18,6 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -48,14 +47,13 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Scanner for shard-based global indexes. */
-public class ShardGlobalIndexScanner implements Closeable {
+public class RowRangeGlobalIndexScanner implements Closeable {
 
     private final Options options;
     private final GlobalIndexEvaluator globalIndexEvaluator;
 
-    public ShardGlobalIndexScanner(
+    public RowRangeGlobalIndexScanner(
             FileStoreTable fileStoreTable,
-            BinaryRow partition,
             long rowRangeStart,
             long rowRangeEnd,
             List<IndexManifestEntry> entries) {
@@ -79,8 +77,7 @@ public class ShardGlobalIndexScanner implements Closeable {
         FileIO fileIO = fileStoreTable.fileIO();
         GlobalIndexFileReadWrite indexFileReadWrite =
                 new GlobalIndexFileReadWrite(
-                        fileIO,
-                        fileStoreTable.store().pathFactory().indexFileFactory(partition, 0));
+                        fileIO, fileStoreTable.store().pathFactory().globalIndexFileFactory());
 
         Map<Integer, Map<String, List<IndexFileMeta>>> indexMetas = new HashMap<>();
         for (IndexManifestEntry entry : entries) {
