@@ -18,13 +18,13 @@
 
 package org.apache.paimon.spark.metric
 
-import org.apache.paimon.metrics.{Gauge, MetricGroup, MetricGroupImpl, MetricRegistry}
-import org.apache.paimon.operation.metrics.ScanMetrics
-import org.apache.paimon.spark.{PaimonPlanningDurationTaskMetric, PaimonResultedTableFilesTaskMetric, PaimonScannedManifestsTaskMetric, PaimonSkippedTableFilesTaskMetric}
+import org.apache.paimon.metrics.{Gauge, Metric, MetricGroup, MetricGroupImpl, MetricRegistry}
+import org.apache.paimon.operation.metrics.{CommitMetrics, ScanMetrics, WriterBufferMetric}
+import org.apache.paimon.spark._
 
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 
-import java.util
+import java.util.{Map => JMap}
 
 import scala.collection.mutable
 
@@ -34,7 +34,7 @@ case class SparkMetricRegistry() extends MetricRegistry {
 
   override def createMetricGroup(
       groupName: String,
-      variables: util.Map[String, String]): MetricGroup = {
+      variables: JMap[String, String]): MetricGroup = {
     val metricGroup = new MetricGroupImpl(groupName, variables)
     metricGroups.put(groupName, metricGroup)
     metricGroup
@@ -44,15 +44,63 @@ case class SparkMetricRegistry() extends MetricRegistry {
     metricGroups.get(ScanMetrics.GROUP_NAME) match {
       case Some(group) =>
         val metrics = group.getMetrics
-        def gaugeLong(key: String): Long = metrics.get(key).asInstanceOf[Gauge[Long]].getValue
         Array(
-          PaimonPlanningDurationTaskMetric(gaugeLong(ScanMetrics.LAST_SCAN_DURATION)),
-          PaimonScannedManifestsTaskMetric(gaugeLong(ScanMetrics.LAST_SCANNED_MANIFESTS)),
-          PaimonSkippedTableFilesTaskMetric(gaugeLong(ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES)),
-          PaimonResultedTableFilesTaskMetric(gaugeLong(ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES))
+          PaimonPlanningDurationTaskMetric(gauge[Long](metrics, ScanMetrics.LAST_SCAN_DURATION)),
+          PaimonScannedSnapshotIdTaskMetric(
+            gauge[Long](metrics, ScanMetrics.LAST_SCANNED_SNAPSHOT_ID)),
+          PaimonScannedManifestsTaskMetric(
+            gauge[Long](metrics, ScanMetrics.LAST_SCANNED_MANIFESTS)),
+          PaimonSkippedTableFilesTaskMetric(
+            gauge[Long](metrics, ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES)),
+          PaimonResultedTableFilesTaskMetric(
+            gauge[Long](metrics, ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES))
         )
       case None =>
         Array.empty
+    }
+  }
+
+  def buildSparkWriteMetrics(): Array[CustomTaskMetric] = {
+    metricGroups.get(WriterBufferMetric.GROUP_NAME) match {
+      case Some(group) =>
+        val metrics = group.getMetrics
+        Array(
+          PaimonNumWritersTaskMetric(gauge[Int](metrics, WriterBufferMetric.NUM_WRITERS))
+        )
+      case None =>
+        Array.empty
+    }
+  }
+
+  def buildSparkCommitMetrics(): Array[CustomTaskMetric] = {
+    metricGroups.get(CommitMetrics.GROUP_NAME) match {
+      case Some(group) =>
+        val metrics = group.getMetrics
+        Array(
+          PaimonCommitDurationTaskMetric(gauge[Long](metrics, CommitMetrics.LAST_COMMIT_DURATION)),
+          PaimonAppendedTableFilesTaskMetric(
+            gauge[Long](metrics, CommitMetrics.LAST_TABLE_FILES_APPENDED)),
+          PaimonAppendedRecordsTaskMetric(
+            gauge[Long](metrics, CommitMetrics.LAST_DELTA_RECORDS_APPENDED)),
+          PaimonAppendedChangelogFilesTaskMetric(
+            gauge[Long](metrics, CommitMetrics.LAST_CHANGELOG_FILES_APPENDED)),
+          PaimonPartitionsWrittenTaskMetric(
+            gauge[Long](metrics, CommitMetrics.LAST_PARTITIONS_WRITTEN)),
+          PaimonBucketsWrittenTaskMetric(gauge[Long](metrics, CommitMetrics.LAST_BUCKETS_WRITTEN))
+        )
+      case None =>
+        Array.empty
+    }
+  }
+
+  private def gauge[T](metrics: JMap[String, Metric], key: String): T = {
+    metrics.get(key) match {
+      case null =>
+        throw new NoSuchElementException(s"Metric key '$key' not found")
+      case g: Gauge[_] =>
+        g.getValue.asInstanceOf[T]
+      case m =>
+        throw new ClassCastException(s"Expected Gauge, but got ${m.getClass.getName}")
     }
   }
 }

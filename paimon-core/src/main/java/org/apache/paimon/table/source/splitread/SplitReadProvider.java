@@ -20,13 +20,47 @@ package org.apache.paimon.table.source.splitread;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.operation.SplitRead;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.LazyField;
 
 /** Provider to create {@link SplitRead}. */
 public interface SplitReadProvider {
 
-    boolean match(DataSplit split, boolean forceKeepDelete);
+    boolean match(Split split, Context context);
 
     LazyField<? extends SplitRead<InternalRow>> get();
+
+    /** Split reader provider context. */
+    class Context {
+
+        public static final Context DEFAULT = Context.builder().build();
+
+        private final boolean forceKeepDelete;
+
+        private Context(boolean forceKeepDelete) {
+            this.forceKeepDelete = forceKeepDelete;
+        }
+
+        public static Context.Builder builder() {
+            return new Builder();
+        }
+
+        public static class Builder {
+
+            private boolean forceKeepDelete;
+
+            public Context build() {
+                return new Context(forceKeepDelete);
+            }
+
+            public Builder withForceKeepDelete(boolean forceKeepDelete) {
+                this.forceKeepDelete = forceKeepDelete;
+                return this;
+            }
+        }
+
+        public boolean forceKeepDelete() {
+            return forceKeepDelete;
+        }
+    }
 }

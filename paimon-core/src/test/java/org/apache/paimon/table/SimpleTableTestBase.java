@@ -46,6 +46,9 @@ import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
@@ -90,6 +93,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -1423,6 +1427,44 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
+    public void testBatchWriteAsyncExpireFallbackToSync() throws Exception {
+        // configure table to async expire but retain only last snapshot
+        Map<String, String> opts = new HashMap<>();
+        opts.put(SNAPSHOT_EXPIRE_EXECUTION_MODE.key(), ExpireExecutionMode.ASYNC.toString());
+        opts.put(SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        opts.put(SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        opts.put(SNAPSHOT_EXPIRE_LIMIT.key(), "100");
+
+        FileStoreTable table = createFileStoreTable(conf -> {});
+        table = table.copy(opts);
+
+        SnapshotManager sm = table.snapshotManager();
+        AtomicLong lastId = new AtomicLong(0);
+
+        // perform multiple batch commits; expiration should run synchronously after each commit
+        for (int i = 0; i < 3; i++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                write.write(rowData(i, i * 10, i * 100L));
+                commit.commit(write.prepareCommit());
+            }
+
+            long latest = sm.latestSnapshotId();
+            assertThat(latest).isGreaterThan(0);
+
+            if (lastId.get() > 0) {
+                // since retain min/max = 1, previous snapshot must have been expired synchronously
+                assertThat(sm.snapshotExists(lastId.get()))
+                        .as("previous snapshot should be expired synchronously in batch mode")
+                        .isFalse();
+                assertThat(sm.earliestSnapshotId()).isEqualTo(latest);
+            }
+            lastId.set(latest);
+        }
+    }
+
+    @Test
     @Timeout(120)
     public void testExpireWithLimit() throws Exception {
         FileStoreTable table = createFileStoreTable();
@@ -1550,11 +1592,12 @@ public abstract class SimpleTableTestBase {
 
     @Test
     public void testDataSplitNotIncludeDvFilesWhenStreamingRead() throws Exception {
-        FileStoreTable table = createFileStoreTable();
-        Map<String, String> options = new HashMap<>();
-        options.put(DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(WRITE_ONLY.key(), "true");
-        table = table.copy(options);
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(DELETION_VECTORS_ENABLED, true);
+                            options.set(WRITE_ONLY, true);
+                        });
 
         try (StreamTableWrite write = table.newWrite(commitUser);
                 StreamTableCommit commit = table.newCommit(commitUser)) {
@@ -1575,11 +1618,12 @@ public abstract class SimpleTableTestBase {
 
     @Test
     public void testDataSplitNotIncludeDvFilesWhenStreamingReadChanges() throws Exception {
-        FileStoreTable table = createFileStoreTable();
-        Map<String, String> options = new HashMap<>();
-        options.put(DELETION_VECTORS_ENABLED.key(), "true");
-        options.put(WRITE_ONLY.key(), "true");
-        table = table.copy(options);
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(DELETION_VECTORS_ENABLED, true);
+                            options.set(WRITE_ONLY, true);
+                        });
 
         try (StreamTableWrite write = table.newWrite(commitUser);
                 StreamTableCommit commit = table.newCommit(commitUser)) {

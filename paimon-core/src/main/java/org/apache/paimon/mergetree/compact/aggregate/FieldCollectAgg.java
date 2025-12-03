@@ -86,7 +86,7 @@ public class FieldCollectAgg extends FieldAggregator {
     public Object aggReversed(Object accumulator, Object inputField) {
         // we don't need to actually do the reverse here for this agg
         // because accumulator has been distinct, just let accumulator be accumulator will speed up
-        // dinstinct process
+        // distinct process
         return agg(accumulator, inputField);
     }
 

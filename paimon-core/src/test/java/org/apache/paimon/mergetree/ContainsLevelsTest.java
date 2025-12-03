@@ -24,6 +24,7 @@ import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.FileIOFinder;
@@ -33,8 +34,10 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
+import org.apache.paimon.lookup.sort.SortLookupStoreFactory;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.mergetree.lookup.DefaultLookupSerializerFactory;
+import org.apache.paimon.mergetree.lookup.PersistEmptyProcessor;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -192,16 +195,19 @@ public class ContainsLevelsTest {
 
     private LookupLevels<Boolean> createContainsLevels(Levels levels, MemorySize maxDiskSize) {
         return new LookupLevels<>(
+                schemaId -> rowType,
+                0L,
                 levels,
                 comparator,
                 keyType,
-                new LookupLevels.ContainsValueProcessor(),
+                PersistEmptyProcessor.factory(),
+                new DefaultLookupSerializerFactory(),
                 file -> createReaderFactory().createRecordReader(file),
                 file -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
-                new HashLookupStoreFactory(
+                new SortLookupStoreFactory(
+                        new RowCompactedSerializer(keyType).createSliceComparator(),
                         new CacheManager(MemorySize.ofMebiBytes(1)),
-                        2048,
-                        0.75,
+                        4096,
                         new CompressOptions("none", 1)),
                 rowCount -> BloomFilter.builder(rowCount, 0.01),
                 LookupFile.createCache(Duration.ofHours(1), maxDiskSize));

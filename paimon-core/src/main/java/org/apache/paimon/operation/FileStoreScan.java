@@ -30,6 +30,7 @@ import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
 
@@ -75,6 +76,8 @@ public interface FileStoreScan {
 
     FileStoreScan withLevelFilter(Filter<Integer> levelFilter);
 
+    FileStoreScan withLevelMinMaxFilter(BiFilter<Integer, Integer> minMaxFilter);
+
     FileStoreScan enableValueFilter();
 
     FileStoreScan withManifestEntryFilter(Filter<ManifestEntry> filter);
@@ -86,6 +89,10 @@ public interface FileStoreScan {
     FileStoreScan dropStats();
 
     FileStoreScan keepStats();
+
+    FileStoreScan withRowIds(List<Long> indices);
+
+    FileStoreScan withReadType(RowType readType);
 
     @Nullable
     Integer parallelism();

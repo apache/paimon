@@ -18,7 +18,6 @@
 
 import unittest
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -41,7 +40,7 @@ class TestFileStoreCommit(unittest.TestCase):
         self.mock_table = Mock()
         self.mock_table.partition_keys = ['dt', 'region']
         self.mock_table.current_branch.return_value = 'main'
-        self.mock_table.table_path = Path('/test/table/path')
+        self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
 
         # Mock snapshot commit
@@ -76,7 +75,10 @@ class TestFileStoreCommit(unittest.TestCase):
             schema_id=0,
             level=0,
             extra_files=None,
-            creation_time=creation_time
+            creation_time=creation_time,
+            external_path=None,
+            first_row_id=None,
+            write_cols=None
         )
 
         commit_message = CommitMessage(
@@ -182,7 +184,10 @@ class TestFileStoreCommit(unittest.TestCase):
             schema_id=0,
             level=0,
             extra_files=None,
-            creation_time=creation_time
+            creation_time=creation_time,
+            external_path=None,
+            first_row_id=None,
+            write_cols=None
         )
 
         # File for partition 2
@@ -199,7 +204,10 @@ class TestFileStoreCommit(unittest.TestCase):
             schema_id=0,
             level=0,
             extra_files=None,
-            creation_time=creation_time
+            creation_time=creation_time,
+            external_path=None,
+            first_row_id=None,
+            write_cols=None
         )
 
         commit_message_1 = CommitMessage(
@@ -261,7 +269,10 @@ class TestFileStoreCommit(unittest.TestCase):
             schema_id=0,
             level=0,
             extra_files=None,
-            creation_time=creation_time
+            creation_time=creation_time,
+            external_path=None,
+            first_row_id=None,
+            write_cols=None
         )
 
         commit_message = CommitMessage(
@@ -389,7 +400,3 @@ class TestFileStoreCommit(unittest.TestCase):
                     file=file
                 ))
         return commit_entries
-
-
-if __name__ == '__main__':
-    unittest.main()

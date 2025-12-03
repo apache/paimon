@@ -33,6 +33,13 @@ public interface WritableColumnVector extends ColumnVector {
     /** Set nulls from rowId to rowId + count (exclude). */
     void setNulls(int rowId, int count);
 
+    default void appendNull() {
+        int elementsAppended = getElementsAppended();
+        reserve(elementsAppended + 1);
+        setNullAt(elementsAppended);
+        addElementsAppended(1);
+    }
+
     /** Fill the column vector with nulls. */
     void fillWithNulls();
 

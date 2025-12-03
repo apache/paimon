@@ -24,7 +24,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
-import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
@@ -162,7 +161,7 @@ public class RESTCatalogServer {
     private final String databaseUri;
 
     private final CatalogContext catalogContext;
-    private final FileSystemCatalog catalog;
+    private final RESTFileSystemCatalog catalog;
     private final MockWebServer server;
 
     private final Map<String, Database> databaseStore = new HashMap<>();
@@ -179,6 +178,8 @@ public class RESTCatalogServer {
     public final String warehouse;
 
     private final ResourcePaths resourcePaths;
+
+    private final List<Map<String, String>> receivedHeaders = new ArrayList<>();
 
     public RESTCatalogServer(
             String dataPath, AuthProvider authProvider, ConfigResponse config, String warehouse) {
@@ -200,7 +201,7 @@ public class RESTCatalogServer {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        this.catalog = new FileSystemCatalog(fileIO, warehousePath, catalogContext);
+        this.catalog = new RESTFileSystemCatalog(fileIO, warehousePath, catalogContext);
         Dispatcher dispatcher = initDispatcher(authProvider);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
@@ -275,6 +276,7 @@ public class RESTCatalogServer {
                 RESTResponse response;
                 try {
                     Map<String, String> headers = getHeader(request);
+                    receivedHeaders.add(new HashMap<>(headers));
                     String[] paths = request.getPath().split("\\?");
                     String resourcePath = paths[0];
                     Map<String, String> parameters =
@@ -681,6 +683,19 @@ public class RESTCatalogServer {
     }
 
     private MockResponse snapshotHandle(Identifier identifier) throws Exception {
+        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+        if (tableMetadata.isExternal()) {
+            ErrorResponse response =
+                    new ErrorResponse(
+                            ErrorResponse.RESOURCE_TYPE_TABLE,
+                            identifier.getFullName(),
+                            "external paimon table does not support get table snapshot in rest server",
+                            501);
+            return mockResponse(response, 404);
+        }
         RESTResponse response;
         Optional<TableSnapshot> snapshotOptional =
                 Optional.ofNullable(tableLatestSnapshotStore.get(identifier.getFullName()));
@@ -712,6 +727,7 @@ public class RESTCatalogServer {
     }
 
     private MockResponse loadSnapshot(Identifier identifier, String version) throws Exception {
+
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         SnapshotManager snapshotManager = table.snapshotManager();
         Snapshot snapshot = null;
@@ -1277,13 +1293,16 @@ public class RESTCatalogServer {
                         tableMetadata = createObjectTable(identifier, schema);
                     } else {
                         catalog.createTable(identifier, schema, false);
+                        boolean isExternal =
+                                schema.options() != null
+                                        && schema.options().containsKey(PATH.key());
                         tableMetadata =
                                 createTableMetadata(
                                         requestBody.getIdentifier(),
                                         0L,
                                         requestBody.getSchema(),
                                         UUID.randomUUID().toString(),
-                                        false);
+                                        isExternal);
                     }
                     tableMetadataStore.put(
                             requestBody.getIdentifier().getFullName(), tableMetadata);
@@ -1508,10 +1527,16 @@ public class RESTCatalogServer {
                 alterTableImpl(identifier, requestBody.getChanges());
                 return new MockResponse().setResponseCode(200);
             case "DELETE":
-                try {
-                    catalog.dropTable(identifier, false);
-                } catch (Exception e) {
-                    System.out.println(e.getMessage());
+                if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+                    return new MockResponse().setResponseCode(404);
+                }
+                tableMetadata = tableMetadataStore.get(identifier.getFullName());
+                if (!tableMetadata.isExternal()) {
+                    try {
+                        catalog.dropTable(identifier, false);
+                    } catch (Exception e) {
+                        System.out.println(e.getMessage());
+                    }
                 }
                 tableMetadataStore.remove(identifier.getFullName());
                 tableLatestSnapshotStore.remove(identifier.getFullName());
@@ -1530,7 +1555,7 @@ public class RESTCatalogServer {
             throw new Catalog.TableNoPermissionException(fromTable);
         } else if (tableMetadataStore.containsKey(fromTable.getFullName())) {
             TableMetadata tableMetadata = tableMetadataStore.get(fromTable.getFullName());
-            if (!isFormatTable(tableMetadata.schema().toSchema())) {
+            if (!isFormatTable(tableMetadata.schema().toSchema()) && !tableMetadata.isExternal()) {
                 catalog.renameTable(requestBody.getSource(), requestBody.getDestination(), false);
             }
             if (tableMetadataStore.containsKey(toTable.getFullName())) {
@@ -2064,6 +2089,17 @@ public class RESTCatalogServer {
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws Catalog.TableNotExistException {
+        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        boolean isExternal = tableMetadataStore.get(identifier.getFullName()).isExternal();
+        if (isExternal) {
+            new ErrorResponse(
+                    ErrorResponse.RESOURCE_TYPE_TABLE,
+                    identifier.getFullName(),
+                    "external paimon table does not support commit in rest server",
+                    501);
+        }
         FileStoreTable table = getFileTable(identifier);
         if (!tableId.equals(table.catalogEnvironment().uuid())) {
             throw new Catalog.TableNotExistException(identifier);
@@ -2221,7 +2257,10 @@ public class RESTCatalogServer {
     private TableMetadata createTableMetadata(
             Identifier identifier, long schemaId, Schema schema, String uuid, boolean isExternal) {
         Map<String, String> options = new HashMap<>(schema.options());
-        Path path = catalog.getTableLocation(identifier);
+        Path path =
+                isExternal && Objects.nonNull(schema.options().get(PATH.key()))
+                        ? new Path(schema.options().get(PATH.key()))
+                        : catalog.getTableLocation(identifier);
         String restPath = path.toString();
         if (this.configResponse
                 .getDefaults()
@@ -2259,27 +2298,22 @@ public class RESTCatalogServer {
         return createTableMetadata(identifier, 1L, newSchema, UUID.randomUUID().toString(), false);
     }
 
-    private FileStoreTable getFileTable(Identifier identifier)
-            throws Catalog.TableNotExistException {
-        if (tableMetadataStore.containsKey(identifier.getFullName())) {
-            TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
-            TableSchema schema = tableMetadata.schema();
-            CatalogEnvironment catalogEnv =
-                    new CatalogEnvironment(
-                            identifier,
-                            tableMetadata.uuid(),
-                            catalog.catalogLoader(),
-                            catalog.lockFactory().orElse(null),
-                            catalog.lockContext().orElse(null),
-                            catalogContext,
-                            false);
-            Path path = new Path(schema.options().get(PATH.key()));
-            FileIO dataFileIO = catalog.fileIO();
-            FileStoreTable table =
-                    FileStoreTableFactory.create(dataFileIO, path, schema, catalogEnv);
-            return table;
-        }
-        throw new Catalog.TableNotExistException(identifier);
+    private FileStoreTable getFileTable(Identifier identifier) {
+        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+        TableSchema schema = tableMetadata.schema();
+        CatalogEnvironment catalogEnv =
+                new CatalogEnvironment(
+                        identifier,
+                        tableMetadata.uuid(),
+                        catalog.catalogLoader(),
+                        catalog.lockFactory().orElse(null),
+                        catalog.lockContext().orElse(null),
+                        catalogContext,
+                        false);
+        Path path = new Path(schema.options().get(PATH.key()));
+        FileIO dataFileIO = catalog.fileIO();
+        FileStoreTable table = FileStoreTableFactory.create(dataFileIO, path, schema, catalogEnv);
+        return table;
     }
 
     private static int getMaxResults(Map<String, String> parameters) {
@@ -2374,5 +2408,13 @@ public class RESTCatalogServer {
                                 "Invalid input for queryParameter maxResults: %s", maxResults),
                         400),
                 400);
+    }
+
+    public List<Map<String, String>> getReceivedHeaders() {
+        return receivedHeaders;
+    }
+
+    public void clearReceivedHeaders() {
+        receivedHeaders.clear();
     }
 }

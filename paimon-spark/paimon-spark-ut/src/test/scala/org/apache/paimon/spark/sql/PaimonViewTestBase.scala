@@ -155,4 +155,42 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
       }
     }
   }
+
+  test("Paimon View: create temp view") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("test_db") {
+      sql("CREATE DATABASE test_db")
+      sql("USE test_db")
+      withTable("t") {
+        withTempView("v1") {
+          sql("CREATE TABLE t (id INT) USING paimon")
+          sql("INSERT INTO t VALUES (1), (2)")
+
+          sql("CREATE TEMPORARY VIEW v1 AS SELECT * FROM t")
+          checkAnswer(sql("SELECT * FROM v1"), Seq(Row(1), Row(2)))
+          checkAnswer(sql("SELECT * FROM v1 WHERE id >= (SELECT max(id) FROM v1)"), Seq(Row(2)))
+
+          sql("CREATE OR REPLACE TEMPORARY VIEW v1 AS SELECT * FROM t WHERE id < 2")
+          checkAnswer(sql("SELECT * FROM v1"), Seq(Row(1)))
+        }
+      }
+    }
+  }
+
+  test("Paimon View: drop temp view") {
+    sql(s"USE $paimonHiveCatalogName")
+    withDatabase("test_db") {
+      sql("CREATE DATABASE test_db")
+      sql("USE test_db")
+      withTable("t") {
+        withTempView("v1") {
+          sql("CREATE TABLE t (id INT) USING paimon")
+          sql("INSERT INTO t VALUES (1), (2)")
+
+          sql("CREATE TEMPORARY VIEW v1 AS SELECT * FROM t")
+          sql("DROP VIEW v1")
+        }
+      }
+    }
+  }
 }

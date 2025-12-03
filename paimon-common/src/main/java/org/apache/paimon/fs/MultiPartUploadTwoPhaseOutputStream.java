@@ -37,26 +37,40 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             LoggerFactory.getLogger(MultiPartUploadTwoPhaseOutputStream.class);
 
     private final ByteArrayOutputStream buffer;
-    private final List<T> uploadedParts;
     private final MultiPartUploadStore<T, C> multiPartUploadStore;
-    private final String objectName;
 
-    private String uploadId;
-    private long position;
+    protected final String objectName;
+    protected final Path targetPath;
+    protected final String uploadId;
+
+    protected List<T> uploadedParts;
+    protected long position;
+
     private boolean closed = false;
+    private Committer committer;
 
     public MultiPartUploadTwoPhaseOutputStream(
-            MultiPartUploadStore<T, C> multiPartUploadStore, org.apache.hadoop.fs.Path hadoopPath)
+            MultiPartUploadStore<T, C> multiPartUploadStore,
+            org.apache.hadoop.fs.Path hadoopPath,
+            Path path)
             throws IOException {
         this.multiPartUploadStore = multiPartUploadStore;
         this.buffer = new ByteArrayOutputStream();
         this.uploadedParts = new ArrayList<>();
         this.objectName = multiPartUploadStore.pathToObject(hadoopPath);
+        this.targetPath = path;
         this.uploadId = multiPartUploadStore.startMultiPartUpload(objectName);
         this.position = 0;
     }
 
-    public abstract long partSizeThreshold();
+    // OSS limit:  100KB ~ 5GB
+    // S3 limit:  5MiB ~ 5GiB
+    // Considering memory usage, and referencing Flink's setting of 10MiB.
+    public int partSizeThreshold() {
+        return 10 << 20;
+    }
+
+    public abstract Committer committer();
 
     @Override
     public long getPos() throws IOException {
@@ -70,9 +84,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         }
         buffer.write(b);
         position++;
-        if (buffer.size() >= partSizeThreshold()) {
-            uploadPart();
-        }
+        uploadPartIfLargerThanThreshold();
     }
 
     @Override
@@ -85,10 +97,18 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         if (closed) {
             throw new IOException("Stream is closed");
         }
-        buffer.write(b, off, len);
-        position += len;
-        if (buffer.size() >= partSizeThreshold()) {
-            uploadPart();
+        int remaining = len;
+        int offset = off;
+        while (remaining > 0) {
+            uploadPartIfLargerThanThreshold();
+            int currentSize = buffer.size();
+            int space = partSizeThreshold() - currentSize;
+            int count = Math.min(remaining, space);
+            buffer.write(b, offset, count);
+            offset += count;
+            remaining -= count;
+            position += count;
+            uploadPartIfLargerThanThreshold();
         }
     }
 
@@ -97,56 +117,60 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         if (closed) {
             throw new IOException("Stream is closed");
         }
+        uploadPartIfLargerThanThreshold();
     }
 
     @Override
     public void close() throws IOException {
-        if (!closed) {
-            Committer committer = closeForCommit();
-            committer.commit();
+        if (!closed && this.committer == null) {
+            this.committer = closeForCommit();
         }
     }
 
     @Override
     public Committer closeForCommit() throws IOException {
-        if (closed) {
-            throw new IOException("Stream is already closed");
+        if (closed && this.committer != null) {
+            return this.committer;
+        } else if (closed) {
+            throw new IOException("Stream is already closed but committer is null");
         }
         closed = true;
-
-        if (buffer.size() > 0) {
-            uploadPart();
-        }
-
-        return new MultiPartUploadCommitter(
-                multiPartUploadStore, uploadId, uploadedParts, objectName, position);
+        // Only last upload part can be smaller than part size threshold
+        uploadPartUtil();
+        return committer();
     }
 
-    private void uploadPart() throws IOException {
+    private void uploadPartIfLargerThanThreshold() throws IOException {
+        if (buffer.size() >= partSizeThreshold()) {
+            uploadPartUtil();
+        }
+    }
+
+    private void uploadPartUtil() throws IOException {
         if (buffer.size() == 0) {
             return;
         }
 
         File tempFile = null;
+        int partNumber = uploadedParts.size() + 1;
         try {
-            byte[] data = buffer.toByteArray();
             tempFile = Files.createTempFile("multi-part-" + UUID.randomUUID(), ".tmp").toFile();
             try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-                fos.write(data);
+                buffer.writeTo(fos);
                 fos.flush();
             }
             T partETag =
                     multiPartUploadStore.uploadPart(
-                            objectName, uploadId, uploadedParts.size() + 1, tempFile, data.length);
+                            objectName,
+                            uploadId,
+                            partNumber,
+                            tempFile,
+                            checkedDownCast(tempFile.length()));
             uploadedParts.add(partETag);
             buffer.reset();
         } catch (Exception e) {
             throw new IOException(
-                    "Failed to upload part "
-                            + (uploadedParts.size() + 1)
-                            + " for upload ID: "
-                            + uploadId,
-                    e);
+                    "Failed to upload part " + partNumber + " for upload ID: " + uploadId, e);
         } finally {
             if (tempFile != null && tempFile.exists()) {
                 if (!tempFile.delete()) {
@@ -156,67 +180,12 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         }
     }
 
-    private static class MultiPartUploadCommitter<T, C> implements Committer {
-
-        private final MultiPartUploadStore<T, C> multiPartUploadStore;
-        private final String uploadId;
-        private final String objectName;
-        private final List<T> uploadedParts;
-        private final long byteLength;
-        private boolean committed = false;
-        private boolean discarded = false;
-
-        public MultiPartUploadCommitter(
-                MultiPartUploadStore<T, C> multiPartUploadStore,
-                String uploadId,
-                List<T> uploadedParts,
-                String objectName,
-                long byteLength) {
-            this.multiPartUploadStore = multiPartUploadStore;
-            this.uploadId = uploadId;
-            this.objectName = objectName;
-            this.uploadedParts = new ArrayList<>(uploadedParts);
-            this.byteLength = byteLength;
+    private static int checkedDownCast(long value) {
+        int downCast = (int) value;
+        if (downCast != value) {
+            throw new IllegalArgumentException(
+                    "Cannot downcast long value " + value + " to integer.");
         }
-
-        @Override
-        public void commit() throws IOException {
-            if (committed) {
-                return;
-            }
-            if (discarded) {
-                throw new IOException("Cannot commit: committer has been discarded");
-            }
-
-            try {
-                multiPartUploadStore.completeMultipartUpload(
-                        objectName, uploadId, uploadedParts, byteLength);
-                committed = true;
-                LOG.info(
-                        "Successfully committed multipart upload with ID: {} for objectName: {}",
-                        uploadId,
-                        objectName);
-            } catch (Exception e) {
-                throw new IOException("Failed to commit multipart upload with ID: " + uploadId, e);
-            }
-        }
-
-        @Override
-        public void discard() throws IOException {
-            if (discarded) {
-                return;
-            }
-
-            try {
-                multiPartUploadStore.abortMultipartUpload(objectName, uploadId);
-                discarded = true;
-                LOG.info(
-                        "Successfully discarded multipart upload with ID: {} for objectName: {}",
-                        uploadId,
-                        objectName);
-            } catch (Exception e) {
-                LOG.warn("Failed to discard multipart upload with ID: {}", uploadId, e);
-            }
-        }
+        return downCast;
     }
 }

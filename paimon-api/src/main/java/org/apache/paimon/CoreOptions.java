@@ -229,6 +229,8 @@ public class CoreOptions implements Serializable {
     public static final String FILE_FORMAT_ORC = "orc";
     public static final String FILE_FORMAT_AVRO = "avro";
     public static final String FILE_FORMAT_PARQUET = "parquet";
+    public static final String FILE_FORMAT_CSV = "csv";
+    public static final String FILE_FORMAT_JSON = "json";
 
     public static final ConfigOption<String> FILE_FORMAT =
             key("file.format")
@@ -623,6 +625,16 @@ public class CoreOptions implements Serializable {
                                             text("append table: the default value is 256 MB."))
                                     .build());
 
+    public static final ConfigOption<MemorySize> BLOB_TARGET_FILE_SIZE =
+            key("blob.target-file-size")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Target size of a blob file. Default is value of TARGET_FILE_SIZE.")
+                                    .build());
+
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
             key("num-sorted-run.compaction-trigger")
                     .intType()
@@ -995,12 +1007,20 @@ public class CoreOptions implements Serializable {
                             "Whether only overwrite dynamic partition when overwriting a partitioned table with "
                                     + "dynamic partition columns. Works only when the table has partition keys.");
 
-    public static final ConfigOption<PartitionExpireStrategy> PARTITION_EXPIRATION_STRATEGY =
+    public static final ConfigOption<String> PARTITION_EXPIRATION_STRATEGY =
             key("partition.expiration-strategy")
-                    .enumType(PartitionExpireStrategy.class)
-                    .defaultValue(PartitionExpireStrategy.VALUES_TIME)
+                    .stringType()
+                    .defaultValue("values-time")
                     .withDescription(
-                            "The strategy determines how to extract the partition time and compare it with the current time.");
+                            Description.builder()
+                                    .text(
+                                            "The strategy determines how to extract the partition time and compare it with the current time.")
+                                    .list(
+                                            text(
+                                                    "\"values-time\": This strategy compares the time extracted from the partition value with the current time."),
+                                            text(
+                                                    "\"update-time\": This strategy compares the last update time of the partition with the current time."))
+                                    .build());
 
     public static final ConfigOption<Duration> PARTITION_EXPIRATION_TIME =
             key("partition.expiration-time")
@@ -1111,12 +1131,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Define partition by table options, cannot define partition on DDL and table options at the same time.");
 
-    public static final ConfigOption<LookupLocalFileType> LOOKUP_LOCAL_FILE_TYPE =
-            key("lookup.local-file-type")
-                    .enumType(LookupLocalFileType.class)
-                    .defaultValue(LookupLocalFileType.SORT)
-                    .withDescription("The local file type for lookup.");
-
     public static final ConfigOption<Float> LOOKUP_HASH_LOAD_FACTOR =
             key("lookup.hash-load-factor")
                     .floatType()
@@ -1172,6 +1186,20 @@ public class CoreOptions implements Serializable {
                     .defaultValue(0.05)
                     .withDescription(
                             "Define the default false positive probability for lookup cache bloom filters.");
+
+    public static final ConfigOption<Boolean> LOOKUP_REMOTE_FILE_ENABLED =
+            key("lookup.remote-file.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to enable the remote file for lookup.");
+
+    public static final ConfigOption<Integer> LOOKUP_REMOTE_LEVEL_THRESHOLD =
+            key("lookup.remote-file.level-threshold")
+                    .intType()
+                    .defaultValue(Integer.MIN_VALUE)
+                    .withDescription(
+                            "Level threshold of lookup to generate remote lookup files. "
+                                    + "Level files below this threshold will not generate remote lookup files.");
 
     public static final ConfigOption<Integer> READ_BATCH_SIZE =
             key("read.batch-size")
@@ -1316,6 +1344,13 @@ public class CoreOptions implements Serializable {
                             "Used to specify the end tag (inclusive), and Paimon will find an earlier tag and return changes between them. "
                                     + "If the tag doesn't exist or the earlier tag doesn't exist, return empty. "
                                     + "This option requires 'tag.creation-period' and 'tag.period-formatter' configured.");
+
+    public static final ConfigOption<Boolean> INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT =
+            key("incremental-between-tag-to-snapshot")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to read incremental changes between the snapshot corresponding to the tag.");
 
     public static final ConfigOption<Boolean> END_INPUT_CHECK_PARTITION_EXPIRE =
             key("end-input.check-partition-expire")
@@ -1674,6 +1709,12 @@ public class CoreOptions implements Serializable {
                                     + " vectors are generated when data is written, which marks the data for deletion."
                                     + " During read operations, by applying these index files, merging can be avoided.");
 
+    public static final ConfigOption<Boolean> DELETION_VECTORS_MODIFIABLE =
+            key("deletion-vectors.modifiable")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to enable modifying deletion vectors mode.");
+
     public static final ConfigOption<MemorySize> DELETION_VECTOR_INDEX_FILE_TARGET_SIZE =
             key("deletion-vector.index-file.target-size")
                     .memoryType()
@@ -1908,8 +1949,9 @@ public class CoreOptions implements Serializable {
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "If set, committer will check if there are other commit user's COMPACT / OVERWRITE snapshot, "
-                                    + "starting from the snapshot after this one. If found, commit will be aborted. "
+                            "If set, committer will check if there are other commit user's snapshot starting from the "
+                                    + "snapshot after this one. If found a COMPACT / OVERWRITE snapshot, or found a "
+                                    + "APPEND snapshot which committed files to fixed bucket, commit will be aborted."
                                     + "If the value of this option is -1, committer will not check for its first commit.");
 
     public static final ConfigOption<String> CLUSTERING_COLUMNS =
@@ -1939,6 +1981,21 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether enable incremental clustering.");
+
+    public static final ConfigOption<Integer> CLUSTERING_HISTORY_PARTITION_LIMIT =
+            key("clustering.history-partition.limit")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription(
+                            "The limit of history partition number for automatically performing full clustering.");
+
+    public static final ConfigOption<Duration> CLUSTERING_HISTORY_PARTITION_IDLE_TIME =
+            key("clustering.history-partition.idle-to-full-sort")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The duration after which a partition without new updates is considered a historical partition. "
+                                    + "Historical partitions will be automatically fully clustered during the cluster operation.");
 
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
@@ -1981,7 +2038,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<FormatTableImplementation> FORMAT_TABLE_IMPLEMENTATION =
             key("format-table.implementation")
                     .enumType(FormatTableImplementation.class)
-                    .defaultValue(FormatTableImplementation.ENGINE)
+                    .defaultValue(FormatTableImplementation.PAIMON)
                     .withDescription("Format table uses paimon or engine.");
 
     public static final ConfigOption<Boolean> FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH =
@@ -1989,6 +2046,18 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Format table file path only contain partition value.");
+
+    public static final ConfigOption<String> FORMAT_TABLE_FILE_COMPRESSION =
+            ConfigOptions.key("format-table.file.compression")
+                    .stringType()
+                    .noDefaultValue()
+                    .withFallbackKeys(FILE_COMPRESSION.key())
+                    .withDescription("Format table file compression.");
+    public static final ConfigOption<String> FORMAT_TABLE_COMMIT_HIVE_SYNC_URI =
+            ConfigOptions.key("format-table.commit-hive-sync-url")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Format table commit hive sync uri.");
 
     public static final ConfigOption<String> BLOB_FIELD =
             key("blob-field")
@@ -2002,6 +2071,25 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
+
+    public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
+            key("commit.discard-duplicate-files")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether discard duplicate files in commit.");
+
+    public static final ConfigOption<Boolean> POSTPONE_BATCH_WRITE_FIXED_BUCKET =
+            key("postpone.batch-write-fixed-bucket")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to write the data into fixed bucket for batch writing a postpone bucket table.");
+
+    public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
+            key("global-index.row-count-per-shard")
+                    .longType()
+                    .defaultValue(100000L)
+                    .withDescription("Row count per shard for global index.");
 
     private final Options options;
 
@@ -2249,6 +2337,33 @@ public class CoreOptions implements Serializable {
         return options.get(FILE_COMPRESSION);
     }
 
+    public String formatTableFileCompression() {
+        if (options.containsKey(FILE_COMPRESSION.key())) {
+            return options.get(FILE_COMPRESSION.key());
+        } else if (options.containsKey(FORMAT_TABLE_FILE_COMPRESSION.key())) {
+            return options.get(FORMAT_TABLE_FILE_COMPRESSION.key());
+        } else {
+            String format = formatType();
+            switch (format) {
+                case FILE_FORMAT_PARQUET:
+                    return "snappy";
+                case FILE_FORMAT_AVRO:
+                case FILE_FORMAT_ORC:
+                    return "zstd";
+                case FILE_FORMAT_CSV:
+                case FILE_FORMAT_JSON:
+                    return "none";
+                default:
+                    throw new UnsupportedOperationException(
+                            String.format("Unsupported format: %s", format));
+            }
+        }
+    }
+
+    public String formatTableCommitSyncPartitionHiveUri() {
+        return options.get(FORMAT_TABLE_COMMIT_HIVE_SYNC_URI);
+    }
+
     public MemorySize fileReaderAsyncThreshold() {
         return options.get(FILE_READER_ASYNC_THRESHOLD);
     }
@@ -2420,12 +2535,16 @@ public class CoreOptions implements Serializable {
         return (int) options.get(CACHE_PAGE_SIZE).getBytes();
     }
 
-    public LookupLocalFileType lookupLocalFileType() {
-        return options.get(LOOKUP_LOCAL_FILE_TYPE);
-    }
-
     public MemorySize lookupCacheMaxMemory() {
         return options.get(LOOKUP_CACHE_MAX_MEMORY_SIZE);
+    }
+
+    public boolean lookupRemoteFileEnabled() {
+        return options.get(LOOKUP_REMOTE_FILE_ENABLED);
+    }
+
+    public int lookupRemoteLevelThreshold() {
+        return options.get(LOOKUP_REMOTE_LEVEL_THRESHOLD);
     }
 
     public double lookupCacheHighPrioPoolRatio() {
@@ -2436,6 +2555,12 @@ public class CoreOptions implements Serializable {
         return options.getOptional(TARGET_FILE_SIZE)
                 .orElse(hasPrimaryKey ? VALUE_128_MB : VALUE_256_MB)
                 .getBytes();
+    }
+
+    public long blobTargetFileSize() {
+        return options.getOptional(BLOB_TARGET_FILE_SIZE)
+                .map(MemorySize::getBytes)
+                .orElse(targetFileSize(false));
     }
 
     public long compactionFileSize(boolean hasPrimaryKey) {
@@ -2673,6 +2798,10 @@ public class CoreOptions implements Serializable {
         return options.get(INCREMENTAL_TO_AUTO_TAG);
     }
 
+    public boolean incrementalBetweenTagToSnapshot() {
+        return options.get(INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT);
+    }
+
     public Integer scanManifestParallelism() {
         return options.get(SCAN_MANIFEST_PARALLELISM);
     }
@@ -2695,7 +2824,11 @@ public class CoreOptions implements Serializable {
 
     public List<String> sequenceField() {
         return options.getOptional(SEQUENCE_FIELD)
-                .map(s -> Arrays.asList(s.split(",")))
+                .map(
+                        s ->
+                                Arrays.stream(s.split(","))
+                                        .map(String::trim)
+                                        .collect(Collectors.toList()))
                 .orElse(Collections.emptyList());
     }
 
@@ -2740,7 +2873,7 @@ public class CoreOptions implements Serializable {
                 .orElse(options.get(PARTITION_EXPIRATION_MAX_NUM));
     }
 
-    public PartitionExpireStrategy partitionExpireStrategy() {
+    public String partitionExpireStrategy() {
         return options.get(PARTITION_EXPIRATION_STRATEGY);
     }
 
@@ -2892,6 +3025,10 @@ public class CoreOptions implements Serializable {
         return callbacks(TAG_CALLBACKS, TAG_CALLBACK_PARAM);
     }
 
+    public boolean commitDiscardDuplicateFiles() {
+        return options.get(COMMIT_DISCARD_DUPLICATE_FILES);
+    }
+
     private Map<String, String> callbacks(
             ConfigOption<String> callbacks, ConfigOption<String> callbackParam) {
         Map<String, String> result = new HashMap<>();
@@ -3037,6 +3174,14 @@ public class CoreOptions implements Serializable {
         return options.get(CLUSTERING_INCREMENTAL);
     }
 
+    public Duration clusteringHistoryPartitionIdleTime() {
+        return options.get(CLUSTERING_HISTORY_PARTITION_IDLE_TIME);
+    }
+
+    public int clusteringHistoryPartitionLimit() {
+        return options.get(CLUSTERING_HISTORY_PARTITION_LIMIT);
+    }
+
     public OrderType clusteringStrategy(int columnSize) {
         return clusteringStrategy(options.get(CLUSTERING_STRATEGY), columnSize);
     }
@@ -3080,6 +3225,14 @@ public class CoreOptions implements Serializable {
 
     public boolean blobAsDescriptor() {
         return options.get(BLOB_AS_DESCRIPTOR);
+    }
+
+    public boolean postponeBatchWriteFixedBucket() {
+        return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET);
+    }
+
+    public long globalIndexRowCountPerShard() {
+        return options.get(GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -3678,38 +3831,6 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    /** Specifies the expiration strategy for partition expiration. */
-    public enum PartitionExpireStrategy implements DescribedEnum {
-        VALUES_TIME(
-                "values-time",
-                "This strategy compares the time extracted from the partition value with the current time."),
-
-        UPDATE_TIME(
-                "update-time",
-                "This strategy compares the last update time of the partition with the current time."),
-
-        CUSTOM("custom", "This strategy use custom class to expire partitions.");
-
-        private final String value;
-
-        private final String description;
-
-        PartitionExpireStrategy(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
-
     /** Specifies the strategy for selecting external storage paths. */
     public enum ExternalPathStrategy implements DescribedEnum {
         NONE(
@@ -3729,32 +3850,6 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         ExternalPathStrategy(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
-
-    /** Specifies the local file type for lookup. */
-    public enum LookupLocalFileType implements DescribedEnum {
-        SORT("sort", "Construct a sorted file for lookup."),
-
-        HASH("hash", "Construct a hash file for lookup.");
-
-        private final String value;
-
-        private final String description;
-
-        LookupLocalFileType(String value, String description) {
             this.value = value;
             this.description = description;
         }

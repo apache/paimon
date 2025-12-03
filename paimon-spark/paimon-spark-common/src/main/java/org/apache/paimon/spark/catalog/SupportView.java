@@ -41,7 +41,7 @@ public interface SupportView extends WithPaimonCatalog {
 
     default List<String> listViews(String[] namespace) throws NoSuchNamespaceException {
         try {
-            checkNamespace(namespace);
+            checkNamespace(namespace, paimonCatalogName());
             return paimonCatalog().listViews(namespace[0]);
         } catch (Catalog.DatabaseNotExistException e) {
             throw new NoSuchNamespaceException(namespace);
@@ -49,7 +49,7 @@ public interface SupportView extends WithPaimonCatalog {
     }
 
     default View loadView(Identifier ident) throws Catalog.ViewNotExistException {
-        return paimonCatalog().getView(toIdentifier(ident));
+        return paimonCatalog().getView(toIdentifier(ident, paimonCatalogName()));
     }
 
     default void createView(
@@ -60,7 +60,7 @@ public interface SupportView extends WithPaimonCatalog {
             Map<String, String> properties,
             Boolean ignoreIfExists)
             throws NoSuchNamespaceException {
-        org.apache.paimon.catalog.Identifier paimonIdent = toIdentifier(ident);
+        org.apache.paimon.catalog.Identifier paimonIdent = toIdentifier(ident, paimonCatalogName());
         try {
             paimonCatalog()
                     .createView(
@@ -80,9 +80,9 @@ public interface SupportView extends WithPaimonCatalog {
         }
     }
 
-    default void dropView(Identifier ident, Boolean ignoreIfExists) {
+    default void dropView(Identifier ident, Boolean ignoreIfNotExists) {
         try {
-            paimonCatalog().dropView(toIdentifier(ident), ignoreIfExists);
+            paimonCatalog().dropView(toIdentifier(ident, paimonCatalogName()), ignoreIfNotExists);
         } catch (Catalog.ViewNotExistException e) {
             throw new RuntimeException("view not exists: " + ident, e);
         }

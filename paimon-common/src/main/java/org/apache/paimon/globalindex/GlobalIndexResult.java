@@ -1,0 +1,71 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.globalindex;
+
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+import java.util.Set;
+
+/**
+ * Global index result represents row ids.
+ *
+ * <p>TODO introduce ranges interface
+ */
+public interface GlobalIndexResult extends Iterable<Long> {
+
+    static GlobalIndexResult createEmpty() {
+        return () ->
+                new Iterator<Long>() {
+                    @Override
+                    public boolean hasNext() {
+                        return false;
+                    }
+
+                    @Override
+                    public Long next() {
+                        throw new NoSuchElementException();
+                    }
+                };
+    }
+
+    default GlobalIndexResult and(GlobalIndexResult other) {
+        Set<Long> set = new HashSet<>();
+        this.forEach(set::add);
+
+        Set<Long> result = new HashSet<>();
+        for (Long l : other) {
+            if (set.contains(l)) {
+                result.add(l);
+            }
+        }
+        return wrap(result);
+    }
+
+    default GlobalIndexResult or(GlobalIndexResult other) {
+        Set<Long> result = new HashSet<>();
+        this.forEach(result::add);
+        other.forEach(result::add);
+        return wrap(result);
+    }
+
+    static GlobalIndexResult wrap(Set<Long> longs) {
+        return longs::iterator;
+    }
+}

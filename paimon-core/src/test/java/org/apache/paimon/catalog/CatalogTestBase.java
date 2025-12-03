@@ -41,7 +41,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.format.FormatTableWrite;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -576,6 +575,56 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testFormatTableFileCompression() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        String dbName = "test_format_table_file_compression";
+        catalog.createDatabase(dbName, true);
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.option("type", "format-table");
+        Pair[] format2ExpectDefaultFileCompression = {
+            Pair.of("csv", "none"),
+            Pair.of("parquet", "snappy"),
+            Pair.of("json", "none"),
+            Pair.of("orc", "zstd")
+        };
+        for (Pair<String, String> format2Compression : format2ExpectDefaultFileCompression) {
+            Identifier identifier =
+                    Identifier.create(
+                            dbName,
+                            "partition_table_file_compression_" + format2Compression.getKey());
+            schemaBuilder.option("file.format", format2Compression.getKey());
+            catalog.createTable(identifier, schemaBuilder.build(), true);
+            String fileCompression =
+                    new CoreOptions(catalog.getTable(identifier).options())
+                            .formatTableFileCompression();
+
+            assertEquals(fileCompression, format2Compression.getValue());
+        }
+        // table has option file.compression
+        String expectFileCompression = "gzip";
+        schemaBuilder.option("file.format", "csv");
+        schemaBuilder.option("file.compression", expectFileCompression);
+        Identifier identifier = Identifier.create(dbName, "partition_table_file_compression_a");
+        catalog.createTable(identifier, schemaBuilder.build(), true);
+        String fileCompression =
+                new CoreOptions(catalog.getTable(identifier).options())
+                        .formatTableFileCompression();
+        assertEquals(fileCompression, expectFileCompression);
+
+        // table has option format-table.file.compression
+        schemaBuilder.option("format-table.file.compression", expectFileCompression);
+        identifier = Identifier.create(dbName, "partition_table_file_compression_b");
+        catalog.createTable(identifier, schemaBuilder.build(), true);
+        fileCompression =
+                new CoreOptions(catalog.getTable(identifier).options())
+                        .formatTableFileCompression();
+        assertEquals(fileCompression, expectFileCompression);
+    }
+
+    @Test
     public void testFormatTableOnlyPartitionValueRead() throws Exception {
         if (!supportsFormatTable()) {
             return;
@@ -583,7 +632,6 @@ public abstract class CatalogTestBase {
         Random random = new Random();
         String dbName = "test_db";
         catalog.createDatabase(dbName, true);
-        HadoopCompressionType compressionType = HadoopCompressionType.GZIP;
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f1", DataTypes.INT());
         schemaBuilder.column("f2", DataTypes.INT());
@@ -591,14 +639,20 @@ public abstract class CatalogTestBase {
         schemaBuilder.column("dt2", DataTypes.VARCHAR(64));
         schemaBuilder.partitionKeys("dt", "dt2");
         schemaBuilder.option("type", "format-table");
-        schemaBuilder.option("file.compression", compressionType.value());
         schemaBuilder.option("format-table.partition-path-only-value", "true");
-        String[] formats = {"csv", "parquet", "json"};
+        Pair[] format2Compressions = {
+            Pair.of("csv", HadoopCompressionType.GZIP),
+            Pair.of("parquet", HadoopCompressionType.ZSTD),
+            Pair.of("json", HadoopCompressionType.GZIP),
+            Pair.of("orc", HadoopCompressionType.ZSTD)
+        };
         int dtPartitionValue = 10;
         String dt2PartitionValue = "2022-01-01";
-        for (String format : formats) {
-            Identifier identifier = Identifier.create(dbName, "partition_table_" + format);
-            schemaBuilder.option("file.format", format);
+        for (Pair<String, HadoopCompressionType> format2Compression : format2Compressions) {
+            Identifier identifier =
+                    Identifier.create(dbName, "partition_table_" + format2Compression.getKey());
+            schemaBuilder.option("file.compression", format2Compression.getValue().value());
+            schemaBuilder.option("file.format", format2Compression.getKey());
             catalog.createTable(identifier, schemaBuilder.build(), true);
             FormatTable table = (FormatTable) catalog.getTable(identifier);
             int size = 5;
@@ -619,7 +673,7 @@ public abstract class CatalogTestBase {
             partitionSpec.put("dt2", dt2PartitionValue + 1);
             List<InternalRow> readFilterData = read(table, null, null, partitionSpec, null);
             assertThat(readFilterData).isEmpty();
-            catalog.dropTable(Identifier.create(dbName, format), true);
+            catalog.dropTable(identifier, true);
         }
     }
 
@@ -633,26 +687,31 @@ public abstract class CatalogTestBase {
         String dbName = "test_db";
         catalog.createDatabase(dbName, true);
         int partitionValue = 10;
-        HadoopCompressionType compressionType = HadoopCompressionType.GZIP;
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f1", DataTypes.INT());
         schemaBuilder.column("f2", DataTypes.INT());
         schemaBuilder.column("dt", DataTypes.INT());
         schemaBuilder.option("type", "format-table");
         schemaBuilder.option("target-file-size", "1 kb");
-        schemaBuilder.option("file.compression", compressionType.value());
-        String[] formats = {"csv", "parquet", "json"};
-        for (String format : formats) {
+        Pair[] format2Compressions = {
+            Pair.of("csv", HadoopCompressionType.GZIP),
+            Pair.of("parquet", HadoopCompressionType.ZSTD),
+            Pair.of("json", HadoopCompressionType.GZIP),
+            Pair.of("orc", HadoopCompressionType.ZSTD)
+        };
+        for (Pair<String, HadoopCompressionType> format2Compression : format2Compressions) {
             if (partitioned) {
                 schemaBuilder.partitionKeys("dt");
             }
-            Identifier identifier = Identifier.create(dbName, "table_" + format);
-            schemaBuilder.option("file.format", format);
+            Identifier identifier =
+                    Identifier.create(dbName, "table_" + format2Compression.getKey());
+            schemaBuilder.option("file.format", format2Compression.getKey());
+            schemaBuilder.option("file.compression", format2Compression.getValue().value());
             catalog.createTable(identifier, schemaBuilder.build(), true);
             FormatTable table = (FormatTable) catalog.getTable(identifier);
             int[] projection = new int[] {1, 2};
-            PredicateBuilder builder = new PredicateBuilder(table.rowType().project(projection));
-            Predicate predicate = builder.greaterOrEqual(0, 10);
+            PredicateBuilder builder = new PredicateBuilder(table.rowType());
+            Predicate predicate = builder.greaterOrEqual(1, 10);
             int size = 2000;
             int checkSize = 3;
             InternalRow[] datas = new InternalRow[size];
@@ -696,13 +755,172 @@ public abstract class CatalogTestBase {
                         read(table, partitionFilterPredicate, projection, null, null);
                 assertThat(readPartitionAndNoPartitionFilterData).hasSize(size);
             }
-            catalog.dropTable(Identifier.create(dbName, format), true);
+            catalog.dropTable(identifier, true);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFormatTableOverwrite(boolean partitionPathOnlyValue) throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        String dbName = "format_overwrite_db";
+        catalog.createDatabase(dbName, true);
+
+        Identifier id = Identifier.create(dbName, "format_overwrite_table");
+        Schema nonPartitionedSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .options(getFormatTableOptions())
+                        .option("file.format", "csv")
+                        .option("file.compression", HadoopCompressionType.GZIP.value())
+                        .option(
+                                "format-table.partition-path-only-value",
+                                "" + partitionPathOnlyValue)
+                        .build();
+        catalog.createTable(id, nonPartitionedSchema, true);
+        FormatTable nonPartitionedTable = (FormatTable) catalog.getTable(id);
+        BatchWriteBuilder nonPartitionedTableWriteBuilder =
+                nonPartitionedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = nonPartitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit = nonPartitionedTableWriteBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 10));
+            write.write(GenericRow.of(2, 20));
+            commit.commit(write.prepareCommit());
+        }
+
+        try (BatchTableWrite write = nonPartitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        nonPartitionedTableWriteBuilder.withOverwrite().newCommit()) {
+            write.write(GenericRow.of(3, 30));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<InternalRow> fullOverwriteRows = read(nonPartitionedTable, null, null, null, null);
+        assertThat(fullOverwriteRows).containsExactlyInAnyOrder(GenericRow.of(3, 30));
+        catalog.dropTable(id, true);
+
+        Identifier pid = Identifier.create(dbName, "format_overwrite_partitioned");
+        Schema partitionedSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .column("year", DataTypes.INT())
+                        .column("month", DataTypes.INT())
+                        .partitionKeys("year", "month")
+                        .options(getFormatTableOptions())
+                        .option("file.format", "csv")
+                        .option("file.compression", HadoopCompressionType.GZIP.value())
+                        .option(
+                                "format-table.partition-path-only-value",
+                                "" + partitionPathOnlyValue)
+                        .build();
+        catalog.createTable(pid, partitionedSchema, true);
+        FormatTable partitionedTable = (FormatTable) catalog.getTable(pid);
+        BatchWriteBuilder partitionedTableWriteBuilder = partitionedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit = partitionedTableWriteBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 100, 2024, 10));
+            write.write(GenericRow.of(2, 200, 2025, 10));
+            write.write(GenericRow.of(3, 300, 2025, 11));
+            commit.commit(write.prepareCommit());
+        }
+
+        Map<String, String> staticPartition = new HashMap<>();
+        staticPartition.put("year", "2024");
+        staticPartition.put("month", "10");
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        partitionedTableWriteBuilder.withOverwrite(staticPartition).newCommit()) {
+            write.write(GenericRow.of(10, 1000, 2024, 10));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<InternalRow> partitionOverwriteRows = read(partitionedTable, null, null, null, null);
+        assertThat(partitionOverwriteRows)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(10, 1000, 2024, 10),
+                        GenericRow.of(2, 200, 2025, 10),
+                        GenericRow.of(3, 300, 2025, 11));
+
+        staticPartition = new HashMap<>();
+        staticPartition.put("year", "2025");
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        partitionedTableWriteBuilder.withOverwrite(staticPartition).newCommit()) {
+            write.write(GenericRow.of(10, 1000, 2025, 10));
+            commit.commit(write.prepareCommit());
+        }
+
+        partitionOverwriteRows = read(partitionedTable, null, null, null, null);
+        assertThat(partitionOverwriteRows)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(10, 1000, 2024, 10), GenericRow.of(10, 1000, 2025, 10));
+
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite()) {
+            write.write(GenericRow.of(10, 1000, 2025, 10));
+            assertThrows(
+                    RuntimeException.class,
+                    () -> {
+                        Map<String, String> staticOverwritePartition = new HashMap<>();
+                        staticOverwritePartition.put("month", "10");
+                        partitionedTableWriteBuilder
+                                .withOverwrite(staticOverwritePartition)
+                                .newCommit();
+                    });
+        }
+        catalog.dropTable(pid, true);
+    }
+
+    @Test
+    public void testFormatTableSplitRead() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        Pair[] format2Compressions = {
+            Pair.of("csv", HadoopCompressionType.NONE),
+            Pair.of("json", HadoopCompressionType.NONE),
+            Pair.of("csv", HadoopCompressionType.GZIP),
+            Pair.of("json", HadoopCompressionType.GZIP),
+            Pair.of("parquet", HadoopCompressionType.ZSTD)
+        };
+        for (Pair<String, HadoopCompressionType> format2Compression : format2Compressions) {
+            String format = format2Compression.getKey();
+            String compression = format2Compression.getValue().value();
+            String dbName = format + "_split_db_" + compression;
+            catalog.createDatabase(dbName, true);
+
+            Identifier id = Identifier.create(dbName, format + "_split_table_" + compression);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("name", DataTypes.STRING())
+                            .column("score", DataTypes.DOUBLE())
+                            .options(getFormatTableOptions())
+                            .option("file.format", format)
+                            .option("source.split.target-size", "54 B")
+                            .option("file.compression", compression.toString())
+                            .build();
+            catalog.createTable(id, schema, true);
+            FormatTable table = (FormatTable) catalog.getTable(id);
+            int size = 50;
+            InternalRow[] datas = new InternalRow[size];
+            for (int i = 0; i < size; i++) {
+                datas[i] = GenericRow.of(i, BinaryString.fromString("User" + i), 85.5 + (i % 15));
+            }
+            writeAndCheckCommitFormatTable(table, datas, null);
+            List<InternalRow> allRows = read(table, null, null, null, null);
+            assertThat(allRows).containsExactlyInAnyOrder(datas);
         }
     }
 
     private void writeAndCheckCommitFormatTable(
-            Table table, InternalRow[] datas, InternalRow dataWithDiffPartition) throws Exception {
-        try (FormatTableWrite write = (FormatTableWrite) table.newBatchWriteBuilder().newWrite()) {
+            FormatTable table, InternalRow[] datas, InternalRow dataWithDiffPartition)
+            throws Exception {
+        try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
+                BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             for (InternalRow row : datas) {
                 write.write(row);
             }
@@ -712,7 +930,7 @@ public abstract class CatalogTestBase {
             List<CommitMessage> committers = write.prepareCommit();
             List<InternalRow> readData = read(table, null, null, null, null);
             assertThat(readData).isEmpty();
-            write.commit(committers);
+            commit.commit(committers);
         }
     }
 

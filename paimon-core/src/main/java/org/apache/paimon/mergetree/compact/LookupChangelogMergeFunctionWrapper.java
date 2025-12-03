@@ -23,7 +23,8 @@ import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.lookup.LookupStrategy;
-import org.apache.paimon.mergetree.LookupLevels.PositionedKeyValue;
+import org.apache.paimon.mergetree.lookup.FilePosition;
+import org.apache.paimon.mergetree.lookup.PositionedKeyValue;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
@@ -110,10 +111,19 @@ public class LookupChangelogMergeFunctionWrapper<T>
             T lookupResult = lookup.apply(mergeFunction.key());
             if (lookupResult != null) {
                 if (lookupStrategy.deletionVector) {
-                    PositionedKeyValue positionedKeyValue = (PositionedKeyValue) lookupResult;
-                    highLevel = positionedKeyValue.keyValue();
-                    deletionVectorsMaintainer.notifyNewDeletion(
-                            positionedKeyValue.fileName(), positionedKeyValue.rowPosition());
+                    String fileName;
+                    long rowPosition;
+                    if (lookupResult instanceof PositionedKeyValue) {
+                        PositionedKeyValue positionedKeyValue = (PositionedKeyValue) lookupResult;
+                        highLevel = positionedKeyValue.keyValue();
+                        fileName = positionedKeyValue.fileName();
+                        rowPosition = positionedKeyValue.rowPosition();
+                    } else {
+                        FilePosition position = (FilePosition) lookupResult;
+                        fileName = position.fileName();
+                        rowPosition = position.rowPosition();
+                    }
+                    deletionVectorsMaintainer.notifyNewDeletion(fileName, rowPosition);
                 } else {
                     highLevel = (KeyValue) lookupResult;
                 }

@@ -41,6 +41,11 @@ public class IndexInDataFileDirPathFactory implements IndexPathFactory {
     }
 
     @Override
+    public Path toPath(String fileName) {
+        return dataFilePathFactory.newPathFromName(fileName);
+    }
+
+    @Override
     public Path newPath() {
         String name = INDEX_PREFIX + uuid + "-" + indexFileCount.getAndIncrement();
         return dataFilePathFactory.newPathFromName(name);

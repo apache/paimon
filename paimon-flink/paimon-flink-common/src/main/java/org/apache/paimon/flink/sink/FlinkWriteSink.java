@@ -24,7 +24,6 @@ import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
@@ -40,7 +39,7 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
 
     private static final long serialVersionUID = 1L;
 
-    @Nullable private final Map<String, String> overwritePartition;
+    @Nullable protected final Map<String, String> overwritePartition;
 
     public FlinkWriteSink(FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
         super(table, overwritePartition != null);
@@ -81,27 +80,8 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
             @Override
             @SuppressWarnings("unchecked, rawtypes")
             public StreamOperator createStreamOperator(StreamOperatorParameters parameters) {
-                return new RowDataStoreWriteOperator(
-                        parameters, table, logSinkFunction, writeProvider, commitUser) {
-
-                    @Override
-                    protected StoreSinkWriteState createState(
-                            int subtaskId,
-                            StateInitializationContext context,
-                            StoreSinkWriteState.StateValueFilter stateFilter) {
-                        // No conflicts will occur in append only unaware bucket writer, so no state
-                        // is needed.
-                        return new NoopStoreSinkWriteState(subtaskId);
-                    }
-
-                    @Override
-                    protected String getCommitUser(StateInitializationContext context)
-                            throws Exception {
-                        // No conflicts will occur in append only unaware bucket writer, so
-                        // commitUser does not matter.
-                        return commitUser == null ? initialCommitUser : commitUser;
-                    }
-                };
+                return new StatelessRowDataStoreWriteOperator(
+                        parameters, table, logSinkFunction, writeProvider, commitUser);
             }
         };
     }

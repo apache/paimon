@@ -32,7 +32,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -114,6 +116,20 @@ public class ExternalBufferTest {
         assertBuffer(expected, buffer);
         assertThat(buffer.getSpillChannels().size()).isGreaterThan(0);
         assertThat(buffer.flushMemory()).isFalse();
+
+        assertThat(buffer.getDiskUsage())
+                .isEqualTo(
+                        buffer.getSpillChannels().stream()
+                                .map(
+                                        c -> {
+                                            try {
+                                                return Files.size(
+                                                        Paths.get(c.getChannel().getPath()));
+                                            } catch (IOException e) {
+                                                throw new RuntimeException(e);
+                                            }
+                                        })
+                                .reduce(0L, Long::sum));
 
         // repeat read
         assertBuffer(expected, buffer);

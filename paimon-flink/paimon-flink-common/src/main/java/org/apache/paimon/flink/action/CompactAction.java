@@ -22,7 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.compact.AppendTableCompactBuilder;
+import org.apache.paimon.flink.compact.AppendTableCompact;
+import org.apache.paimon.flink.compact.IncrementalClusterCompact;
 import org.apache.paimon.flink.postpone.PostponeBucketCompactSplitSource;
 import org.apache.paimon.flink.postpone.RewritePostponeBucketCommittableOperator;
 import org.apache.paimon.flink.predicate.SimpleSqlPredicateConvertor;
@@ -78,13 +79,13 @@ public class CompactAction extends TableActionBase {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CompactAction.class);
 
-    private List<Map<String, String>> partitions;
+    protected List<Map<String, String>> partitions;
 
-    private String whereSql;
+    protected String whereSql;
 
-    @Nullable private Duration partitionIdleTime = null;
+    @Nullable protected Duration partitionIdleTime = null;
 
-    private Boolean fullCompaction;
+    @Nullable protected Boolean fullCompaction;
 
     public CompactAction(
             String database,
@@ -92,6 +93,7 @@ public class CompactAction extends TableActionBase {
             Map<String, String> catalogConfig,
             Map<String, String> tableConf) {
         super(database, tableName, catalogConfig);
+        this.forceStartFlinkJob = true;
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -101,10 +103,6 @@ public class CompactAction extends TableActionBase {
         checkArgument(
                 !((FileStoreTable) table).coreOptions().dataEvolutionEnabled(),
                 "Compact action does not support data evolution table yet. ");
-        checkArgument(
-                !(((FileStoreTable) table).bucketMode() == BucketMode.BUCKET_UNAWARE
-                        && ((FileStoreTable) table).coreOptions().clusteringIncrementalEnabled()),
-                "The table has enabled incremental clustering, and do not support compact in flink yet.");
         HashMap<String, String> dynamicOptions = new HashMap<>(tableConf);
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
         table = table.copy(dynamicOptions);
@@ -139,24 +137,29 @@ public class CompactAction extends TableActionBase {
         buildImpl();
     }
 
-    private boolean buildImpl() throws Exception {
+    protected boolean buildImpl() throws Exception {
         ReadableConfig conf = env.getConfiguration();
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         FileStoreTable fileStoreTable = (FileStoreTable) table;
-
+        PartitionPredicate partitionPredicate = getPartitionPredicate();
         if (fileStoreTable.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
-            return buildForPostponeBucketCompaction(env, fileStoreTable, isStreaming);
+            buildForPostponeBucketCompaction(env, fileStoreTable, isStreaming);
         } else if (fileStoreTable.bucketMode() == BucketMode.BUCKET_UNAWARE) {
-            buildForAppendTableCompact(env, fileStoreTable, isStreaming);
-            return true;
+            if (fileStoreTable.coreOptions().clusteringIncrementalEnabled()) {
+                new IncrementalClusterCompact(
+                                env, fileStoreTable, partitionPredicate, fullCompaction)
+                        .build();
+            } else {
+                buildForAppendTableCompact(env, fileStoreTable, isStreaming);
+            }
         } else {
             buildForBucketedTableCompact(env, fileStoreTable, isStreaming);
-            return true;
         }
+        return true;
     }
 
-    private void buildForBucketedTableCompact(
+    protected void buildForBucketedTableCompact(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
             throws Exception {
         if (fullCompaction == null) {
@@ -192,11 +195,10 @@ public class CompactAction extends TableActionBase {
         sinkBuilder.withInput(source).build();
     }
 
-    private void buildForAppendTableCompact(
+    protected void buildForAppendTableCompact(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
             throws Exception {
-        AppendTableCompactBuilder builder =
-                new AppendTableCompactBuilder(env, identifier.getFullName(), table);
+        AppendTableCompact builder = new AppendTableCompact(env, identifier.getFullName(), table);
         builder.withPartitionPredicate(getPartitionPredicate());
         builder.withContinuousMode(isStreaming);
         builder.withPartitionIdleTime(partitionIdleTime);
@@ -262,7 +264,7 @@ public class CompactAction extends TableActionBase {
         return PartitionPredicate.fromPredicate(partitionType, predicate);
     }
 
-    private boolean buildForPostponeBucketCompaction(
+    protected boolean buildForPostponeBucketCompaction(
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming) {
         checkArgument(
                 !isStreaming, "Postpone bucket compaction currently only supports batch mode");

@@ -18,7 +18,6 @@ limitations under the License.
 import logging
 import threading
 import time
-from pathlib import Path
 from typing import Optional
 
 from pyarrow._fs import FileSystem
@@ -41,13 +40,29 @@ class RESTTokenFileIO(FileIO):
         self.log = logging.getLogger(__name__)
         super().__init__(path, catalog_options)
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Remove non-serializable objects
+        state.pop('lock', None)
+        state.pop('api_instance', None)
+        # token can be serialized, but we'll refresh it on deserialization
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Recreate lock after deserialization
+        self.lock = threading.Lock()
+        # api_instance will be recreated when needed
+        self.api_instance = None
+
     def _initialize_oss_fs(self, path) -> FileSystem:
         self.try_to_refresh_token()
         self.properties.update(self.token.token)
         return super()._initialize_oss_fs(path)
 
-    def new_output_stream(self, path: Path):
-        return self.filesystem.open_output_stream(str(path))
+    def new_output_stream(self, path: str):
+        # Call parent class method to ensure path conversion and parent directory creation
+        return super().new_output_stream(path)
 
     def try_to_refresh_token(self):
         if self.should_refresh():

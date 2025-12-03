@@ -33,6 +33,6 @@ public class HadoopFileIOLoader implements FileIOLoader {
 
     @Override
     public HadoopFileIO load(Path path) {
-        return new HadoopFileIO();
+        return new HadoopFileIO(path);
     }
 }

@@ -23,7 +23,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexInDataFileDirPathFactory;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -335,27 +334,27 @@ public class FileStorePathFactory {
             DataFilePathFactory dataFilePathFactory = createDataFilePathFactory(partition, bucket);
             return new IndexInDataFileDirPathFactory(uuid, indexFileCount, dataFilePathFactory);
         } else {
-            return new IndexPathFactory() {
-                @Override
-                public Path newPath() {
-                    return toPath(INDEX_PREFIX + uuid + "-" + indexFileCount.getAndIncrement());
-                }
-
-                @Override
-                public Path toPath(IndexFileMeta file) {
-                    return toPath(file.fileName());
-                }
-
-                @Override
-                public boolean isExternalPath() {
-                    return false;
-                }
-
-                private Path toPath(String fileName) {
-                    return new Path(indexPath(), fileName);
-                }
-            };
+            return globalIndexFileFactory();
         }
+    }
+
+    public IndexPathFactory globalIndexFileFactory() {
+        return new IndexPathFactory() {
+            @Override
+            public Path toPath(String fileName) {
+                return new Path(indexPath(), fileName);
+            }
+
+            @Override
+            public Path newPath() {
+                return toPath(INDEX_PREFIX + uuid + "-" + indexFileCount.getAndIncrement());
+            }
+
+            @Override
+            public boolean isExternalPath() {
+                return false;
+            }
+        };
     }
 
     public PathFactory statsFileFactory() {

@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.PartitionSinkStrategy;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowWrapper;
@@ -30,6 +31,7 @@ import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
 
@@ -292,16 +294,31 @@ public class FlinkSinkBuilder {
     }
 
     private DataStreamSink<?> buildPostponeBucketSink(DataStream<InternalRow> input) {
-        ChannelComputer<InternalRow> channelComputer;
-        if (!table.partitionKeys().isEmpty()
-                && table.coreOptions().partitionSinkStrategy() == PartitionSinkStrategy.HASH) {
-            channelComputer = new RowDataHashPartitionChannelComputer(table.schema());
+        if (isStreaming(input) || !table.coreOptions().postponeBatchWriteFixedBucket()) {
+            ChannelComputer<InternalRow> channelComputer;
+            if (!table.partitionKeys().isEmpty()
+                    && table.coreOptions().partitionSinkStrategy() == PartitionSinkStrategy.HASH) {
+                channelComputer = new RowDataHashPartitionChannelComputer(table.schema());
+            } else {
+                channelComputer = new PostponeBucketChannelComputer(table.schema());
+            }
+            DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
+            PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
+            return sink.sinkFrom(partitioned);
         } else {
-            channelComputer = new PostponeBucketChannelComputer(table.schema());
+            Map<BinaryRow, Integer> knownNumBuckets = PostponeUtils.getKnownNumBuckets(table);
+            DataStream<InternalRow> partitioned =
+                    partition(
+                            input,
+                            new PostponeFixedBucketChannelComputer(table.schema(), knownNumBuckets),
+                            parallelism);
+
+            FileStoreTable tableForWrite = PostponeUtils.tableForFixBucketWrite(table);
+
+            PostponeFixedBucketSink sink =
+                    new PostponeFixedBucketSink(tableForWrite, overwritePartition, knownNumBuckets);
+            return sink.sinkFrom(partitioned);
         }
-        DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
-        PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
-        return sink.sinkFrom(partitioned);
     }
 
     private DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {

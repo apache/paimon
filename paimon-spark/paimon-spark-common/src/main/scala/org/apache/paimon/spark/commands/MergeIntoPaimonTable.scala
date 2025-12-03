@@ -326,7 +326,7 @@ case class MergeIntoPaimonTable(
       if (count > 0) {
         throw new RuntimeException(
           "Can't execute this MergeInto when there are some target rows that each of " +
-            "them match more then one source rows. It may lead to an unexpected result.")
+            "them match more than one source rows. It may lead to an unexpected result.")
       }
     }
   }

@@ -19,12 +19,14 @@
 import os
 import shutil
 import tempfile
+import time
 import unittest
 
 import pyarrow as pa
 
-from pypaimon import CatalogFactory
-from pypaimon import Schema
+from pypaimon import CatalogFactory, Schema
+from pypaimon.common.core_options import CoreOptions
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class PkReaderTest(unittest.TestCase):
@@ -183,6 +185,79 @@ class PkReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         expected = self.expected.select(['dt', 'user_id', 'behavior'])
         self.assertEqual(actual, expected)
+
+    def test_incremental_timestamp(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={'bucket': '2'})
+        self.catalog.create_table('default.test_incremental_parquet', schema, False)
+        table = self.catalog.get_table('default.test_incremental_parquet')
+        timestamp = int(time.time() * 1000)
+        self._write_test_table(table)
+
+        snapshot_manager = SnapshotManager(table)
+        t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
+        t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
+        # test 1
+        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: str(timestamp - 1) + ',' + str(timestamp)})
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder)
+        self.assertEqual(len(actual), 0)
+        # test 2
+        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: str(timestamp) + ',' + str(t2)})
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        self.assertEqual(self.expected, actual)
+        # test 3
+        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: str(t1) + ',' + str(t2)})
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        expected = pa.Table.from_pydict({
+            "user_id": [2, 5, 7, 8],
+            "item_id": [1002, 1005, 1007, 1008],
+            "behavior": ["b-new", "e", "g", "h"],
+            "dt": ["p1", "p2", "p1", "p2"]
+        }, schema=self.pa_schema)
+        self.assertEqual(expected, actual)
+
+    def test_incremental_read_multi_snapshots(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={'bucket': '2'})
+        self.catalog.create_table('default.test_incremental_read_multi_snapshots', schema, False)
+        table = self.catalog.get_table('default.test_incremental_read_multi_snapshots')
+        write_builder = table.new_batch_write_builder()
+        for i in range(1, 101):
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            pa_table = pa.Table.from_pydict({
+                'user_id': [i],
+                'item_id': [1000 + i],
+                'behavior': [f'snap{i}'],
+                'dt': ['p1' if i % 2 == 1 else 'p2'],
+            }, schema=self.pa_schema)
+            table_write.write_arrow(pa_table)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        snapshot_manager = SnapshotManager(table)
+        t10 = snapshot_manager.get_snapshot_by_id(10).time_millis
+        t20 = snapshot_manager.get_snapshot_by_id(20).time_millis
+
+        table_inc = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: f"{t10},{t20}"})
+        read_builder = table_inc.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+
+        expected = pa.Table.from_pydict({
+            'user_id': list(range(11, 21)),
+            'item_id': [1000 + i for i in range(11, 21)],
+            'behavior': [f'snap{i}' for i in range(11, 21)],
+            'dt': ['p1' if i % 2 == 1 else 'p2' for i in range(11, 21)],
+        }, schema=self.pa_schema).sort_by('user_id')
+        self.assertEqual(expected, actual)
 
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()

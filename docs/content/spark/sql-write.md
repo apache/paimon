@@ -170,7 +170,7 @@ UPDATE t SET s.c2 = 'a_new' WHERE s.c1 = 1;
 Deletes the rows that match a predicate. When no predicate is provided, deletes all rows.
 
 ```sql
-DELETE FROM my_table WHERE currency = 'UNKNOWN';
+DELETE FROM my_table WHERE id = 1;
 ```
 
 ## Merge Into Table

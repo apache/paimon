@@ -60,15 +60,18 @@ import static org.apache.spark.sql.types.DataTypes.createArrayType;
 /** Utils of catalog. */
 public class CatalogUtils {
 
-    public static void checkNamespace(String[] namespace) {
+    public static void checkNamespace(String[] namespace, String catalogName) {
         checkArgument(
                 namespace.length == 1,
-                "Paimon only support single namespace, but got %s",
+                "Current catalog is %s, catalog %s does not exist or Paimon only support single namespace, but got %s",
+                catalogName,
+                namespace.length > 0 ? namespace[0] : "unknown",
                 Arrays.toString(namespace));
     }
 
-    public static org.apache.paimon.catalog.Identifier toIdentifier(Identifier ident) {
-        checkNamespace(ident.namespace());
+    public static org.apache.paimon.catalog.Identifier toIdentifier(
+            Identifier ident, String catalogName) {
+        checkNamespace(ident.namespace(), catalogName);
         return new org.apache.paimon.catalog.Identifier(ident.namespace()[0], ident.name());
     }
 
