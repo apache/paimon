@@ -30,7 +30,9 @@ import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.StoredFields;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.KnnByteVectorQuery;
 import org.apache.lucene.search.KnnFloatVectorQuery;
+import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IndexOutput;
@@ -77,32 +79,14 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
      * @param k number of results
      * @return global index result containing row IDs
      */
-    @Override
-    public GlobalIndexResult visit(float[] query, int k) {
-        Set<Long> resultIds = new HashSet<>();
+    public GlobalIndexResult search(float[] query, int k) {
+        KnnFloatVectorQuery knnQuery = new KnnFloatVectorQuery(VECTOR_FIELD, query, k);
+        return search(knnQuery, k);
+    }
 
-        for (IndexSearcher searcher : searchers) {
-            try {
-                // Create KNN query
-                KnnFloatVectorQuery knnQuery = new KnnFloatVectorQuery(VECTOR_FIELD, query, k);
-
-                // Execute search
-                TopDocs topDocs = searcher.search(knnQuery, k);
-                StoredFields storedFields = searcher.storedFields();
-                Set<String> fieldsToLoad = Set.of(ROW_ID_FIELD);
-                // Collect row IDs from results
-                for (org.apache.lucene.search.ScoreDoc scoreDoc : topDocs.scoreDocs) {
-                    float rawScore = scoreDoc.score;
-                    Document doc = storedFields.document(scoreDoc.doc, fieldsToLoad);
-                    long rowId = doc.getField(ROW_ID_FIELD).numericValue().longValue();
-                    resultIds.add(rowId);
-                }
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to search vector index", e);
-            }
-        }
-
-        return GlobalIndexResult.wrap(resultIds);
+    public GlobalIndexResult search(byte[] query, int k) {
+        KnnByteVectorQuery knnQuery = new KnnByteVectorQuery(VECTOR_FIELD, query, k);
+        return search(knnQuery, k);
     }
 
     @Override
@@ -124,6 +108,29 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
             deleteDirectory(tempDir);
         }
         tempDirs.clear();
+    }
+
+    private GlobalIndexResult search(Query query, int k) {
+        Set<Long> resultIds = new HashSet<>();
+        for (IndexSearcher searcher : searchers) {
+            try {
+                // Execute search
+                TopDocs topDocs = searcher.search(query, k);
+                StoredFields storedFields = searcher.storedFields();
+                Set<String> fieldsToLoad = Set.of(ROW_ID_FIELD);
+                // Collect row IDs from results
+                for (org.apache.lucene.search.ScoreDoc scoreDoc : topDocs.scoreDocs) {
+                    float rawScore = scoreDoc.score;
+                    Document doc = storedFields.document(scoreDoc.doc, fieldsToLoad);
+                    long rowId = doc.getField(ROW_ID_FIELD).numericValue().longValue();
+                    resultIds.add(rowId);
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to search vector index", e);
+            }
+        }
+
+        return GlobalIndexResult.wrap(resultIds);
     }
 
     private void loadIndices(GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files)

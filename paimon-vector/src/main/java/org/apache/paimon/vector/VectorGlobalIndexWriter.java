@@ -23,14 +23,12 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 
 import org.apache.lucene.codecs.KnnVectorsFormat;
-import org.apache.lucene.codecs.lucene99.Lucene99Codec;
+import org.apache.lucene.codecs.lucene912.Lucene912Codec;
 import org.apache.lucene.codecs.lucene99.Lucene99HnswScalarQuantizedVectorsFormat;
 import org.apache.lucene.document.Document;
-import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.document.StoredField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
@@ -63,7 +61,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
     private final VectorIndexOptions vectorOptions;
     private final VectorSimilarityFunction similarityFunction;
 
-    private final List<VectorWithRowId> vectors;
+    private final List<VectorKey> vectors;
     private long minRowId = Long.MAX_VALUE;
     private long maxRowId = Long.MIN_VALUE;
 
@@ -83,21 +81,36 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
 
     @Override
     public void write(Object key) {
-        Preconditions.checkArgument(
-                key instanceof VectorKey, "Key must be VectorKey, but was: " + key.getClass());
+        Long rowId;
+        if (key instanceof FloatVectorKey) {
+            FloatVectorKey vectorKey = (FloatVectorKey) key;
+            rowId = vectorKey.rowId();
+            float[] vector = vectorKey.vector();
 
-        VectorKey vectorKey = (VectorKey) key;
-        long rowId = vectorKey.getRowId();
-        float[] vector = vectorKey.getVector();
+            checkArgument(
+                    vector.length == vectorOptions.dimension(),
+                    "Vector dimension mismatch: expected "
+                            + vectorOptions.dimension()
+                            + ", but got "
+                            + vector.length);
 
-        checkArgument(
-                vector.length == vectorOptions.dimension(),
-                "Vector dimension mismatch: expected "
-                        + vectorOptions.dimension()
-                        + ", but got "
-                        + vector.length);
+            vectors.add(vectorKey);
+        } else if (key instanceof ByteVectorKey) {
+            ByteVectorKey vectorKey = (ByteVectorKey) key;
+            rowId = vectorKey.rowId();
+            byte[] byteVector = vectorKey.vector();
 
-        vectors.add(new VectorWithRowId(rowId, vector));
+            checkArgument(
+                    byteVector.length == vectorOptions.dimension(),
+                    "Vector dimension mismatch: expected "
+                            + vectorOptions.dimension()
+                            + ", but got "
+                            + byteVector.length);
+
+            vectors.add(vectorKey);
+        } else {
+            throw new IllegalArgumentException("Unsupported key type: " + key.getClass().getName());
+        }
         minRowId = Math.min(minRowId, rowId);
         maxRowId = Math.max(maxRowId, rowId);
     }
@@ -169,16 +182,14 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
 
             try (IndexWriter writer = new IndexWriter(directory, config)) {
                 // Add each vector as a document
-                for (VectorWithRowId vectorWithRowId : vectors) {
+                for (VectorKey vectorKey : vectors) {
                     Document doc = new Document();
 
                     // Add KNN vector field
-                    doc.add(
-                            new KnnFloatVectorField(
-                                    VECTOR_FIELD, vectorWithRowId.vector, similarityFunction));
+                    doc.add(vectorKey.toIndexableField(VECTOR_FIELD, similarityFunction));
 
                     // Store row ID
-                    doc.add(new StoredField(ROW_ID_FIELD, vectorWithRowId.rowId));
+                    doc.add(new StoredField(ROW_ID_FIELD, vectorKey.rowId()));
 
                     writer.addDocument(doc);
                 }
@@ -200,7 +211,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
         IndexWriterConfig config = new IndexWriterConfig();
         config.setRAMBufferSizeMB(256); // Increase buffer for better performance
         config.setCodec(
-                new Lucene99Codec(Lucene99Codec.Mode.BEST_SPEED) {
+                new Lucene912Codec(Lucene912Codec.Mode.BEST_SPEED) {
                     @Override
                     public KnnVectorsFormat getKnnVectorsFormatForField(String field) {
                         return new Lucene99HnswScalarQuantizedVectorsFormat(m, efConstruction);
@@ -276,34 +287,5 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
             (byte) (value >>> 8),
             (byte) value
         };
-    }
-
-    /** Key type for vector indexing. */
-    public static class VectorKey {
-        private final long rowId;
-        private final float[] vector;
-
-        public VectorKey(long rowId, float[] vector) {
-            this.rowId = rowId;
-            this.vector = vector;
-        }
-
-        public long getRowId() {
-            return rowId;
-        }
-
-        public float[] getVector() {
-            return vector;
-        }
-    }
-
-    private static class VectorWithRowId {
-        final long rowId;
-        final float[] vector;
-
-        VectorWithRowId(long rowId, float[] vector) {
-            this.rowId = rowId;
-            this.vector = vector;
-        }
     }
 }

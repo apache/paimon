@@ -16,29 +16,34 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.vector;
 
-import org.apache.paimon.predicate.FunctionVisitor;
-import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.lucene.document.KnnFloatVectorField;
+import org.apache.lucene.index.IndexableField;
+import org.apache.lucene.index.VectorSimilarityFunction;
 
-import java.io.Closeable;
-import java.util.List;
+/** Vector key for float vector. */
+public class FloatVectorKey implements VectorKey {
+    private final long rowId;
+    private final float[] vector;
 
-/** Index reader for global index, return {@link GlobalIndexResult}. */
-public interface GlobalIndexReader extends FunctionVisitor<GlobalIndexResult>, Closeable {
+    public FloatVectorKey(long rowId, float[] vector) {
+        this.rowId = rowId;
+        this.vector = vector;
+    }
 
-    @Override
-    default GlobalIndexResult visitAnd(List<GlobalIndexResult> children) {
-        throw new UnsupportedOperationException("Should not invoke this");
+    public float[] vector() {
+        return vector;
     }
 
     @Override
-    default GlobalIndexResult visitOr(List<GlobalIndexResult> children) {
-        throw new UnsupportedOperationException("Should not invoke this");
+    public long rowId() {
+        return rowId;
     }
 
     @Override
-    default GlobalIndexResult visit(TransformPredicate predicate) {
-        throw new UnsupportedOperationException("Should not invoke this");
+    public IndexableField toIndexableField(
+            String fieldName, VectorSimilarityFunction similarityFunction) {
+        return new KnnFloatVectorField(fieldName, this.vector(), similarityFunction);
     }
 }

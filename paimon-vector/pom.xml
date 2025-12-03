@@ -32,7 +32,7 @@ under the License.
     <name>Paimon : Vector</name>
 
     <properties>
-        <lucene.version>9.11.1</lucene.version>
+        <lucene.version>9.12.3</lucene.version>
         <target.java.version>11</target.java.version>
     </properties>
 

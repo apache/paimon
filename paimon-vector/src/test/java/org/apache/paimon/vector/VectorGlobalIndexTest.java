@@ -30,6 +30,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.AfterEach;
@@ -101,7 +102,7 @@ public class VectorGlobalIndexTest {
 
         List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
         for (int i = 0; i < numVectors; i++) {
-            writer.write(new VectorGlobalIndexWriter.VectorKey(i, testVectors.get(i)));
+            writer.write(new FloatVectorKey(i, testVectors.get(i)));
         }
 
         List<GlobalIndexWriter.ResultEntry> results = writer.finish();
@@ -124,7 +125,7 @@ public class VectorGlobalIndexTest {
         VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
         // Test search - query with first vector should return itself
-        GlobalIndexResult searchResult = reader.visit(testVectors.get(0), 5);
+        GlobalIndexResult searchResult = reader.search(testVectors.get(0), 5);
         assertThat(searchResult).isNotNull();
 
         reader.close();
@@ -148,13 +149,13 @@ public class VectorGlobalIndexTest {
                 new VectorGlobalIndexWriter(fileWriter, vectorType, options);
 
         // Write base vector and similar variants
-        writer.write(new VectorGlobalIndexWriter.VectorKey(0, baseVector));
+        writer.write(new FloatVectorKey(0, baseVector));
 
         for (int i = 1; i < numVectors; i++) {
             float[] variant = baseVector.clone();
             // Add small noise
             variant[i % dimension] += (i % 2 == 0 ? 0.1f : -0.1f);
-            writer.write(new VectorGlobalIndexWriter.VectorKey(i, variant));
+            writer.write(new FloatVectorKey(i, variant));
         }
 
         List<GlobalIndexWriter.ResultEntry> results = writer.finish();
@@ -173,7 +174,7 @@ public class VectorGlobalIndexTest {
         VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
         // Search with base vector should return similar vectors
-        GlobalIndexResult searchResult = reader.visit(baseVector, 10);
+        GlobalIndexResult searchResult = reader.search(baseVector, 10);
         assertThat(searchResult).isNotNull();
 
         reader.close();
@@ -198,7 +199,7 @@ public class VectorGlobalIndexTest {
 
             List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
             for (int i = 0; i < numVectors; i++) {
-                writer.write(new VectorGlobalIndexWriter.VectorKey(i, testVectors.get(i)));
+                writer.write(new FloatVectorKey(i, testVectors.get(i)));
             }
 
             List<GlobalIndexWriter.ResultEntry> results = writer.finish();
@@ -217,7 +218,7 @@ public class VectorGlobalIndexTest {
             VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
             // Verify search works with this metric
-            GlobalIndexResult searchResult = reader.visit(testVectors.get(0), 3);
+            GlobalIndexResult searchResult = reader.search(testVectors.get(0), 3);
             assertThat(searchResult).isNotNull();
 
             reader.close();
@@ -240,7 +241,7 @@ public class VectorGlobalIndexTest {
             int numVectors = 10;
             List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
             for (int i = 0; i < numVectors; i++) {
-                writer.write(new VectorGlobalIndexWriter.VectorKey(i, testVectors.get(i)));
+                writer.write(new FloatVectorKey(i, testVectors.get(i)));
             }
 
             List<GlobalIndexWriter.ResultEntry> results = writer.finish();
@@ -259,7 +260,7 @@ public class VectorGlobalIndexTest {
             VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
             // Verify search works with this dimension
-            GlobalIndexResult searchResult = reader.visit(testVectors.get(0), 5);
+            GlobalIndexResult searchResult = reader.search(testVectors.get(0), 5);
             assertThat(searchResult).isNotNull();
 
             reader.close();
@@ -277,10 +278,7 @@ public class VectorGlobalIndexTest {
 
         // Try to write vector with wrong dimension
         float[] wrongDimVector = new float[32]; // Wrong dimension
-        assertThatThrownBy(
-                        () ->
-                                writer.write(
-                                        new VectorGlobalIndexWriter.VectorKey(0, wrongDimVector)))
+        assertThatThrownBy(() -> writer.write(new FloatVectorKey(0, wrongDimVector)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("dimension mismatch");
     }
@@ -313,7 +311,7 @@ public class VectorGlobalIndexTest {
 
         List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
         for (int i = 0; i < numVectors; i++) {
-            writer.write(new VectorGlobalIndexWriter.VectorKey(i, testVectors.get(i)));
+            writer.write(new FloatVectorKey(i, testVectors.get(i)));
         }
 
         List<GlobalIndexWriter.ResultEntry> results = writer.finish();
@@ -332,7 +330,7 @@ public class VectorGlobalIndexTest {
         VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
         // Verify search works with custom HNSW parameters
-        GlobalIndexResult searchResult = reader.visit(testVectors.get(0), 5);
+        GlobalIndexResult searchResult = reader.search(testVectors.get(0), 5);
         assertThat(searchResult).isNotNull();
 
         reader.close();
@@ -351,7 +349,7 @@ public class VectorGlobalIndexTest {
 
         List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
         for (int i = 0; i < numVectors; i++) {
-            writer.write(new VectorGlobalIndexWriter.VectorKey(i, testVectors.get(i)));
+            writer.write(new FloatVectorKey(i, testVectors.get(i)));
         }
 
         List<GlobalIndexWriter.ResultEntry> results = writer.finish();
@@ -370,7 +368,7 @@ public class VectorGlobalIndexTest {
         VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
         // Search with k larger than number of vectors
-        GlobalIndexResult searchResult = reader.visit(testVectors.get(0), 200);
+        GlobalIndexResult searchResult = reader.search(testVectors.get(0), 200);
         assertThat(searchResult).isNotNull();
         assertThat(searchResult).isNotNull();
 
@@ -406,7 +404,7 @@ public class VectorGlobalIndexTest {
 
             // Write vectors for this shard
             for (int i = startIdx; i < endIdx; i++) {
-                writer.write(new VectorGlobalIndexWriter.VectorKey(i, allTestVectors.get(i)));
+                writer.write(new FloatVectorKey(i, allTestVectors.get(i)));
             }
 
             List<GlobalIndexWriter.ResultEntry> results = writer.finish();
@@ -444,7 +442,7 @@ public class VectorGlobalIndexTest {
         // Test 1: Search with various k values
         int[] kValues = {1, 5, 10, 20, 50};
         for (int k : kValues) {
-            GlobalIndexResult searchResult = reader.visit(allTestVectors.get(0), k);
+            GlobalIndexResult searchResult = reader.search(allTestVectors.get(0), k);
             assertThat(searchResult).isNotNull();
             assertThat(containsRowId(searchResult, 0)).isTrue();
         }
@@ -452,7 +450,7 @@ public class VectorGlobalIndexTest {
         // Test 2: Search with query vectors from different shards
         for (int shardIdx = 0; shardIdx < shardsCount; shardIdx++) {
             int queryIdx = shardIdx * vectorsPerShard + 5;
-            GlobalIndexResult searchResult = reader.visit(allTestVectors.get(queryIdx), 10);
+            GlobalIndexResult searchResult = reader.search(allTestVectors.get(queryIdx), 10);
             assertThat(searchResult).isNotNull();
             assertThat(containsRowId(searchResult, queryIdx))
                     .as("Search result should contain the query vector's own ID")
@@ -468,7 +466,7 @@ public class VectorGlobalIndexTest {
         }
         normalize(slightlyModifiedVector);
 
-        GlobalIndexResult similarSearchResult = reader.visit(slightlyModifiedVector, 5);
+        GlobalIndexResult similarSearchResult = reader.search(slightlyModifiedVector, 5);
         assertThat(similarSearchResult).isNotNull();
         assertThat(containsRowId(similarSearchResult, 50))
                 .as("Search with very similar vector should find the original")
@@ -483,18 +481,18 @@ public class VectorGlobalIndexTest {
         }
         normalize(clusterCenter);
 
-        GlobalIndexResult clusterSearchResult = reader.visit(clusterCenter, 20);
+        GlobalIndexResult clusterSearchResult = reader.search(clusterCenter, 20);
         assertThat(clusterSearchResult).isNotNull();
         assertThat(clusterSearchResult.iterator().hasNext()).isTrue();
 
         // Test 5: Edge case - search with k larger than total vectors
-        GlobalIndexResult largeKResult = reader.visit(allTestVectors.get(10), totalVectors * 2);
+        GlobalIndexResult largeKResult = reader.search(allTestVectors.get(10), totalVectors * 2);
         assertThat(largeKResult).isNotNull();
 
         // Test 6: Multiple consecutive searches (stress test)
         for (int i = 0; i < 20; i++) {
             int randomIdx = random.nextInt(totalVectors);
-            GlobalIndexResult result = reader.visit(allTestVectors.get(randomIdx), 15);
+            GlobalIndexResult result = reader.search(allTestVectors.get(randomIdx), 15);
             assertThat(result).isNotNull();
         }
 
@@ -526,9 +524,9 @@ public class VectorGlobalIndexTest {
         long bananaId = 1L;
         long carId = 2L;
 
-        writer.write(new VectorGlobalIndexWriter.VectorKey(appleId, appleVector));
-        writer.write(new VectorGlobalIndexWriter.VectorKey(bananaId, bananaVector));
-        writer.write(new VectorGlobalIndexWriter.VectorKey(carId, carVector));
+        writer.write(new FloatVectorKey(appleId, appleVector));
+        writer.write(new FloatVectorKey(bananaId, bananaVector));
+        writer.write(new FloatVectorKey(carId, carVector));
 
         List<GlobalIndexWriter.ResultEntry> results = writer.finish();
         assertThat(results).hasSize(1);
@@ -548,7 +546,7 @@ public class VectorGlobalIndexTest {
         // Test 1: Query with vector similar to "Apple" - should find Apple and Banana
         // Query: [0.85, 0.15] is between Apple and Banana
         float[] queryVector = new float[] {0.85f, 0.15f};
-        GlobalIndexResult searchResult = reader.visit(queryVector, 2);
+        GlobalIndexResult searchResult = reader.search(queryVector, 2);
 
         assertThat(searchResult).isNotNull();
         assertThat(searchResult.iterator().hasNext()).as("Search should return results").isTrue();
@@ -565,14 +563,14 @@ public class VectorGlobalIndexTest {
         assertThat(resultIds.size()).as("Should return top 2 results").isLessThanOrEqualTo(2);
 
         // Test 2: Query with exact match - should find exact document
-        GlobalIndexResult exactMatchResult = reader.visit(appleVector, 1);
+        GlobalIndexResult exactMatchResult = reader.search(appleVector, 1);
         assertThat(containsRowId(exactMatchResult, appleId))
                 .as("Exact match query should find Apple")
                 .isTrue();
 
         // Test 3: Query with vector similar to "Car" - should find Car first
         float[] carQueryVector = new float[] {0.15f, 0.85f};
-        GlobalIndexResult carSearchResult = reader.visit(carQueryVector, 1);
+        GlobalIndexResult carSearchResult = reader.search(carQueryVector, 1);
 
         List<Long> carResultIds = new ArrayList<>();
         for (Long id : carSearchResult) {
@@ -582,12 +580,12 @@ public class VectorGlobalIndexTest {
         assertThat(carResultIds).as("Query similar to Car should find Car").contains(carId);
 
         // Test 4: Search with larger k than available documents
-        GlobalIndexResult largeKResult = reader.visit(queryVector, 10);
+        GlobalIndexResult largeKResult = reader.search(queryVector, 10);
         assertThat(largeKResult).isNotNull();
         assertThat(largeKResult.iterator().hasNext()).isTrue();
 
         // Test 5: Verify all three documents are indexed
-        GlobalIndexResult allDocsResult = reader.visit(new float[] {0.5f, 0.5f}, 3);
+        GlobalIndexResult allDocsResult = reader.search(new float[] {0.5f, 0.5f}, 3);
         List<Long> allResultIds = new ArrayList<>();
         for (Long id : allDocsResult) {
             allResultIds.add(id);
@@ -645,5 +643,106 @@ public class VectorGlobalIndexTest {
             }
         }
         return false;
+    }
+
+    @Test
+    public void testByteVectorIndexEndToEnd() throws IOException {
+        Options options = createDefaultOptions();
+        int dimension = 2;
+        options.setInteger("vector.dim", dimension);
+        options.setString("vector.metric", "EUCLIDEAN");
+        options.setInteger("vector.m", 16);
+        options.setInteger("vector.ef-construction", 100);
+
+        // Create semantic vectors representing "documents" using byte vectors
+        // Apple [90, 10] and Banana [80, 20] are similar (fruits)
+        // Car [10, 90] is different (vehicle)
+        byte[] appleVector = new byte[] {90, 10};
+        byte[] bananaVector = new byte[] {80, 20};
+        byte[] carVector = new byte[] {10, 90};
+
+        DataType byteVectorType = new ArrayType(new TinyIntType());
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        VectorGlobalIndexWriter writer =
+                new VectorGlobalIndexWriter(fileWriter, byteVectorType, options);
+
+        // Write vectors with row IDs representing documents
+        long appleId = 0L;
+        long bananaId = 1L;
+        long carId = 2L;
+
+        writer.write(new ByteVectorKey(appleId, appleVector));
+        writer.write(new ByteVectorKey(bananaId, bananaVector));
+        writer.write(new ByteVectorKey(carId, carVector));
+
+        List<GlobalIndexWriter.ResultEntry> results = writer.finish();
+        assertThat(results).hasSize(1);
+
+        GlobalIndexWriter.ResultEntry result = results.get(0);
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        List<GlobalIndexIOMeta> metas = new ArrayList<>();
+        metas.add(
+                new GlobalIndexIOMeta(
+                        result.fileName(),
+                        fileIO.getFileSize(new Path(indexPath, result.fileName())),
+                        result.rowRange(),
+                        result.meta()));
+
+        VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
+
+        // Test 1: Query with vector similar to "Apple" - should find Apple and Banana
+        // Query: [85, 15] is between Apple and Banana
+        byte[] queryVector = new byte[] {85, 15};
+        GlobalIndexResult searchResult = reader.search(queryVector, 2);
+
+        assertThat(searchResult).isNotNull();
+        assertThat(searchResult.iterator().hasNext()).as("Search should return results").isTrue();
+
+        // Collect all result IDs
+        List<Long> resultIds = new ArrayList<>();
+        for (Long id : searchResult) {
+            resultIds.add(id);
+        }
+
+        // Should find Apple and Banana (similar fruits), not Car
+        assertThat(resultIds).as("Should find Apple (most similar)").contains(appleId);
+        assertThat(resultIds).as("Should find Banana (second most similar)").contains(bananaId);
+        assertThat(resultIds.size()).as("Should return top 2 results").isLessThanOrEqualTo(2);
+
+        // Test 2: Query with exact match - should find exact document
+        GlobalIndexResult exactMatchResult = reader.search(appleVector, 1);
+        assertThat(containsRowId(exactMatchResult, appleId))
+                .as("Exact match query should find Apple")
+                .isTrue();
+
+        // Test 3: Query with vector similar to "Car" - should find Car first
+        byte[] carQueryVector = new byte[] {15, 85};
+        GlobalIndexResult carSearchResult = reader.search(carQueryVector, 1);
+
+        List<Long> carResultIds = new ArrayList<>();
+        for (Long id : carSearchResult) {
+            carResultIds.add(id);
+        }
+
+        assertThat(carResultIds).as("Query similar to Car should find Car").contains(carId);
+
+        // Test 4: Search with larger k than available documents
+        GlobalIndexResult largeKResult = reader.search(queryVector, 10);
+        assertThat(largeKResult).isNotNull();
+        assertThat(largeKResult.iterator().hasNext()).isTrue();
+
+        // Test 5: Verify all three documents are indexed
+        GlobalIndexResult allDocsResult = reader.search(new byte[] {50, 50}, 3);
+        List<Long> allResultIds = new ArrayList<>();
+        for (Long id : allDocsResult) {
+            allResultIds.add(id);
+        }
+
+        assertThat(allResultIds.size())
+                .as("Should be able to retrieve all 3 documents")
+                .isGreaterThanOrEqualTo(1)
+                .isLessThanOrEqualTo(3);
+
+        reader.close();
     }
 }

@@ -16,29 +16,33 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.vector;
 
-import org.apache.paimon.predicate.FunctionVisitor;
-import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.lucene.document.KnnByteVectorField;
+import org.apache.lucene.index.IndexableField;
+import org.apache.lucene.index.VectorSimilarityFunction;
 
-import java.io.Closeable;
-import java.util.List;
+/** Vector key for byte vector. */
+public class ByteVectorKey implements VectorKey {
+    private final long rowId;
+    private final byte[] vector;
 
-/** Index reader for global index, return {@link GlobalIndexResult}. */
-public interface GlobalIndexReader extends FunctionVisitor<GlobalIndexResult>, Closeable {
+    public ByteVectorKey(long rowId, byte[] vector) {
+        this.rowId = rowId;
+        this.vector = vector;
+    }
 
-    @Override
-    default GlobalIndexResult visitAnd(List<GlobalIndexResult> children) {
-        throw new UnsupportedOperationException("Should not invoke this");
+    public long rowId() {
+        return rowId;
     }
 
     @Override
-    default GlobalIndexResult visitOr(List<GlobalIndexResult> children) {
-        throw new UnsupportedOperationException("Should not invoke this");
+    public IndexableField toIndexableField(
+            String fieldName, VectorSimilarityFunction similarityFunction) {
+        return new KnnByteVectorField(fieldName, this.vector, similarityFunction);
     }
 
-    @Override
-    default GlobalIndexResult visit(TransformPredicate predicate) {
-        throw new UnsupportedOperationException("Should not invoke this");
+    public byte[] vector() {
+        return vector;
     }
 }
