@@ -98,7 +98,7 @@ public abstract class FlinkTableSource
             @Nullable Long limit) {
         this.table = table;
         this.options = Options.fromMap(table.options());
-        this.partitionPredicate = getPartitionPredicateWithOptions();
+        this.partitionPredicate = getPartitionPredicate();
 
         this.predicate = predicate;
         this.projectFields = projectFields;
@@ -139,11 +139,23 @@ public abstract class FlinkTableSource
         return Result.of(filters, unConsumedFilters);
     }
 
+    private PartitionPredicate getPartitionPredicate() {
+        try {
+            return getPartitionPredicateWithOptions();
+        } catch (IllegalArgumentException e) {
+            // In older versions of Flink, however, lookup sources will first be treated as normal
+            // sources. So this method will also be visited by lookup tables, and the options might
+            // cause IllegalArgumentException. In this case we ignore the filters.
+            LOG.info("Failed to get filter with table options {} ", table.options(), e);
+            return null;
+        }
+    }
+
     /**
      * This method is only used for normal source (not lookup source). Specified partitions in
-     * lookup sources are handled in {@link org.apache.paimon.flink.lookup.PartitionLoader}. But we
-     * use PartitionLoader to create partition predicate. It's possible that user use max_pt() or
-     * max_two_pt() in batch join, so we should also handle it.
+     * lookup sources are handled in {@link org.apache.paimon.flink.lookup.PartitionLoader}. But
+     * it's possible that user use max_pt() or max_two_pt() in batch join, so use PartitionLoader to
+     * create partition predicate.
      */
     private PartitionPredicate getPartitionPredicateWithOptions() {
         PartitionLoader partitionLoader = PartitionLoader.of(table);
