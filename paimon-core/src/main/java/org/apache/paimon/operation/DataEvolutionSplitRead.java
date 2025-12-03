@@ -42,11 +42,13 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.RoaringBitmap32;
 
@@ -85,7 +87,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final Function<Long, TableSchema> schemaFetcher;
-    @Nullable private List<Long> indices;
+    @Nullable private List<Range> rowRanges;
     @Nullable private VariantAccessInfo[] variantAccess;
 
     protected RowType readRowType;
@@ -138,17 +140,18 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withRowIds(@Nullable List<Long> indices) {
-        this.indices = indices;
+    public SplitRead<InternalRow> withRowRanges(@Nullable List<Range> rowRanges) {
+        this.rowRanges = rowRanges;
         return this;
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
-        List<DataFileMeta> files = split.dataFiles();
-        BinaryRow partition = split.partition();
+    public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        DataSplit dataSplit = (DataSplit) split;
+        List<DataFileMeta> files = dataSplit.dataFiles();
+        BinaryRow partition = dataSplit.partition();
         DataFilePathFactory dataFilePathFactory =
-                pathFactory.createDataFilePathFactory(partition, split.bucket());
+                pathFactory.createDataFilePathFactory(partition, dataSplit.bucket());
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
         Builder formatBuilder =
@@ -210,7 +213,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         long rowCount = fieldsFiles.get(0).rowCount();
         long firstRowId = fieldsFiles.get(0).files().get(0).firstRowId();
 
-        if (indices == null) {
+        if (rowRanges == null) {
             for (FieldBunch bunch : fieldsFiles) {
                 checkArgument(
                         bunch.rowCount() == rowCount,
@@ -335,7 +338,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
         List<ReaderSupplier<InternalRow>> readerSuppliers = new ArrayList<>();
         for (DataFileMeta file : bunch.files()) {
-            RoaringBitmap32 selection = file.toFileSelection(indices);
+            RoaringBitmap32 selection = file.toFileSelection(rowRanges);
             FormatReaderContext formatReaderContext =
                     new FormatReaderContext(
                             fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);
@@ -363,7 +366,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             FormatReaderMapping formatReaderMapping)
             throws IOException {
-        RoaringBitmap32 selection = file.toFileSelection(indices);
+        RoaringBitmap32 selection = file.toFileSelection(rowRanges);
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(
                         fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);

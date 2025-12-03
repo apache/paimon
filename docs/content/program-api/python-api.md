@@ -355,7 +355,7 @@ print(duckdb_con.query("SELECT * FROM duckdb_table WHERE f0 = 1").fetchdf())
 
 This requires `ray` to be installed.
 
-You can convert the splits into a Ray dataset and handle it by Ray API:
+You can convert the splits into a Ray Dataset and handle it by Ray Data API for distributed processing:
 
 ```python
 table_read = read_builder.new_read()
@@ -374,6 +374,21 @@ print(ray_dataset.to_pandas())
 # 2   3  c
 # 3   4  d
 # ...
+```
+
+The `to_ray()` method supports a `parallelism` parameter to control distributed reading. Use `parallelism=1` for single-task read (default) or `parallelism > 1` for distributed read with multiple Ray workers:
+
+```python
+# Simple mode (single task)
+ray_dataset = table_read.to_ray(splits, parallelism=1)
+
+# Distributed mode with 4 parallel tasks
+ray_dataset = table_read.to_ray(splits, parallelism=4)
+
+# Use Ray Data operations
+mapped_dataset = ray_dataset.map(lambda row: {'value': row['value'] * 2})
+filtered_dataset = ray_dataset.filter(lambda row: row['score'] > 80)
+df = ray_dataset.to_pandas()
 ```
 
 ### Incremental Read

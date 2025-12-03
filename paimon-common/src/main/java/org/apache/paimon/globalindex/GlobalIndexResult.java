@@ -18,54 +18,54 @@
 
 package org.apache.paimon.globalindex;
 
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.NoSuchElementException;
-import java.util.Set;
+import org.apache.paimon.utils.LazyField;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
-/**
- * Global index result represents row ids.
- *
- * <p>TODO introduce ranges interface
- */
-public interface GlobalIndexResult extends Iterable<Long> {
+import java.util.function.Supplier;
 
-    static GlobalIndexResult createEmpty() {
-        return () ->
-                new Iterator<Long>() {
-                    @Override
-                    public boolean hasNext() {
-                        return false;
-                    }
+/** Global index result represents row ids as a compressed bitmap. */
+public interface GlobalIndexResult {
 
-                    @Override
-                    public Long next() {
-                        throw new NoSuchElementException();
-                    }
-                };
-    }
+    /** Returns the bitmap representing row ids. */
+    RoaringNavigableMap64 results();
 
+    /**
+     * Returns the intersection of this result and the other result.
+     *
+     * <p>Uses native bitmap AND operation for optimal performance.
+     */
     default GlobalIndexResult and(GlobalIndexResult other) {
-        Set<Long> set = new HashSet<>();
-        this.forEach(set::add);
-
-        Set<Long> result = new HashSet<>();
-        for (Long l : other) {
-            if (set.contains(l)) {
-                result.add(l);
-            }
-        }
-        return wrap(result);
+        return create(() -> RoaringNavigableMap64.and(this.results(), other.results()));
     }
 
+    /**
+     * Returns the union of this result and the other result.
+     *
+     * <p>Uses native bitmap OR operation for optimal performance.
+     */
     default GlobalIndexResult or(GlobalIndexResult other) {
-        Set<Long> result = new HashSet<>();
-        this.forEach(result::add);
-        other.forEach(result::add);
-        return wrap(result);
+        return create(() -> RoaringNavigableMap64.or(this.results(), other.results()));
     }
 
-    static GlobalIndexResult wrap(Set<Long> longs) {
-        return longs::iterator;
+    /** Returns an empty {@link GlobalIndexResult}. */
+    static GlobalIndexResult createEmpty() {
+        return create(RoaringNavigableMap64::new);
+    }
+
+    /** Returns a new {@link GlobalIndexResult} from supplier. */
+    static GlobalIndexResult create(Supplier<RoaringNavigableMap64> supplier) {
+        LazyField<RoaringNavigableMap64> lazyField = new LazyField<>(supplier);
+        return lazyField::get;
+    }
+
+    /** Returns a new {@link GlobalIndexResult} from {@link Range}. */
+    static GlobalIndexResult fromRange(Range range) {
+        return create(
+                () -> {
+                    RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
+                    result64.addRange(range);
+                    return result64;
+                });
     }
 }

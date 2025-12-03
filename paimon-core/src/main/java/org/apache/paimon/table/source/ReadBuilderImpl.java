@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -63,7 +64,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private @Nullable RowType readType;
     private @Nullable VariantAccessInfo[] variantAccessInfo;
-    private @Nullable List<Long> indices;
+    private @Nullable List<Range> rowRanges;
 
     private boolean dropStats = false;
 
@@ -157,8 +158,8 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
-    public ReadBuilder withRowIds(List<Long> indices) {
-        this.indices = indices;
+    public ReadBuilder withRowRanges(List<Range> indices) {
+        this.rowRanges = indices;
         return this;
     }
 
@@ -204,7 +205,7 @@ public class ReadBuilderImpl implements ReadBuilder {
         scan.withFilter(filter)
                 .withReadType(readType)
                 .withPartitionFilter(partitionFilter)
-                .withRowIds(indices);
+                .withRowRanges(rowRanges);
         checkState(
                 bucketFilter == null || shardIndexOfThisSubtask == null,
                 "Bucket filter and shard configuration cannot be used together. "
@@ -242,8 +243,8 @@ public class ReadBuilderImpl implements ReadBuilder {
         if (limit != null) {
             read.withLimit(limit);
         }
-        if (indices != null) {
-            read.withRowIds(indices);
+        if (rowRanges != null) {
+            read.withRowRanges(rowRanges);
         }
         if (variantAccessInfo != null) {
             read.withVariantAccess(variantAccessInfo);

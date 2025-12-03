@@ -327,6 +327,39 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Data Evolution: merge into table with data-evolution on _ROW_ID") {
+    withTable("source", "target") {
+      sql(
+        "CREATE TABLE source (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql(
+        "INSERT INTO source VALUES (1, 100, 'c11'), (3, 300, 'c33'), (5, 500, 'c55'), (7, 700, 'c77'), (9, 900, 'c99')")
+
+      sql(
+        "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3')")
+
+      sql(s"""
+             |MERGE INTO target
+             |USING source
+             |ON target._ROW_ID = source._ROW_ID
+             |WHEN MATCHED AND target.a = 2 THEN UPDATE SET b = source.b + target.b
+             |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET b = source.b, c = source.c
+             |WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (a, b * 1.1, c)
+             |WHEN NOT MATCHED THEN INSERT (a, b, c) VALUES (a, b, c)
+             |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM target ORDER BY a"),
+        Seq(
+          Row(1, 10, "c1", 0, 2),
+          Row(2, 320, "c2", 1, 2),
+          Row(3, 500, "c55", 2, 2),
+          Row(7, 700, "c77", 3, 2),
+          Row(9, 990, "c99", 4, 2))
+      )
+    }
+  }
+
   test("Data Evolution: update table throws exception") {
     withTable("t") {
       sql(

@@ -68,10 +68,11 @@ public class BitmapGlobalIndex implements GlobalIndexer {
 
     private GlobalIndexResult toGlobalResult(Range range, FileIndexResult result) {
         if (FileIndexResult.REMAIN == result) {
-            return BitmapIndexResultWrapper.fromRange(range);
+            return GlobalIndexResult.fromRange(range);
         } else if (FileIndexResult.SKIP == result) {
             return GlobalIndexResult.createEmpty();
         }
-        return new BitmapIndexResultWrapper((BitmapIndexResult) result, range.from);
+        BitmapIndexResult bitmapResult = (BitmapIndexResult) result;
+        return GlobalIndexResult.create(() -> bitmapResult.get().toNavigable64(range.from));
     }
 }

@@ -32,6 +32,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.KeyValueTableRead;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FieldsComparator;
@@ -91,7 +92,8 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
+    public RecordReader<InternalRow> createReader(Split s) throws IOException {
+        DataSplit split = (DataSplit) s;
         RecordReader<KeyValue> reader =
                 readDiff(
                         mergeRead.createMergeReader(
