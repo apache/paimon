@@ -35,6 +35,11 @@ import java.util.Objects;
 /** A compressed bitmap for 64-bit integer aggregated by tree. */
 public class RoaringNavigableMap64 {
 
+    static {
+        Roaring64NavigableMap.SERIALIZATION_MODE =
+                Roaring64NavigableMap.SERIALIZATION_MODE_PORTABLE;
+    }
+
     private final Roaring64NavigableMap roaring64NavigableMap;
 
     public RoaringNavigableMap64() {
