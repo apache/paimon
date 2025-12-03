@@ -26,6 +26,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -57,7 +58,7 @@ public interface SplitRead<T> {
         return this;
     }
 
-    default SplitRead<T> withRowIds(@Nullable List<Long> indices) {
+    default SplitRead<T> withRowRanges(@Nullable List<Range> rowRanges) {
         return this;
     }
 
@@ -98,8 +99,8 @@ public interface SplitRead<T> {
             }
 
             @Override
-            public SplitRead<R> withRowIds(@Nullable List<Long> indices) {
-                read.withRowIds(indices);
+            public SplitRead<R> withRowRanges(@Nullable List<Range> rowRanges) {
+                read.withRowRanges(rowRanges);
                 return this;
             }
 

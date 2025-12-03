@@ -33,6 +33,7 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -90,7 +91,7 @@ public interface FileStoreScan {
 
     FileStoreScan keepStats();
 
-    FileStoreScan withRowIds(List<Long> indices);
+    FileStoreScan withRowRanges(List<Range> rowRanges);
 
     FileStoreScan withReadType(RowType readType);
 

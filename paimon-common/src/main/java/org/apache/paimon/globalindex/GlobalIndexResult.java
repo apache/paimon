@@ -18,54 +18,33 @@
 
 package org.apache.paimon.globalindex;
 
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.NoSuchElementException;
-import java.util.Set;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
-/**
- * Global index result represents row ids.
- *
- * <p>TODO introduce ranges interface
- */
-public interface GlobalIndexResult extends Iterable<Long> {
+/** Global index result represents row ids as a compressed bitmap. */
+public interface GlobalIndexResult {
+
+    /** Returns the bitmap representing row ids. */
+    RoaringNavigableMap64 results();
 
     static GlobalIndexResult createEmpty() {
-        return () ->
-                new Iterator<Long>() {
-                    @Override
-                    public boolean hasNext() {
-                        return false;
-                    }
-
-                    @Override
-                    public Long next() {
-                        throw new NoSuchElementException();
-                    }
-                };
+        return RoaringNavigableMap64::new;
     }
 
+    /**
+     * Returns the intersection of this result and the other result.
+     *
+     * <p>Uses native bitmap AND operation for optimal performance.
+     */
     default GlobalIndexResult and(GlobalIndexResult other) {
-        Set<Long> set = new HashSet<>();
-        this.forEach(set::add);
-
-        Set<Long> result = new HashSet<>();
-        for (Long l : other) {
-            if (set.contains(l)) {
-                result.add(l);
-            }
-        }
-        return wrap(result);
+        return () -> RoaringNavigableMap64.and(this.results(), other.results());
     }
 
+    /**
+     * Returns the union of this result and the other result.
+     *
+     * <p>Uses native bitmap OR operation for optimal performance.
+     */
     default GlobalIndexResult or(GlobalIndexResult other) {
-        Set<Long> result = new HashSet<>();
-        this.forEach(result::add);
-        other.forEach(result::add);
-        return wrap(result);
-    }
-
-    static GlobalIndexResult wrap(Set<Long> longs) {
-        return longs::iterator;
+        return () -> RoaringNavigableMap64.or(this.results(), other.results());
     }
 }
