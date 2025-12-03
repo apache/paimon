@@ -24,6 +24,7 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
@@ -34,20 +35,14 @@ import org.apache.lucene.search.KnnByteVectorQuery;
 import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TopDocs;
-import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.store.MMapDirectory;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * Vector global index reader using Apache Lucene 9.x.
@@ -57,18 +52,15 @@ import java.util.UUID;
  */
 public class VectorGlobalIndexReader implements GlobalIndexReader {
 
-    private static final String VECTOR_FIELD = "vector";
-    private static final String ROW_ID_FIELD = "rowId";
+    private static final int BUFFER_SIZE = 8192; // 8KB buffer for streaming
 
     private final List<IndexSearcher> searchers;
-    private final List<Directory> directories;
-    private final List<java.nio.file.Path> tempDirs;
+    private final List<IndexMMapDirectory> directories;
 
     public VectorGlobalIndexReader(GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files)
             throws IOException {
         this.searchers = new ArrayList<>();
         this.directories = new ArrayList<>();
-        this.tempDirs = new ArrayList<>();
         loadIndices(fileReader, files);
     }
 
@@ -80,12 +72,12 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
      * @return global index result containing row IDs
      */
     public GlobalIndexResult search(float[] query, int k) {
-        KnnFloatVectorQuery knnQuery = new KnnFloatVectorQuery(VECTOR_FIELD, query, k);
+        KnnFloatVectorQuery knnQuery = new KnnFloatVectorQuery(VectorIndex.VECTOR_FIELD, query, k);
         return search(knnQuery, k);
     }
 
     public GlobalIndexResult search(byte[] query, int k) {
-        KnnByteVectorQuery knnQuery = new KnnByteVectorQuery(VECTOR_FIELD, query, k);
+        KnnByteVectorQuery knnQuery = new KnnByteVectorQuery(VectorIndex.VECTOR_FIELD, query, k);
         return search(knnQuery, k);
     }
 
@@ -98,95 +90,112 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
         searchers.clear();
 
         // Close directories
-        for (Directory directory : directories) {
-            directory.close();
+        for (IndexMMapDirectory directory : directories) {
+            try {
+                directory.close();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
         directories.clear();
-
-        // Clean up temp directories
-        for (java.nio.file.Path tempDir : tempDirs) {
-            deleteDirectory(tempDir);
-        }
-        tempDirs.clear();
     }
 
     private GlobalIndexResult search(Query query, int k) {
-        Set<Long> resultIds = new HashSet<>();
+        RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
         for (IndexSearcher searcher : searchers) {
             try {
                 // Execute search
                 TopDocs topDocs = searcher.search(query, k);
                 StoredFields storedFields = searcher.storedFields();
-                Set<String> fieldsToLoad = Set.of(ROW_ID_FIELD);
+                Set<String> fieldsToLoad = Set.of(VectorIndex.ROW_ID_FIELD);
                 // Collect row IDs from results
                 for (org.apache.lucene.search.ScoreDoc scoreDoc : topDocs.scoreDocs) {
                     float rawScore = scoreDoc.score;
                     Document doc = storedFields.document(scoreDoc.doc, fieldsToLoad);
-                    long rowId = doc.getField(ROW_ID_FIELD).numericValue().longValue();
-                    resultIds.add(rowId);
+                    long rowId = doc.getField(VectorIndex.ROW_ID_FIELD).numericValue().longValue();
+                    roaringBitmap64.add(rowId);
                 }
             } catch (IOException e) {
                 throw new RuntimeException("Failed to search vector index", e);
             }
         }
 
-        return GlobalIndexResult.wrap(resultIds);
+        return GlobalIndexResult.create(() -> roaringBitmap64);
     }
 
     private void loadIndices(GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files)
             throws IOException {
         for (GlobalIndexIOMeta meta : files) {
             try (SeekableInputStream in = fileReader.getInputStream(meta.fileName())) {
-                byte[] indexBytes = new byte[(int) meta.fileSize()];
-                int totalRead = 0;
-                while (totalRead < indexBytes.length) {
-                    int read = in.read(indexBytes, totalRead, indexBytes.length - totalRead);
-                    if (read == -1) {
-                        throw new IOException("Unexpected end of stream");
-                    }
-                    totalRead += read;
-                }
-
-                Directory directory = deserializeDirectory(indexBytes);
+                IndexMMapDirectory directory = deserializeDirectory(in);
                 directories.add(directory);
-
-                IndexReader reader = DirectoryReader.open(directory);
+                IndexReader reader = DirectoryReader.open(directory.directory());
                 IndexSearcher searcher = new IndexSearcher(reader);
                 searchers.add(searcher);
             }
         }
     }
 
-    private Directory deserializeDirectory(byte[] data) throws IOException {
-        // Create temporary directory for MMap
-        Path tempDir = Files.createTempDirectory("paimon-vector-read" + UUID.randomUUID());
-        tempDirs.add(tempDir);
-        Directory directory = new MMapDirectory(tempDir);
-
-        ByteBuffer buffer = ByteBuffer.wrap(data);
+    private IndexMMapDirectory deserializeDirectory(SeekableInputStream in) throws IOException {
+        IndexMMapDirectory indexMMapDirectory = new IndexMMapDirectory();
 
         // Read number of files
-        int numFiles = buffer.getInt();
+        int numFiles = readInt(in);
+
+        // Reusable buffer for streaming
+        byte[] buffer = new byte[BUFFER_SIZE];
 
         for (int i = 0; i < numFiles; i++) {
             // Read file name
-            int nameLength = buffer.getInt();
+            int nameLength = readInt(in);
             byte[] nameBytes = new byte[nameLength];
-            buffer.get(nameBytes);
+            readFully(in, nameBytes);
             String fileName = new String(nameBytes, StandardCharsets.UTF_8);
 
-            // Read file content
-            long fileLength = buffer.getLong();
-            byte[] fileContent = new byte[(int) fileLength];
-            buffer.get(fileContent);
+            // Read file content length
+            long fileLength = readLong(in);
 
-            // Write to directory
-            try (IndexOutput output = directory.createOutput(fileName, null)) {
-                output.writeBytes(fileContent, 0, fileContent.length);
+            // Stream file content directly to directory
+            try (IndexOutput output = indexMMapDirectory.directory().createOutput(fileName, null)) {
+                long remaining = fileLength;
+                while (remaining > 0) {
+                    int toRead = (int) Math.min(buffer.length, remaining);
+                    readFully(in, buffer, 0, toRead);
+                    output.writeBytes(buffer, 0, toRead);
+                    remaining -= toRead;
+                }
             }
         }
 
-        return directory;
+        return indexMMapDirectory;
+    }
+
+    private int readInt(SeekableInputStream in) throws IOException {
+        byte[] bytes = new byte[4];
+        readFully(in, bytes);
+        return ByteBuffer.wrap(bytes).getInt();
+    }
+
+    private long readLong(SeekableInputStream in) throws IOException {
+        byte[] bytes = new byte[8];
+        readFully(in, bytes);
+        return ByteBuffer.wrap(bytes).getLong();
+    }
+
+    private void readFully(SeekableInputStream in, byte[] buffer) throws IOException {
+        readFully(in, buffer, 0, buffer.length);
+    }
+
+    private void readFully(SeekableInputStream in, byte[] buffer, int offset, int length)
+            throws IOException {
+        int totalRead = 0;
+        while (totalRead < length) {
+            int read = in.read(buffer, offset + totalRead, length - totalRead);
+            if (read == -1) {
+                throw new IOException("Unexpected end of stream");
+            }
+            totalRead += read;
+        }
     }
 
     private void deleteDirectory(java.nio.file.Path path) throws IOException {

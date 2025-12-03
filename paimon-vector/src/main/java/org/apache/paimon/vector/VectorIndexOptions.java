@@ -36,7 +36,7 @@ public class VectorIndexOptions {
                     .stringType()
                     .defaultValue("EUCLIDEAN")
                     .withDescription(
-                            "The similarity metric for vector search (COSINE, DOT_PRODUCT, EUCLIDEAN, MAX_INNER_PRODUCT)");
+                            "The similarity metric for vector search (COSINE, DOT_PRODUCT, EUCLIDEAN, MAX_INNER_PRODUCT), and EUCLIDEAN is the default");
 
     public static final ConfigOption<Integer> VECTOR_M =
             ConfigOptions.key("vector.m")
@@ -52,16 +52,35 @@ public class VectorIndexOptions {
                     .withDescription(
                             "The size of the dynamic candidate list during the index construction");
 
+    public static final ConfigOption<Integer> VECTOR_SIZE_PER_INDEX =
+            ConfigOptions.key("vector.size-per-index")
+                    .intType()
+                    .defaultValue(10000)
+                    .withDescription("The size of vectors stored in each vector index file");
+
+    public static final ConfigOption<Integer> VECTOR_WRITE_BUFFER_SIZE =
+            ConfigOptions.key("vector.write-buffer-size")
+                    .intType()
+                    .defaultValue(256)
+                    .withDescription("write buffer size in MB for vector index");
+
     private final int dimension;
     private final String metric;
     private final int m;
     private final int efConstruction;
+    private final int sizePerIndex;
+    private final int writeBufferSize;
 
     public VectorIndexOptions(Options options) {
         this.dimension = options.get(VECTOR_DIM);
         this.metric = options.get(VECTOR_METRIC);
         this.m = options.get(VECTOR_M);
         this.efConstruction = options.get(VECTOR_EF_CONSTRUCTION);
+        this.sizePerIndex =
+                options.get(VECTOR_SIZE_PER_INDEX) > 0
+                        ? options.get(VECTOR_SIZE_PER_INDEX)
+                        : VECTOR_SIZE_PER_INDEX.defaultValue();
+        this.writeBufferSize = options.get(VECTOR_WRITE_BUFFER_SIZE);
     }
 
     public int dimension() {
@@ -78,5 +97,13 @@ public class VectorIndexOptions {
 
     public int efConstruction() {
         return efConstruction;
+    }
+
+    public int sizePerIndex() {
+        return sizePerIndex;
+    }
+
+    public int writeBufferSize() {
+        return writeBufferSize;
     }
 }

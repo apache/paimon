@@ -29,12 +29,10 @@ import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.lucene912.Lucene912Codec;
 import org.apache.lucene.codecs.lucene99.Lucene99HnswScalarQuantizedVectorsFormat;
 import org.apache.lucene.document.Document;
-import org.apache.lucene.document.StoredField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.MMapDirectory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -53,38 +51,31 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class VectorGlobalIndexWriter implements GlobalIndexWriter {
 
-    private static final String VECTOR_FIELD = "vector";
-    private static final String ROW_ID_FIELD = "rowId";
-
     private final GlobalIndexFileWriter fileWriter;
     private final DataType fieldType;
     private final VectorIndexOptions vectorOptions;
     private final VectorSimilarityFunction similarityFunction;
+    private final int sizePerIndex;
 
-    private final List<VectorKey> vectors;
-    private long minRowId = Long.MAX_VALUE;
-    private long maxRowId = Long.MIN_VALUE;
+    private final List<VectorIndex> vectors;
 
     public VectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter, DataType fieldType, Options options) {
+        checkArgument(
+                fieldType instanceof ArrayType,
+                "Vector field type must be ARRAY, but was: " + fieldType);
         this.fileWriter = fileWriter;
         this.fieldType = fieldType;
         this.vectors = new ArrayList<>();
-
-        // Parse options
         this.vectorOptions = new VectorIndexOptions(options);
         this.similarityFunction = parseMetricToLucene(vectorOptions.metric());
-
-        // Validate field type
-        validateFieldType(fieldType);
+        this.sizePerIndex = vectorOptions.sizePerIndex();
     }
 
     @Override
     public void write(Object key) {
-        Long rowId;
-        if (key instanceof FloatVectorKey) {
-            FloatVectorKey vectorKey = (FloatVectorKey) key;
-            rowId = vectorKey.rowId();
+        if (key instanceof FloatVectorIndex) {
+            FloatVectorIndex vectorKey = (FloatVectorIndex) key;
             float[] vector = vectorKey.vector();
 
             checkArgument(
@@ -95,9 +86,8 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                             + vector.length);
 
             vectors.add(vectorKey);
-        } else if (key instanceof ByteVectorKey) {
-            ByteVectorKey vectorKey = (ByteVectorKey) key;
-            rowId = vectorKey.rowId();
+        } else if (key instanceof ByteVectorIndex) {
+            ByteVectorIndex vectorKey = (ByteVectorIndex) key;
             byte[] byteVector = vectorKey.vector();
 
             checkArgument(
@@ -109,10 +99,9 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
 
             vectors.add(vectorKey);
         } else {
-            throw new IllegalArgumentException("Unsupported key type: " + key.getClass().getName());
+            throw new IllegalArgumentException(
+                    "Unsupported index type: " + key.getClass().getName());
         }
-        minRowId = Math.min(minRowId, rowId);
-        maxRowId = Math.max(maxRowId, rowId);
     }
 
     @Override
@@ -122,36 +111,50 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                 return new ArrayList<>();
             }
 
-            // Build Lucene index in memory
-            byte[] indexBytes =
-                    buildLuceneIndex(this.vectorOptions.m(), this.vectorOptions.efConstruction());
+            List<ResultEntry> results = new ArrayList<>();
 
-            // Create metadata
-            VectorIndexMetadata metadata =
-                    new VectorIndexMetadata(
-                            vectorOptions.dimension(),
-                            vectorOptions.metric(),
-                            vectorOptions.m(),
-                            vectorOptions.efConstruction());
-            byte[] metaBytes = VectorIndexMetadata.serializeMetadata(metadata);
+            // Split vectors into batches if size exceeds sizePerIndex
+            int totalVectors = vectors.size();
+            int numBatches = (int) Math.ceil((double) totalVectors / sizePerIndex);
 
-            // Write to file
-            String fileName = fileWriter.newFileName(VectorGlobalIndexerFactory.IDENTIFIER);
-            try (OutputStream out = fileWriter.newOutputStream(fileName)) {
-                out.write(indexBytes);
+            for (int batchIndex = 0; batchIndex < numBatches; batchIndex++) {
+                int startIdx = batchIndex * sizePerIndex;
+                int endIdx = Math.min(startIdx + sizePerIndex, totalVectors);
+                List<VectorIndex> batchVectors = vectors.subList(startIdx, endIdx);
+
+                // Build index
+                byte[] indexBytes =
+                        buildIndex(
+                                batchVectors,
+                                this.vectorOptions.m(),
+                                this.vectorOptions.efConstruction(),
+                                this.vectorOptions.writeBufferSize());
+
+                // Create metadata
+                VectorIndexMetadata metadata =
+                        new VectorIndexMetadata(
+                                vectorOptions.dimension(),
+                                vectorOptions.metric(),
+                                vectorOptions.m(),
+                                vectorOptions.efConstruction());
+                byte[] metaBytes = VectorIndexMetadata.serializeMetadata(metadata);
+
+                // Write to file
+                String fileName = fileWriter.newFileName(VectorGlobalIndexerFactory.IDENTIFIER);
+                try (OutputStream out = fileWriter.newOutputStream(fileName)) {
+                    out.write(indexBytes);
+                }
+                long minRowIdInBatch = batchVectors.get(0).rowId();
+                long maxRowIdInBatch = batchVectors.get(batchVectors.size() - 1).rowId();
+                results.add(
+                        ResultEntry.of(
+                                fileName, metaBytes, new Range(minRowIdInBatch, maxRowIdInBatch)));
             }
 
-            List<ResultEntry> results = new ArrayList<>();
-            results.add(ResultEntry.of(fileName, metaBytes, new Range(minRowId, maxRowId + 1)));
             return results;
         } catch (IOException e) {
             throw new RuntimeException("Failed to write vector global index", e);
         }
-    }
-
-    private void validateFieldType(DataType type) {
-        checkArgument(
-                type instanceof ArrayType, "Vector field type must be ARRAY, but was: " + type);
     }
 
     private VectorSimilarityFunction parseMetricToLucene(String metric) {
@@ -169,27 +172,24 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
         }
     }
 
-    private byte[] buildLuceneIndex(int m, int efConstruction) throws IOException {
-        // Create temporary directory for MMap
-        java.nio.file.Path tempDir =
-                java.nio.file.Files.createTempDirectory(
-                        fileWriter.newFileName("paimon-vector-index"));
-        Directory directory = new MMapDirectory(tempDir);
+    private byte[] buildIndex(
+            List<VectorIndex> batchVectors, int m, int efConstruction, int writeBufferSize)
+            throws IOException {
 
-        try {
+        try (IndexMMapDirectory indexMMapDirectory = new IndexMMapDirectory()) {
             // Configure index writer
-            IndexWriterConfig config = getIndexWriterConfig(m, efConstruction);
+            IndexWriterConfig config = getIndexWriterConfig(m, efConstruction, writeBufferSize);
 
-            try (IndexWriter writer = new IndexWriter(directory, config)) {
+            try (IndexWriter writer = new IndexWriter(indexMMapDirectory.directory(), config)) {
                 // Add each vector as a document
-                for (VectorKey vectorKey : vectors) {
+                for (VectorIndex vectorIndex : batchVectors) {
                     Document doc = new Document();
 
                     // Add KNN vector field
-                    doc.add(vectorKey.toIndexableField(VECTOR_FIELD, similarityFunction));
+                    doc.add(vectorIndex.indexableField(similarityFunction));
 
                     // Store row ID
-                    doc.add(new StoredField(ROW_ID_FIELD, vectorKey.rowId()));
+                    doc.add(vectorIndex.rowIdStoredField());
 
                     writer.addDocument(doc);
                 }
@@ -199,17 +199,17 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
             }
 
             // Serialize directory to byte array
-            return serializeDirectory(directory);
-        } finally {
-            // Clean up
-            directory.close();
-            deleteDirectory(tempDir);
+            return serializeDirectory(indexMMapDirectory.directory());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
-    private static IndexWriterConfig getIndexWriterConfig(int m, int efConstruction) {
+    private static IndexWriterConfig getIndexWriterConfig(
+            int m, int efConstruction, int writeBufferSize) {
         IndexWriterConfig config = new IndexWriterConfig();
-        config.setRAMBufferSizeMB(256); // Increase buffer for better performance
+        config.setRAMBufferSizeMB(
+                writeBufferSize); // Configure RAM buffer size based on user settings
         config.setCodec(
                 new Lucene912Codec(Lucene912Codec.Mode.BEST_SPEED) {
                     @Override
@@ -218,21 +218,6 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                     }
                 });
         return config;
-    }
-
-    private void deleteDirectory(java.nio.file.Path path) throws IOException {
-        if (java.nio.file.Files.exists(path)) {
-            java.nio.file.Files.walk(path)
-                    .sorted(java.util.Comparator.reverseOrder())
-                    .forEach(
-                            p -> {
-                                try {
-                                    java.nio.file.Files.delete(p);
-                                } catch (IOException e) {
-                                    // Ignore cleanup errors
-                                }
-                            });
-        }
     }
 
     private byte[] serializeDirectory(Directory directory) throws IOException {

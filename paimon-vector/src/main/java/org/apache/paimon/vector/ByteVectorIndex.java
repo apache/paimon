@@ -22,24 +22,24 @@ import org.apache.lucene.document.KnnByteVectorField;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.VectorSimilarityFunction;
 
-/** Vector key for byte vector. */
-public class ByteVectorKey implements VectorKey {
+/** Vector index for byte vector. */
+public class ByteVectorIndex extends VectorIndex {
     private final long rowId;
     private final byte[] vector;
 
-    public ByteVectorKey(long rowId, byte[] vector) {
+    public ByteVectorIndex(long rowId, byte[] vector) {
         this.rowId = rowId;
         this.vector = vector;
     }
 
+    @Override
     public long rowId() {
         return rowId;
     }
 
     @Override
-    public IndexableField toIndexableField(
-            String fieldName, VectorSimilarityFunction similarityFunction) {
-        return new KnnByteVectorField(fieldName, this.vector, similarityFunction);
+    public IndexableField indexableField(VectorSimilarityFunction similarityFunction) {
+        return new KnnByteVectorField(VECTOR_FIELD, this.vector, similarityFunction);
     }
 
     public byte[] vector() {

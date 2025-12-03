@@ -18,12 +18,31 @@
 
 package org.apache.paimon.vector;
 
+import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.VectorSimilarityFunction;
 
-/** Vector key interface. */
-public interface VectorKey {
-    long rowId();
+/** Vector index for float vector. */
+public class FloatVectorIndex extends VectorIndex {
+    private final long rowId;
+    private final float[] vector;
 
-    IndexableField toIndexableField(String fieldName, VectorSimilarityFunction similarityFunction);
+    public FloatVectorIndex(long rowId, float[] vector) {
+        this.rowId = rowId;
+        this.vector = vector;
+    }
+
+    public float[] vector() {
+        return vector;
+    }
+
+    @Override
+    public long rowId() {
+        return rowId;
+    }
+
+    @Override
+    public IndexableField indexableField(VectorSimilarityFunction similarityFunction) {
+        return new KnnFloatVectorField(VECTOR_FIELD, this.vector(), similarityFunction);
+    }
 }
