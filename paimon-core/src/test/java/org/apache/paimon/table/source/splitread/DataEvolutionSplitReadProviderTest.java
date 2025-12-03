@@ -40,6 +40,9 @@ import static org.mockito.Mockito.when;
 /** Tests for {@link DataEvolutionSplitReadProvider}. */
 public class DataEvolutionSplitReadProviderTest {
 
+    public static final SplitReadProvider.Context DEFAULT_CONTEXT =
+            new SplitReadProvider.Context(false);
+
     private Supplier<DataEvolutionSplitRead> mockSupplier;
     private SplitReadConfig mockSplitReadConfig;
     private DataEvolutionSplitRead mockSplitRead;
@@ -80,7 +83,7 @@ public class DataEvolutionSplitReadProviderTest {
     public void testMatchWithNoFiles() {
         DataSplit split = mock(DataSplit.class);
         when(split.dataFiles()).thenReturn(Collections.emptyList());
-        assertThat(provider.match(split, SplitReadProvider.Context.DEFAULT)).isFalse();
+        assertThat(provider.match(split, DEFAULT_CONTEXT)).isFalse();
     }
 
     @Test
@@ -88,7 +91,7 @@ public class DataEvolutionSplitReadProviderTest {
         DataSplit split = mock(DataSplit.class);
         DataFileMeta file1 = mock(DataFileMeta.class);
         when(split.dataFiles()).thenReturn(Collections.singletonList(file1));
-        assertThat(provider.match(split, SplitReadProvider.Context.DEFAULT)).isFalse();
+        assertThat(provider.match(split, DEFAULT_CONTEXT)).isFalse();
     }
 
     @Test
@@ -103,7 +106,7 @@ public class DataEvolutionSplitReadProviderTest {
         when(file1.fileName()).thenReturn("test1.parquet");
         when(file2.fileName()).thenReturn("test2.parquet");
 
-        assertThat(provider.match(split, SplitReadProvider.Context.DEFAULT)).isFalse();
+        assertThat(provider.match(split, DEFAULT_CONTEXT)).isFalse();
     }
 
     @Test
@@ -118,7 +121,7 @@ public class DataEvolutionSplitReadProviderTest {
         when(file1.fileName()).thenReturn("test1.parquet");
         when(file2.fileName()).thenReturn("test2.parquet");
 
-        assertThat(provider.match(split, SplitReadProvider.Context.DEFAULT)).isFalse();
+        assertThat(provider.match(split, DEFAULT_CONTEXT)).isFalse();
     }
 
     @Test
@@ -136,13 +139,7 @@ public class DataEvolutionSplitReadProviderTest {
         when(file2.fileName()).thenReturn("test2.parquet");
 
         // The forceKeepDelete parameter is not used in match, so test both values
-        assertThat(
-                        provider.match(
-                                split,
-                                SplitReadProvider.Context.builder()
-                                        .withForceKeepDelete(true)
-                                        .build()))
-                .isTrue();
-        assertThat(provider.match(split, SplitReadProvider.Context.DEFAULT)).isTrue();
+        assertThat(provider.match(split, new SplitReadProvider.Context(true))).isTrue();
+        assertThat(provider.match(split, DEFAULT_CONTEXT)).isTrue();
     }
 }

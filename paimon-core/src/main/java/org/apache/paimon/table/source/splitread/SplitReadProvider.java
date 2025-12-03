@@ -33,30 +33,10 @@ public interface SplitReadProvider {
     /** Split reader provider context. */
     class Context {
 
-        public static final Context DEFAULT = Context.builder().build();
-
         private final boolean forceKeepDelete;
 
-        private Context(boolean forceKeepDelete) {
+        public Context(boolean forceKeepDelete) {
             this.forceKeepDelete = forceKeepDelete;
-        }
-
-        public static Context.Builder builder() {
-            return new Builder();
-        }
-
-        public static class Builder {
-
-            private boolean forceKeepDelete;
-
-            public Context build() {
-                return new Context(forceKeepDelete);
-            }
-
-            public Builder withForceKeepDelete(boolean forceKeepDelete) {
-                this.forceKeepDelete = forceKeepDelete;
-                return this;
-            }
         }
 
         public boolean forceKeepDelete() {
