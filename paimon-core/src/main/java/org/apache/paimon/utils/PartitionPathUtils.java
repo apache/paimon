@@ -303,8 +303,8 @@ public class PartitionPathUtils {
         try {
             FileStatus fileStatus = fileIO.getFileStatus(path);
             listStatusRecursively(fileIO, fileStatus, 0, expectLevel, result);
-        } catch (IOException ignore) {
-            return new FileStatus[0];
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to list files in " + path, e);
         }
 
         return result.toArray(new FileStatus[0]);
