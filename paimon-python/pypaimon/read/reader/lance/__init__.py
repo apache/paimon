@@ -16,12 +16,18 @@
 # limitations under the License.
 ################################################################################
 
-"""Lance format support modules including vector indexing, scalar indexing, and predicate optimization."""
+"""Lance format support modules including vector indexing, scalar indexing, predicate optimization, and type validation."""
 
 try:
     from pypaimon.read.reader.lance.vector_index import VectorIndexBuilder
     from pypaimon.read.reader.lance.scalar_index import ScalarIndexBuilder, BitmapIndexHandler, BTreeIndexHandler
     from pypaimon.read.reader.lance.predicate_pushdown import PredicateOptimizer, PredicateExpression, PredicateOperator
+    from pypaimon.read.reader.lance.incremental_index import (
+        IncrementalIndexManager, IndexMetadata, UpdateStrategy, IndexUpdateScheduler
+    )
+    from pypaimon.read.reader.lance.type_validation import (
+        TypeValidator, DataType, IndexTypeCompatibility, SchemaBuilder
+    )
     from pypaimon.read.reader.lance.lance_utils import LanceUtils
     from pypaimon.read.reader.lance.lance_native_reader import LanceNativeReader
     
@@ -34,7 +40,15 @@ try:
         'PredicateExpression',
         'PredicateOperator',
         'LanceUtils',
-        'LanceNativeReader',
+        'LanceNativeReader', 
+        'IncrementalIndexManager',
+        'IndexMetadata',
+        'UpdateStrategy',
+        'IndexUpdateScheduler',
+        'TypeValidator',
+        'DataType',
+        'IndexTypeCompatibility',
+        'SchemaBuilder',
     ]
 except ImportError:
     # Lance library not available
