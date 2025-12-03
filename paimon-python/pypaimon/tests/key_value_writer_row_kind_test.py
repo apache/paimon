@@ -22,7 +22,6 @@ from unittest.mock import Mock
 import pyarrow as pa
 
 from pypaimon.table.row.row_kind import RowKind
-from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
 
 
 class KeyValueWriterRowKindTest(unittest.TestCase):
@@ -30,12 +29,17 @@ class KeyValueWriterRowKindTest(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
+        # Import the actual method
+        from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
+
         # Only test _extract_row_kind_column directly, not through KeyValueDataWriter init
         # because it requires complex mock setup
         self.writer = Mock(spec=['_extract_row_kind_column'])
-        # Import the actual method
-        from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
-        self.writer._extract_row_kind_column = KeyValueDataWriter._extract_row_kind_column.__get__(self.writer, type(self.writer))
+        self.writer._extract_row_kind_column = (
+            KeyValueDataWriter._extract_row_kind_column.__get__(
+                self.writer, type(self.writer)
+            )
+        )
 
     def test_extract_row_kind_with_valid_column(self):
         """Test extracting RowKind from '__row_kind__' column with valid values."""
