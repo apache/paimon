@@ -18,7 +18,11 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.utils.LazyField;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import java.util.function.Supplier;
 
 /** Global index result represents row ids as a compressed bitmap. */
 public interface GlobalIndexResult {
@@ -26,17 +30,13 @@ public interface GlobalIndexResult {
     /** Returns the bitmap representing row ids. */
     RoaringNavigableMap64 results();
 
-    static GlobalIndexResult createEmpty() {
-        return RoaringNavigableMap64::new;
-    }
-
     /**
      * Returns the intersection of this result and the other result.
      *
      * <p>Uses native bitmap AND operation for optimal performance.
      */
     default GlobalIndexResult and(GlobalIndexResult other) {
-        return () -> RoaringNavigableMap64.and(this.results(), other.results());
+        return create(() -> RoaringNavigableMap64.and(this.results(), other.results()));
     }
 
     /**
@@ -45,6 +45,27 @@ public interface GlobalIndexResult {
      * <p>Uses native bitmap OR operation for optimal performance.
      */
     default GlobalIndexResult or(GlobalIndexResult other) {
-        return () -> RoaringNavigableMap64.or(this.results(), other.results());
+        return create(() -> RoaringNavigableMap64.or(this.results(), other.results()));
+    }
+
+    /** Returns an empty {@link GlobalIndexResult}. */
+    static GlobalIndexResult createEmpty() {
+        return create(RoaringNavigableMap64::new);
+    }
+
+    /** Returns a new {@link GlobalIndexResult} from supplier. */
+    static GlobalIndexResult create(Supplier<RoaringNavigableMap64> supplier) {
+        LazyField<RoaringNavigableMap64> lazyField = new LazyField<>(supplier);
+        return lazyField::get;
+    }
+
+    /** Returns a new {@link GlobalIndexResult} from {@link Range}. */
+    static GlobalIndexResult fromRange(Range range) {
+        return create(
+                () -> {
+                    RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
+                    result64.addRange(range);
+                    return result64;
+                });
     }
 }

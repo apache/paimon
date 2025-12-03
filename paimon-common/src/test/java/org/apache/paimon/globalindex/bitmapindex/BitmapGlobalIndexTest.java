@@ -28,7 +28,6 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndex;
-import org.apache.paimon.globalindex.bitmap.BitmapIndexResultWrapper;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
@@ -37,6 +36,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringBitmap32;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.Rule;
 import org.junit.jupiter.api.Test;
@@ -93,22 +93,14 @@ public class BitmapGlobalIndexTest {
                                 writer.write(o);
                             }
                         });
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, a))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(0, 4));
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, b))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(2));
-        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(1, 3));
-        assert ((BitmapIndexResultWrapper) reader.visitIn(fieldRef, Arrays.asList(a, b)))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(0, 2, 4));
+        assert reader.visitEqual(fieldRef, a)
+                .results()
+                .equals(RoaringNavigableMap64.bitmapOf(0, 4));
+        assert reader.visitEqual(fieldRef, b).results().equals(RoaringNavigableMap64.bitmapOf(2));
+        assert reader.visitIsNull(fieldRef).results().equals(RoaringNavigableMap64.bitmapOf(1, 3));
+        assert reader.visitIn(fieldRef, Arrays.asList(a, b))
+                .results()
+                .equals(RoaringNavigableMap64.bitmapOf(0, 2, 4));
         assert reader.visitEqual(fieldRef, BinaryString.fromString("c")).results().isEmpty();
     }
 
@@ -125,22 +117,12 @@ public class BitmapGlobalIndexTest {
                                 writer.write(o);
                             }
                         });
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, 0))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(0));
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, 1))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(1));
-        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(2));
-        assert ((BitmapIndexResultWrapper) reader.visitIn(fieldRef, Arrays.asList(0, 1, 2)))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(0, 1));
+        assert reader.visitEqual(fieldRef, 0).results().equals(RoaringNavigableMap64.bitmapOf(0));
+        assert reader.visitEqual(fieldRef, 1).results().equals(RoaringNavigableMap64.bitmapOf(1));
+        assert reader.visitIsNull(fieldRef).results().equals(RoaringNavigableMap64.bitmapOf(2));
+        assert reader.visitIn(fieldRef, Arrays.asList(0, 1, 2))
+                .results()
+                .equals(RoaringNavigableMap64.bitmapOf(0, 1));
 
         assert reader.visitEqual(fieldRef, 2).results().isEmpty();
     }
@@ -158,14 +140,10 @@ public class BitmapGlobalIndexTest {
                                 writer.write(o);
                             }
                         });
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, Boolean.TRUE))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(0, 2));
-        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(4));
+        assert reader.visitEqual(fieldRef, Boolean.TRUE)
+                .results()
+                .equals(RoaringNavigableMap64.bitmapOf(0, 2));
+        assert reader.visitIsNull(fieldRef).results().equals(RoaringNavigableMap64.bitmapOf(4));
     }
 
     private void testHighCardinality(
@@ -200,15 +178,12 @@ public class BitmapGlobalIndexTest {
         GlobalIndexResult result =
                 reader.visitEqual(
                         fieldRef, BinaryString.fromString(prefix + (approxCardinality / 2)));
-        RoaringBitmap32 resultBm = ((BitmapIndexResultWrapper) result).getBitmapIndexResult().get();
         System.out.println("read time: " + (System.currentTimeMillis() - time2));
-        assert resultBm.equals(middleBm);
+        assert result.results().equals(middleBm.toNavigable64(0));
         long time3 = System.currentTimeMillis();
         GlobalIndexResult resultNull = reader.visitIsNull(fieldRef);
-        RoaringBitmap32 resultNullBm =
-                ((BitmapIndexResultWrapper) resultNull).getBitmapIndexResult().get();
         System.out.println("read null bitmap time: " + (System.currentTimeMillis() - time3));
-        assert resultNullBm.equals(nullBm);
+        assert resultNull.results().equals(nullBm.toNavigable64(0));
     }
 
     private GlobalIndexReader createTestReaderOnWriter(
@@ -273,22 +248,14 @@ public class BitmapGlobalIndexTest {
                             a.pointTo(c.getSegments(), c.getOffset(), c.getSizeInBytes());
                             writer.write(null);
                         });
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, a))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(0));
-        assert ((BitmapIndexResultWrapper) reader.visitEqual(fieldRef, b))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(3));
-        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(1, 2, 4, 5));
-        assert ((BitmapIndexResultWrapper) reader.visitIn(fieldRef, Arrays.asList(a, b)))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(0, 3));
+        assert reader.visitEqual(fieldRef, a).results().equals(RoaringNavigableMap64.bitmapOf(0));
+        assert reader.visitEqual(fieldRef, b).results().equals(RoaringNavigableMap64.bitmapOf(3));
+        assert reader.visitIsNull(fieldRef)
+                .results()
+                .equals(RoaringNavigableMap64.bitmapOf(1, 2, 4, 5));
+        assert reader.visitIn(fieldRef, Arrays.asList(a, b))
+                .results()
+                .equals(RoaringNavigableMap64.bitmapOf(0, 3));
         assert reader.visitEqual(fieldRef, BinaryString.fromString("c")).results().isEmpty();
     }
 
@@ -305,10 +272,9 @@ public class BitmapGlobalIndexTest {
                                 writer.write(o);
                             }
                         });
-        assert ((BitmapIndexResultWrapper) reader.visitIsNull(fieldRef))
-                .getBitmapIndexResult()
-                .get()
-                .equals(RoaringBitmap32.bitmapOf(0, 1, 2));
+        assert reader.visitIsNull(fieldRef)
+                .results()
+                .equals(RoaringNavigableMap64.bitmapOf(0, 1, 2));
         assert reader.visitIsNotNull(fieldRef).results().isEmpty();
     }
 }
