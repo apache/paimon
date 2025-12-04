@@ -30,7 +30,6 @@ def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[D
     storage_options = None
     file_path_for_lance = file_io.to_filesystem_path(file_path)
 
-    # For local filesystem, ensure absolute path
     if scheme in {'file', None} or not scheme:
         if not os.path.isabs(file_path_for_lance):
             file_path_for_lance = os.path.abspath(file_path_for_lance)
