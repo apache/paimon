@@ -18,7 +18,6 @@
 
 import os
 from typing import Dict, Optional, Tuple
-from urllib.parse import urlparse
 
 from pypaimon.common.config import CatalogOptions, OssOptions
 from pypaimon.common.file_io import FileIO
@@ -39,7 +38,6 @@ def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[D
     if scheme == 'oss':
         storage_options = {}
         if hasattr(file_io, 'properties'):
-            uri = urlparse(file_path)
             # DLF OSS endpoint should override the standard OSS endpoint.
             endpoint = file_io.properties.get(CatalogOptions.DLF_OSS_ENDPOINT)
             if not endpoint:
