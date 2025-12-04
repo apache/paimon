@@ -411,9 +411,7 @@ class GenericRowSerializer:
     def _serialize_timestamp(cls, value: datetime) -> bytes:
         if value.tzinfo is not None:
             raise RuntimeError("datetime tzinfo not supported yet")
-        epoch = datetime(1970, 1, 1)
-        delta = value - epoch
-        millis = int(delta.total_seconds() * 1000)
+        millis = int(value.timestamp() * 1000)
         return struct.pack('<q', millis)
 
     @classmethod
