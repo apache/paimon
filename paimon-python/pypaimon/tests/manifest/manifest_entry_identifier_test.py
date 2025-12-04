@@ -31,18 +31,6 @@ import pyarrow as pa
 
 
 class ManifestEntryIdentifierTest(unittest.TestCase):
-    """
-    Test for manifest entry identifier matching in merge logic.
-    
-    Bug: Previously, _entry_identifier was incomplete (missing level, extra_files,
-    embedded_index, external_path), causing ADD and DELETE entries to be incorrectly
-    matched. This led to:
-    - ADD entry not being removed when DELETE entry exists
-    - Result: empty reads because the file was actually deleted but ADD entry remained
-    
-    Fix: _entry_identifier now includes all fields needed for accurate matching:
-    (partition, bucket, level, file_name, extra_files, embedded_index, external_path)
-    """
 
     @classmethod
     def setUpClass(cls):
