@@ -411,8 +411,6 @@ class GenericRowSerializer:
     def _serialize_timestamp(cls, value: datetime) -> bytes:
         if value.tzinfo is not None:
             raise RuntimeError("datetime tzinfo not supported yet")
-        # timezone-free (LocalDateTime), so we should not convert to UTC
-        # Calculate milliseconds since 1970-01-01 00:00:00 directly without timezone conversion
         epoch = datetime(1970, 1, 1)
         delta = value - epoch
         millis = int(delta.total_seconds() * 1000)
