@@ -40,15 +40,15 @@ def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[D
         storage_options = {}
         if hasattr(file_io, 'properties'):
             uri = urlparse(file_path)
-            host = uri.netloc or uri.hostname or ''
             # DLF OSS endpoint should override the standard OSS endpoint.
             endpoint = file_io.properties.get(CatalogOptions.DLF_OSS_ENDPOINT)
             if not endpoint:
                 endpoint = file_io.properties.get(OssOptions.OSS_ENDPOINT)
-            if endpoint and host:
-                storage_options['endpoint'] = f"https://{host}.{endpoint}"
-            elif endpoint:
-                storage_options['endpoint'] = endpoint
+            if endpoint:
+                if not endpoint.startswith('http://') and not endpoint.startswith('https://'):
+                    storage_options['endpoint'] = f"https://{endpoint}"
+                else:
+                    storage_options['endpoint'] = endpoint
 
             if OssOptions.OSS_ACCESS_KEY_ID in file_io.properties:
                 storage_options['access_key_id'] = file_io.properties[OssOptions.OSS_ACCESS_KEY_ID]
