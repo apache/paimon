@@ -36,7 +36,7 @@ class FormatLanceReader(RecordBatchReader):
                  push_down_predicate: Any, batch_size: int = 4096):
         """Initialize Lance reader."""
         import lance
-        
+
         file_path_for_lance, storage_options = to_lance_specified(file_io, file_path)
 
         columns_for_lance = read_fields if read_fields else None

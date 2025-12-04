@@ -61,8 +61,8 @@ class RayDataTest(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up test environment."""
         try:
-                if ray.is_initialized():
-                    ray.shutdown()
+            if ray.is_initialized():
+                ray.shutdown()
         except Exception:
             pass
         try:

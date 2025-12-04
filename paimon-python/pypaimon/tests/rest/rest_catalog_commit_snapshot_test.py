@@ -221,7 +221,6 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
         from pypaimon import Schema
         import pyarrow as pa
         import tempfile
-        import os
         import shutil
         from pypaimon.api.api_response import ConfigResponse
         from pypaimon.api.auth import BearTokenAuthProvider
