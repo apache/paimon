@@ -18,7 +18,6 @@
 
 from typing import List, Optional, Any
 
-import lance
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
@@ -36,6 +35,8 @@ class FormatLanceReader(RecordBatchReader):
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
                  push_down_predicate: Any, batch_size: int = 4096):
         """Initialize Lance reader."""
+        import lance
+        
         file_path_for_lance, storage_options = to_lance_specified(file_io, file_path)
 
         columns_for_lance = read_fields if read_fields else None
