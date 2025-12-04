@@ -18,21 +18,76 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 
 /** Builder for scanning global indexes. */
 public interface GlobalIndexScanBuilder {
 
     GlobalIndexScanBuilder withSnapshot(long snapshotId);
 
-    GlobalIndexScanBuilder withPartition(BinaryRow binaryRow);
+    GlobalIndexScanBuilder withSnapshot(Snapshot snapshot);
+
+    GlobalIndexScanBuilder withPartitionPredicate(PartitionPredicate partitionPredicate);
 
     GlobalIndexScanBuilder withRowRange(Range rowRange);
 
     RowRangeGlobalIndexScanner build();
 
-    Set<Range> shardList();
+    // Return sorted and no overlap ranges
+    List<Range> shardList();
+
+    static Optional<List<Range>> scan(
+            final List<Range> ranges,
+            final GlobalIndexScanBuilder globalIndexScanBuilder,
+            final Predicate filter) {
+        List<RowRangeGlobalIndexScanner> scanners =
+                ranges.stream()
+                        .map(globalIndexScanBuilder::withRowRange)
+                        .map(GlobalIndexScanBuilder::build)
+                        .collect(Collectors.toList());
+
+        try {
+            List<Optional<RoaringNavigableMap64>> rowsResults = new ArrayList<>();
+            Iterator<Optional<RoaringNavigableMap64>> resultIterators =
+                    randomlyExecuteSequentialReturn(
+                            scanner -> {
+                                Optional<GlobalIndexResult> result = scanner.scan(filter);
+                                return Collections.singletonList(
+                                        result.map(GlobalIndexResult::results));
+                            },
+                            scanners,
+                            null);
+            while (resultIterators.hasNext()) {
+                rowsResults.add(resultIterators.next());
+            }
+            if (rowsResults.stream().noneMatch(Optional::isPresent)) {
+                return Optional.empty();
+            }
+            RoaringNavigableMap64 combinedResult = new RoaringNavigableMap64();
+            for (int i = 0; i < ranges.size(); i++) {
+                if (rowsResults.get(i).isPresent()) {
+                    combinedResult.or(rowsResults.get(i).get());
+                } else {
+                    combinedResult.addRange(ranges.get(i));
+                }
+            }
+            return Optional.of(combinedResult.toRangeList());
+        } finally {
+            IOUtils.closeAllQuietly(scanners);
+        }
+    }
 }

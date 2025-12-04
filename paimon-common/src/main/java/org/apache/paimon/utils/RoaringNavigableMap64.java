@@ -41,6 +41,11 @@ public class RoaringNavigableMap64 {
         this.roaring64NavigableMap = new Roaring64NavigableMap();
     }
 
+    public RoaringNavigableMap64(Range range) {
+        this.roaring64NavigableMap = new Roaring64NavigableMap();
+        this.roaring64NavigableMap.addRange(range.from, range.to);
+    }
+
     private RoaringNavigableMap64(Roaring64NavigableMap bitmap) {
         this.roaring64NavigableMap = bitmap;
     }
