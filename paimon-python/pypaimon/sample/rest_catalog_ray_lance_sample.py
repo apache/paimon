@@ -30,14 +30,7 @@ import uuid
 
 import pandas as pd
 import pyarrow as pa
-
-try:
-    import ray
-
-    ray_available = True
-except ImportError:
-    ray_available = False
-    print("Warning: Ray is not installed. Ray Data features will be skipped.")
+import ray
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.core_options import CoreOptions
@@ -49,10 +42,9 @@ from pypaimon.api.auth import BearTokenAuthProvider
 def main():
     """REST catalog + Ray Data + Lance format integration example."""
 
-    # Initialize Ray if available
-    if ray_available:
-        ray.init(ignore_reinit_error=True)
-        print("Ray initialized successfully")
+    # Initialize Ray
+    ray.init(ignore_reinit_error=True)
+    print("Ray initialized successfully")
 
     # Setup mock REST server
     temp_dir = tempfile.mkdtemp()
@@ -147,45 +139,41 @@ def main():
         result_arrow = table_read.to_arrow(splits)
         print(f"\nArrow Table result: {result_arrow.num_rows} rows")
 
-        # Read using Ray Data (if available)
-        if ray_available:
-            print("\nReading data using Ray Data for distributed processing...")
-            ray_dataset = table_read.to_ray(splits)
+        # Read using Ray Data
+        print("\nReading data using Ray Data for distributed processing...")
+        ray_dataset = table_read.to_ray(splits)
 
-            print(f"Ray Dataset: {ray_dataset}")
-            print(f"Number of rows: {ray_dataset.count()}")
+        print(f"Ray Dataset: {ray_dataset}")
+        print(f"Number of rows: {ray_dataset.count()}")
 
-            # Sample Ray Data operations
-            print("\nRay Data operations:")
+        # Sample Ray Data operations
+        print("\nRay Data operations:")
 
-            # Take first few rows
-            sample_data = ray_dataset.take(3)
-            print(f"First 3 rows: {sample_data}")
+        # Take first few rows
+        sample_data = ray_dataset.take(3)
+        print(f"First 3 rows: {sample_data}")
 
-            # Filter data
-            filtered_dataset = ray_dataset.filter(lambda row: row['value'] > 30.0)
-            print(f"Filtered rows (value > 30): {filtered_dataset.count()}")
+        # Filter data
+        filtered_dataset = ray_dataset.filter(lambda row: row['value'] > 30.0)
+        print(f"Filtered rows (value > 30): {filtered_dataset.count()}")
 
-            # Map operation
-            def double_value(row):
-                row['value'] = row['value'] * 2
-                return row
+        # Map operation
+        def double_value(row):
+            row['value'] = row['value'] * 2
+            return row
 
-            mapped_dataset = ray_dataset.map(double_value)
-            print(f"Mapped dataset (doubled values): {mapped_dataset.count()} rows")
+        mapped_dataset = ray_dataset.map(double_value)
+        print(f"Mapped dataset (doubled values): {mapped_dataset.count()} rows")
 
-            # Convert to Pandas
-            ray_pandas = ray_dataset.to_pandas()
-            print("\nRay Dataset converted to Pandas:")
-            print(ray_pandas)
+        # Convert to Pandas
+        ray_pandas = ray_dataset.to_pandas()
+        print("\nRay Dataset converted to Pandas:")
+        print(ray_pandas)
 
-            # Group by category
-            print("\nGrouping by category using Ray Data:")
-            grouped = ray_dataset.groupby("category").sum("value")
-            print(grouped)
-
-        else:
-            print("\nRay is not available. Skipping Ray Data operations.")
+        # Group by category
+        print("\nGrouping by category using Ray Data:")
+        grouped = ray_dataset.groupby("category").sum("value")
+        print(grouped)
 
         # Demonstrate predicate pushdown with Lance format
         print("\nDemonstrating predicate pushdown with Lance format...")
@@ -214,8 +202,7 @@ def main():
 
     finally:
         server.shutdown()
-        if ray_available:
-            ray.shutdown()
+        ray.shutdown()
         print("\nServer stopped and Ray shutdown")
 
 

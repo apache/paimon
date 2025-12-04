@@ -389,7 +389,8 @@ class FileIO:
             from pypaimon.read.reader.lance_utils import to_lance_specified
             file_path_for_lance, storage_options = to_lance_specified(self, path)
 
-            writer = lance.file.LanceFileWriter(file_path_for_lance, data.schema, storage_options=storage_options, **kwargs)
+            writer = lance.file.LanceFileWriter(
+                file_path_for_lance, data.schema, storage_options=storage_options, **kwargs)
             try:
                 # Write all batches
                 for batch in data.to_batches():

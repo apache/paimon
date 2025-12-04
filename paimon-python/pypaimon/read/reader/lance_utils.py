@@ -19,7 +19,7 @@
 import os
 from typing import Dict, Optional, Tuple
 
-from pypaimon.common.config import CatalogOptions, OssOptions
+from pypaimon.common.config import OssOptions
 from pypaimon.common.file_io import FileIO
 
 
@@ -38,10 +38,7 @@ def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[D
     if scheme == 'oss':
         storage_options = {}
         if hasattr(file_io, 'properties'):
-            # DLF OSS endpoint should override the standard OSS endpoint.
-            endpoint = file_io.properties.get(CatalogOptions.DLF_OSS_ENDPOINT)
-            if not endpoint:
-                endpoint = file_io.properties.get(OssOptions.OSS_ENDPOINT)
+            endpoint = file_io.properties.get(OssOptions.OSS_ENDPOINT)
             if endpoint:
                 if not endpoint.startswith('http://') and not endpoint.startswith('https://'):
                     storage_options['endpoint'] = f"https://{endpoint}"
