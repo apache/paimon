@@ -316,12 +316,15 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   /**
-   * Tries to extract a direct mapping from a source column to the target's _ROW_ID to avoid a full
-   * join.
+   * Attempts to identify a direct mapping from sourceTable's attribute to the target table's
+   * `_ROW_ID`.
+   *
+   * This is a shortcut optimization for `MERGE INTO` to avoid a full, expensive join when the merge
+   * condition is a simple equality on the target's `_ROW_ID`.
    *
    * @return
-   *   An `Option` containing the source attribute that maps to `_ROW_ID` if the pattern
-   *   `target._ROW_ID = source.col` (or vice-versa) is found, otherwise `None`.
+   *   An `Option` containing the sourceTable's attribute if a pattern like
+   *   `target._ROW_ID = source.col` (or its reverse) is found, otherwise `None`.
    */
   private def extractSourceRowIdMapping: Option[AttributeReference] = {
 
@@ -341,13 +344,10 @@ case class MergeIntoPaimonDataEvolutionTable(
       case EqualTo(left: AttributeReference, right: AttributeReference)
           if isTargetRowId(left) && isSourceAttribute(right) =>
         Some(right)
-
       // Case 2: source.col = target._ROW_ID
       case EqualTo(left: AttributeReference, right: AttributeReference)
           if isSourceAttribute(left) && isTargetRowId(right) =>
         Some(left)
-
-      // The condition does not match the optimization pattern
       case _ => None
     }
   }
