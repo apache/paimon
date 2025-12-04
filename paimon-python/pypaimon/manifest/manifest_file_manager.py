@@ -21,6 +21,8 @@ from typing import List
 
 import fastavro
 
+from datetime import datetime, timedelta
+
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
@@ -118,7 +120,7 @@ class ManifestFileManager:
                 schema_id=file_dict['_SCHEMA_ID'],
                 level=file_dict['_LEVEL'],
                 extra_files=file_dict['_EXTRA_FILES'],
-                creation_time=file_dict['_CREATION_TIME'],
+                creation_time=self._normalize_creation_time(file_dict['_CREATION_TIME']),
                 delete_row_count=file_dict['_DELETE_ROW_COUNT'],
                 embedded_index=file_dict['_EMBEDDED_FILE_INDEX'],
                 file_source=file_dict['_FILE_SOURCE'],
@@ -187,7 +189,7 @@ class ManifestFileManager:
                     "_SCHEMA_ID": entry.file.schema_id,
                     "_LEVEL": entry.file.level,
                     "_EXTRA_FILES": entry.file.extra_files,
-                    "_CREATION_TIME": entry.file.creation_time,
+                    "_CREATION_TIME": self._datetime_to_millis(entry.file.creation_time),
                     "_DELETE_ROW_COUNT": entry.file.delete_row_count,
                     "_EMBEDDED_FILE_INDEX": entry.file.embedded_index,
                     "_FILE_SOURCE": entry.file.file_source,
@@ -209,3 +211,43 @@ class ManifestFileManager:
         except Exception as e:
             self.file_io.delete_quietly(manifest_path)
             raise RuntimeError(f"Failed to write manifest file: {e}") from e
+
+    @staticmethod
+    def _datetime_to_millis(dt: datetime) -> int:
+        """Convert datetime to milliseconds since epoch without timezone conversion.
+        This matches Java's LocalDateTime semantics (timezone-free).
+        """
+        if dt is None:
+            return None
+        epoch = datetime(1970, 1, 1)
+        delta = dt - epoch
+        return int(delta.total_seconds() * 1000)
+
+    @staticmethod
+    def _millis_to_datetime(millis: int) -> datetime:
+        """Convert milliseconds since epoch to datetime without timezone conversion.
+        This matches Java's LocalDateTime semantics (timezone-free).
+        """
+        if millis is None:
+            return None
+        epoch = datetime(1970, 1, 1)
+        return epoch + timedelta(milliseconds=millis)
+
+    @staticmethod
+    def _normalize_creation_time(creation_time) -> datetime:
+        """Normalize creation_time from various formats to naive datetime.
+        fastavro may return datetime with timezone or int milliseconds.
+        """
+        if creation_time is None:
+            return None
+        if isinstance(creation_time, datetime):
+            # If fastavro already converted it to datetime, remove timezone if present
+            if creation_time.tzinfo is not None:
+                # Convert to naive datetime by using the local time components
+                return creation_time.replace(tzinfo=None)
+            return creation_time
+        elif isinstance(creation_time, (int, float)):
+            # If it's still milliseconds, convert it
+            return ManifestFileManager._millis_to_datetime(int(creation_time))
+        else:
+            raise ValueError(f"Unexpected creation_time type: {type(creation_time)}")

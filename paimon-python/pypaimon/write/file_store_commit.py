@@ -18,6 +18,7 @@
 
 import time
 import uuid
+from datetime import datetime
 from typing import List
 
 from pypaimon.common.core_options import CoreOptions
@@ -310,7 +311,9 @@ class FileStoreCommit:
 
             # Convert creation_time to milliseconds (Java uses epoch millis)
             if file_meta.creation_time:
-                file_creation_time = int(file_meta.creation_time.timestamp() * 1000)
+                epoch = datetime(1970, 1, 1)
+                delta = file_meta.creation_time - epoch
+                file_creation_time = int(delta.total_seconds() * 1000)
             else:
                 file_creation_time = int(time.time() * 1000)
 
