@@ -46,7 +46,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
                 self.catalog.file_io.delete(table_path, recursive=True)
         except Exception:
             pass
-        
+
         pa_schema = pa.schema([('id', pa.int32()), ('value', pa.string())])
         schema = Schema.from_pyarrow_schema(pa_schema)
         self.catalog.create_table('default.test_table', schema, False)
@@ -89,16 +89,16 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
     def test_add_delete_matching_same_file(self):
         """
         Core test: ADD -> DELETE should result in empty entries.
-        
+
         This is the main scenario that was broken:
         - Manifest 1: ADD entry for "data-1.parquet"
         - Manifest 2: DELETE entry for "data-1.parquet" (same identifier)
         - Expected: Both entries removed, final_entries should be empty
-        - Bug: If identifier was incomplete, DELETE wouldn't match ADD, 
+        - Bug: If identifier was incomplete, DELETE wouldn't match ADD,
                ADD would remain, but file is gone -> empty reads
         """
         partition = GenericRow([], [])
-        
+
         add_entry = ManifestEntry(
             kind=0,  # ADD
             partition=partition,
@@ -106,7 +106,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             total_buckets=1,
             file=self._create_file_meta("data-1.parquet", level=0)
         )
-        
+
         delete_entry = ManifestEntry(
             kind=1,  # DELETE
             partition=partition,
@@ -114,7 +114,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             total_buckets=1,
             file=self._create_file_meta("data-1.parquet", level=0)  # Same identifier
         )
-        
+
         manifest_file_1 = ManifestFileMeta(
             file_name="manifest-1.avro",
             file_size=1024,
@@ -123,7 +123,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             partition_stats=SimpleStats.empty_stats(),
             schema_id=0
         )
-        
+
         manifest_file_2 = ManifestFileMeta(
             file_name="manifest-2.avro",
             file_size=1024,
@@ -132,13 +132,13 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             partition_stats=SimpleStats.empty_stats(),
             schema_id=0
         )
-        
+
         self.manifest_file_manager.write(manifest_file_1.file_name, [add_entry])
         self.manifest_file_manager.write(manifest_file_2.file_name, [delete_entry])
-        
+
         final_entries = self.manifest_file_manager.read_entries_parallel(
             [manifest_file_1, manifest_file_2])
-        
+
         # With correct identifier matching, ADD and DELETE should cancel out
         self.assertEqual(
             len(final_entries), 0,
@@ -147,11 +147,11 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
     def test_add_delete_different_levels(self):
         """
         Test that entries with different levels are NOT matched.
-        
+
         Same file_name but different level -> different files -> should NOT cancel out.
         """
         partition = GenericRow([], [])
-        
+
         add_entry = ManifestEntry(
             kind=0,
             partition=partition,
@@ -159,7 +159,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             total_buckets=1,
             file=self._create_file_meta("data-1.parquet", level=0)
         )
-        
+
         delete_entry = ManifestEntry(
             kind=1,
             partition=partition,
@@ -167,7 +167,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             total_buckets=1,
             file=self._create_file_meta("data-1.parquet", level=1)  # Different level!
         )
-        
+
         manifest_file_1 = ManifestFileMeta(
             file_name="manifest-1.avro",
             file_size=1024,
@@ -176,7 +176,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             partition_stats=SimpleStats.empty_stats(),
             schema_id=0
         )
-        
+
         manifest_file_2 = ManifestFileMeta(
             file_name="manifest-2.avro",
             file_size=1024,
@@ -185,13 +185,13 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             partition_stats=SimpleStats.empty_stats(),
             schema_id=0
         )
-        
+
         self.manifest_file_manager.write(manifest_file_1.file_name, [add_entry])
         self.manifest_file_manager.write(manifest_file_2.file_name, [delete_entry])
-        
+
         final_entries = self.manifest_file_manager.read_entries_parallel(
             [manifest_file_1, manifest_file_2])
-        
+
         # Different levels -> different identifiers -> should NOT match
         self.assertEqual(len(final_entries), 1, "Different levels should NOT match")
         self.assertEqual(final_entries[0].file.level, 0, "ADD entry with level=0 should remain")
@@ -201,7 +201,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
         Test that entries with different extra_files are NOT matched.
         """
         partition = GenericRow([], [])
-        
+
         add_entry = ManifestEntry(
             kind=0,
             partition=partition,
@@ -209,7 +209,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             total_buckets=1,
             file=self._create_file_meta("data-1.parquet", extra_files=["index.idx"])
         )
-        
+
         delete_entry = ManifestEntry(
             kind=1,
             partition=partition,
@@ -217,7 +217,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             total_buckets=1,
             file=self._create_file_meta("data-1.parquet", extra_files=[])  # Different!
         )
-        
+
         manifest_file_1 = ManifestFileMeta(
             file_name="manifest-1.avro",
             file_size=1024,
@@ -226,7 +226,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             partition_stats=SimpleStats.empty_stats(),
             schema_id=0
         )
-        
+
         manifest_file_2 = ManifestFileMeta(
             file_name="manifest-2.avro",
             file_size=1024,
@@ -235,13 +235,13 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             partition_stats=SimpleStats.empty_stats(),
             schema_id=0
         )
-        
+
         self.manifest_file_manager.write(manifest_file_1.file_name, [add_entry])
         self.manifest_file_manager.write(manifest_file_2.file_name, [delete_entry])
-        
+
         final_entries = self.manifest_file_manager.read_entries_parallel(
             [manifest_file_1, manifest_file_2])
-        
+
         # Different extra_files -> different identifiers -> should NOT match
         self.assertEqual(len(final_entries), 1, "Different extra_files should NOT match")
         self.assertEqual(final_entries[0].file.extra_files, ["index.idx"])
