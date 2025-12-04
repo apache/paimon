@@ -232,7 +232,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories)
             throws IOException {
         return new RecordReaderIterator<>(
-                readForCompact.createReader(partition, bucket, files, dvFactories));
+                readForCompact.createReader(partition, bucket, files, dvFactories, null));
     }
 
     @Override

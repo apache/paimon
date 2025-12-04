@@ -21,6 +21,7 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.manifest.FileKind;
@@ -39,6 +40,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.BiFunction;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -61,7 +63,7 @@ public class CreateGlobalIndexProcedureTest {
         entriesByPartition.put(partition, Collections.singletonList(entry));
 
         // Execute
-        Map<BinaryRow, Map<Range, DataSplit>> result =
+        Map<BinaryRow, List<IndexedSplit>> result =
                 CreateGlobalIndexProcedure.groupFilesIntoShardsByPartition(
                         entriesByPartition, 1000L, pathFactory);
 
@@ -69,14 +71,14 @@ public class CreateGlobalIndexProcedureTest {
         assertThat(result).hasSize(1);
         assertThat(result).containsKey(partition);
 
-        Map<Range, DataSplit> shardSplits = result.get(partition);
+        List<IndexedSplit> shardSplits = result.get(partition);
         assertThat(shardSplits).hasSize(1);
 
         // Should be in shard [0, 999]
         Range expectedRange = new Range(0L, 999L);
-        assertThat(shardSplits).containsKey(expectedRange);
+        assertThat(shardSplits.get(0).rowRanges()).containsExactly(expectedRange);
 
-        DataSplit split = shardSplits.get(expectedRange);
+        DataSplit split = shardSplits.get(0).dataSplit();
         assertThat(split.dataFiles()).hasSize(1);
         assertThat(split.dataFiles().get(0)).isEqualTo(file);
     }
@@ -95,13 +97,13 @@ public class CreateGlobalIndexProcedureTest {
         entriesByPartition.put(partition, Collections.singletonList(entry));
 
         // Execute
-        Map<BinaryRow, Map<Range, DataSplit>> result =
+        Map<BinaryRow, List<IndexedSplit>> result =
                 CreateGlobalIndexProcedure.groupFilesIntoShardsByPartition(
                         entriesByPartition, 1000L, pathFactory);
 
         // Verify
         assertThat(result).hasSize(1);
-        Map<Range, DataSplit> shardSplits = result.get(partition);
+        List<IndexedSplit> shardSplits = result.get(partition);
         assertThat(shardSplits).hasSize(3);
 
         // Verify all three shards contain the file
@@ -109,10 +111,14 @@ public class CreateGlobalIndexProcedureTest {
         Range shard1 = new Range(1000L, 1999L);
         Range shard2 = new Range(2000L, 2999L);
 
-        assertThat(shardSplits).containsKeys(shard0, shard1, shard2);
-        assertThat(shardSplits.get(shard0).dataFiles()).contains(file);
-        assertThat(shardSplits.get(shard1).dataFiles()).contains(file);
-        assertThat(shardSplits.get(shard2).dataFiles()).contains(file);
+        assertThat(
+                        shardSplits.stream()
+                                .flatMap(s -> s.rowRanges().stream())
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(shard0, shard1, shard2);
+        assertThat(shardSplits.get(0).dataSplit().dataFiles()).contains(file);
+        assertThat(shardSplits.get(1).dataSplit().dataFiles()).contains(file);
+        assertThat(shardSplits.get(2).dataSplit().dataFiles()).contains(file);
     }
 
     @Test
@@ -135,17 +141,17 @@ public class CreateGlobalIndexProcedureTest {
         entriesByPartition.put(partition, entries);
 
         // Execute
-        Map<BinaryRow, Map<Range, DataSplit>> result =
+        Map<BinaryRow, List<IndexedSplit>> result =
                 CreateGlobalIndexProcedure.groupFilesIntoShardsByPartition(
                         entriesByPartition, 1000L, pathFactory);
 
         // Verify
         assertThat(result).hasSize(1);
-        Map<Range, DataSplit> shardSplits = result.get(partition);
+        List<IndexedSplit> shardSplits = result.get(partition);
         assertThat(shardSplits).hasSize(1);
 
         Range expectedRange = new Range(0L, 999L);
-        DataSplit split = shardSplits.get(expectedRange);
+        DataSplit split = shardSplits.get(0).dataSplit();
         assertThat(split.dataFiles()).hasSize(3);
         assertThat(split.dataFiles()).containsExactlyInAnyOrder(file1, file2, file3);
     }
@@ -170,13 +176,13 @@ public class CreateGlobalIndexProcedureTest {
         entriesByPartition.put(partition, entries);
 
         // Execute
-        Map<BinaryRow, Map<Range, DataSplit>> result =
+        Map<BinaryRow, List<IndexedSplit>> result =
                 CreateGlobalIndexProcedure.groupFilesIntoShardsByPartition(
                         entriesByPartition, 1000L, pathFactory);
 
         // Verify
         assertThat(result).hasSize(1);
-        Map<Range, DataSplit> shardSplits = result.get(partition);
+        List<IndexedSplit> shardSplits = result.get(partition);
         assertThat(shardSplits).hasSize(3);
 
         // Verify each shard has the correct file
@@ -184,9 +190,14 @@ public class CreateGlobalIndexProcedureTest {
         Range shard1 = new Range(1000L, 1999L);
         Range shard2 = new Range(2000L, 2999L);
 
-        assertThat(shardSplits.get(shard0).dataFiles()).containsExactly(file1);
-        assertThat(shardSplits.get(shard1).dataFiles()).containsExactly(file2);
-        assertThat(shardSplits.get(shard2).dataFiles()).containsExactly(file3);
+        Map<Range, DataSplit> shardToSplit =
+                shardSplits.stream()
+                        .collect(
+                                Collectors.toMap(
+                                        s -> s.rowRanges().get(0), IndexedSplit::dataSplit));
+        assertThat(shardToSplit.get(shard0).dataFiles()).contains(file1);
+        assertThat(shardToSplit.get(shard1).dataFiles()).contains(file2);
+        assertThat(shardToSplit.get(shard2).dataFiles()).contains(file3);
     }
 
     @Test
@@ -206,7 +217,7 @@ public class CreateGlobalIndexProcedureTest {
                 partition2, Collections.singletonList(createManifestEntry(partition2, file2)));
 
         // Execute
-        Map<BinaryRow, Map<Range, DataSplit>> result =
+        Map<BinaryRow, List<IndexedSplit>> result =
                 CreateGlobalIndexProcedure.groupFilesIntoShardsByPartition(
                         entriesByPartition, 100L, pathFactory);
 
@@ -215,16 +226,25 @@ public class CreateGlobalIndexProcedureTest {
         assertThat(result).containsKeys(partition1, partition2);
 
         // Verify partition1
-        Map<Range, DataSplit> shardSplits1 = result.get(partition1);
+        List<IndexedSplit> shardSplits1 = result.get(partition1);
+
         assertThat(shardSplits1).hasSize(11);
-        assertThat(shardSplits1).containsKey(new Range(1000, 1099));
-        assertThat(shardSplits1.get(new Range(1000L, 1099L)).dataFiles()).containsExactly(file1);
+        IndexedSplit split =
+                shardSplits1.stream()
+                        .filter(f -> f.rowRanges().contains(new Range(1000, 1099)))
+                        .findFirst()
+                        .get();
+        assertThat(split.dataSplit().dataFiles()).containsExactly(file1);
 
         // Verify partition2
-        Map<Range, DataSplit> shardSplits2 = result.get(partition2);
+        List<IndexedSplit> shardSplits2 = result.get(partition2);
         assertThat(shardSplits2).hasSize(11);
-        assertThat(shardSplits1).containsKey(new Range(1000, 1099));
-        assertThat(shardSplits2.get(new Range(1000L, 1099L)).dataFiles()).containsExactly(file2);
+        split =
+                shardSplits2.stream()
+                        .filter(f -> f.rowRanges().contains(new Range(1000, 1099)))
+                        .findFirst()
+                        .get();
+        assertThat(split.dataSplit().dataFiles()).containsExactly(file2);
     }
 
     @Test
@@ -240,16 +260,16 @@ public class CreateGlobalIndexProcedureTest {
         entriesByPartition.put(partition, Collections.singletonList(entry));
 
         // Execute
-        Map<BinaryRow, Map<Range, DataSplit>> result =
+        Map<BinaryRow, List<IndexedSplit>> result =
                 CreateGlobalIndexProcedure.groupFilesIntoShardsByPartition(
                         entriesByPartition, 1000L, pathFactory);
 
         // Verify - file ending at row 999 should be in shard [0,999] only
         // File covers rows [0, 999]
         assertThat(result).hasSize(1);
-        Map<Range, DataSplit> shardSplits = result.get(partition);
+        List<IndexedSplit> shardSplits = result.get(partition);
         assertThat(shardSplits).hasSize(1);
-        assertThat(shardSplits).containsKey(new Range(0L, 999L));
+        assertThat(shardSplits.get(0).rowRanges()).containsExactly(new Range(0L, 999L));
     }
 
     @Test
@@ -265,17 +285,18 @@ public class CreateGlobalIndexProcedureTest {
         entriesByPartition.put(partition, Collections.singletonList(entry));
 
         // Execute with shard size of 10
-        Map<BinaryRow, Map<Range, DataSplit>> result =
+        Map<BinaryRow, List<IndexedSplit>> result =
                 CreateGlobalIndexProcedure.groupFilesIntoShardsByPartition(
                         entriesByPartition, 10L, pathFactory);
 
         // Verify - file should span 3 shards: [0,9], [10,19], [20,29]
         assertThat(result).hasSize(1);
-        Map<Range, DataSplit> shardSplits = result.get(partition);
+        List<IndexedSplit> shardSplits = result.get(partition);
         assertThat(shardSplits).hasSize(3);
 
-        assertThat(shardSplits)
-                .containsKeys(new Range(0L, 9L), new Range(10L, 19L), new Range(20L, 29L));
+        assertThat(shardSplits.stream().flatMap(s -> s.rowRanges().stream()))
+                .containsExactlyInAnyOrder(
+                        new Range(0L, 9L), new Range(10L, 19L), new Range(20L, 29L));
     }
 
     private BinaryRow createPartition(int i) {

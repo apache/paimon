@@ -27,7 +27,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -47,7 +46,7 @@ public class GlobalIndexBuilderContext implements Serializable {
     private final RowType readType;
     private final DataField indexField;
     private final String indexType;
-    private final Range rowRange;
+    private final long startOffset;
     private final Options options;
 
     public GlobalIndexBuilderContext(
@@ -56,13 +55,13 @@ public class GlobalIndexBuilderContext implements Serializable {
             RowType readType,
             DataField indexField,
             String indexType,
-            Range rowRange,
+            long startOffset,
             Options options) {
         this.table = table;
         this.readType = readType;
         this.indexField = indexField;
         this.indexType = indexType;
-        this.rowRange = rowRange;
+        this.startOffset = startOffset;
         this.options = options;
 
         this.binaryRowSerializer = new BinaryRowSerializer(partition.getFieldCount());
@@ -97,8 +96,8 @@ public class GlobalIndexBuilderContext implements Serializable {
         return indexType;
     }
 
-    public Range range() {
-        return rowRange;
+    public long startOffset() {
+        return startOffset;
     }
 
     public Options options() {

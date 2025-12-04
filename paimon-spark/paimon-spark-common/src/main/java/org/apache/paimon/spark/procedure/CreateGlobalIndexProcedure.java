@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
@@ -60,6 +61,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -174,7 +176,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
 
                         // Step 1: generate splits for each partition&&shard
-                        Map<BinaryRow, Map<Range, DataSplit>> splits =
+                        Map<BinaryRow, List<IndexedSplit>> splits =
                                 split(table, partitionPredicate, rowsPerShard);
 
                         // Step 2: build index by certain index system
@@ -203,7 +205,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
 
     private List<CommitMessage> buildIndex(
             FileStoreTable table,
-            Map<BinaryRow, Map<Range, DataSplit>> preparedDS,
+            Map<BinaryRow, List<IndexedSplit>> preparedDS,
             String indexType,
             RowType readType,
             DataField indexField,
@@ -211,13 +213,14 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             throws IOException {
         JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
         List<Pair<GlobalIndexBuilderContext, byte[]>> taskList = new ArrayList<>();
-        for (Map.Entry<BinaryRow, Map<Range, DataSplit>> entry : preparedDS.entrySet()) {
+        for (Map.Entry<BinaryRow, List<IndexedSplit>> entry : preparedDS.entrySet()) {
             BinaryRow partition = entry.getKey();
-            Map<Range, DataSplit> partitions = entry.getValue();
+            List<IndexedSplit> partitions = entry.getValue();
 
-            for (Map.Entry<Range, DataSplit> partitionEntry : partitions.entrySet()) {
-                Range startOffset = partitionEntry.getKey();
-                DataSplit partitionDS = partitionEntry.getValue();
+            for (IndexedSplit indexedSplit : partitions) {
+                checkArgument(
+                        indexedSplit.rowRanges().size() == 1,
+                        "Each IndexedSplit should contain exactly one row range.");
                 GlobalIndexBuilderContext builderContext =
                         new GlobalIndexBuilderContext(
                                 table,
@@ -225,10 +228,10 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 readType,
                                 indexField,
                                 indexType,
-                                startOffset,
+                                indexedSplit.rowRanges().get(0).from,
                                 options);
 
-                byte[] dsBytes = InstantiationUtil.serializeObject(partitionDS);
+                byte[] dsBytes = InstantiationUtil.serializeObject(indexedSplit);
                 taskList.add(Pair.of(builderContext, dsBytes));
             }
         }
@@ -242,7 +245,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                             new CommitMessageSerializer();
                                     GlobalIndexBuilderContext builderContext = pair.getLeft();
                                     byte[] dataSplitBytes = pair.getRight();
-                                    DataSplit split =
+                                    IndexedSplit split =
                                             InstantiationUtil.deserializeObject(
                                                     dataSplitBytes,
                                                     GlobalIndexBuilder.class.getClassLoader());
@@ -271,7 +274,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
         }
     }
 
-    protected Map<BinaryRow, Map<Range, DataSplit>> split(
+    protected Map<BinaryRow, List<IndexedSplit>> split(
             FileStoreTable table, PartitionPredicate partitions, long rowsPerShard) {
         FileStorePathFactory pathFactory = table.store().pathFactory();
         // Get all manifest entries from the table scan
@@ -295,11 +298,11 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
      * @param pathFactory path factory for creating bucket paths
      * @return map of partition to shard splits
      */
-    public static Map<BinaryRow, Map<Range, DataSplit>> groupFilesIntoShardsByPartition(
+    public static Map<BinaryRow, List<IndexedSplit>> groupFilesIntoShardsByPartition(
             Map<BinaryRow, List<ManifestEntry>> entriesByPartition,
             long rowsPerShard,
             BiFunction<BinaryRow, Integer, Path> pathFactory) {
-        Map<BinaryRow, Map<Range, DataSplit>> result = new HashMap<>();
+        Map<BinaryRow, List<IndexedSplit>> result = new HashMap<>();
 
         for (Map.Entry<BinaryRow, List<ManifestEntry>> partitionEntry :
                 entriesByPartition.entrySet()) {
@@ -307,7 +310,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             List<ManifestEntry> partitionEntries = partitionEntry.getValue();
 
             // Group files into shards - a file may belong to multiple shards
-            Map<Long, List<DataFileMeta>> filesByShard = new HashMap<>();
+            Map<Long, List<DataFileMeta>> filesByShard = new LinkedHashMap<>();
 
             for (ManifestEntry entry : partitionEntries) {
                 DataFileMeta file = entry.file();
@@ -332,7 +335,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             }
 
             // Create DataSplit for each shard with exact ranges
-            Map<Range, DataSplit> shardSplits = new HashMap<>();
+            List<IndexedSplit> shardSplits = new ArrayList<>();
             for (Map.Entry<Long, List<DataFileMeta>> shardEntry : filesByShard.entrySet()) {
                 long startRowId = shardEntry.getKey();
                 List<DataFileMeta> shardFiles = shardEntry.getValue();
@@ -356,7 +359,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 .rawConvertible(false)
                                 .build();
 
-                shardSplits.put(range, dataSplit);
+                shardSplits.add(
+                        new IndexedSplit(dataSplit, Collections.singletonList(range), null));
             }
 
             if (!shardSplits.isEmpty()) {

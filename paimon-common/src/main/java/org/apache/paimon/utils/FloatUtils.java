@@ -16,27 +16,30 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex.bitmap;
+package org.apache.paimon.utils;
 
-import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
-import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.GlobalIndexerFactory;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataField;
+/** Utils for float. */
+public class FloatUtils {
 
-/** Factory for creating bitmap global indexers. */
-public class BitmapGlobalIndexerFactory implements GlobalIndexerFactory {
+    public static boolean equals(float[] arr1, float[] arr2, float epsilon) {
+        if (arr1 == arr2) {
+            return true;
+        }
 
-    public static final String IDENTIFIER = "bitmap";
+        if (arr1 == null || arr2 == null) {
+            return false;
+        }
 
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
-    }
+        if (arr1.length != arr2.length) {
+            return false;
+        }
 
-    @Override
-    public GlobalIndexer create(DataField dataField, Options options) {
-        BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(dataField.type(), options);
-        return new BitmapGlobalIndex(bitmapFileIndex);
+        for (int i = 0; i < arr1.length; i++) {
+            float diff = Math.abs(arr1[i] - arr2[i]);
+            if (diff > epsilon) {
+                return false;
+            }
+        }
+        return true;
     }
 }

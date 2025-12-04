@@ -24,7 +24,6 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
-import org.apache.paimon.globalindex.GlobalIndexScanBuilderImpl;
 import org.apache.paimon.operation.LocalOrphanFilesClean;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.TableSchema;
@@ -134,7 +133,7 @@ public interface FileStoreTable extends DataTable {
 
     /** Returns a new global index scan builder. */
     default GlobalIndexScanBuilder newIndexScanBuilder() {
-        return new GlobalIndexScanBuilderImpl(this);
+        return store().newIndexScanBuilder();
     }
 
     /**

@@ -46,7 +46,11 @@ public class RoaringNavigableMap64 {
     }
 
     public void addRange(Range range) {
-        roaring64NavigableMap.addRange(range.from, range.to);
+        if (range.from == range.to) {
+            roaring64NavigableMap.add(range.from);
+        } else {
+            roaring64NavigableMap.addRange(range.from, range.to);
+        }
     }
 
     public void add(long x) {

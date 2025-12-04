@@ -26,12 +26,10 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
-import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.List;
 
 /**
  * Read operation which provides {@link RecordReader} creation.
@@ -55,10 +53,6 @@ public interface SplitRead<T> {
     }
 
     default SplitRead<T> withLimit(@Nullable Integer limit) {
-        return this;
-    }
-
-    default SplitRead<T> withRowRanges(@Nullable List<Range> rowRanges) {
         return this;
     }
 
@@ -95,12 +89,6 @@ public interface SplitRead<T> {
             @Override
             public SplitRead<R> withFilter(@Nullable Predicate predicate) {
                 read.withFilter(predicate);
-                return this;
-            }
-
-            @Override
-            public SplitRead<R> withRowRanges(@Nullable List<Range> rowRanges) {
-                read.withRowRanges(rowRanges);
                 return this;
             }
 

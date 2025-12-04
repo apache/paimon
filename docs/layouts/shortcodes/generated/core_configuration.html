@@ -591,6 +591,12 @@ under the License.
             <td>For streaming write, full compaction will be constantly triggered after delta commits. For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.</td>
         </tr>
         <tr>
+            <td><h5>global-index.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable global index for scan.</td>
+        </tr>
+        <tr>
             <td><h5>global-index.row-count-per-shard</h5></td>
             <td style="word-wrap: break-word;">100000</td>
             <td>Long</td>
