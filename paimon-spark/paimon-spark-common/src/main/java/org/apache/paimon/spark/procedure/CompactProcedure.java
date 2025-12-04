@@ -181,9 +181,10 @@ public class CompactProcedure extends BaseProcedure {
                 partitions == null || where == null,
                 "partitions and where cannot be used together.");
         String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : where;
-        return modifyPaimonTable(
+        return modifySparkTable(
                 tableIdent,
-                t -> {
+                sparkTable -> {
+                    org.apache.paimon.table.Table t = sparkTable.getTable();
                     checkArgument(t instanceof FileStoreTable);
                     FileStoreTable table = (FileStoreTable) t;
                     CoreOptions coreOptions = table.coreOptions();
@@ -195,7 +196,7 @@ public class CompactProcedure extends BaseProcedure {
                             "order_by should not contain partition cols, because it is meaningless, your order_by cols are %s, and partition cols are %s",
                             sortColumns,
                             table.partitionKeys());
-                    DataSourceV2Relation relation = createRelation(tableIdent);
+                    DataSourceV2Relation relation = createRelation(tableIdent, sparkTable);
                     PartitionPredicate partitionPredicate =
                             SparkProcedureUtils.convertToPartitionPredicate(
                                     finalWhere,
