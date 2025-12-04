@@ -22,7 +22,9 @@ import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan}
 import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
 import org.apache.spark.sql.execution.joins.BaseJoinExec
 import org.apache.spark.sql.util.QueryExecutionListener
 
@@ -365,7 +367,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Data Evolution: merge into table with data-evolution complex with _ROW_ID shortcut") {
+  test("Data Evolution: merge into table with data-evolution with _ROW_ID shortcut") {
     withTable("source", "target") {
       sql("CREATE TABLE source (target_ROW_ID BIGINT, b INT, c STRING)")
       sql(
@@ -376,13 +378,13 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       sql(
         "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
 
-      val capturedPlans: mutable.ListBuffer[SparkPlan] = mutable.ListBuffer.empty
+      val capturedPlans: mutable.ListBuffer[LogicalPlan] = mutable.ListBuffer.empty
       val listener = new QueryExecutionListener {
         override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
-          capturedPlans += qe.sparkPlan
+          capturedPlans += qe.analyzed
         }
         override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
-          capturedPlans += qe.sparkPlan
+          capturedPlans += qe.analyzed
         }
       }
       spark.listenerManager.register(listener)
@@ -395,7 +397,9 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
              |WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (target_ROW_ID, b * 1.1, c)
              |WHEN NOT MATCHED THEN INSERT (a, b, c) VALUES (target_ROW_ID, b, c)
              |""".stripMargin)
-      assert(!capturedPlans.head.isInstanceOf[BaseJoinExec])
+      // Assert that no Join operator was used during
+      // `org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.targetRelatedSplits`
+      assert(capturedPlans.head.collect { case plan: Join => plan }.isEmpty)
       spark.listenerManager.unregister(listener)
 
       checkAnswer(

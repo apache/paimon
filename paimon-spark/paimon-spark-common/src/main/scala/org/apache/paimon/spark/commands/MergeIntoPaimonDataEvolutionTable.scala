@@ -156,7 +156,7 @@ case class MergeIntoPaimonDataEvolutionTable(
         findRelatedFirstRowIds(sourceDss, sparkSession, sourceRowIdAttr.name).toSet
 
       case None =>
-        // Fallback: Perform the full join to find related _FIRST_ROW_IDs.
+        // Perform the full join to find related _FIRST_ROW_IDs.
         val targetDss = createDataset(sparkSession, targetRelation)
         findRelatedFirstRowIds(
           targetDss.alias("_left").join(sourceDss, toColumn(matchedCondition), "inner"),

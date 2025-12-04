@@ -105,6 +105,18 @@ under the License.
                     </execution>
                 </executions>
             </plugin>
+            <!-- 在这里添加以下新的插件配置 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <!-- 关键配置！强制编译器包含所有测试源文件 -->
+                    <testIncludes>
+                        <testInclude>**/*.java</testInclude>
+                        <testInclude>**/*.scala</testInclude>
+                    </testIncludes>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>
