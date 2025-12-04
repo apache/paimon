@@ -85,7 +85,7 @@ public class LanceUtils {
             }
         }
 
-       Options originOptions;
+        Options originOptions;
         if (ossFileIOKlass != null && ossFileIOKlass.isInstance(fileIO)) {
             originOptions = ((OSSFileIO) fileIO).hadoopOptions();
         } else if (jindoFileIOKlass != null && jindoFileIOKlass.isInstance(fileIO)) {
