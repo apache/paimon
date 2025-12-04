@@ -92,6 +92,13 @@ public class FileStoreTableFactory {
             TableSchema tableSchema,
             Options dynamicOptions,
             CatalogEnvironment catalogEnvironment) {
+        // Check if chain table is enabled
+        CoreOptions coreOptions = new CoreOptions(tableSchema.options());
+        if (coreOptions.chainTableEnabled()) {
+            return createChainTable(
+                    fileIO, tablePath, tableSchema, dynamicOptions, catalogEnvironment);
+        }
+
         FileStoreTable table =
                 createWithoutFallbackBranch(
                         fileIO, tablePath, tableSchema, dynamicOptions, catalogEnvironment);
@@ -128,6 +135,61 @@ public class FileStoreTableFactory {
         }
 
         return table;
+    }
+
+    private static FileStoreTable createChainTable(
+            FileIO fileIO,
+            Path tablePath,
+            TableSchema tableSchema,
+            Options dynamicOptions,
+            CatalogEnvironment catalogEnvironment) {
+
+        CoreOptions coreOptions = new CoreOptions(tableSchema.options());
+        String snapshotBranch = coreOptions.scanFallbackSnapshotBranch();
+        String deltaBranch = coreOptions.scanFallbackDeltaBranch();
+
+        // Create snapshot branch table
+        Options snapshotBranchOptions = new Options(dynamicOptions.toMap());
+        snapshotBranchOptions.set(CoreOptions.BRANCH, snapshotBranch);
+        Optional<TableSchema> snapshotSchema =
+                new SchemaManager(fileIO, tablePath, snapshotBranch).latest();
+        FileStoreTable snapshotTable =
+                snapshotSchema.isPresent()
+                        ? createWithoutFallbackBranch(
+                                fileIO,
+                                tablePath,
+                                snapshotSchema.get(),
+                                snapshotBranchOptions,
+                                catalogEnvironment)
+                        : createWithoutFallbackBranch(
+                                fileIO,
+                                tablePath,
+                                tableSchema,
+                                snapshotBranchOptions,
+                                catalogEnvironment);
+
+        // Create delta branch table
+        Options deltaBranchOptions = new Options(dynamicOptions.toMap());
+        deltaBranchOptions.set(CoreOptions.BRANCH, deltaBranch);
+        Optional<TableSchema> deltaSchema =
+                new SchemaManager(fileIO, tablePath, deltaBranch).latest();
+        FileStoreTable deltaTable =
+                deltaSchema.isPresent()
+                        ? createWithoutFallbackBranch(
+                                fileIO,
+                                tablePath,
+                                deltaSchema.get(),
+                                deltaBranchOptions,
+                                catalogEnvironment)
+                        : createWithoutFallbackBranch(
+                                fileIO,
+                                tablePath,
+                                tableSchema,
+                                deltaBranchOptions,
+                                catalogEnvironment);
+
+        // Create chain table instance
+        return new ChainFileStoreTable(snapshotTable, deltaTable);
     }
 
     public static FileStoreTable createWithoutFallbackBranch(
