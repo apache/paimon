@@ -85,6 +85,16 @@ public class LanceUtils {
             }
         }
 
+        // TraceableFileIO is a test utility that wraps LocalFileIO
+        // Convert traceable:// to file:// for Lance compatibility
+        if ("traceable".equals(schema)) {
+            String uriString = uri.toString();
+            uriString = uriString.replace("traceable://", "file://");
+            uri = URI.create(uriString);
+            schema = uri.getScheme();
+            path = new Path(uri);
+        }
+
         Options originOptions;
         if (ossFileIOKlass != null && ossFileIOKlass.isInstance(fileIO)) {
             originOptions = ((OSSFileIO) fileIO).hadoopOptions();
