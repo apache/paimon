@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup.sort;
+package org.apache.paimon.sst;
 
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
@@ -24,12 +24,35 @@ import org.apache.paimon.utils.IntArrayList;
 
 import java.io.IOException;
 
-import static org.apache.paimon.lookup.sort.BlockAlignedType.ALIGNED;
-import static org.apache.paimon.lookup.sort.BlockAlignedType.UNALIGNED;
+import static org.apache.paimon.sst.BlockAlignedType.ALIGNED;
+import static org.apache.paimon.sst.BlockAlignedType.UNALIGNED;
 
-/** Writer to build a Block. */
+/**
+ * Writer to build a Block. A block is designed for storing and random-accessing k-v pairs. The
+ * layout is as below:
+ *
+ * <pre>
+ *     +---------------+
+ *     | Block Trailer |
+ *     +------------------------------------------------+
+ *     |                  Block CRC23C                  |
+ *     +------------------------------------------------+
+ *     +---------------+
+ *     |  Block Data   |
+ *     +---------------+--------------------------------+----+
+ *     | key len | key bytes | value len | value bytes  |    |
+ *     +------------------------------------------------+    |
+ *     | key len | key bytes | value len | value bytes  |    +-> Key-Value pairs
+ *     +------------------------------------------------+    |
+ *     |                  ... ...                       |    |
+ *     +------------------------------------------------+----+
+ *     | entry pos | entry pos |     ...     | entry pos|    +-> optional, for unaligned block
+ *     +------------------------------------------------+----+
+ *     |   entry num  /  entry size   |   aligned type  |
+ *     +------------------------------------------------+
+ * </pre>
+ */
 public class BlockWriter {
-
     private final IntArrayList positions;
     private final MemorySliceOutput block;
 

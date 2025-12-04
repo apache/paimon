@@ -16,27 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup.sort;
+package org.apache.paimon.format.sst;
 
-import org.apache.paimon.compression.BlockCompressionType;
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.memory.MemorySlice;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory;
 
-import java.util.zip.CRC32;
+/** The {@link FileFormatFactory} for SST Files. */
+public class SstFileFormatFactory implements FileFormatFactory {
+    public static final String IDENTIFIER = "sst";
 
-/** Utils for sort lookup store. */
-public class SortLookupStoreUtils {
-    public static int crc32c(MemorySlice data, BlockCompressionType type) {
-        CRC32 crc = new CRC32();
-        crc.update(data.getHeapMemory(), data.offset(), data.length());
-        crc.update(type.persistentId() & 0xFF);
-        return (int) crc.getValue();
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 
-    public static int crc32c(MemorySegment data, BlockCompressionType type) {
-        CRC32 crc = new CRC32();
-        crc.update(data.getHeapMemory(), 0, data.size());
-        crc.update(type.persistentId() & 0xFF);
-        return (int) crc.getValue();
+    @Override
+    public FileFormat create(FormatContext formatContext) {
+        return new SstFileFormat(formatContext);
     }
 }

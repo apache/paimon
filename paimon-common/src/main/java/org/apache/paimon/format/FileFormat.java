@@ -74,8 +74,30 @@ public abstract class FileFormat {
         return createReaderFactory(dataSchemaRowType, projectedRowType, filters);
     }
 
+    /**
+     * Same as {@link FileFormat#createReaderFactory(RowType, RowType, List)}, but for file formats
+     * which need to store keys and values separately.
+     */
+    public FormatReaderFactory createReaderFactory(
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> filters,
+            RowType keyType,
+            RowType valueType) {
+        return createReaderFactory(dataSchemaRowType, projectedRowType, filters);
+    }
+
     /** Create a {@link FormatWriterFactory} from the type. */
     public abstract FormatWriterFactory createWriterFactory(RowType type);
+
+    /**
+     * Same as {@link FileFormat#createWriterFactory(RowType)}, but for file formats which need to
+     * store keys and values separately.
+     */
+    public FormatWriterFactory createWriterFactory(
+            RowType type, RowType keyType, RowType valueType) {
+        return createWriterFactory(type);
+    }
 
     /** Validate data field type supported or not. */
     public abstract void validateDataFields(RowType rowType);

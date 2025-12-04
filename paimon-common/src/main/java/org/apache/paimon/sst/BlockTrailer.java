@@ -16,31 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup.sort;
+package org.apache.paimon.sst;
 
-import org.apache.paimon.compression.BlockCompressionType;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.memory.MemorySliceOutput;
 
-import static java.util.Objects.requireNonNull;
+import java.util.Objects;
 
 /** Trailer of a block. */
 public class BlockTrailer {
-    public static final int ENCODED_LENGTH = 5;
+    public static final int ENCODED_LENGTH = 4;
 
-    private final BlockCompressionType compressionType;
     private final int crc32c;
 
-    public BlockTrailer(BlockCompressionType compressionType, int crc32c) {
-        requireNonNull(compressionType, "compressionType is null");
-
-        this.compressionType = compressionType;
+    public BlockTrailer(int crc32c) {
         this.crc32c = crc32c;
-    }
-
-    public BlockCompressionType getCompressionType() {
-        return compressionType;
     }
 
     public int getCrc32c() {
@@ -57,34 +48,22 @@ public class BlockTrailer {
         }
 
         BlockTrailer that = (BlockTrailer) o;
-        if (crc32c != that.crc32c) {
-            return false;
-        }
-        return compressionType == that.compressionType;
+        return crc32c == that.crc32c;
     }
 
     @Override
     public int hashCode() {
-        int result = compressionType.hashCode();
-        result = 31 * result + crc32c;
-        return result;
+        return Objects.hash(crc32c);
     }
 
     @Override
     public String toString() {
-        return "BlockTrailer"
-                + "{compressionType="
-                + compressionType
-                + ", crc32c=0x"
-                + Integer.toHexString(crc32c)
-                + '}';
+        return "BlockTrailer" + "{crc32c=0x" + Integer.toHexString(crc32c) + '}';
     }
 
     public static BlockTrailer readBlockTrailer(MemorySliceInput input) {
-        BlockCompressionType compressionType =
-                BlockCompressionType.getCompressionTypeByPersistentId(input.readUnsignedByte());
         int crc32c = input.readInt();
-        return new BlockTrailer(compressionType, crc32c);
+        return new BlockTrailer(crc32c);
     }
 
     public static MemorySlice writeBlockTrailer(BlockTrailer blockTrailer) {
@@ -94,7 +73,6 @@ public class BlockTrailer {
     }
 
     public static void writeBlockTrailer(BlockTrailer blockTrailer, MemorySliceOutput sliceOutput) {
-        sliceOutput.writeByte(blockTrailer.getCompressionType().persistentId());
         sliceOutput.writeInt(blockTrailer.getCrc32c());
     }
 }

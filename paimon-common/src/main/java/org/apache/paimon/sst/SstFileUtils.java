@@ -16,29 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup.sort;
+package org.apache.paimon.sst;
 
-/** Aligned type for block. */
-public enum BlockAlignedType {
-    ALIGNED((byte) 0),
-    UNALIGNED((byte) 1);
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySlice;
 
-    private final byte b;
+import java.util.zip.CRC32;
 
-    BlockAlignedType(byte b) {
-        this.b = b;
+/** Utils for sort lookup store. */
+public class SstFileUtils {
+    public static int crc32c(MemorySlice data) {
+        CRC32 crc = new CRC32();
+        crc.update(data.getHeapMemory(), data.offset(), data.length());
+        return (int) crc.getValue();
     }
 
-    public byte toByte() {
-        return b;
-    }
-
-    public static BlockAlignedType fromByte(byte b) {
-        for (BlockAlignedType type : BlockAlignedType.values()) {
-            if (type.toByte() == b) {
-                return type;
-            }
-        }
-        throw new IllegalStateException("Illegal block aligned type: " + b);
+    public static int crc32c(MemorySegment data) {
+        CRC32 crc = new CRC32();
+        crc.update(data.getHeapMemory(), 0, data.size());
+        return (int) crc.getValue();
     }
 }

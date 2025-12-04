@@ -18,6 +18,8 @@
 
 package org.apache.paimon.io.cache;
 
+import org.apache.paimon.fs.Path;
+
 import java.io.RandomAccessFile;
 import java.util.Objects;
 
@@ -26,6 +28,10 @@ public interface CacheKey {
 
     static CacheKey forPosition(RandomAccessFile file, long position, int length, boolean isIndex) {
         return new PositionCacheKey(file, position, length, isIndex);
+    }
+
+    static CacheKey forPosition(Path path, long position, int length, boolean isIndex) {
+        return new PathPositionCacheKey(path, position, length, isIndex);
     }
 
     static CacheKey forPageIndex(RandomAccessFile file, int pageSize, int pageIndex) {
@@ -120,6 +126,47 @@ public interface CacheKey {
         @Override
         public int hashCode() {
             return Objects.hash(file, pageSize, pageIndex, isIndex);
+        }
+    }
+
+    /** The {@link CacheKey} for a remote file position and length. */
+    class PathPositionCacheKey implements CacheKey {
+
+        private final Path remotePath;
+        private final long position;
+        private final int length;
+        private final boolean isIndex;
+
+        private PathPositionCacheKey(Path remotePath, long position, int length, boolean isIndex) {
+            this.remotePath = remotePath;
+            this.position = position;
+            this.length = length;
+            this.isIndex = isIndex;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            PathPositionCacheKey that = (PathPositionCacheKey) o;
+            return position == that.position
+                    && length == that.length
+                    && isIndex == that.isIndex
+                    && Objects.equals(remotePath, that.remotePath);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(remotePath, position, length, isIndex);
+        }
+
+        @Override
+        public boolean isIndex() {
+            return isIndex;
         }
     }
 }
