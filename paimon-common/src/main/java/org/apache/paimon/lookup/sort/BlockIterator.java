@@ -36,6 +36,8 @@ public abstract class BlockIterator implements Iterator<Map.Entry<MemorySlice, M
     private final int recordCount;
     private final Comparator<MemorySlice> comparator;
 
+    private BlockEntry polled;
+
     public BlockIterator(
             MemorySliceInput data, int recordCount, Comparator<MemorySlice> comparator) {
         this.data = data;
@@ -45,13 +47,19 @@ public abstract class BlockIterator implements Iterator<Map.Entry<MemorySlice, M
 
     @Override
     public boolean hasNext() {
-        return data.isReadable();
+        return polled != null || data.isReadable();
     }
 
     @Override
     public BlockEntry next() {
         if (!hasNext()) {
             throw new NoSuchElementException();
+        }
+
+        if (polled != null) {
+            BlockEntry result = polled;
+            polled = null;
+            return result;
         }
 
         return readEntry();
@@ -62,54 +70,30 @@ public abstract class BlockIterator implements Iterator<Map.Entry<MemorySlice, M
         throw new UnsupportedOperationException();
     }
 
-    /**
-     * Seeks to the first entry with a key that is either equal to or greater than the specified
-     * key. After this call, the next invocation of {@link BlockIterator#next()} will return that
-     * entry (if it exists).
-     *
-     * <p>Note that the comparing value must be monotonically increasing across current block e.g.
-     * key and some special values such as the {@code lastRecordPosition} of an {@code
-     * IndexBlockEntry}.
-     *
-     * @param targetKey target key
-     * @return true if found an equal record
-     */
     public boolean seekTo(MemorySlice targetKey) {
         int left = 0;
         int right = recordCount - 1;
-        int mid = left + (right - left) / 2;
 
         while (left <= right) {
-            mid = left + (right - left) / 2;
+            int mid = left + (right - left) / 2;
 
             seekTo(mid);
             BlockEntry midEntry = readEntry();
             int compare = comparator.compare(midEntry.getKey(), targetKey);
 
             if (compare == 0) {
-                break;
+                polled = midEntry;
+                return true;
             } else if (compare > 0) {
+                polled = midEntry;
                 right = mid - 1;
             } else {
+                polled = null;
                 left = mid + 1;
             }
         }
 
-        // left <= right means we found an equal key
-        boolean equal = left <= right;
-        int targetPos = equal ? mid : left;
-
-        if (targetPos >= recordCount) {
-            moveToEnd();
-        } else {
-            seekTo(targetPos);
-        }
-
-        return equal;
-    }
-
-    private void moveToEnd() {
-        data.exhaust();
+        return false;
     }
 
     /** Seek to the specified record position of current block. */

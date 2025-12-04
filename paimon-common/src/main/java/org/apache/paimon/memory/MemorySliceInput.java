@@ -99,8 +99,4 @@ public class MemorySliceInput {
         position += length;
         return newSlice;
     }
-
-    public void exhaust() {
-        setPosition(slice.length());
-    }
 }
