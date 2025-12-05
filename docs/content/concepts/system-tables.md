@@ -413,7 +413,7 @@ SELECT * FROM my_table$table_indexes;
 ## Global System Table
 
 Global system tables contain the statistical information of all the tables exists in paimon. For convenient of searching, we create a reference system database called `sys`.
-We can display all the global system tables by sql in flink:
+We can display all the global system tables by sql in flink or spark:
 
 ```sql
 USE sys;
