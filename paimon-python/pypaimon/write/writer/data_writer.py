@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Tuple
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.external_path_provider import ExternalPathProvider
+from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import PyarrowFieldParser

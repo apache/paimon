@@ -107,18 +107,18 @@ class ManifestFileManager:
                 max_values=BinaryRow(value_dict['_MAX_VALUES'], fields),
                 null_counts=value_dict['_NULL_COUNTS'],
             )
-            # fastavro automatically converts timestamp-millis to datetime, convert to Timestamp
+            # fastavro returns UTC-aware datetime for timestamp-millis, we need to convert properly
             from pypaimon.data.timestamp import Timestamp
             creation_time_value = file_dict['_CREATION_TIME']
             creation_time_ts = None
             if creation_time_value is not None:
                 if isinstance(creation_time_value, datetime):
-                    # fastavro converted it to datetime, convert to Timestamp
-                    dt = (creation_time_value.replace(tzinfo=None)
-                          if creation_time_value.tzinfo else creation_time_value)
-                    creation_time_ts = Timestamp.from_local_date_time(dt)
+                    if creation_time_value.tzinfo:
+                        epoch_millis = int(creation_time_value.timestamp() * 1000)
+                        creation_time_ts = Timestamp.from_epoch_millis(epoch_millis)
+                    else:
+                        creation_time_ts = Timestamp.from_local_date_time(creation_time_value)
                 elif isinstance(creation_time_value, (int, float)):
-                    # In rare cases, fastavro might not convert (shouldn't happen with timestamp-millis)
                     creation_time_ts = Timestamp.from_epoch_millis(int(creation_time_value))
                 else:
                     raise ValueError(f"Unexpected creation_time type: {type(creation_time_value)}")
@@ -205,7 +205,7 @@ class ManifestFileManager:
                     "_SCHEMA_ID": entry.file.schema_id,
                     "_LEVEL": entry.file.level,
                     "_EXTRA_FILES": entry.file.extra_files,
-                    "_CREATION_TIME": entry.file.creation_time_epoch_millis(),
+                    "_CREATION_TIME": entry.file.creation_time.get_millisecond() if entry.file.creation_time else None,
                     "_DELETE_ROW_COUNT": entry.file.delete_row_count,
                     "_EMBEDDED_FILE_INDEX": entry.file.embedded_index,
                     "_FILE_SOURCE": entry.file.file_source,

@@ -259,6 +259,47 @@ class PkReaderTest(unittest.TestCase):
         }, schema=self.pa_schema).sort_by('user_id')
         self.assertEqual(expected, actual)
 
+    def test_manifest_creation_time_timestamp(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={'bucket': '2'})
+        self.catalog.create_table('default.test_manifest_creation_time', schema, False)
+        table = self.catalog.get_table('default.test_manifest_creation_time')
+        
+        self._write_test_table(table)
+        
+        snapshot_manager = SnapshotManager(table)
+        latest_snapshot = snapshot_manager.get_latest_snapshot()
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        manifest_list_manager = table_scan.starting_scanner.manifest_list_manager
+        manifest_files = manifest_list_manager.read_all(latest_snapshot)
+        
+        manifest_file_manager = table_scan.starting_scanner.manifest_file_manager
+        creation_times_found = []
+        for manifest_file_meta in manifest_files:
+            entries = manifest_file_manager.read(manifest_file_meta.file_name, drop_stats=False)
+            for entry in entries:
+                if entry.file.creation_time is not None:
+                    creation_time = entry.file.creation_time
+                    self.assertIsNotNone(creation_time)
+                    epoch_millis = entry.file.creation_time_epoch_millis()
+                    self.assertIsNotNone(epoch_millis)
+                    self.assertGreater(epoch_millis, 0)
+                    import time
+                    expected_epoch_millis = creation_time.get_millisecond()
+                    if time.daylight:
+                        tz_offset_seconds = -time.altzone
+                    else:
+                        tz_offset_seconds = -time.timezone
+                    expected_epoch_millis = expected_epoch_millis - (tz_offset_seconds * 1000)
+                    self.assertEqual(epoch_millis, expected_epoch_millis)
+                    creation_times_found.append(epoch_millis)
+        
+        self.assertGreater(len(creation_times_found), 0,
+                          "At least one manifest entry should have creation_time")
+
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
 

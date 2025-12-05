@@ -43,13 +43,6 @@ class Timestamp:
     NANOS_PER_MICROSECOND = 1_000
 
     def __init__(self, millisecond: int, nano_of_millisecond: int = 0):
-        """
-        Create a Timestamp instance.
-
-        Args:
-            millisecond: the number of milliseconds since 1970-01-01 00:00:00
-            nano_of_millisecond: the nanoseconds within the millisecond, from 0 to 999,999
-        """
         if not (0 <= nano_of_millisecond <= 999_999):
             raise ValueError(
                 f"nano_of_millisecond must be between 0 and 999,999, got {nano_of_millisecond}"
@@ -64,7 +57,6 @@ class Timestamp:
     def get_nano_of_millisecond(self) -> int:
         """
         Returns the number of nanoseconds (the nanoseconds within the milliseconds).
-
         The value range is from 0 to 999,999.
         """
         return self._nano_of_millisecond
@@ -78,12 +70,10 @@ class Timestamp:
             days -= 1
             time_millis += self.MILLIS_PER_DAY
 
-        # Convert milliseconds to microseconds for timedelta
         microseconds = time_millis * 1000 + self._nano_of_millisecond // 1000
         return epoch + timedelta(days=days, microseconds=microseconds)
 
     def to_millis_timestamp(self) -> 'Timestamp':
-        """Returns a Timestamp with only milliseconds (nano_of_millisecond = 0)."""
         return Timestamp.from_epoch_millis(self._millisecond)
 
     def to_micros(self) -> int:
@@ -135,7 +125,6 @@ class Timestamp:
     def from_epoch_millis(milliseconds: int, nanos_of_millisecond: int = 0) -> 'Timestamp':
         """
         Creates an instance of Timestamp from milliseconds.
-
         Args:
             milliseconds: the number of milliseconds since 1970-01-01 00:00:00
             nanos_of_millisecond: the nanoseconds within the millisecond, from 0 to 999,999

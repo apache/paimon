@@ -19,6 +19,7 @@
 import unittest
 from datetime import datetime
 from unittest.mock import Mock, patch
+import time
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
@@ -103,9 +104,12 @@ class TestFileStoreCommit(unittest.TestCase):
         self.assertEqual(stat.record_count, 10000)
         self.assertEqual(stat.file_count, 1)
         self.assertEqual(stat.file_size_in_bytes, 1024 * 1024)
-        # Match Java's creationTimeEpochMillis() logic (uses system timezone)
-        expected_time = creation_time.to_local_date_time().timestamp() * 1000
-        expected_time = int(expected_time)
+        expected_time = creation_time.get_millisecond()
+        if time.daylight:
+            tz_offset_seconds = -time.altzone
+        else:
+            tz_offset_seconds = -time.timezone
+        expected_time = expected_time - (tz_offset_seconds * 1000)
         self.assertEqual(stat.last_file_creation_time, expected_time)
 
     def test_generate_partition_statistics_multiple_files_same_partition(
@@ -169,9 +173,12 @@ class TestFileStoreCommit(unittest.TestCase):
         self.assertEqual(stat.record_count, 25000)  # 10000 + 15000
         self.assertEqual(stat.file_count, 2)
         self.assertEqual(stat.file_size_in_bytes, 3 * 1024 * 1024)  # 1MB + 2MB
-        # Match Java's creationTimeEpochMillis() logic (uses system timezone)
-        expected_time = creation_time_2.to_local_date_time().timestamp() * 1000
-        expected_time = int(expected_time)
+        expected_time = creation_time_2.get_millisecond()
+        if time.daylight:
+            tz_offset_seconds = -time.altzone
+        else:
+            tz_offset_seconds = -time.timezone
+        expected_time = expected_time - (tz_offset_seconds * 1000)
         self.assertEqual(stat.last_file_creation_time, expected_time)
 
     def test_generate_partition_statistics_multiple_partitions(

@@ -19,6 +19,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
+import time
 
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.simple_stats import (KEY_STATS_SCHEMA, VALUE_STATS_SCHEMA,
@@ -58,21 +59,14 @@ class DataFileMeta:
         return self.creation_time
 
     def creation_time_epoch_millis(self) -> Optional[int]:
-        """
-        Get creation_time as epoch milliseconds.
-
-        This method matches Java's PojoDataFileMeta.creationTimeEpochMillis() implementation:
-        creationTime.toLocalDateTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-
-        Note: This uses system timezone for conversion, matching Java's behavior for consistency.
-        """
         if self.creation_time is None:
             return None
-        # Match Java's logic: toLocalDateTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        # In Python: convert Timestamp to datetime (timezone-naive), then use system timezone to get epoch millis
-        dt = self.creation_time.to_local_date_time()
-        # datetime.timestamp() assumes naive datetime is in system timezone, matching Java's behavior
-        return int(dt.timestamp() * 1000)
+        millis = self.creation_time.get_millisecond()
+        if time.daylight:
+            tz_offset_seconds = -time.altzone
+        else:
+            tz_offset_seconds = -time.timezone
+        return millis - (tz_offset_seconds * 1000)
 
     def creation_time_as_datetime(self) -> Optional[datetime]:
         if self.creation_time is None:
@@ -102,6 +96,7 @@ class DataFileMeta:
         external_path: Optional[str] = None,
         first_row_id: Optional[int] = None,
         write_cols: Optional[List[str]] = None,
+        file_path: Optional[str] = None,
     ) -> 'DataFileMeta':
         if creation_time is None:
             creation_time = Timestamp.now()
@@ -127,6 +122,7 @@ class DataFileMeta:
             external_path=external_path,
             first_row_id=first_row_id,
             write_cols=write_cols,
+            file_path=file_path,
         )
 
     def set_file_path(self, table_path: str, partition: GenericRow, bucket: int):
