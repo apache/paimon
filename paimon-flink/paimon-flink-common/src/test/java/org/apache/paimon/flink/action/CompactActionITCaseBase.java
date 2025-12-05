@@ -107,6 +107,23 @@ public class CompactActionITCaseBase extends ActionITCaseBase {
         assertThat(snapshot.commitKind()).isEqualTo(commitKind);
     }
 
+    protected void checkLatestSnapshot(
+            FileStoreTable table, long snapshotId, Snapshot.CommitKind commitKind, long timeout)
+            throws Exception {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        long start = System.currentTimeMillis();
+        while (!Objects.equals(snapshotManager.latestSnapshotId(), snapshotId)) {
+            Thread.sleep(500);
+            if (System.currentTimeMillis() - start > timeout) {
+                throw new RuntimeException("can't wait for a compaction.");
+            }
+        }
+
+        Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
+        assertThat(snapshot.id()).isEqualTo(snapshotId);
+        assertThat(snapshot.commitKind()).isEqualTo(commitKind);
+    }
+
     protected FileStoreTable prepareTable(
             List<String> partitionKeys,
             List<String> primaryKeys,
