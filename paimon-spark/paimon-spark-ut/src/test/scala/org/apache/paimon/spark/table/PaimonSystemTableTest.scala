@@ -30,7 +30,7 @@ class PaimonSystemTableTest extends PaimonSparkTestBase {
   test("system table: show all global system tables") {
     checkAnswer(
       sql("SHOW TABLES IN sys").select("tableName"),
-      SystemTableLoader.GLOBAL_SYSTEM_TABLES.asScala.map(Row(_))
+      SystemTableLoader.GLOBAL_SYSTEM_TABLES.asScala.map(Row(_)).toSeq
     )
   }
 }
