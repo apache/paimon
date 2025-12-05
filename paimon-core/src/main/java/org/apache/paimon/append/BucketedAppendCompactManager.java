@@ -38,6 +38,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
@@ -46,7 +47,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
 import static java.util.Collections.emptyList;
-import static org.apache.paimon.table.source.AppendOnlySplitGenerator.DATA_FILE_COMPARATOR;
+import static org.apache.paimon.table.source.AppendOnlySplitGenerator.CREATION_TIME_COMPARATOR;
+import static org.apache.paimon.table.source.AppendOnlySplitGenerator.SEQUENCE_NUMBER_COMPARATOR;
 
 /** Compact manager for {@link AppendOnlyFileStore}. */
 public class BucketedAppendCompactManager extends CompactFutureManager {
@@ -55,6 +57,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
 
     private static final int FULL_COMPACT_MIN_FILE = 3;
 
+    private final Comparator<DataFileMeta> comparator;
     private final ExecutorService executor;
     private final BucketedDvMaintainer dvMaintainer;
     private final PriorityQueue<DataFileMeta> toCompact;
@@ -74,11 +77,13 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             int minFileNum,
             long targetFileSize,
             boolean forceRewriteAllFiles,
+            boolean ordered,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter) {
+        this.comparator = ordered ? SEQUENCE_NUMBER_COMPARATOR : CREATION_TIME_COMPARATOR;
         this.executor = executor;
         this.dvMaintainer = dvMaintainer;
-        this.toCompact = new PriorityQueue<>(DATA_FILE_COMPARATOR);
+        this.toCompact = new PriorityQueue<>(comparator);
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.targetFileSize = targetFileSize;

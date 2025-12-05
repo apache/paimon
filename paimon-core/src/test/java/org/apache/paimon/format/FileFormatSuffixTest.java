@@ -90,7 +90,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         null,
                         0,
                         new BucketedAppendCompactManager(
-                                null, toCompact, null, 4, 10, false, null, null), // not used
+                                null, toCompact, null, 4, 10, false, true, null, null), // not used
                         null,
                         false,
                         dataFilePathFactory,

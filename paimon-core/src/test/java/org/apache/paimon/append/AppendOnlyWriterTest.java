@@ -676,6 +676,7 @@ public class AppendOnlyWriterTest {
                         MIN_FILE_NUM,
                         targetFileSize,
                         false,
+                        true,
                         compactBefore -> {
                             latch.await();
                             return compactBefore.isEmpty()
