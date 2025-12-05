@@ -43,6 +43,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+import static org.apache.paimon.globalindex.GlobalIndexScanBuilder.parallelScan;
 import static org.apache.paimon.globalindex.GlobalIndexScanBuilder.scan;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
@@ -254,7 +255,7 @@ public class ReadBuilderImpl implements ReadBuilder {
                 List<Range> nonIndexedRowRanges =
                         new Range(0, snapshot.nextRowId() - 1).exclude(indexedRowRanges);
                 Optional<List<Range>> combined =
-                        scan(indexedRowRanges, globalIndexScanBuilder, filter);
+                        parallelScan(indexedRowRanges, globalIndexScanBuilder, filter);
                 if (combined.isPresent()) {
                     List<Range> finalResult = new ArrayList<>(combined.get());
                     if (!nonIndexedRowRanges.isEmpty()) {

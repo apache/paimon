@@ -50,7 +50,7 @@ public interface GlobalIndexScanBuilder {
     // Return sorted and no overlap ranges
     List<Range> shardList();
 
-    static Optional<List<Range>> scan(
+    static Optional<List<Range>> parallelScan(
             final List<Range> ranges,
             final GlobalIndexScanBuilder globalIndexScanBuilder,
             final Predicate filter) {
