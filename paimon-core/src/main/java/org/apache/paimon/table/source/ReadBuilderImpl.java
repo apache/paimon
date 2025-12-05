@@ -44,7 +44,6 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.globalindex.GlobalIndexScanBuilder.parallelScan;
-import static org.apache.paimon.globalindex.GlobalIndexScanBuilder.scan;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
 import static org.apache.paimon.utils.Preconditions.checkState;
