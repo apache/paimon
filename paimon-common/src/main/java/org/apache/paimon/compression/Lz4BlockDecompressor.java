@@ -57,9 +57,10 @@ public class Lz4BlockDecompressor implements BlockDecompressor {
         }
 
         try {
-            final int compressedLen2 =
-                    decompressor.decompress(src, srcOff + HEADER_LENGTH, originalLen, dst, dstOff);
-            if (compressedLen != compressedLen2) {
+            final int originalLenByLz4 =
+                    decompressor.decompress(
+                            src, srcOff + HEADER_LENGTH, compressedLen, dst, dstOff);
+            if (originalLen != originalLenByLz4) {
                 throw new BufferDecompressionException("Input is corrupted");
             }
         } catch (LZ4Exception e) {
