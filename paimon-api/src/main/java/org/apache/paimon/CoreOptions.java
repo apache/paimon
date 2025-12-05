@@ -2092,7 +2092,7 @@ public class CoreOptions implements Serializable {
                     .withDescription("Row count per shard for global index.");
 
     public static final ConfigOption<Boolean> GLOBAL_INDEX_ENABLED_IN_CORE =
-            key("global-index.enabled-in-core ")
+            key("global-index.enabled-in-core")
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
