@@ -106,6 +106,61 @@ class PkReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
+    def test_pk_lance_reader(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={
+                                                'bucket': '2',
+                                                'file.format': 'lance'
+                                            })
+        self.catalog.create_table('default.test_pk_lance', schema, False)
+        table = self.catalog.get_table('default.test_pk_lance')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        for split in splits:
+            for file in split.files:
+                file_path = file.file_path
+                table_path = os.path.join(self.warehouse, 'default.db', 'test_pk_lance')
+                full_path = os.path.join(table_path, file_path)
+                if os.path.exists(full_path):
+                    self.assertTrue(os.path.exists(full_path))
+                    self.assertTrue(
+                        file_path.endswith('.lance'),
+                        f"Expected file path to end with .lance, got {file_path}")
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        self.assertEqual(actual, self.expected)
+
+    def test_pk_lance_reader_with_filter(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={
+                                                'bucket': '2',
+                                                'file.format': 'lance'
+                                            })
+        self.catalog.create_table('default.test_pk_lance_filter', schema, False)
+        table = self.catalog.get_table('default.test_pk_lance_filter')
+        self._write_test_table(table)
+
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        p1 = predicate_builder.is_in('dt', ['p1'])
+        p2 = predicate_builder.between('user_id', 2, 7)
+        p3 = predicate_builder.is_not_null('behavior')
+        g1 = predicate_builder.and_predicates([p1, p2, p3])
+        read_builder = table.new_read_builder().with_filter(g1)
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        expected = pa.concat_tables([
+            self.expected.slice(1, 1),  # 2/b
+            self.expected.slice(5, 1)  # 7/g
+        ])
+        self.assertEqual(actual, expected)
+
     def test_pk_multi_write_once_commit(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
