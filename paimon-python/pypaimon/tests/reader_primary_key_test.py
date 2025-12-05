@@ -68,7 +68,7 @@ class PkReaderTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
-        
+
         # Verify _VALUE_KIND field type is int8 in the written parquet file
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
@@ -87,15 +87,17 @@ class PkReaderTest(unittest.TestCase):
                         field = file_schema.field(i)
                         if field.name == '_VALUE_KIND':
                             value_kind_field_found = True
-                            self.assertEqual(field.type, pa.int8(), 
-                                           f"_VALUE_KIND field type should be int8, got {field.type}")
+                            self.assertEqual(
+                                field.type, pa.int8(),
+                                f"_VALUE_KIND field type should be int8, got {field.type}")
                             break
                     if value_kind_field_found:
                         break
             if value_kind_field_found:
                 break
-        self.assertTrue(value_kind_field_found, 
-                       "_VALUE_KIND field should exist in the written parquet file")
+        self.assertTrue(
+            value_kind_field_found,
+            "_VALUE_KIND field should exist in the written parquet file")
 
     def test_pk_orc_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
