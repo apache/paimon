@@ -19,7 +19,6 @@
 import unittest
 from datetime import datetime
 from unittest.mock import Mock, patch
-import time
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
