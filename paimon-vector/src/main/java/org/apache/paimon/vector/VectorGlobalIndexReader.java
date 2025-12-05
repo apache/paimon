@@ -93,11 +93,7 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
 
         // Close directories
         for (IndexMMapDirectory directory : directories) {
-            try {
-                directory.close();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+            directory.close();
         }
         directories.clear();
     }
@@ -216,21 +212,6 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                 throw new IOException("Unexpected end of stream");
             }
             totalRead += read;
-        }
-    }
-
-    private void deleteDirectory(java.nio.file.Path path) throws IOException {
-        if (java.nio.file.Files.exists(path)) {
-            java.nio.file.Files.walk(path)
-                    .sorted(java.util.Comparator.reverseOrder())
-                    .forEach(
-                            p -> {
-                                try {
-                                    java.nio.file.Files.delete(p);
-                                } catch (IOException e) {
-                                    // Ignore cleanup errors
-                                }
-                            });
         }
     }
 

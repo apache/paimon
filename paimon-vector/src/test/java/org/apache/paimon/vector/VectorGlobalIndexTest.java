@@ -92,7 +92,7 @@ public class VectorGlobalIndexTest {
         int dimension = 32;
         int numVectors = 20;
 
-        String[] metrics = {"COSINE", "DOT_PRODUCT", "EUCLIDEAN"};
+        String[] metrics = {"COSINE", "DOT_PRODUCT", "EUCLIDEAN", "MAX_INNER_PRODUCT"};
 
         for (String metric : metrics) {
             Options options = createDefaultOptions(dimension);

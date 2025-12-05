@@ -39,7 +39,7 @@ public class IndexMMapDirectory implements AutoCloseable {
         return mmapDirectory;
     }
 
-    public void close() throws Exception {
+    public void close() throws IOException {
         mmapDirectory.close();
         if (java.nio.file.Files.exists(path)) {
             java.nio.file.Files.walk(path)

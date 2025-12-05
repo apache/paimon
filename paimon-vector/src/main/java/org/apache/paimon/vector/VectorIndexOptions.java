@@ -31,10 +31,10 @@ public class VectorIndexOptions {
                     .defaultValue(128)
                     .withDescription("The dimension of the vector");
 
-    public static final ConfigOption<String> VECTOR_METRIC =
+    public static final ConfigOption<VectorMetric> VECTOR_METRIC =
             ConfigOptions.key("vector.metric")
-                    .stringType()
-                    .defaultValue("EUCLIDEAN")
+                    .enumType(VectorMetric.class)
+                    .defaultValue(VectorMetric.EUCLIDEAN)
                     .withDescription(
                             "The similarity metric for vector search (COSINE, DOT_PRODUCT, EUCLIDEAN, MAX_INNER_PRODUCT), and EUCLIDEAN is the default");
 
@@ -65,7 +65,7 @@ public class VectorIndexOptions {
                     .withDescription("write buffer size in MB for vector index");
 
     private final int dimension;
-    private final String metric;
+    private final VectorMetric metric;
     private final int m;
     private final int efConstruction;
     private final int sizePerIndex;
@@ -76,10 +76,8 @@ public class VectorIndexOptions {
         this.metric = options.get(VECTOR_METRIC);
         this.m = options.get(VECTOR_M);
         this.efConstruction = options.get(VECTOR_EF_CONSTRUCTION);
-        this.sizePerIndex =
-                options.get(VECTOR_SIZE_PER_INDEX) > 0
-                        ? options.get(VECTOR_SIZE_PER_INDEX)
-                        : VECTOR_SIZE_PER_INDEX.defaultValue();
+        int size = options.get(VECTOR_SIZE_PER_INDEX);
+        this.sizePerIndex = size > 0 ? size : VECTOR_SIZE_PER_INDEX.defaultValue();
         this.writeBufferSize = options.get(VECTOR_WRITE_BUFFER_SIZE);
     }
 
@@ -87,7 +85,7 @@ public class VectorIndexOptions {
         return dimension;
     }
 
-    public String metric() {
+    public VectorMetric metric() {
         return metric;
     }
 
