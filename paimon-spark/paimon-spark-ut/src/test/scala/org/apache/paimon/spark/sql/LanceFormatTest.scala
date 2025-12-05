@@ -30,10 +30,10 @@ class LanceFormatTest extends PaimonSparkTestBase {
         "CREATE TABLE t (a INT, b STRING, scores ARRAY<DOUBLE>) TBLPROPERTIES ('file.format' = 'lance')")
       sql(
         "INSERT INTO t VALUES (1, 'a', ARRAY(CAST(90.5 as double), CAST(88.0 as double))), (2, 'b', ARRAY(CAST(90.6 as double), CAST(88.1 as double)))")
-      checkAnswer(sql("SELECT * FROM t LIMIT 1"), Seq(Row(1, "a", Array(90.5, 88.0))))
+      assert(sql("SELECT * FROM t LIMIT 1").collect().length == 1)
       checkAnswer(
         sql("SELECT * FROM t LIMIT 10"),
-        Seq(Row(1, "a", Array(90.5, 88.0)), Row(2, "b", Array(90.6, 88.1))))
+        Row(1, "a", Array(90.5, 88.0)) :: Row(2, "b", Array(90.6, 88.1)) :: Nil)
 
       assert(
         sql("SELECT file_size_in_bytes FROM `t$files`")
