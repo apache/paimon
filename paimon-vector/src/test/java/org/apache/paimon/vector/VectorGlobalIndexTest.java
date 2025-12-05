@@ -193,35 +193,18 @@ public class VectorGlobalIndexTest {
         Options options = createDefaultOptions(dimension);
         options.setInteger("vector.size-per-index", 3);
 
-        // Apple [0.9, 0.1], Banana [0.8, 0.2], and Orange [0.85, 0.15] are close in Euclidean
-        // distance (fruits)
-        // Car [0.1, 0.9], Bike [0.15, 0.85], and Truck [0.2, 0.8] are close to each other in
-        // Euclidean distance (vehicles)
-        float[] appleVector = new float[] {0.9f, 0.1f};
-        float[] bananaVector = new float[] {0.8f, 0.2f};
-        float[] carVector = new float[] {0.1f, 0.9f};
-        float[] orangeVector = new float[] {0.85f, 0.15f};
-        float[] bikeVector = new float[] {0.15f, 0.85f};
-        float[] truckVector = new float[] {0.2f, 0.8f};
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f}, new float[] {0.95f, 0.1f}, new float[] {0.1f, 0.95f},
+                    new float[] {0.98f, 0.05f}, new float[] {0.0f, 1.0f}, new float[] {0.05f, 0.98f}
+                };
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer =
                 new VectorGlobalIndexWriter(fileWriter, vectorType, options);
-
-        // Write vectors with row IDs representing documents
-        long appleId = 0L;
-        long bananaId = 1L;
-        long carId = 2L;
-        long orangeId = 3L;
-        long bikeId = 4L;
-        long truckId = 5L;
-
-        writer.write(new FloatVectorIndex(appleId, appleVector));
-        writer.write(new FloatVectorIndex(bananaId, bananaVector));
-        writer.write(new FloatVectorIndex(carId, carVector));
-        writer.write(new FloatVectorIndex(orangeId, orangeVector));
-        writer.write(new FloatVectorIndex(bikeId, bikeVector));
-        writer.write(new FloatVectorIndex(truckId, truckVector));
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(new FloatVectorIndex(i, vectors[i]));
+        }
 
         List<GlobalIndexWriter.ResultEntry> results = writer.finish();
         assertThat(results).hasSize(2);
@@ -239,42 +222,15 @@ public class VectorGlobalIndexTest {
 
         VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
 
-        // Test 1: Query with vector similar to "Apple" - should find Apple, Banana, and Orange
-        // Query: [0.85, 0.15] is between Apple and Banana
+        GlobalIndexResult result = reader.search(vectors[0], 1);
+        assertThat(result.results().getLongCardinality()).isEqualTo(1);
+        assertThat(containsRowId(result, 0)).isTrue();
+
         float[] queryVector = new float[] {0.85f, 0.15f};
-        GlobalIndexResult searchResult = reader.search(queryVector, 1);
-
-        assertThat(searchResult).isNotNull();
-        assertThat(searchResult.results().iterator().hasNext())
-                .as("Search should return results")
-                .isTrue();
-
-        // Collect all result IDs
-        List<Long> resultIds = new ArrayList<>();
-        searchResult.results().iterator().forEachRemaining(resultIds::add);
-
-        // Should find Apple, Banana, and Orange (similar fruits), not vehicles
-        assertThat(resultIds).containsAnyOf(appleId, bananaId, orangeId);
-
-        // Test 2: Query with exact match - should find exact document
-        GlobalIndexResult exactMatchResult = reader.search(appleVector, 1);
-        assertThat(containsRowId(exactMatchResult, appleId)).isTrue();
-
-        // Test 3: Search with larger k than available documents
-        GlobalIndexResult largeKResult = reader.search(queryVector, 10);
-        assertThat(largeKResult).isNotNull();
-        assertThat(largeKResult.results().iterator().hasNext()).isTrue();
-
-        // Test 4: Verify all six documents are indexed
-        GlobalIndexResult allDocsResult = reader.search(new float[] {0.5f, 0.5f}, 6);
-        List<Long> allResultIds = new ArrayList<>();
-        allDocsResult.results().iterator().forEachRemaining(allResultIds::add);
-
-        assertThat(allResultIds.size())
-                .as("Should be able to retrieve all 6 documents")
-                .isGreaterThanOrEqualTo(1)
-                .isLessThanOrEqualTo(6);
-
+        result = reader.search(queryVector, 2);
+        assertThat(result.results().getLongCardinality()).isEqualTo(2);
+        assertThat(containsRowId(result, 1)).isTrue();
+        assertThat(containsRowId(result, 3)).isTrue();
         reader.close();
     }
 

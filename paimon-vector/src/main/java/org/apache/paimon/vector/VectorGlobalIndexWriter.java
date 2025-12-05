@@ -130,15 +130,6 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                                 this.vectorOptions.efConstruction(),
                                 this.vectorOptions.writeBufferSize());
 
-                // Create metadata
-                VectorIndexMetadata metadata =
-                        new VectorIndexMetadata(
-                                vectorOptions.dimension(),
-                                vectorOptions.metric(),
-                                vectorOptions.m(),
-                                vectorOptions.efConstruction());
-                byte[] metaBytes = VectorIndexMetadata.serializeMetadata(metadata);
-
                 // Write to file
                 String fileName = fileWriter.newFileName(VectorGlobalIndexerFactory.IDENTIFIER);
                 try (OutputStream out = fileWriter.newOutputStream(fileName)) {
@@ -148,7 +139,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                 long maxRowIdInBatch = batchVectors.get(batchVectors.size() - 1).rowId();
                 results.add(
                         ResultEntry.of(
-                                fileName, metaBytes, new Range(minRowIdInBatch, maxRowIdInBatch)));
+                                fileName, null, new Range(minRowIdInBatch, maxRowIdInBatch)));
             }
 
             return results;

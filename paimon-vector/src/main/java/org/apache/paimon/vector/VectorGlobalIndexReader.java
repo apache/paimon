@@ -41,7 +41,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.PriorityQueue;
 import java.util.Set;
 
 /**
@@ -101,26 +103,45 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     private GlobalIndexResult search(Query query, int k) {
-        RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
+        PriorityQueue<ScoredRow> topK =
+                new PriorityQueue<>(Comparator.comparingDouble(sr -> sr.score));
         for (IndexSearcher searcher : searchers) {
             try {
-                // Execute search
                 TopDocs topDocs = searcher.search(query, k);
                 StoredFields storedFields = searcher.storedFields();
                 Set<String> fieldsToLoad = Set.of(VectorIndex.ROW_ID_FIELD);
-                // Collect row IDs from results
                 for (org.apache.lucene.search.ScoreDoc scoreDoc : topDocs.scoreDocs) {
-                    float rawScore = scoreDoc.score;
                     Document doc = storedFields.document(scoreDoc.doc, fieldsToLoad);
                     long rowId = doc.getField(VectorIndex.ROW_ID_FIELD).numericValue().longValue();
-                    roaringBitmap64.add(rowId);
+                    if (topK.size() < k) {
+                        topK.offer(new ScoredRow(rowId, scoreDoc.score));
+                    } else {
+                        if (topK.peek() != null && scoreDoc.score > topK.peek().score) {
+                            topK.poll();
+                            topK.offer(new ScoredRow(rowId, scoreDoc.score));
+                        }
+                    }
                 }
             } catch (IOException e) {
                 throw new RuntimeException("Failed to search vector index", e);
             }
         }
-
+        RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
+        for (ScoredRow scoredRow : topK) {
+            roaringBitmap64.add(scoredRow.rowId);
+        }
         return GlobalIndexResult.create(() -> roaringBitmap64);
+    }
+
+    /** Helper class to store row ID with its score. */
+    private static class ScoredRow {
+        final long rowId;
+        final float score;
+
+        ScoredRow(long rowId, float score) {
+            this.rowId = rowId;
+            this.score = score;
+        }
     }
 
     private void loadIndices(GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files)
