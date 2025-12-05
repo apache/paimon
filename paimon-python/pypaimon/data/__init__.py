@@ -19,4 +19,3 @@
 from pypaimon.data.timestamp import Timestamp
 
 __all__ = ['Timestamp']
-

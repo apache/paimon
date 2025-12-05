@@ -144,17 +144,17 @@ class Timestamp:
 
         epoch_date = datetime(1970, 1, 1).date()
         date_time_date = date_time.date()
-        
+
         epoch_day = (date_time_date - epoch_date).days
         time_part = date_time.time()
-        
+
         nano_of_day = (
             time_part.hour * Timestamp.NANOS_PER_HOUR
             + time_part.minute * Timestamp.NANOS_PER_MINUTE
             + time_part.second * Timestamp.NANOS_PER_SECOND
             + time_part.microsecond * Timestamp.NANOS_PER_MICROSECOND
         )
-        
+
         millisecond = epoch_day * Timestamp.MILLIS_PER_DAY + nano_of_day // 1_000_000
         nano_of_millisecond = int(nano_of_day % 1_000_000)
 
@@ -166,4 +166,3 @@ class Timestamp:
         mills = micros // Timestamp.MICROS_PER_MILLIS
         nanos = (micros - mills * Timestamp.MICROS_PER_MILLIS) * Timestamp.NANOS_PER_MICROS
         return Timestamp.from_epoch_millis(mills, int(nanos))
-

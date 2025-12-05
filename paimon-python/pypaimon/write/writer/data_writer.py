@@ -19,7 +19,6 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import uuid
 from abc import ABC, abstractmethod
-from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from pypaimon.common.core_options import CoreOptions

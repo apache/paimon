@@ -266,9 +266,9 @@ class PkReaderTest(unittest.TestCase):
                                             options={'bucket': '2'})
         self.catalog.create_table('default.test_manifest_creation_time', schema, False)
         table = self.catalog.get_table('default.test_manifest_creation_time')
-        
+
         self._write_test_table(table)
-        
+
         snapshot_manager = SnapshotManager(table)
         latest_snapshot = snapshot_manager.get_latest_snapshot()
         read_builder = table.new_read_builder()
@@ -296,9 +296,10 @@ class PkReaderTest(unittest.TestCase):
                     expected_epoch_millis = expected_epoch_millis - (tz_offset_seconds * 1000)
                     self.assertEqual(epoch_millis, expected_epoch_millis)
                     creation_times_found.append(epoch_millis)
-        
-        self.assertGreater(len(creation_times_found), 0,
-                          "At least one manifest entry should have creation_time")
+
+        self.assertGreater(
+            len(creation_times_found), 0,
+            "At least one manifest entry should have creation_time")
 
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()

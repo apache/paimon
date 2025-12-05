@@ -18,7 +18,6 @@
 
 import logging
 import uuid
-from datetime import datetime
 from typing import List, Optional, Tuple, Dict
 
 import pyarrow as pa
