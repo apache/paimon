@@ -45,7 +45,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /** Tests for {@link EarlyFullCompaction}. */
-public class FullCompactTriggerTest {
+public class EarlyFullCompactionTest {
 
     @Test
     public void testCreateNoOptions() {
