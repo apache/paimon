@@ -116,16 +116,18 @@ class JavaPyReadWriteTest(unittest.TestCase):
             for manifest_file_meta in manifest_files:
                 entries = manifest_file_manager.read(manifest_file_meta.file_name)
                 for entry in entries:
-                    if entry.file.creation_time:
+                    if entry.file.get_creation_time() is not None:
+                        creation_time_ts = entry.file.get_creation_time()
+                        creation_time_dt = creation_time_ts.to_local_date_time()
                         self.assertIsNone(
-                            entry.file.creation_time.tzinfo,
+                            creation_time_dt.tzinfo,
                             "Manifest file creation_time should be naive datetime (no timezone)"
                         )
                         write_time = datetime.now()
-                        time_diff = abs((entry.file.creation_time - write_time).total_seconds())
+                        time_diff = abs((creation_time_dt - write_time).total_seconds())
                         self.assertLess(
                             time_diff, 60,
-                            f"Manifest file creation_time {entry.file.creation_time} is too far from "
+                            f"Manifest file creation_time {creation_time_dt} is too far from "
                             f"write time {write_time}. This indicates a timezone conversion bug "
                             f"(likely 8-hour offset)."
                         )

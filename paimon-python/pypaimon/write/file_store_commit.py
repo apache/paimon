@@ -18,7 +18,6 @@
 
 import time
 import uuid
-from datetime import datetime
 from typing import List
 
 from pypaimon.common.core_options import CoreOptions
@@ -309,11 +308,9 @@ class FileStoreCommit:
             file_size_in_bytes = file_meta.file_size if entry.kind == 0 else file_meta.file_size * -1
             file_count = 1 if entry.kind == 0 else -1
 
-            # Convert creation_time to milliseconds (Java uses epoch millis)
+            # Use epoch millis
             if file_meta.creation_time:
-                epoch = datetime(1970, 1, 1)
-                delta = file_meta.creation_time - epoch
-                file_creation_time = int(delta.total_seconds() * 1000)
+                file_creation_time = file_meta.creation_time_epoch_millis()
             else:
                 file_creation_time = int(time.time() * 1000)
 

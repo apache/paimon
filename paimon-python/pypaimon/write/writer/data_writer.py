@@ -209,7 +209,7 @@ class DataWriter(ABC):
         min_seq = self.sequence_generator.start
         max_seq = self.sequence_generator.current
         self.sequence_generator.start = self.sequence_generator.current
-        self.committed_files.append(DataFileMeta(
+        self.committed_files.append(DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
             row_count=data.num_rows,
@@ -230,7 +230,7 @@ class DataWriter(ABC):
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],
-            creation_time=datetime.now(),
+            creation_time=Timestamp.now(),
             delete_row_count=0,
             file_source=0,
             value_stats_cols=None,  # None means all columns in the data have statistics

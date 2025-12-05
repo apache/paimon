@@ -284,7 +284,7 @@ class DataBlobWriter(DataWriter):
 
         self.sequence_generator.start = self.sequence_generator.current
 
-        return DataFileMeta(
+        return DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
             row_count=data.num_rows,
@@ -303,7 +303,7 @@ class DataBlobWriter(DataWriter):
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],
-            creation_time=datetime.now(),
+            creation_time=Timestamp.now(),
             delete_row_count=0,
             file_source=0,
             value_stats_cols=self.normal_column_names,
