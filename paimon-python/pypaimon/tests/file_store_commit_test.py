@@ -104,12 +104,7 @@ class TestFileStoreCommit(unittest.TestCase):
         self.assertEqual(stat.record_count, 10000)
         self.assertEqual(stat.file_count, 1)
         self.assertEqual(stat.file_size_in_bytes, 1024 * 1024)
-        expected_time = creation_time.get_millisecond()
-        if time.daylight:
-            tz_offset_seconds = -time.altzone
-        else:
-            tz_offset_seconds = -time.timezone
-        expected_time = expected_time - (tz_offset_seconds * 1000)
+        expected_time = file_meta.creation_time_epoch_millis()
         self.assertEqual(stat.last_file_creation_time, expected_time)
 
     def test_generate_partition_statistics_multiple_files_same_partition(
@@ -173,12 +168,7 @@ class TestFileStoreCommit(unittest.TestCase):
         self.assertEqual(stat.record_count, 25000)  # 10000 + 15000
         self.assertEqual(stat.file_count, 2)
         self.assertEqual(stat.file_size_in_bytes, 3 * 1024 * 1024)  # 1MB + 2MB
-        expected_time = creation_time_2.get_millisecond()
-        if time.daylight:
-            tz_offset_seconds = -time.altzone
-        else:
-            tz_offset_seconds = -time.timezone
-        expected_time = expected_time - (tz_offset_seconds * 1000)
+        expected_time = file_meta_2.creation_time_epoch_millis()
         self.assertEqual(stat.last_file_creation_time, expected_time)
 
     def test_generate_partition_statistics_multiple_partitions(

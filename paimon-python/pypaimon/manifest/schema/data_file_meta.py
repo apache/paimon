@@ -17,7 +17,7 @@
 ################################################################################
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 import time
 
@@ -61,12 +61,12 @@ class DataFileMeta:
     def creation_time_epoch_millis(self) -> Optional[int]:
         if self.creation_time is None:
             return None
-        millis = self.creation_time.get_millisecond()
-        if time.daylight:
-            tz_offset_seconds = -time.altzone
-        else:
-            tz_offset_seconds = -time.timezone
-        return millis - (tz_offset_seconds * 1000)
+        local_dt = self.creation_time.to_local_date_time()
+        local_time_struct = local_dt.timetuple()
+        local_timestamp = time.mktime(local_time_struct)
+        local_time_struct_utc = time.gmtime(local_timestamp)
+        utc_timestamp = time.mktime(local_time_struct_utc)
+        return int(utc_timestamp * 1000)
 
     def creation_time_as_datetime(self) -> Optional[datetime]:
         if self.creation_time is None:

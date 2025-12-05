@@ -289,11 +289,12 @@ class PkReaderTest(unittest.TestCase):
                     self.assertGreater(epoch_millis, 0)
                     import time
                     expected_epoch_millis = creation_time.get_millisecond()
-                    if time.daylight:
-                        tz_offset_seconds = -time.altzone
-                    else:
-                        tz_offset_seconds = -time.timezone
-                    expected_epoch_millis = expected_epoch_millis - (tz_offset_seconds * 1000)
+                    local_dt = creation_time.to_local_date_time()
+                    local_time_struct = local_dt.timetuple()
+                    local_timestamp = time.mktime(local_time_struct)
+                    local_time_struct_utc = time.gmtime(local_timestamp)
+                    utc_timestamp = time.mktime(local_time_struct_utc)
+                    expected_epoch_millis = int(utc_timestamp * 1000)
                     self.assertEqual(epoch_millis, expected_epoch_millis)
                     creation_times_found.append(epoch_millis)
 
