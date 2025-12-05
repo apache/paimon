@@ -43,6 +43,7 @@ class CoreOptions(str, Enum):
     FILE_FORMAT_AVRO = "avro"
     FILE_FORMAT_PARQUET = "parquet"
     FILE_FORMAT_BLOB = "blob"
+    FILE_FORMAT_LANCE = "lance"
     FILE_COMPRESSION = "file.compression"
     FILE_COMPRESSION_PER_LEVEL = "file.compression.per.level"
     FILE_FORMAT_PER_LEVEL = "file.format.per.level"
@@ -132,6 +133,16 @@ class CoreOptions(str, Enum):
     @staticmethod
     def external_specific_fs(options: dict) -> Optional[str]:
         return options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS)
+
+    @staticmethod
+    def lance_enable_vector_search(options: dict) -> bool:
+        """Check if vector search is enabled for Lance format."""
+        return options.get("lance.vector-search", "false").lower() == "true"
+
+    @staticmethod
+    def lance_index_type(options: dict) -> str:
+        """Get Lance index type, default to 'ivf_pq'."""
+        return options.get("lance.index-type", "ivf_pq").lower()
 
     @staticmethod
     def file_compression(options: dict) -> str:
