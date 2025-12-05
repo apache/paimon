@@ -26,10 +26,11 @@ under the License.
 
 # File Format
 
-Currently, supports Parquet, Avro, ORC, CSV, JSON file formats.
+Currently, supports Parquet, Avro, ORC, CSV, JSON, and Lance file formats.
 - Recommended column format is Parquet, which has a high compression rate and fast column projection queries.
 - Recommended row based format is Avro, which has good performance n reading and writing full row (all columns).
 - Recommended testing format is CSV, which has better readability but the worst read-write performance.
+- Recommended format for ML workloads is Lance, which is optimized for vector search and machine learning use cases.
 
 ## PARQUET
 
@@ -640,3 +641,88 @@ The following table lists the type mapping from Paimon type to JSON type.
     </tr>
     </tbody>
 </table>
+
+## LANCE
+
+Lance is a modern columnar data format optimized for machine learning and vector search workloads. It provides high-performance read and write operations with native support for Apache Arrow.
+
+The following table lists the type mapping from Paimon type to Lance (Arrow) type.
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left">Paimon Type</th>
+        <th class="text-center">Lance (Arrow) type</th>
+      </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td>CHAR / VARCHAR / STRING</td>
+      <td>UTF8</td>
+    </tr>
+    <tr>
+      <td>BOOLEAN</td>
+      <td>BOOL</td>
+    </tr>
+    <tr>
+      <td>BINARY / VARBINARY</td>
+      <td>BINARY</td>
+    </tr>
+    <tr>
+      <td>DECIMAL(P, S)</td>
+      <td>DECIMAL128(P, S)</td>
+    </tr>
+    <tr>
+      <td>TINYINT</td>
+      <td>INT8</td>
+    </tr>
+    <tr>
+      <td>SMALLINT</td>
+      <td>INT16</td>
+    </tr>
+    <tr>
+      <td>INT</td>
+      <td>INT32</td>
+    </tr>
+    <tr>
+      <td>BIGINT</td>
+      <td>INT64</td>
+    </tr>
+    <tr>
+      <td>FLOAT</td>
+      <td>FLOAT</td>
+    </tr>
+    <tr>
+      <td>DOUBLE</td>
+      <td>DOUBLE</td>
+    </tr>
+    <tr>
+      <td>DATE</td>
+      <td>DATE32</td>
+    </tr>
+    <tr>
+      <td>TIME</td>
+      <td>TIME32 / TIME64</td>
+    </tr>
+    <tr>
+      <td>TIMESTAMP(P)</td>
+      <td>TIMESTAMP (unit based on precision)</td>
+    </tr>
+    <tr>
+      <td>ARRAY</td>
+      <td>LIST</td>
+    </tr>
+    <tr>
+      <td>MULTISET</td>
+      <td>LIST</td>
+    </tr>
+    <tr>
+      <td>ROW</td>
+      <td>STRUCT</td>
+    </tr>
+    </tbody>
+</table>
+
+Limitations:
+1. Lance file format does not support `MAP` type.
+2. Lance file format does not support `TIMESTAMP_LOCAL_ZONE` type.

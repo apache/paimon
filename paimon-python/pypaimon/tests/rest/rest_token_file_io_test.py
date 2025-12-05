@@ -16,11 +16,13 @@
 #  limitations under the License.
 ################################################################################
 import os
+import pickle
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.common.config import CatalogOptions, OssOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 
@@ -109,6 +111,84 @@ class RESTTokenFileIOTest(unittest.TestCase):
             with regular_file_io.new_input_stream(test_file_path) as stream:
                 read_content = stream.read()
                 self.assertEqual(read_content, test_content)
+
+    def test_pickle_serialization(self):
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            original_file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                self.catalog_options
+            )
+
+            self.assertTrue(hasattr(original_file_io, 'lock'))
+            self.assertIsNotNone(original_file_io.lock)
+
+            pickled = pickle.dumps(original_file_io)
+
+            deserialized_file_io = pickle.loads(pickled)
+
+            self.assertEqual(deserialized_file_io.identifier, original_file_io.identifier)
+            self.assertEqual(deserialized_file_io.path, original_file_io.path)
+            self.assertEqual(deserialized_file_io.properties, original_file_io.properties)
+
+            self.assertTrue(hasattr(deserialized_file_io, 'lock'))
+            self.assertIsNotNone(deserialized_file_io.lock)
+            self.assertIsNot(deserialized_file_io.lock, original_file_io.lock)
+
+            self.assertIsNone(deserialized_file_io.api_instance)
+
+            test_file_path = f"file://{self.temp_dir}/pickle_test.txt"
+            test_content = b"pickle test content"
+
+            with deserialized_file_io.new_output_stream(test_file_path) as stream:
+                stream.write(test_content)
+
+            expected_path = f"{self.temp_dir}/pickle_test.txt"
+            self.assertTrue(os.path.exists(expected_path))
+            with open(expected_path, 'rb') as f:
+                self.assertEqual(f.read(), test_content)
+
+    def test_dlf_oss_endpoint_overrides_token_endpoint(self):
+        """Test that DLF OSS endpoint overrides the standard OSS endpoint in token."""
+        dlf_oss_endpoint = "https://dlf-custom-endpoint.oss-cn-hangzhou.aliyuncs.com"
+        catalog_options = {
+            CatalogOptions.DLF_OSS_ENDPOINT: dlf_oss_endpoint
+        }
+
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                catalog_options
+            )
+
+            # Create a token with a standard OSS endpoint
+            token = {
+                OssOptions.OSS_ENDPOINT: "https://standard-endpoint.oss-cn-beijing.aliyuncs.com",
+                "fs.oss.accessKeyId": "test-access-key",
+                "fs.oss.accessKeySecret": "test-secret-key"
+            }
+
+            # Merge token with catalog options
+            merged_token = file_io._merge_token_with_catalog_options(token)
+
+            # Verify DLF OSS endpoint overrides the standard endpoint
+            self.assertEqual(
+                merged_token[OssOptions.OSS_ENDPOINT],
+                dlf_oss_endpoint,
+                "DLF OSS endpoint should override the standard OSS endpoint in token"
+            )
+            # Verify other token properties are preserved
+            self.assertEqual(
+                merged_token["fs.oss.accessKeyId"],
+                "test-access-key",
+                "Other token properties should be preserved"
+            )
+            self.assertEqual(
+                merged_token["fs.oss.accessKeySecret"],
+                "test-secret-key",
+                "Other token properties should be preserved"
+            )
 
 
 if __name__ == '__main__':
