@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 from collections import defaultdict
-from typing import List
+from typing import List, Optional
 
 import pyarrow as pa
 
@@ -36,12 +36,33 @@ class TableWrite:
         self.row_key_extractor = self.table.create_row_key_extractor()
         self.commit_user = commit_user
 
-    def write_arrow(self, table: pa.Table):
+    def write_arrow(self, table: pa.Table, row_kinds: Optional[List[int]] = None):
+        """Write Arrow table with optional RowKind information.
+
+        Args:
+            table: PyArrow table to write
+            row_kinds: Optional list of RowKind values (0-3) for each row.
+                      If provided, a '__row_kind__' column will be added to the table.
+                      0=INSERT, 1=UPDATE_BEFORE, 2=UPDATE_AFTER, 3=DELETE
+        """
+        if row_kinds is not None:
+            table = self._add_row_kind_column(table, row_kinds)
+
         batches_iterator = table.to_batches()
         for batch in batches_iterator:
             self.write_arrow_batch(batch)
 
-    def write_arrow_batch(self, data: pa.RecordBatch):
+    def write_arrow_batch(self, data: pa.RecordBatch, row_kinds: Optional[List[int]] = None):
+        """Write Arrow record batch with optional RowKind information.
+
+        Args:
+            data: PyArrow record batch to write
+            row_kinds: Optional list of RowKind values for each row.
+                      If provided, a '__row_kind__' column will be added to the batch.
+        """
+        if row_kinds is not None:
+            data = self._add_row_kind_to_batch(data, row_kinds)
+
         self._validate_pyarrow_schema(data.schema)
         partitions, buckets = self.row_key_extractor.extract_partition_bucket_batch(data)
 
@@ -70,6 +91,64 @@ class TableWrite:
 
     def close(self):
         self.file_store_write.close()
+
+    def _add_row_kind_column(self, table: pa.Table, row_kinds: List[int]) -> pa.Table:
+        """Add '__row_kind__' column to the table.
+
+        Args:
+            table: PyArrow table
+            row_kinds: List of RowKind values (0-3) for each row
+
+        Returns:
+            Table with '__row_kind__' column added
+
+        Raises:
+            ValueError: If row_kinds length doesn't match table rows or contains invalid values
+        """
+        if len(row_kinds) != table.num_rows:
+            raise ValueError(
+                f"row_kinds length ({len(row_kinds)}) must match table rows ({table.num_rows})"
+            )
+
+        # Validate RowKind values
+        for i, rk in enumerate(row_kinds):
+            if rk not in [0, 1, 2, 3]:
+                raise ValueError(
+                    f"Invalid RowKind value: {rk} at index {i}. "
+                    f"Valid values are 0(INSERT), 1(UPDATE_BEFORE), 2(UPDATE_AFTER), 3(DELETE)"
+                )
+
+        row_kind_array = pa.array(row_kinds, type=pa.int32())
+        return table.append_column('__row_kind__', row_kind_array)
+
+    def _add_row_kind_to_batch(self, batch: pa.RecordBatch, row_kinds: List[int]) -> pa.RecordBatch:
+        """Add '__row_kind__' column to the record batch.
+
+        Args:
+            batch: PyArrow record batch
+            row_kinds: List of RowKind values (0-3) for each row
+
+        Returns:
+            Batch with '__row_kind__' column added
+
+        Raises:
+            ValueError: If row_kinds length doesn't match batch rows or contains invalid values
+        """
+        if len(row_kinds) != batch.num_rows:
+            raise ValueError(
+                f"row_kinds length ({len(row_kinds)}) must match batch rows ({batch.num_rows})"
+            )
+
+        # Validate RowKind values
+        for i, rk in enumerate(row_kinds):
+            if rk not in [0, 1, 2, 3]:
+                raise ValueError(
+                    f"Invalid RowKind value: {rk} at index {i}. "
+                    f"Valid values are 0(INSERT), 1(UPDATE_BEFORE), 2(UPDATE_AFTER), 3(DELETE)"
+                )
+
+        row_kind_array = pa.array(row_kinds, type=pa.int32())
+        return batch.append_column('__row_kind__', row_kind_array)
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
         if data_schema != self.table_pyarrow_schema and data_schema.names != self.file_store_write.write_cols:
