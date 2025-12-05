@@ -17,7 +17,6 @@
 ################################################################################
 
 from datetime import datetime, timedelta
-from typing import Optional
 
 
 class Timestamp:
@@ -36,6 +35,12 @@ class Timestamp:
 
     MICROS_PER_MILLIS = 1000
     NANOS_PER_MICROS = 1000
+
+    # Constants for nano of day calculation
+    NANOS_PER_HOUR = 3_600_000_000_000
+    NANOS_PER_MINUTE = 60_000_000_000
+    NANOS_PER_SECOND = 1_000_000_000
+    NANOS_PER_MICROSECOND = 1_000
 
     def __init__(self, millisecond: int, nano_of_millisecond: int = 0):
         """
@@ -148,19 +153,21 @@ class Timestamp:
         if date_time.tzinfo is not None:
             raise ValueError("datetime must be naive (no timezone)")
 
-        epoch = datetime(1970, 1, 1)
-        delta = date_time - epoch
-
-        # Calculate total milliseconds (including fractional part)
-        total_seconds = delta.total_seconds()
-        total_milliseconds = total_seconds * 1000
-
-        # Split into integer milliseconds and fractional part
-        millisecond = int(total_milliseconds)
-        fractional_millis = total_milliseconds - millisecond
-
-        # Convert fractional milliseconds to nanoseconds (0-999,999)
-        nano_of_millisecond = int(fractional_millis * 1_000_000)
+        epoch_date = datetime(1970, 1, 1).date()
+        date_time_date = date_time.date()
+        
+        epoch_day = (date_time_date - epoch_date).days
+        time_part = date_time.time()
+        
+        nano_of_day = (
+            time_part.hour * Timestamp.NANOS_PER_HOUR
+            + time_part.minute * Timestamp.NANOS_PER_MINUTE
+            + time_part.second * Timestamp.NANOS_PER_SECOND
+            + time_part.microsecond * Timestamp.NANOS_PER_MICROSECOND
+        )
+        
+        millisecond = epoch_day * Timestamp.MILLIS_PER_DAY + nano_of_day // 1_000_000
+        nano_of_millisecond = int(nano_of_day % 1_000_000)
 
         return Timestamp(millisecond, nano_of_millisecond)
 
