@@ -33,10 +33,11 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.IOContext;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -52,12 +53,11 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class VectorGlobalIndexWriter implements GlobalIndexWriter {
 
     private final GlobalIndexFileWriter fileWriter;
-    private final DataType fieldType;
     private final VectorIndexOptions vectorOptions;
     private final VectorSimilarityFunction similarityFunction;
     private final int sizePerIndex;
 
-    private final List<VectorIndex> vectors;
+    private final List<VectorIndex> vectorIndices;
 
     public VectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter, DataType fieldType, Options options) {
@@ -65,78 +65,57 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                 fieldType instanceof ArrayType,
                 "Vector field type must be ARRAY, but was: " + fieldType);
         this.fileWriter = fileWriter;
-        this.fieldType = fieldType;
-        this.vectors = new ArrayList<>();
+        this.vectorIndices = new ArrayList<>();
         this.vectorOptions = new VectorIndexOptions(options);
-        this.similarityFunction = parseMetricToLucene(vectorOptions.metric());
+        this.similarityFunction = vectorOptions.metric().vectorSimilarityFunction();
         this.sizePerIndex = vectorOptions.sizePerIndex();
     }
 
     @Override
     public void write(Object key) {
+        VectorIndex index;
         if (key instanceof FloatVectorIndex) {
-            FloatVectorIndex vectorKey = (FloatVectorIndex) key;
-            float[] vector = vectorKey.vector();
-
-            checkArgument(
-                    vector.length == vectorOptions.dimension(),
-                    "Vector dimension mismatch: expected "
-                            + vectorOptions.dimension()
-                            + ", but got "
-                            + vector.length);
-
-            vectors.add(vectorKey);
+            index = (FloatVectorIndex) key;
         } else if (key instanceof ByteVectorIndex) {
-            ByteVectorIndex vectorKey = (ByteVectorIndex) key;
-            byte[] byteVector = vectorKey.vector();
-
-            checkArgument(
-                    byteVector.length == vectorOptions.dimension(),
-                    "Vector dimension mismatch: expected "
-                            + vectorOptions.dimension()
-                            + ", but got "
-                            + byteVector.length);
-
-            vectors.add(vectorKey);
+            index = (ByteVectorIndex) key;
         } else {
             throw new IllegalArgumentException(
                     "Unsupported index type: " + key.getClass().getName());
         }
+        index.checkDimension(vectorOptions.dimension());
+        vectorIndices.add(index);
     }
 
     @Override
     public List<ResultEntry> finish() {
         try {
-            if (vectors.isEmpty()) {
+            if (vectorIndices.isEmpty()) {
                 return new ArrayList<>();
             }
 
             List<ResultEntry> results = new ArrayList<>();
 
             // Split vectors into batches if size exceeds sizePerIndex
-            int totalVectors = vectors.size();
+            int totalVectors = vectorIndices.size();
             int numBatches = (int) Math.ceil((double) totalVectors / sizePerIndex);
 
             for (int batchIndex = 0; batchIndex < numBatches; batchIndex++) {
                 int startIdx = batchIndex * sizePerIndex;
                 int endIdx = Math.min(startIdx + sizePerIndex, totalVectors);
-                List<VectorIndex> batchVectors = vectors.subList(startIdx, endIdx);
+                List<VectorIndex> batchVectorIndices = vectorIndices.subList(startIdx, endIdx);
 
-                // Build index
-                byte[] indexBytes =
-                        buildIndex(
-                                batchVectors,
-                                this.vectorOptions.m(),
-                                this.vectorOptions.efConstruction(),
-                                this.vectorOptions.writeBufferSize());
-
-                // Write to file
                 String fileName = fileWriter.newFileName(VectorGlobalIndexerFactory.IDENTIFIER);
                 try (OutputStream out = fileWriter.newOutputStream(fileName)) {
-                    out.write(indexBytes);
+                    buildIndex(
+                            batchVectorIndices,
+                            this.vectorOptions.m(),
+                            this.vectorOptions.efConstruction(),
+                            this.vectorOptions.writeBufferSize(),
+                            out);
                 }
-                long minRowIdInBatch = batchVectors.get(0).rowId();
-                long maxRowIdInBatch = batchVectors.get(batchVectors.size() - 1).rowId();
+                long minRowIdInBatch = batchVectorIndices.get(0).rowId();
+                long maxRowIdInBatch =
+                        batchVectorIndices.get(batchVectorIndices.size() - 1).rowId();
                 results.add(
                         ResultEntry.of(
                                 fileName, null, new Range(minRowIdInBatch, maxRowIdInBatch)));
@@ -148,49 +127,27 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
         }
     }
 
-    private VectorSimilarityFunction parseMetricToLucene(String metric) {
-        switch (metric.toUpperCase()) {
-            case "COSINE":
-                return VectorSimilarityFunction.COSINE;
-            case "DOT_PRODUCT":
-                return VectorSimilarityFunction.DOT_PRODUCT;
-            case "EUCLIDEAN":
-                return VectorSimilarityFunction.EUCLIDEAN;
-            case "MAX_INNER_PRODUCT":
-                return VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT;
-            default:
-                throw new IllegalArgumentException("Unsupported metric: " + metric);
-        }
-    }
-
-    private byte[] buildIndex(
-            List<VectorIndex> batchVectors, int m, int efConstruction, int writeBufferSize)
+    private void buildIndex(
+            List<VectorIndex> batchVectors,
+            int m,
+            int efConstruction,
+            int writeBufferSize,
+            OutputStream out)
             throws IOException {
 
+        IndexWriterConfig config = getIndexWriterConfig(m, efConstruction, writeBufferSize);
         try (IndexMMapDirectory indexMMapDirectory = new IndexMMapDirectory()) {
-            // Configure index writer
-            IndexWriterConfig config = getIndexWriterConfig(m, efConstruction, writeBufferSize);
-
             try (IndexWriter writer = new IndexWriter(indexMMapDirectory.directory(), config)) {
-                // Add each vector as a document
                 for (VectorIndex vectorIndex : batchVectors) {
                     Document doc = new Document();
-
-                    // Add KNN vector field
                     doc.add(vectorIndex.indexableField(similarityFunction));
-
-                    // Store row ID
                     doc.add(vectorIndex.rowIdStoredField());
-
                     writer.addDocument(doc);
                 }
-
-                // Commit changes
                 writer.commit();
             }
 
-            // Serialize directory to byte array
-            return serializeDirectory(indexMMapDirectory.directory());
+            serializeDirectory(indexMMapDirectory.directory(), out);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -199,8 +156,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
     private static IndexWriterConfig getIndexWriterConfig(
             int m, int efConstruction, int writeBufferSize) {
         IndexWriterConfig config = new IndexWriterConfig();
-        config.setRAMBufferSizeMB(
-                writeBufferSize); // Configure RAM buffer size based on user settings
+        config.setRAMBufferSizeMB(writeBufferSize);
         config.setCodec(
                 new Lucene912Codec(Lucene912Codec.Mode.BEST_SPEED) {
                     @Override
@@ -211,57 +167,33 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
         return config;
     }
 
-    private byte[] serializeDirectory(Directory directory) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-
-        // Write all files from the directory
+    private void serializeDirectory(Directory directory, OutputStream out) throws IOException {
         String[] files = directory.listAll();
-
-        // Write number of files
-        baos.write(intToBytes(files.length));
+        out.write(intToBytes(files.length));
 
         for (String fileName : files) {
-            // Write file name length and name
             byte[] nameBytes = fileName.getBytes(StandardCharsets.UTF_8);
-            baos.write(intToBytes(nameBytes.length));
-            baos.write(nameBytes);
-
-            // Write file content length and content
+            out.write(intToBytes(nameBytes.length));
+            out.write(nameBytes);
             long fileLength = directory.fileLength(fileName);
-            baos.write(longToBytes(fileLength));
+            out.write(ByteBuffer.allocate(8).putLong(fileLength).array());
 
-            try (org.apache.lucene.store.IndexInput input = directory.openInput(fileName, null)) {
+            try (org.apache.lucene.store.IndexInput input =
+                    directory.openInput(fileName, IOContext.DEFAULT)) {
                 byte[] buffer = new byte[8192];
                 long remaining = fileLength;
 
                 while (remaining > 0) {
                     int toRead = (int) Math.min(buffer.length, remaining);
                     input.readBytes(buffer, 0, toRead);
-                    baos.write(buffer, 0, toRead);
+                    out.write(buffer, 0, toRead);
                     remaining -= toRead;
                 }
             }
         }
-
-        return baos.toByteArray();
     }
 
     private byte[] intToBytes(int value) {
-        return new byte[] {
-            (byte) (value >>> 24), (byte) (value >>> 16), (byte) (value >>> 8), (byte) value
-        };
-    }
-
-    private byte[] longToBytes(long value) {
-        return new byte[] {
-            (byte) (value >>> 56),
-            (byte) (value >>> 48),
-            (byte) (value >>> 40),
-            (byte) (value >>> 32),
-            (byte) (value >>> 24),
-            (byte) (value >>> 16),
-            (byte) (value >>> 8),
-            (byte) value
-        };
+        return ByteBuffer.allocate(4).putInt(value).array();
     }
 }

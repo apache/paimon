@@ -18,34 +18,34 @@
 
 package org.apache.paimon.vector;
 
-import org.apache.lucene.document.StoredField;
-import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.VectorSimilarityFunction;
 
-/** Vector index interface. */
-public abstract class VectorIndex<T> {
+/** Enumeration of supported vector similarity metrics. */
+public enum VectorMetric {
+    /** Cosine similarity metric. */
+    COSINE(VectorSimilarityFunction.COSINE),
 
-    public static final String VECTOR_FIELD = "vector";
-    public static final String ROW_ID_FIELD = "rowId";
+    /** Dot product similarity metric. */
+    DOT_PRODUCT(VectorSimilarityFunction.DOT_PRODUCT),
 
-    public abstract long rowId();
+    /** Euclidean distance metric. */
+    EUCLIDEAN(VectorSimilarityFunction.EUCLIDEAN),
 
-    public abstract long dimension();
+    /** Maximum inner product metric. */
+    MAX_INNER_PRODUCT(VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT);
 
-    public abstract T vector();
+    private final VectorSimilarityFunction vectorSimilarityFunction;
 
-    public abstract IndexableField indexableField(VectorSimilarityFunction similarityFunction);
-
-    public StoredField rowIdStoredField() {
-        return new StoredField(ROW_ID_FIELD, rowId());
+    VectorMetric(VectorSimilarityFunction vectorSimilarityFunction) {
+        this.vectorSimilarityFunction = vectorSimilarityFunction;
     }
 
-    public void checkDimension(int dimension) {
-        if (dimension() != dimension) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Vector dimension mismatch: expected %d, but got %d",
-                            dimension(), dimension));
-        }
+    /**
+     * Get the corresponding Lucene vector similarity function.
+     *
+     * @return the Lucene VectorSimilarityFunction
+     */
+    public VectorSimilarityFunction vectorSimilarityFunction() {
+        return vectorSimilarityFunction;
     }
 }

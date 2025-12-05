@@ -26,6 +26,8 @@ on:
       - '**/*.md'
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
+      - 'paimon-vector/**'
+      - '.github/workflows/utitcase-paimon-vector.yml'
 
 env:
   JDK_VERSION: 8

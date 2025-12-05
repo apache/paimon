@@ -16,6 +16,9 @@
 name: docs-tests
 on:
   push:
+    paths-ignore:
+      - 'paimon-vector/**'
+      - '.github/workflows/utitcase-paimon-vector.yml'
   pull_request:
     paths:
       - 'docs/**'

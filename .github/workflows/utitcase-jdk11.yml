@@ -20,12 +20,17 @@ name: UTCase and ITCase Others on JDK 11
 
 on:
   push:
+    paths-ignore:
+      - 'paimon-vector/**'
+      - '.github/workflows/utitcase-paimon-vector.yml'
   pull_request:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
+      - 'paimon-vector/**'
+      - '.github/workflows/utitcase-paimon-vector.yml'
 
 env:
   JDK_VERSION: 11

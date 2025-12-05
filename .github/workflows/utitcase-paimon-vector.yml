@@ -21,11 +21,9 @@ name: UTCase and ITCase Paimon Vector
 on:
   push:
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'paimon-python/**'
-      - '.github/workflows/paimon-python-checks.yml'
+    paths:
+        - 'paimon-vector/**'
+        - 'pom.xml'
 
 env:
   JDK_VERSION: 11
@@ -57,7 +55,7 @@ jobs:
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          TEST_MODULE="org.apache.paimon:paimon-vector" 
+          TEST_MODULE="org.apache.paimon:paimon-vector"
           echo "Start testing module: $TEST_MODULE"
           mvn -T 2C -B test verify -Ppaimon-vector -pl "${TEST_MODULE}" -Duser.timezone=$jvm_timezone
           echo "All modules tested"

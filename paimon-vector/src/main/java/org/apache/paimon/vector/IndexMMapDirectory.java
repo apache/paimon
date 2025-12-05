@@ -31,7 +31,7 @@ public class IndexMMapDirectory implements AutoCloseable {
 
     public IndexMMapDirectory() throws IOException {
         this.path =
-                java.nio.file.Files.createTempDirectory("paimon-vector-index" + UUID.randomUUID());
+                java.nio.file.Files.createTempDirectory("paimon-vector-index-" + UUID.randomUUID());
         this.mmapDirectory = new MMapDirectory(path);
     }
 

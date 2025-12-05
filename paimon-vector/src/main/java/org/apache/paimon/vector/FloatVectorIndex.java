@@ -23,7 +23,7 @@ import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.VectorSimilarityFunction;
 
 /** Vector index for float vector. */
-public class FloatVectorIndex extends VectorIndex {
+public class FloatVectorIndex extends VectorIndex<float[]> {
     private final long rowId;
     private final float[] vector;
 
@@ -32,6 +32,7 @@ public class FloatVectorIndex extends VectorIndex {
         this.vector = vector;
     }
 
+    @Override
     public float[] vector() {
         return vector;
     }
@@ -39,6 +40,11 @@ public class FloatVectorIndex extends VectorIndex {
     @Override
     public long rowId() {
         return rowId;
+    }
+
+    @Override
+    public long dimension() {
+        return vector().length;
     }
 
     @Override

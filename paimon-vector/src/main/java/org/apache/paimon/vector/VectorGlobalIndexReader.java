@@ -85,9 +85,19 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
 
     @Override
     public void close() throws IOException {
+        Throwable firstException = null;
+
         // Close readers
         for (IndexSearcher searcher : searchers) {
-            searcher.getIndexReader().close();
+            try {
+                searcher.getIndexReader().close();
+            } catch (Throwable t) {
+                if (firstException == null) {
+                    firstException = t;
+                } else {
+                    firstException.addSuppressed(t);
+                }
+            }
         }
         searchers.clear();
 
@@ -95,11 +105,26 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
         for (IndexMMapDirectory directory : directories) {
             try {
                 directory.close();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+            } catch (Throwable t) {
+                if (firstException == null) {
+                    firstException = t;
+                } else {
+                    firstException.addSuppressed(t);
+                }
             }
         }
         directories.clear();
+
+        if (firstException != null) {
+            if (firstException instanceof IOException) {
+                throw (IOException) firstException;
+            } else if (firstException instanceof RuntimeException) {
+                throw (RuntimeException) firstException;
+            } else {
+                throw new RuntimeException(
+                        "Failed to close vector global index reader", firstException);
+            }
+        }
     }
 
     private GlobalIndexResult search(Query query, int k) {
@@ -148,47 +173,71 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
             throws IOException {
         for (GlobalIndexIOMeta meta : files) {
             try (SeekableInputStream in = fileReader.getInputStream(meta.fileName())) {
-                IndexMMapDirectory directory = deserializeDirectory(in);
-                directories.add(directory);
-                IndexReader reader = DirectoryReader.open(directory.directory());
-                IndexSearcher searcher = new IndexSearcher(reader);
-                searchers.add(searcher);
+                IndexMMapDirectory directory = null;
+                IndexReader reader = null;
+                boolean success = false;
+                try {
+                    directory = deserializeDirectory(in);
+                    reader = DirectoryReader.open(directory.directory());
+                    IndexSearcher searcher = new IndexSearcher(reader);
+                    directories.add(directory);
+                    searchers.add(searcher);
+                    success = true;
+                } finally {
+                    if (!success) {
+                        if (reader != null) {
+                            try {
+                                reader.close();
+                            } catch (IOException e) {
+                            }
+                        }
+                        if (directory != null) {
+                            try {
+                                directory.close();
+                            } catch (Exception e) {
+                                throw new IOException("Failed to close directory", e);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
     private IndexMMapDirectory deserializeDirectory(SeekableInputStream in) throws IOException {
         IndexMMapDirectory indexMMapDirectory = new IndexMMapDirectory();
-
-        // Read number of files
-        int numFiles = readInt(in);
-
-        // Reusable buffer for streaming
-        byte[] buffer = new byte[BUFFER_SIZE];
-
-        for (int i = 0; i < numFiles; i++) {
-            // Read file name
-            int nameLength = readInt(in);
-            byte[] nameBytes = new byte[nameLength];
-            readFully(in, nameBytes);
-            String fileName = new String(nameBytes, StandardCharsets.UTF_8);
-
-            // Read file content length
-            long fileLength = readLong(in);
-
-            // Stream file content directly to directory
-            try (IndexOutput output = indexMMapDirectory.directory().createOutput(fileName, null)) {
-                long remaining = fileLength;
-                while (remaining > 0) {
-                    int toRead = (int) Math.min(buffer.length, remaining);
-                    readFully(in, buffer, 0, toRead);
-                    output.writeBytes(buffer, 0, toRead);
-                    remaining -= toRead;
+        try {
+            int numFiles = readInt(in);
+            byte[] buffer = new byte[BUFFER_SIZE];
+            for (int i = 0; i < numFiles; i++) {
+                int nameLength = readInt(in);
+                byte[] nameBytes = new byte[nameLength];
+                readFully(in, nameBytes);
+                String fileName = new String(nameBytes, StandardCharsets.UTF_8);
+                long fileLength = readLong(in);
+                try (IndexOutput output =
+                        indexMMapDirectory.directory().createOutput(fileName, null)) {
+                    long remaining = fileLength;
+                    while (remaining > 0) {
+                        int toRead = (int) Math.min(buffer.length, remaining);
+                        readFully(in, buffer, 0, toRead);
+                        output.writeBytes(buffer, 0, toRead);
+                        remaining -= toRead;
+                    }
                 }
             }
+            return indexMMapDirectory;
+        } catch (Exception e) {
+            try {
+                indexMMapDirectory.close();
+            } catch (Exception closeEx) {
+            }
+            if (e instanceof IOException) {
+                throw (IOException) e;
+            } else {
+                throw new IOException("Failed to deserialize directory", e);
+            }
         }
-
-        return indexMMapDirectory;
     }
 
     private int readInt(SeekableInputStream in) throws IOException {
@@ -216,21 +265,6 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                 throw new IOException("Unexpected end of stream");
             }
             totalRead += read;
-        }
-    }
-
-    private void deleteDirectory(java.nio.file.Path path) throws IOException {
-        if (java.nio.file.Files.exists(path)) {
-            java.nio.file.Files.walk(path)
-                    .sorted(java.util.Comparator.reverseOrder())
-                    .forEach(
-                            p -> {
-                                try {
-                                    java.nio.file.Files.delete(p);
-                                } catch (IOException e) {
-                                    // Ignore cleanup errors
-                                }
-                            });
         }
     }
 

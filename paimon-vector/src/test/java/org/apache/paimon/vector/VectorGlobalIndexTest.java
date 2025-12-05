@@ -121,13 +121,10 @@ public class VectorGlobalIndexTest {
                             result.rowRange(),
                             result.meta()));
 
-            VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
-
-            // Verify search works with this metric
-            GlobalIndexResult searchResult = reader.search(testVectors.get(0), 3);
-            assertThat(searchResult).isNotNull();
-
-            reader.close();
+            try (VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas)) {
+                GlobalIndexResult searchResult = reader.search(testVectors.get(0), 3);
+                assertThat(searchResult).isNotNull();
+            }
         }
     }
 
@@ -162,13 +159,11 @@ public class VectorGlobalIndexTest {
                             result.rowRange(),
                             result.meta()));
 
-            VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
-
-            // Verify search works with this dimension
-            GlobalIndexResult searchResult = reader.search(testVectors.get(0), 5);
-            assertThat(searchResult).isNotNull();
-
-            reader.close();
+            try (VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas)) {
+                // Verify search works with this dimension
+                GlobalIndexResult searchResult = reader.search(testVectors.get(0), 5);
+                assertThat(searchResult).isNotNull();
+            }
         }
     }
 
@@ -220,18 +215,17 @@ public class VectorGlobalIndexTest {
                             result.meta()));
         }
 
-        VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas);
+        try (VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas)) {
+            GlobalIndexResult result = reader.search(vectors[0], 1);
+            assertThat(result.results().getLongCardinality()).isEqualTo(1);
+            assertThat(containsRowId(result, 0)).isTrue();
 
-        GlobalIndexResult result = reader.search(vectors[0], 1);
-        assertThat(result.results().getLongCardinality()).isEqualTo(1);
-        assertThat(containsRowId(result, 0)).isTrue();
-
-        float[] queryVector = new float[] {0.85f, 0.15f};
-        result = reader.search(queryVector, 2);
-        assertThat(result.results().getLongCardinality()).isEqualTo(2);
-        assertThat(containsRowId(result, 1)).isTrue();
-        assertThat(containsRowId(result, 3)).isTrue();
-        reader.close();
+            float[] queryVector = new float[] {0.85f, 0.15f};
+            result = reader.search(queryVector, 2);
+            assertThat(result.results().getLongCardinality()).isEqualTo(2);
+            assertThat(containsRowId(result, 1)).isTrue();
+            assertThat(containsRowId(result, 3)).isTrue();
+        }
     }
 
     private Options createDefaultOptions(int dimension) {

@@ -23,7 +23,7 @@ import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.VectorSimilarityFunction;
 
 /** Vector index for byte vector. */
-public class ByteVectorIndex extends VectorIndex {
+public class ByteVectorIndex extends VectorIndex<byte[]> {
     private final long rowId;
     private final byte[] vector;
 
@@ -38,10 +38,16 @@ public class ByteVectorIndex extends VectorIndex {
     }
 
     @Override
+    public long dimension() {
+        return vector().length;
+    }
+
+    @Override
     public IndexableField indexableField(VectorSimilarityFunction similarityFunction) {
         return new KnnByteVectorField(VECTOR_FIELD, this.vector, similarityFunction);
     }
 
+    @Override
     public byte[] vector() {
         return vector;
     }
