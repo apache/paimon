@@ -25,6 +25,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowKind
+
 import org.apache.spark.sql.{Column, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If, Literal}
@@ -167,10 +168,7 @@ case class UpdatePaimonTableCommand(
   private def rowIdCol = col(ROW_ID_COLUMN)
 
   private def sequenceNumberCol(sparkSession: SparkSession) = toColumn(
-    optimizedIf(
-      condition,
-      Literal(null),
-      toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
+    optimizedIf(condition, Literal(null), toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
     .as(SEQUENCE_NUMBER_COLUMN)
 
   private def optimizedIf(

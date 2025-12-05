@@ -79,7 +79,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       sql("DROP TABLE t")
 
       // enable row tracking and deletion vectors
-      sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'deletion-vectors.enabled' = 'true')")
+      sql(
+        "CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'deletion-vectors.enabled' = 'true')")
       runAndCheckAnswer()
 
       def runAndCheckAnswer(): Unit = {
@@ -106,7 +107,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       sql("DROP TABLE t")
 
       // enable row tracking and deletion vectors
-      sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'deletion-vectors.enabled' = 'true')")
+      sql(
+        "CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'deletion-vectors.enabled' = 'true')")
       runAndCheckAnswer()
 
       def runAndCheckAnswer(): Unit = {
