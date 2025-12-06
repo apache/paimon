@@ -39,6 +39,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.InternalRowUtils;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SerializationUtils;
 
 import javax.annotation.Nullable;
@@ -62,7 +63,7 @@ public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 8;
+    private static final int VERSION = 9;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -78,6 +79,8 @@ public class DataSplit implements Split {
 
     private boolean isStreaming = false;
     private boolean rawConvertible;
+
+    @Nullable private List<Range> rowRanges;
 
     public DataSplit() {}
 
@@ -290,6 +293,11 @@ public class DataSplit implements Split {
         return hasIndexFile ? Optional.of(indexFiles) : Optional.empty();
     }
 
+    @Nullable
+    public List<Range> rowRanges() {
+        return rowRanges;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -364,6 +372,7 @@ public class DataSplit implements Split {
         this.dataDeletionFiles = other.dataDeletionFiles;
         this.isStreaming = other.isStreaming;
         this.rawConvertible = other.rawConvertible;
+        this.rowRanges = other.rowRanges;
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -398,6 +407,16 @@ public class DataSplit implements Split {
         out.writeBoolean(isStreaming);
 
         out.writeBoolean(rawConvertible);
+
+        out.writeBoolean(rowRanges != null);
+
+        if (rowRanges != null) {
+            out.writeInt(rowRanges.size());
+            for (Range range : rowRanges) {
+                out.writeLong(range.from);
+                out.writeLong(range.to);
+            }
+        }
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
@@ -433,6 +452,18 @@ public class DataSplit implements Split {
 
         boolean isStreaming = in.readBoolean();
         boolean rawConvertible = in.readBoolean();
+        boolean hasRowRanges = version >= 9 && in.readBoolean();
+
+        List<Range> rowRanges = null;
+        if (hasRowRanges) {
+            rowRanges = new ArrayList<>();
+            int rangeSize = in.readInt();
+            for (int i = 0; i < rangeSize; i++) {
+                long from = in.readLong();
+                long to = in.readLong();
+                rowRanges.add(new Range(from, to));
+            }
+        }
 
         DataSplit.Builder builder =
                 builder()
@@ -444,7 +475,8 @@ public class DataSplit implements Split {
                         .withBeforeFiles(beforeFiles)
                         .withDataFiles(dataFiles)
                         .isStreaming(isStreaming)
-                        .rawConvertible(rawConvertible);
+                        .rawConvertible(rawConvertible)
+                        .withRowRanges(rowRanges);
 
         if (beforeDeletionFiles != null) {
             builder.withBeforeDeletionFiles(beforeDeletionFiles);
@@ -473,7 +505,7 @@ public class DataSplit implements Split {
             DataFileMetaFirstRowIdLegacySerializer serializer =
                     new DataFileMetaFirstRowIdLegacySerializer();
             return serializer::deserialize;
-        } else if (version == 8) {
+        } else if (version == 8 || version == 9) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {
@@ -553,6 +585,12 @@ public class DataSplit implements Split {
 
         public Builder rawConvertible(boolean rawConvertible) {
             this.split.rawConvertible = rawConvertible;
+            return this;
+        }
+
+        public Builder withRowRanges(@Nullable List<Range> rowRanges) {
+            // TODO: Trim row ranges according to data files
+            this.split.rowRanges = rowRanges;
             return this;
         }
 

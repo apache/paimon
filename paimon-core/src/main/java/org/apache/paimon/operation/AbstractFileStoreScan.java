@@ -263,6 +263,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public List<Range> rowRanges() {
+        return rowRanges;
+    }
+
+    @Override
     public Plan plan() {
         long started = System.nanoTime();
         ManifestsReader.Result manifestsResult = readManifests();

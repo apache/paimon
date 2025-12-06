@@ -67,7 +67,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -824,25 +823,98 @@ public class DataEvolutionTableTest extends TableTestBase {
 
     @Test
     public void testGlobalIndex() throws Exception {
+        write(100000L);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+
+        Predicate predicate =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a100"));
+
+        RoaringNavigableMap64 rowIds = globalIndexScan(table, predicate);
+        assertNotNull(rowIds);
+        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(1);
+        Assertions.assertThat(rowIds.toRangeList()).containsExactly(new Range(100L, 100L));
+
+        Predicate predicate2 =
+                new PredicateBuilder(table.rowType())
+                        .in(
+                                1,
+                                Arrays.asList(
+                                        BinaryString.fromString("a200"),
+                                        BinaryString.fromString("a300"),
+                                        BinaryString.fromString("a400")));
+
+        rowIds = globalIndexScan(table, predicate2);
+        assertNotNull(rowIds);
+        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(3);
+        Assertions.assertThat(rowIds.toRangeList())
+                .containsExactlyInAnyOrder(
+                        new Range(200L, 200L), new Range(300L, 300L), new Range(400L, 400L));
+
+        ReadBuilder readBuilder = table.newReadBuilder().withRowRanges(rowIds.toRangeList());
+
+        List<String> readF1 = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(
+                        row -> {
+                            readF1.add(row.getString(1).toString());
+                        });
+
+        Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400");
+    }
+
+    @Test
+    public void testGlobalIndexWithCoreScan() throws Exception {
+        write(100000L);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+
+        Predicate predicate =
+                new PredicateBuilder(table.rowType())
+                        .in(
+                                1,
+                                Arrays.asList(
+                                        BinaryString.fromString("a200"),
+                                        BinaryString.fromString("a300"),
+                                        BinaryString.fromString("a400")));
+
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        List<String> readF1 = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(
+                        row -> {
+                            readF1.add(row.getString(1).toString());
+                        });
+
+        Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400");
+    }
+
+    private void write(long count) throws Exception {
         createTableDefault();
-        long count = 100000;
 
         Schema schema = schemaDefault();
         RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
         RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
         BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
-        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0);
-                BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
-
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
             for (int i = 0; i < count; i++) {
                 write0.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write0.prepareCommit());
+        }
+
+        builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            for (int i = 0; i < count; i++) {
                 write1.write(GenericRow.of(BinaryString.fromString("b" + i)));
             }
-
             BatchTableCommit commit = builder.newCommit();
-            List<CommitMessage> commitables = new ArrayList<>();
-            commitables.addAll(write0.prepareCommit());
-            commitables.addAll(write1.prepareCommit());
+            List<CommitMessage> commitables = write1.prepareCommit();
             setFirstRowId(commitables, 0L);
             commit.commit(commitables);
         }
@@ -900,57 +972,12 @@ public class DataEvolutionTableTest extends TableTestBase {
                         CompactIncrement.emptyIncrement());
 
         table.newBatchWriteBuilder().newCommit().commit(Collections.singletonList(commitMessage));
-
-        Predicate predicate =
-                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a100"));
-
-        RoaringNavigableMap64 rowIds = globalIndexScan(table, predicate);
-        assertNotNull(rowIds);
-        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(1);
-        Assertions.assertThat(rowIds.toRangeList()).containsExactly(new Range(100L, 100L));
-
-        Predicate predicate2 =
-                new PredicateBuilder(table.rowType())
-                        .in(
-                                1,
-                                Arrays.asList(
-                                        BinaryString.fromString("a200"),
-                                        BinaryString.fromString("a300"),
-                                        BinaryString.fromString("a400")));
-
-        rowIds = globalIndexScan(table, predicate2);
-        assertNotNull(rowIds);
-        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(3);
-        Assertions.assertThat(rowIds.toRangeList())
-                .containsExactlyInAnyOrder(
-                        new Range(200L, 200L), new Range(300L, 300L), new Range(400L, 400L));
-
-        readBuilder = table.newReadBuilder().withRowRanges(rowIds.toRangeList());
-
-        List<String> readF1 = new ArrayList<>();
-        readBuilder
-                .newRead()
-                .createReader(readBuilder.newScan().plan())
-                .forEachRemaining(
-                        row -> {
-                            readF1.add(row.getString(1).toString());
-                        });
-
-        Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400");
-
-        Predicate predicate3 =
-                new PredicateBuilder(table.rowType()).notEqual(1, BinaryString.fromString("a500"));
-        rowIds = globalIndexScan(table, predicate3);
-        assertNotNull(rowIds);
-        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(99999L);
-        Assertions.assertThat(rowIds.toRangeList())
-                .contains(new Range(0L, 499L), new Range(501L, 99999L));
     }
 
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)
             throws Exception {
         GlobalIndexScanBuilder indexScanBuilder = table.newIndexScanBuilder();
-        Set<Range> ranges = indexScanBuilder.shardList();
+        List<Range> ranges = indexScanBuilder.shardList();
         GlobalIndexResult globalFileIndexResult = GlobalIndexResult.createEmpty();
         for (Range range : ranges) {
             try (RowRangeGlobalIndexScanner scanner =

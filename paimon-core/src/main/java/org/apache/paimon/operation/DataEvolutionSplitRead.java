@@ -148,6 +148,16 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         DataSplit dataSplit = (DataSplit) split;
+        List<Range> splitRowRanges = dataSplit.rowRanges();
+
+        if (splitRowRanges != null) {
+            if (this.rowRanges != null) {
+                this.rowRanges = Range.and(this.rowRanges, splitRowRanges);
+            } else {
+                this.rowRanges = splitRowRanges;
+            }
+        }
+
         List<DataFileMeta> files = dataSplit.dataFiles();
         BinaryRow partition = dataSplit.partition();
         DataFilePathFactory dataFilePathFactory =

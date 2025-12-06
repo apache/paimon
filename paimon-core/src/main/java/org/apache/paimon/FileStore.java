@@ -19,6 +19,7 @@
 package org.apache.paimon;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
@@ -124,4 +125,6 @@ public interface FileStore<T> {
     void setManifestCache(SegmentsCache<Path> manifestCache);
 
     void setSnapshotCache(Cache<Path, Snapshot> cache);
+
+    GlobalIndexScanBuilder newIndexScanBuilder();
 }
