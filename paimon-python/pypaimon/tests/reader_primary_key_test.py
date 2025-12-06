@@ -275,7 +275,7 @@ class PkReaderTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         manifest_list_manager = table_scan.starting_scanner.manifest_list_manager
         manifest_files = manifest_list_manager.read_all(latest_snapshot)
-        
+
         manifest_file_manager = table_scan.starting_scanner.manifest_file_manager
         creation_times_found = []
         for manifest_file_meta in manifest_files:
