@@ -64,6 +64,12 @@ class CoreOptions(str, Enum):
     DATA_FILE_EXTERNAL_PATHS = "data-file.external-paths"
     DATA_FILE_EXTERNAL_PATHS_STRATEGY = "data-file.external-paths.strategy"
     DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS = "data-file.external-paths.specific-fs"
+    # Compaction options
+    NUM_SORTED_RUNS_COMPACTION_TRIGGER = "num-sorted-run.compaction-trigger"
+    COMPACTION_MIN_FILE_NUM = "compaction.min.file-num"
+    COMPACTION_DELETE_RATIO_THRESHOLD = "compaction.delete-ratio-threshold"
+    COMPACTION_TOTAL_SIZE_THRESHOLD = "compaction.total-size-threshold"
+    WRITE_ONLY = "write-only"
 
     @staticmethod
     def data_file_prefix(options: dict) -> str:

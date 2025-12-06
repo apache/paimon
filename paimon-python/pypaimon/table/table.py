@@ -17,9 +17,13 @@
 #################################################################################
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
+
+if TYPE_CHECKING:
+    from pypaimon.compact.compact_builder import CompactBuilder
 
 
 class Table(ABC):
@@ -36,3 +40,7 @@ class Table(ABC):
     @abstractmethod
     def new_stream_write_builder(self) -> StreamWriteBuilder:
         """Returns a builder for building stream table write and table commit."""
+
+    @abstractmethod
+    def new_compact_builder(self) -> 'CompactBuilder':
+        """Returns a builder for building table compaction operations."""
