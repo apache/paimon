@@ -761,6 +761,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "When total size is smaller than this threshold, force a full compaction.");
 
+    public static final ConfigOption<MemorySize> COMPACTION_INCREMENTAL_SIZE_THRESHOLD =
+            key("compaction.incremental-size-threshold")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "When incremental size is bigger than this threshold, force a full compaction.");
+
     public static final ConfigOption<Integer> COMPACTION_MIN_FILE_NUM =
             key("compaction.min.file-num")
                     .intType()
@@ -2582,6 +2589,11 @@ public class CoreOptions implements Serializable {
     @Nullable
     public MemorySize compactionTotalSizeThreshold() {
         return options.get(COMPACTION_TOTAL_SIZE_THRESHOLD);
+    }
+
+    @Nullable
+    public MemorySize compactionIncrementalSizeThreshold() {
+        return options.get(COMPACTION_INCREMENTAL_SIZE_THRESHOLD);
     }
 
     public int numSortedRunStopTrigger() {

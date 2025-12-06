@@ -49,9 +49,9 @@ import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeWriter;
 import org.apache.paimon.mergetree.compact.CompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactStrategy;
+import org.apache.paimon.mergetree.compact.EarlyFullCompaction;
 import org.apache.paimon.mergetree.compact.ForceUpLevel0Compaction;
 import org.apache.paimon.mergetree.compact.FullChangelogMergeTreeCompactRewriter;
-import org.apache.paimon.mergetree.compact.FullCompactTrigger;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter.FirstRowMergeFunctionWrapperFactory;
@@ -254,7 +254,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             options.maxSizeAmplificationPercent(),
                             options.sortedRunSizeRatio(),
                             options.numSortedRunCompactionTrigger(),
-                            FullCompactTrigger.create(options),
+                            EarlyFullCompaction.create(options),
                             OffPeakHours.create(options)),
                     compactMaxInterval);
         }
@@ -264,7 +264,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         options.maxSizeAmplificationPercent(),
                         options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger(),
-                        FullCompactTrigger.create(options),
+                        EarlyFullCompaction.create(options),
                         OffPeakHours.create(options));
         if (options.compactionForceUpLevel0()) {
             return new ForceUpLevel0Compaction(universal, null);

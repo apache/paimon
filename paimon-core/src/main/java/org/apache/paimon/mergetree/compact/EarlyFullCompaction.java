@@ -33,32 +33,38 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
-/** Trigger full compaction. */
-public class FullCompactTrigger {
+/** Early trigger full compaction. */
+public class EarlyFullCompaction {
 
-    private static final Logger LOG = LoggerFactory.getLogger(FullCompactTrigger.class);
+    private static final Logger LOG = LoggerFactory.getLogger(EarlyFullCompaction.class);
 
     @Nullable private final Long fullCompactionInterval;
     @Nullable private final Long totalSizeThreshold;
+    @Nullable private final Long incrementalSizeThreshold;
 
     @Nullable private Long lastFullCompaction;
 
-    public FullCompactTrigger(
-            @Nullable Long fullCompactionInterval, @Nullable Long totalSizeThreshold) {
+    public EarlyFullCompaction(
+            @Nullable Long fullCompactionInterval,
+            @Nullable Long totalSizeThreshold,
+            @Nullable Long incrementalSizeThreshold) {
         this.fullCompactionInterval = fullCompactionInterval;
         this.totalSizeThreshold = totalSizeThreshold;
+        this.incrementalSizeThreshold = incrementalSizeThreshold;
     }
 
     @Nullable
-    public static FullCompactTrigger create(CoreOptions options) {
+    public static EarlyFullCompaction create(CoreOptions options) {
         Duration interval = options.optimizedCompactionInterval();
-        MemorySize threshold = options.compactionTotalSizeThreshold();
-        if (interval == null && threshold == null) {
+        MemorySize totalThreshold = options.compactionTotalSizeThreshold();
+        MemorySize incrementalThreshold = options.compactionIncrementalSizeThreshold();
+        if (interval == null && totalThreshold == null && incrementalThreshold == null) {
             return null;
         }
-        return new FullCompactTrigger(
+        return new EarlyFullCompaction(
                 interval == null ? null : interval.toMillis(),
-                threshold == null ? null : threshold.getBytes());
+                totalThreshold == null ? null : totalThreshold.getBytes(),
+                incrementalThreshold == null ? null : incrementalThreshold.getBytes());
     }
 
     public Optional<CompactUnit> tryFullCompact(int numLevels, List<LevelSortedRun> runs) {
@@ -81,6 +87,17 @@ public class FullCompactTrigger {
                 totalSize += run.run().totalSize();
             }
             if (totalSize < totalSizeThreshold) {
+                return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
+            }
+        }
+        if (incrementalSizeThreshold != null) {
+            long incrementalSize = 0;
+            for (LevelSortedRun run : runs) {
+                if (run.level() != maxLevel) {
+                    incrementalSize += run.run().totalSize();
+                }
+            }
+            if (incrementalSize > incrementalSizeThreshold) {
                 return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
             }
         }

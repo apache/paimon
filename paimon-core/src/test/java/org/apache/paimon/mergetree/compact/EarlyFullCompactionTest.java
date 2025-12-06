@@ -28,6 +28,8 @@ import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
 
+import javax.annotation.Nullable;
+
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -42,20 +44,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/** Tests for {@link FullCompactTrigger}. */
-public class FullCompactTriggerTest {
+/** Tests for {@link EarlyFullCompaction}. */
+public class EarlyFullCompactionTest {
 
     @Test
     public void testCreateNoOptions() {
         CoreOptions options = new CoreOptions(new Options());
-        assertThat(FullCompactTrigger.create(options)).isNull();
+        assertThat(EarlyFullCompaction.create(options)).isNull();
     }
 
     @Test
     public void testCreateWithInterval() {
         Options options = new Options();
         options.set(COMPACTION_OPTIMIZATION_INTERVAL, Duration.ofHours(1));
-        FullCompactTrigger trigger = FullCompactTrigger.create(new CoreOptions(options));
+        EarlyFullCompaction trigger = EarlyFullCompaction.create(new CoreOptions(options));
         assertThat(trigger).isNotNull();
     }
 
@@ -63,7 +65,7 @@ public class FullCompactTriggerTest {
     public void testCreateWithThreshold() {
         Options options = new Options();
         options.set(COMPACTION_TOTAL_SIZE_THRESHOLD, MemorySize.ofMebiBytes(100));
-        FullCompactTrigger trigger = FullCompactTrigger.create(new CoreOptions(options));
+        EarlyFullCompaction trigger = EarlyFullCompaction.create(new CoreOptions(options));
         assertThat(trigger).isNotNull();
     }
 
@@ -72,26 +74,27 @@ public class FullCompactTriggerTest {
         Options options = new Options();
         options.set(COMPACTION_OPTIMIZATION_INTERVAL, Duration.ofHours(1));
         options.set(COMPACTION_TOTAL_SIZE_THRESHOLD, MemorySize.ofMebiBytes(100));
-        FullCompactTrigger trigger = FullCompactTrigger.create(new CoreOptions(options));
+        EarlyFullCompaction trigger = EarlyFullCompaction.create(new CoreOptions(options));
         assertThat(trigger).isNotNull();
     }
 
     @Test
     public void testSingleRun() {
-        FullCompactTrigger trigger = new FullCompactTrigger(1000L, 1000L);
+        EarlyFullCompaction trigger = new EarlyFullCompaction(1000L, 1000L, null);
         assertThat(trigger.tryFullCompact(5, createRuns(100))).isEmpty();
     }
 
     @Test
     public void testNoOptions() {
-        FullCompactTrigger trigger = new FullCompactTrigger(null, null);
+        EarlyFullCompaction trigger = new EarlyFullCompaction(null, null, null);
         assertThat(trigger.tryFullCompact(5, createRuns(100, 200))).isEmpty();
     }
 
     @Test
     public void testInterval() {
         AtomicLong time = new AtomicLong(10_000);
-        TestableFullCompactTrigger trigger = new TestableFullCompactTrigger(1000L, null, time);
+        TestableEarlyFullCompaction trigger =
+                new TestableEarlyFullCompaction(1000L, null, null, time);
 
         // First time, should trigger
         Optional<CompactUnit> compactUnit = trigger.tryFullCompact(5, createRuns(100, 200));
@@ -113,8 +116,8 @@ public class FullCompactTriggerTest {
     }
 
     @Test
-    public void testThreshold() {
-        FullCompactTrigger trigger = new FullCompactTrigger(null, 1000L);
+    public void testTotalSizeThreshold() {
+        EarlyFullCompaction trigger = new EarlyFullCompaction(null, 1000L, null);
 
         // total size 300 < 1000, should trigger
         Optional<CompactUnit> compactUnit = trigger.tryFullCompact(5, createRuns(100, 200));
@@ -130,10 +133,47 @@ public class FullCompactTriggerTest {
     }
 
     @Test
+    public void testIncrementalSizeThreshold() {
+        EarlyFullCompaction trigger = new EarlyFullCompaction(null, null, 500L);
+
+        // trigger, no max level
+        Optional<CompactUnit> compactUnit = trigger.tryFullCompact(5, createRuns(400, 200));
+        assertThat(compactUnit).isPresent();
+        assertThat(compactUnit.get().outputLevel()).isEqualTo(4);
+        assertThat(compactUnit.get().files()).hasSize(2);
+
+        // no trigger, no max level
+        compactUnit = trigger.tryFullCompact(5, createRuns(100, 200));
+        assertThat(compactUnit).isEmpty();
+
+        // no trigger, with max level
+        List<LevelSortedRun> runs =
+                Arrays.asList(
+                        createLevelSortedRun(100),
+                        createLevelSortedRun(300),
+                        createLevelSortedRun(4, 500));
+        compactUnit = trigger.tryFullCompact(5, runs);
+        assertThat(compactUnit).isEmpty();
+
+        // trigger, with max level
+        runs =
+                Arrays.asList(
+                        createLevelSortedRun(100),
+                        createLevelSortedRun(300),
+                        createLevelSortedRun(300),
+                        createLevelSortedRun(4, 500));
+        compactUnit = trigger.tryFullCompact(5, runs);
+        assertThat(compactUnit).isPresent();
+        assertThat(compactUnit.get().outputLevel()).isEqualTo(4);
+        assertThat(compactUnit.get().files()).hasSize(4);
+    }
+
+    @Test
     public void testIntervalTriggersFirst() {
         AtomicLong time = new AtomicLong(10_000);
         // Interval will trigger, but size is > threshold
-        TestableFullCompactTrigger trigger = new TestableFullCompactTrigger(1000L, 500L, time);
+        TestableEarlyFullCompaction trigger =
+                new TestableEarlyFullCompaction(1000L, 500L, null, time);
 
         // First time, interval should trigger even if size (600) > threshold (500)
         Optional<CompactUnit> compactUnit = trigger.tryFullCompact(5, createRuns(300, 300));
@@ -144,7 +184,8 @@ public class FullCompactTriggerTest {
     @Test
     public void testThresholdTriggersWhenIntervalFails() {
         AtomicLong time = new AtomicLong(10_000);
-        TestableFullCompactTrigger trigger = new TestableFullCompactTrigger(1000L, 500L, time);
+        TestableEarlyFullCompaction trigger =
+                new TestableEarlyFullCompaction(1000L, 500L, null, time);
 
         // Trigger once to set last compaction time
         assertThat(trigger.tryFullCompact(5, createRuns(10, 20))).isPresent();
@@ -162,12 +203,15 @@ public class FullCompactTriggerTest {
     }
 
     private LevelSortedRun createLevelSortedRun(long size) {
+        return createLevelSortedRun(0, size);
+    }
+
+    private LevelSortedRun createLevelSortedRun(int level, long size) {
         SortedRun run = mock(SortedRun.class);
         when(run.totalSize()).thenReturn(size);
         DataFileMeta file = mock(DataFileMeta.class);
         when(run.files()).thenReturn(singletonList(file));
-        // Level does not matter for the trigger logic
-        return new LevelSortedRun(0, run);
+        return new LevelSortedRun(level, run);
     }
 
     private List<LevelSortedRun> createRuns(long... sizes) {
@@ -176,14 +220,17 @@ public class FullCompactTriggerTest {
                 .collect(Collectors.toList());
     }
 
-    /** A {@link FullCompactTrigger} that allows controlling time for tests. */
-    private static class TestableFullCompactTrigger extends FullCompactTrigger {
+    /** A {@link EarlyFullCompaction} that allows controlling time for tests. */
+    private static class TestableEarlyFullCompaction extends EarlyFullCompaction {
 
         private final AtomicLong currentTime;
 
-        public TestableFullCompactTrigger(
-                Long fullCompactionInterval, Long totalSizeThreshold, AtomicLong currentTime) {
-            super(fullCompactionInterval, totalSizeThreshold);
+        public TestableEarlyFullCompaction(
+                @Nullable Long fullCompactionInterval,
+                @Nullable Long totalSizeThreshold,
+                @Nullable Long incrementalSizeThreshold,
+                AtomicLong currentTime) {
+            super(fullCompactionInterval, totalSizeThreshold, incrementalSizeThreshold);
             this.currentTime = currentTime;
         }
 
