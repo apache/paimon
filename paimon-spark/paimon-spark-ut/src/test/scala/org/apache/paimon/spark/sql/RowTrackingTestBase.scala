@@ -73,43 +73,63 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
   test("Row Tracking: delete table") {
     withTable("t") {
+      // only enable row tracking
       sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      runAndCheckAnswer()
+      sql("DROP TABLE t")
 
-      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
-      sql("DELETE FROM t WHERE id = 2")
-      checkAnswer(
-        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-        Seq(Row(1, 1, 0, 1), Row(3, 3, 2, 1))
-      )
-      sql("DELETE FROM t WHERE _ROW_ID = 2")
-      checkAnswer(
-        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-        Seq(Row(1, 1, 0, 1))
-      )
+      // enable row tracking and deletion vectors
+      sql(
+        "CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'deletion-vectors.enabled' = 'true')")
+      runAndCheckAnswer()
+
+      def runAndCheckAnswer(): Unit = {
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+        sql("DELETE FROM t WHERE id = 2")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(1, 1, 0, 1), Row(3, 3, 2, 1))
+        )
+        sql("DELETE FROM t WHERE _ROW_ID = 2")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(1, 1, 0, 1))
+        )
+      }
     }
   }
 
   test("Row Tracking: update table") {
     withTable("t") {
+      // only enable row tracking
       sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      runAndCheckAnswer()
+      sql("DROP TABLE t")
 
-      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
-      checkAnswer(
-        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-        Seq(Row(1, 1, 0, 1), Row(2, 2, 1, 1), Row(3, 3, 2, 1))
-      )
+      // enable row tracking and deletion vectors
+      sql(
+        "CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'deletion-vectors.enabled' = 'true')")
+      runAndCheckAnswer()
 
-      sql("UPDATE t SET data = 22 WHERE id = 2")
-      checkAnswer(
-        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-        Seq(Row(1, 1, 0, 1), Row(2, 22, 1, 2), Row(3, 3, 2, 1))
-      )
+      def runAndCheckAnswer(): Unit = {
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(1, 1, 0, 1), Row(2, 2, 1, 1), Row(3, 3, 2, 1))
+        )
 
-      sql("UPDATE t SET data = 222 WHERE _ROW_ID = 1")
-      checkAnswer(
-        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-        Seq(Row(1, 1, 0, 1), Row(2, 222, 1, 3), Row(3, 3, 2, 1))
-      )
+        sql("UPDATE t SET data = 22 WHERE id = 2")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(1, 1, 0, 1), Row(2, 22, 1, 2), Row(3, 3, 2, 1))
+        )
+
+        sql("UPDATE t SET data = 222 WHERE _ROW_ID = 1")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(1, 1, 0, 1), Row(2, 222, 1, 3), Row(3, 3, 2, 1))
+        )
+      }
     }
   }
 
