@@ -98,7 +98,6 @@ public class LanceUtils {
             originOptions = new Options();
         }
 
-        Path converted = path;
         Map<String, String> storageOptions = new HashMap<>();
         if ("oss".equals(schema)) {
             assert originOptions.containsKey("fs.oss.endpoint");
@@ -127,9 +126,8 @@ public class LanceUtils {
             if (originOptions.containsKey("fs.oss.endpoint")) {
                 storageOptions.put("oss_endpoint", originOptions.get("fs.oss.endpoint"));
             }
-            converted = new Path(uri.toString().replace("oss://", "s3://"));
         }
 
-        return Pair.of(converted, storageOptions);
+        return Pair.of(path, storageOptions);
     }
 }

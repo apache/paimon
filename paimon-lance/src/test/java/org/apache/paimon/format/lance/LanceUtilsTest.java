@@ -70,7 +70,8 @@ class LanceUtilsTest {
 
         Pair<Path, Map<String, String>> result = LanceUtils.toLanceSpecified(fileIO, path);
 
-        assertTrue(result.getKey().toString().startsWith("s3://test-bucket/"));
+        // Keep oss:// scheme (same as Python implementation)
+        assertTrue(result.getKey().toString().startsWith("oss://test-bucket/"));
 
         Map<String, String> storageOptions = result.getValue();
         assertEquals(
