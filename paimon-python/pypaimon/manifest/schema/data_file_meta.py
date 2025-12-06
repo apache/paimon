@@ -55,7 +55,6 @@ class DataFileMeta:
     file_path: str = None
 
     def get_creation_time(self) -> Optional[Timestamp]:
-        """Get creation_time as Timestamp object."""
         return self.creation_time
 
     def creation_time_epoch_millis(self) -> Optional[int]:
