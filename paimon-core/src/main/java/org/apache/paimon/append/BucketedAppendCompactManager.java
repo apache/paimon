@@ -47,6 +47,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
 import static java.util.Collections.emptyList;
+import static org.apache.paimon.table.source.AppendOnlySplitGenerator.CREATION_TIME_COMPARATOR;
+import static org.apache.paimon.table.source.AppendOnlySplitGenerator.SEQUENCE_NUMBER_COMPARATOR;
 
 /** Compact manager for {@link AppendOnlyFileStore}. */
 public class BucketedAppendCompactManager extends CompactFutureManager {
@@ -55,6 +57,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
 
     private static final int FULL_COMPACT_MIN_FILE = 3;
 
+    private final Comparator<DataFileMeta> comparator;
     private final ExecutorService executor;
     private final BucketedDvMaintainer dvMaintainer;
     private final PriorityQueue<DataFileMeta> toCompact;
@@ -74,11 +77,13 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             int minFileNum,
             long targetFileSize,
             boolean forceRewriteAllFiles,
+            boolean ordered,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter) {
+        this.comparator = ordered ? SEQUENCE_NUMBER_COMPARATOR : CREATION_TIME_COMPARATOR;
         this.executor = executor;
         this.dvMaintainer = dvMaintainer;
-        this.toCompact = new PriorityQueue<>(fileComparator(false));
+        this.toCompact = new PriorityQueue<>(comparator);
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.targetFileSize = targetFileSize;
@@ -356,36 +361,5 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     /** Compact rewriter for append-only table. */
     public interface CompactRewriter {
         List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception;
-    }
-
-    /**
-     * New files may be created during the compaction process, then the results of the compaction
-     * may be put after the new files, and this order will be disrupted. We need to ensure this
-     * order, so we force the order by sequence.
-     */
-    public static Comparator<DataFileMeta> fileComparator(boolean ignoreOverlap) {
-        return (o1, o2) -> {
-            if (o1 == o2) {
-                return 0;
-            }
-
-            if (!ignoreOverlap && isOverlap(o1, o2)) {
-                LOG.warn(
-                        String.format(
-                                "There should no overlap in append files, but Range1(%s, %s), Range2(%s, %s),"
-                                        + " check if you have multiple write jobs.",
-                                o1.minSequenceNumber(),
-                                o1.maxSequenceNumber(),
-                                o2.minSequenceNumber(),
-                                o2.maxSequenceNumber()));
-            }
-
-            return Long.compare(o1.minSequenceNumber(), o2.minSequenceNumber());
-        };
-    }
-
-    private static boolean isOverlap(DataFileMeta o1, DataFileMeta o2) {
-        return o2.minSequenceNumber() <= o1.maxSequenceNumber()
-                && o2.maxSequenceNumber() >= o1.minSequenceNumber();
     }
 }

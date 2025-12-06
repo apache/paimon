@@ -24,24 +24,35 @@ import org.apache.paimon.utils.BinPacking;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.append.BucketedAppendCompactManager.fileComparator;
-
 /** Append only implementation of {@link SplitGenerator}. */
 public class AppendOnlySplitGenerator implements SplitGenerator {
+
+    public static final Comparator<DataFileMeta> CREATION_TIME_COMPARATOR =
+            Comparator.comparing(DataFileMeta::creationTime).thenComparing(DataFileMeta::fileName);
+
+    public static final Comparator<DataFileMeta> SEQUENCE_NUMBER_COMPARATOR =
+            Comparator.comparing(DataFileMeta::minSequenceNumber)
+                    .thenComparing(DataFileMeta::fileName);
 
     private final long targetSplitSize;
     private final long openFileCost;
     private final BucketMode bucketMode;
+    private final Comparator<DataFileMeta> fileComparator;
 
     public AppendOnlySplitGenerator(
-            long targetSplitSize, long openFileCost, BucketMode bucketMode) {
+            long targetSplitSize,
+            long openFileCost,
+            BucketMode bucketMode,
+            Comparator<DataFileMeta> fileComparator) {
         this.targetSplitSize = targetSplitSize;
         this.openFileCost = openFileCost;
         this.bucketMode = bucketMode;
+        this.fileComparator = fileComparator;
     }
 
     @Override
@@ -52,7 +63,7 @@ public class AppendOnlySplitGenerator implements SplitGenerator {
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> input) {
         List<DataFileMeta> files = new ArrayList<>(input);
-        files.sort(fileComparator(bucketMode == BucketMode.BUCKET_UNAWARE));
+        files.sort(fileComparator);
         Function<DataFileMeta, Long> weightFunc = file -> Math.max(file.fileSize(), openFileCost);
         return BinPacking.packForOrdered(files, weightFunc, targetSplitSize).stream()
                 .map(SplitGroup::rawConvertibleGroup)
