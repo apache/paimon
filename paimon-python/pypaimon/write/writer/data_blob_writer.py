@@ -23,6 +23,7 @@ from typing import List, Optional, Tuple, Dict
 import pyarrow as pa
 
 from pypaimon.common.core_options import CoreOptions
+from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.generic_row import GenericRow
