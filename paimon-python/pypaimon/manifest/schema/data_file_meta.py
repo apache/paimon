@@ -63,9 +63,9 @@ class DataFileMeta:
         local_dt = self.creation_time.to_local_date_time()
         local_time_struct = local_dt.timetuple()
         local_timestamp = time.mktime(local_time_struct)
-        local_time_struct_utc = time.gmtime(local_timestamp)
-        utc_timestamp = time.mktime(local_time_struct_utc)
-        return int(utc_timestamp * 1000)
+        utc_timestamp = time.mktime(time.gmtime(local_timestamp))
+        tz_offset_seconds = int(local_timestamp - utc_timestamp)
+        return int((local_timestamp - tz_offset_seconds) * 1000)
 
     def creation_time_as_datetime(self) -> Optional[datetime]:
         if self.creation_time is None:
