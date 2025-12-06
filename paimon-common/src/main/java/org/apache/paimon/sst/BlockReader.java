@@ -16,13 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup.sort;
+package org.apache.paimon.sst;
 
 import org.apache.paimon.memory.MemorySlice;
 
 import java.util.Comparator;
 
-import static org.apache.paimon.lookup.sort.BlockAlignedType.ALIGNED;
+import static org.apache.paimon.sst.BlockAlignedType.ALIGNED;
 
 /** Reader for a block. */
 public class BlockReader {

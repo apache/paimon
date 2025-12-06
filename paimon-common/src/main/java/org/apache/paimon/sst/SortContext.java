@@ -16,27 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup.sort;
+package org.apache.paimon.sst;
 
-import org.apache.paimon.compression.BlockCompressionType;
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.memory.MemorySlice;
+import org.apache.paimon.lookup.LookupStoreFactory.Context;
 
-import java.util.zip.CRC32;
+/** A {@link Context} for sort store. */
+public class SortContext implements Context {
 
-/** Utils for sort lookup store. */
-public class SortLookupStoreUtils {
-    public static int crc32c(MemorySlice data, BlockCompressionType type) {
-        CRC32 crc = new CRC32();
-        crc.update(data.getHeapMemory(), data.offset(), data.length());
-        crc.update(type.persistentId() & 0xFF);
-        return (int) crc.getValue();
+    private final long fileSize;
+
+    public SortContext(long fileSize) {
+        this.fileSize = fileSize;
     }
 
-    public static int crc32c(MemorySegment data, BlockCompressionType type) {
-        CRC32 crc = new CRC32();
-        crc.update(data.getHeapMemory(), 0, data.size());
-        crc.update(type.persistentId() & 0xFF);
-        return (int) crc.getValue();
+    public long fileSize() {
+        return fileSize;
     }
 }
