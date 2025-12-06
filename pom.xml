@@ -510,6 +510,16 @@ under the License.
                 <jdk>11</jdk>
             </activation>
         </profile>
+
+        <profile>
+            <id>paimon-vector</id>
+            <modules>
+                <module>paimon-vector</module>
+            </modules>
+            <activation>
+                <jdk>11</jdk>
+            </activation>
+        </profile>
     </profiles>
 
     <build>
