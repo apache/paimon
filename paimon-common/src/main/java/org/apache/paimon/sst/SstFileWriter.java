@@ -87,8 +87,7 @@ public class SstFileWriter implements Closeable {
             PositionOutputStream out,
             int blockSize,
             @Nullable BloomFilter.Builder bloomFilter,
-            @Nullable BlockCompressionFactory compressionFactory)
-            throws IOException {
+            @Nullable BlockCompressionFactory compressionFactory) {
         this.out = out;
         this.blockSize = blockSize;
         this.dataBlockWriter = new BlockWriter((int) (blockSize * 1.1));

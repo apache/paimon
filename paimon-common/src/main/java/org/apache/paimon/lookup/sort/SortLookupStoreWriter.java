@@ -19,7 +19,6 @@
 package org.apache.paimon.lookup.sort;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -34,8 +33,8 @@ import java.io.IOException;
 
 /** A {@link LookupStoreWriter} backed by an {@link SstFileWriter}. */
 public class SortLookupStoreWriter implements LookupStoreWriter {
-    private final SstFileWriter sstFileWriter;
-    private final FileIO fileIO;
+
+    private final SstFileWriter writer;
     private final PositionOutputStream out;
 
     public SortLookupStoreWriter(
@@ -44,21 +43,19 @@ public class SortLookupStoreWriter implements LookupStoreWriter {
             @Nullable BloomFilter.Builder bloomFilter,
             BlockCompressionFactory compressionFactory)
             throws IOException {
-        final Path filePath = new Path(file.getAbsolutePath());
-        this.fileIO = LocalFileIO.create();
-        this.out = fileIO.newOutputStream(filePath, true);
-        this.sstFileWriter = new SstFileWriter(out, blockSize, bloomFilter, compressionFactory);
+        Path filePath = new Path(file.getAbsolutePath());
+        this.out = LocalFileIO.INSTANCE.newOutputStream(filePath, true);
+        this.writer = new SstFileWriter(out, blockSize, bloomFilter, compressionFactory);
     }
 
     @Override
     public void put(byte[] key, byte[] value) throws IOException {
-        sstFileWriter.put(key, value);
+        writer.put(key, value);
     }
 
     @Override
     public void close() throws IOException {
-        sstFileWriter.close();
+        writer.close();
         out.close();
-        fileIO.close();
     }
 }

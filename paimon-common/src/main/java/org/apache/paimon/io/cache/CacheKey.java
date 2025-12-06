@@ -26,11 +26,11 @@ import java.util.Objects;
 /** Key for cache manager. */
 public interface CacheKey {
 
-    static CacheKey forPosition(Path filePath, long position, int length, boolean isIndex) {
+    static PositionCacheKey forPosition(Path filePath, long position, int length, boolean isIndex) {
         return new PositionCacheKey(filePath, position, length, isIndex);
     }
 
-    static CacheKey forPageIndex(RandomAccessFile file, int pageSize, int pageIndex) {
+    static PageIndexCacheKey forPageIndex(RandomAccessFile file, int pageSize, int pageIndex) {
         return new PageIndexCacheKey(file, pageSize, pageIndex, false);
     }
 
@@ -50,6 +50,14 @@ public interface CacheKey {
             this.position = position;
             this.length = length;
             this.isIndex = isIndex;
+        }
+
+        public long position() {
+            return position;
+        }
+
+        public int length() {
+            return length;
         }
 
         @Override

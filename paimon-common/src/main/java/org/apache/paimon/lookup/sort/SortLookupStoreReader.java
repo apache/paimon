@@ -18,7 +18,6 @@
 
 package org.apache.paimon.lookup.sort;
 
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -36,31 +35,26 @@ import java.util.Comparator;
 /** A {@link LookupStoreReader} backed by an {@link SstFileReader}. */
 public class SortLookupStoreReader implements LookupStoreReader {
 
-    private final FileIO fileIO;
     private final SeekableInputStream input;
-    private final SstFileReader sstFileReader;
+    private final SstFileReader reader;
 
     public SortLookupStoreReader(
             Comparator<MemorySlice> comparator, File file, CacheManager cacheManager)
             throws IOException {
-        final Path filePath = new Path(file.getAbsolutePath());
-        this.fileIO = LocalFileIO.create();
-        this.input = fileIO.newInputStream(filePath);
-        this.sstFileReader =
-                new SstFileReader(comparator, file.length(), filePath, input, cacheManager);
+        Path filePath = new Path(file.getAbsolutePath());
+        this.input = LocalFileIO.INSTANCE.newInputStream(filePath);
+        this.reader = new SstFileReader(comparator, file.length(), filePath, input, cacheManager);
     }
 
     @Nullable
     @Override
     public byte[] lookup(byte[] key) throws IOException {
-        return sstFileReader.lookup(key);
+        return reader.lookup(key);
     }
 
     @Override
     public void close() throws IOException {
-        // be careful about the close order
-        sstFileReader.close();
+        reader.close();
         input.close();
-        fileIO.close();
     }
 }

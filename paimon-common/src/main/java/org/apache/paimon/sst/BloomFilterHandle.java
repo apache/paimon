@@ -23,8 +23,6 @@ import java.util.Objects;
 /** Handle for bloom filter. */
 public class BloomFilterHandle {
 
-    public static final int MAX_ENCODED_LENGTH = 9 + 5 + 9;
-
     private final long offset;
     private final int size;
     private final long expectedEntries;

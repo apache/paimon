@@ -47,11 +47,9 @@ public class SstFileReader implements Closeable {
 
     private final Comparator<MemorySlice> comparator;
     private final Path filePath;
-    private final long fileSize;
-
-    private final BlockIterator indexBlockIterator;
-    @Nullable private FileBasedBloomFilter bloomFilter;
     private final BlockCache blockCache;
+    private final BlockIterator indexBlockIterator;
+    @Nullable private final FileBasedBloomFilter bloomFilter;
 
     public SstFileReader(
             Comparator<MemorySlice> comparator,
@@ -62,13 +60,16 @@ public class SstFileReader implements Closeable {
             throws IOException {
         this.comparator = comparator;
         this.filePath = filePath;
-        this.fileSize = fileSize;
-
         this.blockCache = new BlockCache(filePath, input, cacheManager);
-        Footer footer = readFooter();
+        MemorySegment footerData =
+                blockCache.getBlock(
+                        fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH, b -> b, true);
+        Footer footer = Footer.readFooter(MemorySlice.wrap(footerData).toInput());
         this.indexBlockIterator = readBlock(footer.getIndexBlockHandle(), true).iterator();
         BloomFilterHandle handle = footer.getBloomFilterHandle();
-        if (handle != null) {
+        if (handle == null) {
+            this.bloomFilter = null;
+        } else {
             this.bloomFilter =
                     new FileBasedBloomFilter(
                             input,
@@ -78,13 +79,6 @@ public class SstFileReader implements Closeable {
                             handle.offset(),
                             handle.size());
         }
-    }
-
-    private Footer readFooter() throws IOException {
-        MemorySegment footerData =
-                blockCache.getBlock(
-                        fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH, b -> b, true);
-        return Footer.readFooter(MemorySlice.wrap(footerData).toInput());
     }
 
     /**
