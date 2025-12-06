@@ -98,24 +98,36 @@ public class LanceUtils {
             originOptions = new Options();
         }
 
-        Path converted = path;
         Map<String, String> storageOptions = new HashMap<>();
         if ("oss".equals(schema)) {
             assert originOptions.containsKey("fs.oss.endpoint");
             assert originOptions.containsKey("fs.oss.accessKeyId");
             assert originOptions.containsKey("fs.oss.accessKeySecret");
+
+            for (String key : originOptions.keySet()) {
+                if (key.startsWith("fs.oss.")) {
+                    storageOptions.put(key, originOptions.get(key));
+                }
+            }
+
             storageOptions.put(
                     "endpoint",
                     "https://" + uri.getHost() + "." + originOptions.get("fs.oss.endpoint"));
             storageOptions.put("access_key_id", originOptions.get("fs.oss.accessKeyId"));
+            storageOptions.put("oss_access_key_id", originOptions.get("fs.oss.accessKeyId"));
             storageOptions.put("secret_access_key", originOptions.get("fs.oss.accessKeySecret"));
+            storageOptions.put(
+                    "oss_secret_access_key", originOptions.get("fs.oss.accessKeySecret"));
             storageOptions.put("virtual_hosted_style_request", "true");
             if (originOptions.containsKey("fs.oss.securityToken")) {
                 storageOptions.put("session_token", originOptions.get("fs.oss.securityToken"));
+                storageOptions.put("oss_session_token", originOptions.get("fs.oss.securityToken"));
             }
-            converted = new Path(uri.toString().replace("oss://", "s3://"));
+            if (originOptions.containsKey("fs.oss.endpoint")) {
+                storageOptions.put("oss_endpoint", originOptions.get("fs.oss.endpoint"));
+            }
         }
 
-        return Pair.of(converted, storageOptions);
+        return Pair.of(path, storageOptions);
     }
 }
