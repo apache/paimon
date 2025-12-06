@@ -1051,6 +1051,8 @@ public class FlinkCatalog extends AbstractCatalog {
         RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
+        List<String> partitionKeys = getPartitionKeys(catalogTable);
+
         String blobName = options.get(CoreOptions.BLOB_FIELD.key());
         if (blobName != null) {
             checkArgument(
@@ -1060,6 +1062,9 @@ public class FlinkCatalog extends AbstractCatalog {
                             + "', you must also set '"
                             + CoreOptions.DATA_EVOLUTION_ENABLED.key()
                             + "'");
+            checkArgument(
+                    !partitionKeys.contains(blobName),
+                    "The blob field cannot be part of partition keys");
         }
         // Serialize virtual columns and watermark to the options
         // This is what Flink SQL needs, the storage itself does not need them
@@ -1073,7 +1078,7 @@ public class FlinkCatalog extends AbstractCatalog {
                                 schema.getPrimaryKey()
                                         .map(pk -> pk.getColumns())
                                         .orElse(Collections.emptyList()))
-                        .partitionKeys(getPartitionKeys(catalogTable));
+                        .partitionKeys(partitionKeys);
         Map<String, String> columnComments = getColumnComments(catalogTable);
         rowType.getFields()
                 .forEach(

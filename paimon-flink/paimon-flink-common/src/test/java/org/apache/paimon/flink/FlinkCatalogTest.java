@@ -149,7 +149,7 @@ public class FlinkCatalogTest {
                 Arrays.asList(
                         Column.physical("first", DataTypes.STRING()),
                         Column.physical("second", DataTypes.INT()),
-                        Column.physical("third", DataTypes.STRING()),
+                        Column.physical("third", DataTypes.BYTES()),
                         Column.physical(
                                 "four",
                                 DataTypes.ROW(
@@ -844,6 +844,55 @@ public class FlinkCatalogTest {
     }
 
     @Test
+    void testCreateTableWithBlobColumn() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+
+        final ResolvedSchema resolvedSchema = this.createSchema();
+        // 1. only binary and varbinary columns can be specified as blob
+        final TableDescriptor desc1 =
+                TableDescriptor.forConnector("paimon")
+                        .schema(Schema.newBuilder().fromResolvedSchema(resolvedSchema).build())
+                        .option(CoreOptions.BLOB_FIELD.key(), "first")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        CatalogTable catalogTable1 =
+                new ResolvedCatalogTable(desc1.toCatalogTable(), resolvedSchema);
+        assertThatThrownBy(() -> catalog.createTable(path1, catalogTable1, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Expected BinaryType or VarBinaryType");
+
+        // 2. can not specify a partition key as the blob column
+        final TableDescriptor desc2 =
+                TableDescriptor.forConnector("paimon")
+                        .schema(Schema.newBuilder().fromResolvedSchema(resolvedSchema).build())
+                        .partitionedBy("third")
+                        .option(CoreOptions.BLOB_FIELD.key(), "third")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        CatalogTable catalogTable2 =
+                new ResolvedCatalogTable(desc2.toCatalogTable(), resolvedSchema);
+        assertThatThrownBy(() -> catalog.createTable(path1, catalogTable2, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("The blob field cannot be part of partition keys");
+
+        // 3. must specify data evolution = true
+        final TableDescriptor desc3 =
+                TableDescriptor.forConnector("paimon")
+                        .schema(Schema.newBuilder().fromResolvedSchema(resolvedSchema).build())
+                        .partitionedBy("third")
+                        .option(CoreOptions.BLOB_FIELD.key(), "third")
+                        .build();
+        CatalogTable catalogTable3 =
+                new ResolvedCatalogTable(desc3.toCatalogTable(), resolvedSchema);
+        assertThatThrownBy(() -> catalog.createTable(path1, catalogTable3, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        String.format(
+                                "you must also set '%s'",
+                                CoreOptions.DATA_EVOLUTION_ENABLED.key()));
+    }
+
+    @Test
     void testBuildPaimonTableWithCustomScheme() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         CatalogTable table = createTable(optionProvider(false).iterator().next());
@@ -854,7 +903,7 @@ public class FlinkCatalogTest {
                 Arrays.asList(
                         Column.physical("first", DataTypes.STRING()),
                         Column.physical("second", DataTypes.INT()),
-                        Column.physical("third", DataTypes.STRING()),
+                        Column.physical("third", DataTypes.BYTES()),
                         Column.physical(
                                 "four",
                                 DataTypes.ROW(
