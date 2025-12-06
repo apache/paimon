@@ -36,7 +36,6 @@ class Timestamp:
     MICROS_PER_MILLIS = 1000
     NANOS_PER_MICROS = 1000
 
-    # Constants for nano of day calculation
     NANOS_PER_HOUR = 3_600_000_000_000
     NANOS_PER_MINUTE = 60_000_000_000
     NANOS_PER_SECOND = 1_000_000_000
