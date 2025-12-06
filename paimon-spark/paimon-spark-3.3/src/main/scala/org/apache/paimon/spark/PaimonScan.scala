@@ -29,12 +29,15 @@ import org.apache.spark.sql.connector.read.partitioning.{KeyGroupedPartitioning,
 import org.apache.spark.sql.sources.{Filter, In}
 import org.apache.spark.sql.types.StructType
 
+import java.lang.{Long => JLong}
+
 import scala.collection.JavaConverters._
 
 case class PaimonScan(
     table: InnerTable,
     requiredSchema: StructType,
     filters: Seq[Predicate],
+    override val rowIds: Seq[JLong],
     reservedFilters: Seq[Filter],
     override val pushDownLimit: Option[Int],
     override val pushDownTopN: Option[TopN],

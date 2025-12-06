@@ -24,6 +24,6 @@ import org.apache.spark.sql.connector.read.Scan
 
 class PaimonSplitScanBuilder(table: KnownSplitsTable) extends PaimonScanBuilder(table) {
   override def build(): Scan = {
-    PaimonSplitScan(table, table.splits(), requiredSchema, pushedPaimonPredicates)
+    PaimonSplitScan(table, table.splits(), requiredSchema, pushedPaimonPredicates, pushedRowIds)
   }
 }

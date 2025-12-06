@@ -16,31 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.sql
 
-import org.apache.paimon.table.InnerTable
-import org.apache.paimon.types.RowType
-
-import org.apache.spark.sql.connector.read.Scan
-import org.apache.spark.sql.sources.Filter
-
-import java.util.{List => JList}
-
-class PaimonScanBuilder(table: InnerTable)
-  extends PaimonBaseScanBuilder(table)
-  with PaimonBasePushDown {
-
-  override protected var partitionKeys: JList[String] = table.partitionKeys()
-  override protected var rowType: RowType = table.rowType()
-
-  override def build(): Scan = {
-    PaimonScan(
-      table,
-      requiredSchema,
-      pushedPaimonPredicates,
-      pushedRowIds,
-      reservedFilters,
-      None,
-      pushDownTopN)
-  }
-}
+class RowIdPushDownTest extends RowIdPushDownTestBase {}
