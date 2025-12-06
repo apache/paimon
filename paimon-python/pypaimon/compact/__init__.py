@@ -51,6 +51,19 @@ from pypaimon.compact.partition_predicate import (
     PartitionOrPredicate,
     PartitionPredicateConverter,
 )
+from pypaimon.compact.table_level_file_scanner import (
+    TableLevelFileScanner,
+    FileStatistics,
+    PartitionFileStatistics,
+)
+from pypaimon.compact.table_level_task_generator import (
+    TableLevelTaskGenerator,
+    CompactionTaskGenerationResult,
+)
+from pypaimon.compact.compact_action import (
+    CompactAction,
+    CompactionActionResult,
+)
 
 __all__ = [
     'CompactTask',
@@ -74,4 +87,11 @@ __all__ = [
     'PartitionAndPredicate',
     'PartitionOrPredicate',
     'PartitionPredicateConverter',
+    'TableLevelFileScanner',
+    'FileStatistics',
+    'PartitionFileStatistics',
+    'TableLevelTaskGenerator',
+    'CompactionTaskGenerationResult',
+    'CompactAction',
+    'CompactionActionResult',
 ]
