@@ -51,7 +51,6 @@ class LanceUtilsTest {
             return Thread.currentThread().getContextClassLoader();
         }
 
-        // Set options directly to avoid Hadoop dependency
         void setOptions(Options opts) {
             this.options = opts;
         }
@@ -61,39 +60,39 @@ class LanceUtilsTest {
     void testOssUrlConversion() {
         Path path = new Path("oss://test-bucket/db-name.db/table-name/bucket-0/data.lance");
         Options options = new Options();
-        options.set("fs.oss.endpoint", "oss-example-region.example.com");
-        options.set("fs.oss.accessKeyId", "test-key");
-        options.set("fs.oss.accessKeySecret", "test-secret");
+        options.set(LanceUtils.FS_OSS_ENDPOINT, "oss-example-region.example.com");
+        options.set(LanceUtils.FS_OSS_ACCESS_KEY_ID, "test-key");
+        options.set(LanceUtils.FS_OSS_ACCESS_KEY_SECRET, "test-secret");
 
         TestFileIO fileIO = new TestFileIO();
         fileIO.setOptions(options);
 
         Pair<Path, Map<String, String>> result = LanceUtils.toLanceSpecified(fileIO, path);
 
-        // Keep oss:// scheme (same as Python implementation)
         assertTrue(result.getKey().toString().startsWith("oss://test-bucket/"));
 
         Map<String, String> storageOptions = result.getValue();
         assertEquals(
                 "https://test-bucket.oss-example-region.example.com",
-                storageOptions.get("endpoint"));
-        assertEquals("test-key", storageOptions.get("access_key_id"));
-        assertEquals("test-secret", storageOptions.get("secret_access_key"));
-        assertEquals("true", storageOptions.get("virtual_hosted_style_request"));
+                storageOptions.get(LanceUtils.STORAGE_OPTION_ENDPOINT));
+        assertEquals("test-key", storageOptions.get(LanceUtils.STORAGE_OPTION_ACCESS_KEY_ID));
+        assertEquals(
+                "test-secret", storageOptions.get(LanceUtils.STORAGE_OPTION_SECRET_ACCESS_KEY));
+        assertEquals("true", storageOptions.get(LanceUtils.STORAGE_OPTION_VIRTUAL_HOSTED_STYLE));
 
-        assertTrue(storageOptions.containsKey("fs.oss.endpoint"));
-        assertTrue(storageOptions.containsKey("fs.oss.accessKeyId"));
-        assertTrue(storageOptions.containsKey("fs.oss.accessKeySecret"));
+        assertTrue(storageOptions.containsKey(LanceUtils.FS_OSS_ENDPOINT));
+        assertTrue(storageOptions.containsKey(LanceUtils.FS_OSS_ACCESS_KEY_ID));
+        assertTrue(storageOptions.containsKey(LanceUtils.FS_OSS_ACCESS_KEY_SECRET));
     }
 
     @Test
     void testOssUrlWithSecurityToken() {
         Path path = new Path("oss://my-bucket/path/to/file.lance");
         Options options = new Options();
-        options.set("fs.oss.endpoint", "oss-example-region.example.com");
-        options.set("fs.oss.accessKeyId", "test-access-key");
-        options.set("fs.oss.accessKeySecret", "test-secret-key");
-        options.set("fs.oss.securityToken", "test-token");
+        options.set(LanceUtils.FS_OSS_ENDPOINT, "oss-example-region.example.com");
+        options.set(LanceUtils.FS_OSS_ACCESS_KEY_ID, "test-access-key");
+        options.set(LanceUtils.FS_OSS_ACCESS_KEY_SECRET, "test-secret-key");
+        options.set(LanceUtils.FS_OSS_SECURITY_TOKEN, "test-token");
 
         TestFileIO fileIO = new TestFileIO();
         fileIO.setOptions(options);
@@ -101,8 +100,8 @@ class LanceUtilsTest {
         Pair<Path, Map<String, String>> result = LanceUtils.toLanceSpecified(fileIO, path);
 
         Map<String, String> storageOptions = result.getValue();
-        assertEquals("test-token", storageOptions.get("session_token"));
-        assertEquals("test-token", storageOptions.get("oss_session_token"));
-        assertTrue(storageOptions.containsKey("fs.oss.securityToken"));
+        assertEquals("test-token", storageOptions.get(LanceUtils.STORAGE_OPTION_SESSION_TOKEN));
+        assertEquals("test-token", storageOptions.get(LanceUtils.STORAGE_OPTION_OSS_SESSION_TOKEN));
+        assertTrue(storageOptions.containsKey(LanceUtils.FS_OSS_SECURITY_TOKEN));
     }
 }
