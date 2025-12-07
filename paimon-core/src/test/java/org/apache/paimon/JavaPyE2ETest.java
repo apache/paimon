@@ -83,8 +83,8 @@ public class JavaPyE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
-    public void testJavaWriteRead() throws Exception {
-        Identifier identifier = identifier("mixed_test_tablej");
+    public void testJavaWriteReadAppendTable() throws Exception {
+        Identifier identifier = identifier("mixed_test_append_tablej");
         Schema schema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
@@ -132,8 +132,8 @@ public class JavaPyE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
-    public void testRead() throws Exception {
-        Identifier identifier = identifier("mixed_test_tablep");
+    public void testReadAppendTable() throws Exception {
+        Identifier identifier = identifier("mixed_test_append_tablep");
         Table table = catalog.getTable(identifier);
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         List<Split> splits =
@@ -145,6 +145,82 @@ public class JavaPyE2ETest {
                         splits,
                         row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
         System.out.println(res);
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteReadPkTable() throws Exception {
+        Identifier identifier = identifier("mixed_test_pk_tablej");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("category", DataTypes.STRING())
+                        .column("value", DataTypes.DOUBLE())
+                        .primaryKey("id")
+                        .partitionKeys("category")
+                        .option("dynamic-partition-overwrite", "false")
+                        .option("bucket", "2")
+                        .build();
+
+        catalog.createTable(identifier, schema, true);
+        Table table = catalog.getTable(identifier);
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+
+        try (StreamTableWrite write = fileStoreTable.newWrite(commitUser);
+                InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
+
+            write.write(createRow(1, "Apple", "Fruit", 1.5));
+            write.write(createRow(2, "Banana", "Fruit", 0.8));
+            write.write(createRow(3, "Carrot", "Vegetable", 0.6));
+            write.write(createRow(4, "Broccoli", "Vegetable", 1.2));
+            write.write(createRow(5, "Chicken", "Meat", 5.0));
+            write.write(createRow(6, "Beef", "Meat", 8.0));
+
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+
+        List<Split> splits =
+                new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
+        TableRead read = fileStoreTable.newRead();
+        List<String> res =
+                getResult(
+                        read,
+                        splits,
+                        row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+        assertThat(res)
+                .containsExactlyInAnyOrder(
+                        "1, Apple, Fruit, 1.5",
+                        "2, Banana, Fruit, 0.8",
+                        "3, Carrot, Vegetable, 0.6",
+                        "4, Broccoli, Vegetable, 1.2",
+                        "5, Chicken, Meat, 5.0",
+                        "6, Beef, Meat, 8.0");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadPkTable() throws Exception {
+        Identifier identifier = identifier("mixed_test_pk_tablep_parquet");
+        Table table = catalog.getTable(identifier);
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        List<Split> splits =
+                new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
+        TableRead read = fileStoreTable.newRead();
+        List<String> res =
+                getResult(
+                        read,
+                        splits,
+                        row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+        System.out.println("Result: " + res);
+        assertThat(res)
+                .containsExactlyInAnyOrder(
+                        "1, Apple, Fruit, 1.5",
+                        "2, Banana, Fruit, 0.8",
+                        "3, Carrot, Vegetable, 0.6",
+                        "4, Broccoli, Vegetable, 1.2",
+                        "5, Chicken, Meat, 5.0",
+                        "6, Beef, Meat, 8.0");
     }
 
     // Helper method from TableTestBase
