@@ -51,6 +51,10 @@ class GenericRow(InternalRow):
     def __len__(self) -> int:
         return len(self.values)
 
+    def __str__(self):
+        field_strs = [f"{field.name}={repr(value)}" for field, value in zip(self.fields, self.values)]
+        return f"GenericRow(row_kind={self.row_kind.name}, {', '.join(field_strs)})"
+
 
 class GenericRowDeserializer:
     HEADER_SIZE_IN_BITS = 8

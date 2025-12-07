@@ -168,13 +168,37 @@ run_java_read_test() {
         return 1
     fi
 }
+run_pk_dv_test() {
+    echo -e "${YELLOW}=== Step 5: Running Primary Key & Deletion Vector Test (testPKDeletionVectorWriteRead) ===${NC}"
 
+    cd "$PROJECT_ROOT"
+
+    # Run the specific Java test method
+    echo "Running Maven test for JavaPyReadWriteTest.testPKDeletionVectorWrite..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyReadWriteTest#testPKDeletionVectorWrite -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    # Run the specific Python test method
+    echo "Running Python test for JavaPyReadWriteTest.test_pk_dv_read..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_pk_dv_read -v; then
+        echo -e "${GREEN}✓ Python test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python test failed${NC}"
+        return 1
+    fi
+}
 # Main execution
 main() {
     local java_write_result=0
     local python_read_result=0
     local python_write_result=0
     local java_read_result=0
+    local pk_dv_result=0
 
     echo -e "${YELLOW}Starting mixed language test execution...${NC}"
     echo ""
@@ -213,6 +237,10 @@ main() {
         java_read_result=1
     fi
 
+    # Run pk dv read test
+    if ! run_pk_dv_test; then
+        pk_dv_result=1
+    fi
     echo ""
     echo -e "${YELLOW}=== Test Results Summary ===${NC}"
 
@@ -239,6 +267,12 @@ main() {
     else
         echo -e "${RED}✗ Java Read Test (Parquet + Lance): FAILED${NC}"
     fi
+
+     if [[ $pk_dv_result -eq 0 ]]; then
+          echo -e "${GREEN}✓ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): PASSED${NC}"
+      else
+          echo -e "${RED}✗ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): FAILED${NC}"
+      fi
 
     echo ""
 
