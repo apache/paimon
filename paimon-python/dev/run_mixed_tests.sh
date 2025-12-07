@@ -174,8 +174,8 @@ run_pk_dv_test() {
     cd "$PROJECT_ROOT"
 
     # Run the specific Java test method
-    echo "Running Maven test for JavaPyReadWriteTest.testPKDeletionVectorWrite..."
-    if mvn test -Dtest=org.apache.paimon.JavaPyReadWriteTest#testPKDeletionVectorWrite -pl paimon-core -q -Drun.e2e.tests=true; then
+    echo "Running Maven test for JavaPyE2ETest.testPKDeletionVectorWrite..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testPKDeletionVectorWrite -pl paimon-core -q -Drun.e2e.tests=true; then
         echo -e "${GREEN}✓ Java test completed successfully${NC}"
     else
         echo -e "${RED}✗ Java test failed${NC}"
