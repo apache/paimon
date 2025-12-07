@@ -17,7 +17,7 @@ limitations under the License.
 """
 import os
 from collections import defaultdict
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Dict, Set
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
@@ -332,7 +332,7 @@ class FullStartingScanner(StartingScanner):
                 entry.file.row_count
             )
 
-    def _scan_dv_index(self, snapshot, buckets: set[tuple]) -> dict[tuple, dict[str, DeletionFile]]:
+    def _scan_dv_index(self, snapshot, buckets: Set[tuple]) -> Dict[tuple, Dict[str, DeletionFile]]:
         """
         Scan deletion vector index from snapshot.
         Returns a map of (partition, bucket) -> {filename -> DeletionFile}
@@ -364,7 +364,7 @@ class FullStartingScanner(StartingScanner):
 
         return result
 
-    def _to_deletion_files(self, index_entry) -> dict[str, DeletionFile]:
+    def _to_deletion_files(self, index_entry) -> Dict[str, DeletionFile]:
         """
         Convert index manifest entry to deletion files map.
         Returns {filename -> DeletionFile}
