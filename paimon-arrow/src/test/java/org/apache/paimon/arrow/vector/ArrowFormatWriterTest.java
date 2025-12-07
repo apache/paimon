@@ -20,8 +20,10 @@ package org.apache.paimon.arrow.vector;
 
 import org.apache.paimon.arrow.ArrowBundleRecords;
 import org.apache.paimon.arrow.ArrowFieldTypeConversion;
+import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.converter.Arrow2PaimonVectorConverter;
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
+import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -30,6 +32,7 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.IntColumnVector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -40,6 +43,7 @@ import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.TimeMilliVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.complex.ListVector;
@@ -52,6 +56,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -430,6 +435,55 @@ public class ArrowFormatWriterTest {
                         RowType.of(DataTypes.ROW(DataTypes.ARRAY(DataTypes.INT()))), 1, true)) {
             writeAndCheckRowArray(arrowFormatWriter);
             writeAndCheckRowArray(arrowFormatWriter);
+        }
+    }
+
+    @Test
+    public void testTimeFieldWriterWithOffset() {
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(0, "time_field", DataTypes.TIME())));
+        try (RootAllocator allocator = new RootAllocator();
+                VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator)) {
+            ArrowFieldWriter[] fieldWriters = ArrowUtils.createArrowFieldWriters(vsr, rowType);
+
+            IntColumnVector timeVec =
+                    new IntColumnVector() {
+                        final int[] values = new int[] {0, 1000, 2000, 3000, 4000};
+
+                        @Override
+                        public int getInt(int i) {
+                            return values[i];
+                        }
+
+                        @Override
+                        public boolean isNullAt(int i) {
+                            return false;
+                        }
+                    };
+
+            TimeMilliVector timeMilliVector = (TimeMilliVector) vsr.getVector("time_field");
+            final int batchRows = 3;
+            int startIndex = 0;
+            fieldWriters[0].write(timeVec, null, startIndex, batchRows);
+            vsr.setRowCount(batchRows);
+
+            for (int i = 0; i < batchRows; i++) {
+                int arrowValue = timeMilliVector.get(i);
+                int paimonValue = timeVec.getInt(i + startIndex);
+                assertThat(arrowValue).isEqualTo(paimonValue);
+            }
+
+            timeMilliVector.clear();
+            startIndex = 2;
+            fieldWriters[0].write(timeVec, null, startIndex, batchRows);
+            vsr.setRowCount(batchRows);
+            for (int i = 0; i < batchRows; i++) {
+                int arrowValue = timeMilliVector.get(i);
+                int paimonValue = timeVec.getInt(i + startIndex);
+                assertThat(arrowValue).isEqualTo(paimonValue);
+            }
         }
     }
 
