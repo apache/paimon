@@ -266,7 +266,6 @@ public class JavaPyReadWriteTest {
     public void testPKDeletionVectorWriteMultiBatchRawConvertable() throws Exception {
         Consumer<Options> optionsSetter =
                 options -> {
-                    // let level has many files
                     options.set(DELETION_VECTORS_ENABLED, true);
                 };
         String tableName = "test_pk_dv_raw_convertable";
