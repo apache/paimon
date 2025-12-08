@@ -69,7 +69,9 @@ class TensorFlowPipelineOptimizer:
         enable_cache: bool = True,
         cache_file: Optional[str] = None,
         parallel_map_calls: Optional[int] = None,
-        enable_performance_monitoring: bool = False
+        enable_performance_monitoring: bool = False,
+        shuffle_buffer_size: int = 10000,
+        batch_size: int = 32
     ) -> Any:
         """Apply a series of optimizations to the data pipeline.
 
@@ -81,6 +83,8 @@ class TensorFlowPipelineOptimizer:
             cache_file: Cache file path (default: memory cache)
             parallel_map_calls: Number of parallel map calls (default: AUTOTUNE)
             enable_performance_monitoring: Whether to enable performance monitoring
+            shuffle_buffer_size: Shuffle buffer size (default: 10000)
+            batch_size: Batch size (default: 32)
 
         Returns:
             Optimized tf.data.Dataset
@@ -91,7 +95,9 @@ class TensorFlowPipelineOptimizer:
             ...     dataset,
             ...     num_workers=4,
             ...     prefetch_buffer_size=tf.data.AUTOTUNE,
-            ...     enable_cache=True
+            ...     enable_cache=True,
+            ...     shuffle_buffer_size=10000,
+            ...     batch_size=32
             ... )
         """
         try:
@@ -100,27 +106,49 @@ class TensorFlowPipelineOptimizer:
             # 1. Cache (cache raw data before other operations)
             if enable_cache:
                 self.logger.debug(f"Cache enabled (file: {cache_file or 'memory'})")
-                optimized = optimized.cache(filename=cache_file)
+                try:
+                    optimized = optimized.cache(filename=cache_file)
+                except Exception as cache_error:
+                    self.logger.warning(f"Cache operation failed, skipping: {cache_error}")
 
             # 2. Shuffle (shuffle after cache for good data distribution)
-            # Note: if dataset is very large, should do before batch
-            # optimized = optimized.shuffle(buffer_size=10000)
+            # Shuffle is important for good model training generalization
+            if shuffle_buffer_size > 0:
+                try:
+                    self.logger.debug(f"Shuffle operation added, buffer size: {shuffle_buffer_size}")
+                    optimized = optimized.shuffle(buffer_size=shuffle_buffer_size, reshuffle_each_iteration=True)
+                except Exception as shuffle_error:
+                    self.logger.warning(f"Shuffle operation failed, skipping: {shuffle_error}")
 
             # 3. Parallel map (if transformation function available)
             if parallel_map_calls is not None:
-                self.logger.debug(f"Parallel map enabled, concurrency: {parallel_map_calls}")
-                # Users can add transformation functions via map operation
+                if parallel_map_calls != 1 and parallel_map_calls > 0:
+                    self.logger.debug(f"Parallel map enabled, concurrency: {parallel_map_calls}")
+                    # Users can add transformation functions via map operation
 
-            # 4. Batching
-            # Batching is usually controlled by user, suggestions provided here
-            # optimized = optimized.batch(batch_size)
+            # 4. Batching (production-grade implementation)
+            if batch_size > 0:
+                try:
+                    self.logger.debug(f"Batch operation added, batch size: {batch_size}")
+                    optimized = optimized.batch(
+                        batch_size,
+                        drop_remainder=False,  # Keep remainder for better data utilization
+                        num_parallel_calls=None  # Uses default parallelism
+                    )
+                except Exception as batch_error:
+                    self.logger.warning(f"Batch operation failed, skipping: {batch_error}")
 
             # 5. Prefetch (after all other operations)
             if prefetch_buffer_size is None:
-                prefetch_buffer_size = tf.data.AUTOTUNE
+                # Use a reasonable default buffer size for prefetch
+                prefetch_buffer_size = 1  # This allows async prefetch without AUTOTUNE
 
-            self.logger.debug(f"Prefetch enabled, buffer size: {prefetch_buffer_size}")
-            optimized = optimized.prefetch(buffer_size=prefetch_buffer_size)
+            try:
+                self.logger.debug(f"Prefetch enabled, buffer size: {prefetch_buffer_size}")
+                optimized = optimized.prefetch(buffer_size=prefetch_buffer_size)
+            except Exception as prefetch_error:
+                self.logger.error(f"Prefetch operation failed: {prefetch_error}", exc_info=True)
+                raise
 
             if enable_performance_monitoring:
                 self.logger.info("Performance monitoring enabled, use benchmark() to test throughput")
@@ -341,7 +369,8 @@ class DatasetPipelineBuilder:
         """
         try:
             if buffer_size is None:
-                buffer_size = tf.data.AUTOTUNE
+                # Use a reasonable default for prefetch buffer
+                buffer_size = 1
 
             self.dataset = self.dataset.prefetch(buffer_size=buffer_size)
             self.logger.debug(f"Prefetch operation added, buffer size: {buffer_size}")
