@@ -21,6 +21,7 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
@@ -29,24 +30,12 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import static org.apache.paimon.data.BinaryString.fromString;
 
 /** A {@link NullFalseLeafBinaryFunction} to evaluate {@code filter like}. */
 public class Like extends NullFalseLeafBinaryFunction {
 
     public static final Like INSTANCE = new Like();
-
-    /** Accepts simple LIKE patterns like "abc%". */
-    private static final Pattern BEGIN_PATTERN = Pattern.compile("([^%]+)%");
-    /** Accepts simple LIKE patterns like "%abc". */
-    private static final Pattern END_PATTERN = Pattern.compile("%([^%]+)");
-    /** Accepts simple LIKE patterns like "%abc%". */
-    private static final Pattern MIDDLE_PATTERN = Pattern.compile("%([^%]+)%");
-    /** Accepts simple LIKE patterns like "abc". */
-    private static final Pattern NONE_PATTERN = Pattern.compile("[^%]+");
 
     private static final Cache<BinaryString, Filter<BinaryString>> CACHE =
             Caffeine.newBuilder().softValues().executor(Runnable::run).build();
@@ -62,43 +51,23 @@ public class Like extends NullFalseLeafBinaryFunction {
         BinaryString pattern = (BinaryString) patternLiteral;
         Filter<BinaryString> filter = CACHE.getIfPresent(pattern);
         if (filter == null) {
-            filter = createFunc(pattern.toString());
+            filter = createFunc(type, patternLiteral);
             CACHE.put(pattern, filter);
         }
         return filter.test((BinaryString) field);
     }
 
-    private Filter<BinaryString> createFunc(String pattern) {
-        if (pattern.contains("_")) {
-            return createRegexFunc(pattern);
+    private Filter<BinaryString> createFunc(DataType type, Object patternLiteral) {
+        Optional<Pair<NullFalseLeafBinaryFunction, Object>> optimized =
+                LikeOptimization.tryOptimize(patternLiteral);
+        if (optimized.isPresent()) {
+            NullFalseLeafBinaryFunction func = optimized.get().getKey();
+            Object literal = optimized.get().getValue();
+            return field -> func.test(type, field, literal);
         }
-
-        Matcher noneMatcher = NONE_PATTERN.matcher(pattern);
-        Matcher beginMatcher = BEGIN_PATTERN.matcher(pattern);
-        Matcher endMatcher = END_PATTERN.matcher(pattern);
-        Matcher middleMatcher = MIDDLE_PATTERN.matcher(pattern);
-
-        if (noneMatcher.matches()) {
-            BinaryString equals = fromString(pattern);
-            return input -> input.equals(equals);
-        } else if (beginMatcher.matches()) {
-            BinaryString begin = fromString(beginMatcher.group(1));
-            return input -> input.startsWith(begin);
-        } else if (endMatcher.matches()) {
-            BinaryString end = fromString(endMatcher.group(1));
-            return input -> input.endsWith(end);
-        } else if (middleMatcher.matches()) {
-            BinaryString middle = fromString(middleMatcher.group(1));
-            return input -> input.contains(middle);
-        } else {
-            return createRegexFunc(pattern);
-        }
-    }
-
-    private Filter<BinaryString> createRegexFunc(String pattern) {
-        String regex = sqlToRegexLike(pattern, null);
-        Pattern patternObject = Pattern.compile(regex);
-        return input -> patternObject.matcher(input.toString()).matches();
+        String regex = sqlToRegexLike(patternLiteral.toString(), null);
+        Pattern pattern = Pattern.compile(regex);
+        return input -> pattern.matcher(input.toString()).matches();
     }
 
     private static String sqlToRegexLike(String sqlPattern, @Nullable CharSequence escapeStr) {
