@@ -49,13 +49,15 @@ jobs:
         python-version: ['3.6.15', '3.10']
 
     steps:
-      - name: Clean up disk space
+      - name: Clean up old pip cache
         shell: bash
         run: |
           echo "Disk usage before cleanup:"
           df -h
-          echo "Cleaning /tmp directory..."
-          rm -rf /tmp/* /tmp/.*
+          echo "Cleaning old pip cache and build artifacts..."
+          # Only clean pip cache older than 7 days, not all /tmp
+          find ~/.cache/pip -type f -atime +7 -delete 2>/dev/null || true
+          find /tmp -maxdepth 1 -type d -name 'tmp*' -atime +2 -exec rm -rf {} + 2>/dev/null || true
           echo "Disk usage after cleanup:"
           df -h
 
