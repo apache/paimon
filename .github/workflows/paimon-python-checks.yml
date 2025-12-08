@@ -49,6 +49,16 @@ jobs:
         python-version: ['3.6.15', '3.10']
 
     steps:
+      - name: Clean up disk space
+        shell: bash
+        run: |
+          echo "Disk usage before cleanup:"
+          df -h
+          echo "Cleaning /tmp directory..."
+          rm -rf /tmp/* /tmp/.*
+          echo "Disk usage after cleanup:"
+          df -h
+
       - name: Checkout code
         uses: actions/checkout@v2
 
