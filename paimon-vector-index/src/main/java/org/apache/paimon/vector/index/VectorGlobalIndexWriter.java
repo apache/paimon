@@ -35,6 +35,7 @@ import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 
+import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
@@ -58,6 +59,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
     private final int sizePerIndex;
 
     private final List<VectorIndex> vectorIndices;
+    private final List<ResultEntry> results;
 
     public VectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter, DataType fieldType, Options options) {
@@ -66,6 +68,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                 "Vector field type must be ARRAY, but was: " + fieldType);
         this.fileWriter = fileWriter;
         this.vectorIndices = new ArrayList<>();
+        this.results = new ArrayList<>();
         this.vectorOptions = new VectorIndexOptions(options);
         this.similarityFunction = vectorOptions.metric().vectorSimilarityFunction();
         this.sizePerIndex = vectorOptions.sizePerIndex();
@@ -84,47 +87,42 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
         }
         index.checkDimension(vectorOptions.dimension());
         vectorIndices.add(index);
+        if (vectorIndices.size() >= sizePerIndex) {
+            try {
+                flush();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     @Override
     public List<ResultEntry> finish() {
         try {
-            if (vectorIndices.isEmpty()) {
-                return new ArrayList<>();
-            }
-
-            List<ResultEntry> results = new ArrayList<>();
-
-            // Split vectors into batches if size exceeds sizePerIndex
-            int totalVectors = vectorIndices.size();
-            int numBatches = (int) Math.ceil((double) totalVectors / sizePerIndex);
-
-            for (int batchIndex = 0; batchIndex < numBatches; batchIndex++) {
-                int startIdx = batchIndex * sizePerIndex;
-                int endIdx = Math.min(startIdx + sizePerIndex, totalVectors);
-                List<VectorIndex> batchVectorIndices = vectorIndices.subList(startIdx, endIdx);
-
-                String fileName = fileWriter.newFileName(VectorGlobalIndexerFactory.IDENTIFIER);
-                try (OutputStream out = fileWriter.newOutputStream(fileName)) {
-                    buildIndex(
-                            batchVectorIndices,
-                            this.vectorOptions.m(),
-                            this.vectorOptions.efConstruction(),
-                            this.vectorOptions.writeBufferSize(),
-                            out);
-                }
-                long minRowIdInBatch = batchVectorIndices.get(0).rowId();
-                long maxRowIdInBatch =
-                        batchVectorIndices.get(batchVectorIndices.size() - 1).rowId();
-                results.add(
-                        ResultEntry.of(
-                                fileName, null, new Range(minRowIdInBatch, maxRowIdInBatch)));
+            if (!vectorIndices.isEmpty()) {
+                flush();
             }
 
             return results;
         } catch (IOException e) {
             throw new RuntimeException("Failed to write vector global index", e);
         }
+    }
+
+    private void flush() throws IOException {
+        String fileName = fileWriter.newFileName(VectorGlobalIndexerFactory.IDENTIFIER);
+        try (OutputStream out = new BufferedOutputStream(fileWriter.newOutputStream(fileName))) {
+            buildIndex(
+                    vectorIndices,
+                    this.vectorOptions.m(),
+                    this.vectorOptions.efConstruction(),
+                    this.vectorOptions.writeBufferSize(),
+                    out);
+        }
+        long minRowIdInBatch = vectorIndices.get(0).rowId();
+        long maxRowIdInBatch = vectorIndices.get(vectorIndices.size() - 1).rowId();
+        results.add(ResultEntry.of(fileName, null, new Range(minRowIdInBatch, maxRowIdInBatch)));
+        vectorIndices.clear();
     }
 
     private void buildIndex(
@@ -180,7 +178,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
 
             try (org.apache.lucene.store.IndexInput input =
                     directory.openInput(fileName, IOContext.DEFAULT)) {
-                byte[] buffer = new byte[8192];
+                byte[] buffer = new byte[32 * 1024];
                 long remaining = fileLength;
 
                 while (remaining > 0) {
