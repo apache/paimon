@@ -26,8 +26,8 @@ import tempfile
 import unittest
 
 try:
-    import torch
-    from torch.utils.data import DataLoader
+    import torch  # noqa: F401
+    from torch.utils.data import DataLoader  # noqa: F401
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False

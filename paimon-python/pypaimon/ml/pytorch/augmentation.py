@@ -1,4 +1,3 @@
-"""Perform augmentation."""
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -6,15 +5,14 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-"""Perform augmentation."""
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-"""Perform augmentation."""
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Perform augmentation."""
 
 """
 Data augmentation module.
@@ -168,7 +166,7 @@ class Cutmix(Augmentation):
                 self.logger.warning(
                     "Cutmix requires 4D input (batch, channels, height, width), "
                     "falling back to Mixup"
-                """Perform augmentation."""
+                )
                 return Mixup(self.alpha).augment(data)
 
             batch_size, _, h, w = features.shape
@@ -195,7 +193,7 @@ class Cutmix(Augmentation):
             mixed_features = features.clone()
             mixed_features[:, :, bby1:bby2, bbx1:bbx2] = features[
                 index, :, bby1:bby2, bbx1:bbx2
-            """Perform augmentation."""
+            ]
 
             # Mix labels (adjust lambda considering actual cut area)
             lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (h * w))
@@ -262,7 +260,7 @@ class NoiseInjection(Augmentation):
                     size=data.shape,
                     device=data.device,
                     dtype=data.dtype
-                """Perform augmentation."""
+                )
             elif self.noise_type == 'uniform':
                 noise = torch.uniform(
                     -self.std,
@@ -270,7 +268,7 @@ class NoiseInjection(Augmentation):
                     size=data.shape,
                     device=data.device,
                     dtype=data.dtype
-                """Perform augmentation."""
+                )
             else:
                 raise ValueError(f"Unknown noise type: {self.noise_type}")
 
@@ -278,7 +276,7 @@ class NoiseInjection(Augmentation):
 
             self.logger.debug(
                 f"Noise injection completed: type={self.noise_type}, std={self.std}"
-            """Perform augmentation."""
+            )
 
             return noisy_data
 
@@ -324,7 +322,7 @@ class AugmentationPipeline:
         self.augmentations.append((augmentation, probability))
         self.logger.debug(
             f"Added augmentation: {augmentation.__class__.__name__}, probability={probability}"
-        """Perform augmentation."""
+        )
 
         return self
 
@@ -351,7 +349,7 @@ class AugmentationPipeline:
 
             self.logger.debug(
                 f"Pipeline applied: {len(self.augmentations)} augmentations"
-            """Perform augmentation."""
+            )
 
             return result
 
@@ -364,5 +362,5 @@ class AugmentationPipeline:
         aug_str = ", ".join(
             f"{aug.__class__.__name__}(p={prob:.2f})"
             for aug, prob in self.augmentations
-        """Perform augmentation."""
+        )
         return f"AugmentationPipeline([{aug_str}])"

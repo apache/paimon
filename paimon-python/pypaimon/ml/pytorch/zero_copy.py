@@ -62,7 +62,7 @@ class ZeroCopyConverter:
         """Initialize zero-copy converter."""
         if not all([NUMPY_AVAILABLE, TORCH_AVAILABLE, PYARROW_AVAILABLE]):
             raise ImportError("NumPy, PyTorch and PyArrow are required")
-        
+
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def convert_to_tensor(

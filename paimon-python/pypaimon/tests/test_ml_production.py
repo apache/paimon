@@ -119,7 +119,7 @@ class TestMemoryPoolManager(unittest.TestCase):
         """Test memory pool statistics."""
         manager = MemoryPoolManager(pool_size_mb=256)
 
-        tensor = manager.allocate((10, 10), torch.float32)
+        manager.allocate((10, 10), torch.float32)
         stats = manager.get_stats()
 
         self.assertIn('used_blocks', stats)

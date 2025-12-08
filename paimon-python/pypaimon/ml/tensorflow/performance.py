@@ -32,7 +32,7 @@ import time
 from typing import Any, Optional, Callable
 
 try:
-    import tensorflow as tf
+    import tensorflow
     TENSORFLOW_AVAILABLE = True
 except ImportError:
     TENSORFLOW_AVAILABLE = False
