@@ -16,6 +16,8 @@
 # limitations under the License.
 #
 
+from __future__ import annotations
+
 """
 PyTorch Dataset implementations for Paimon tables.
 
@@ -33,8 +35,9 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
-    IterableDataset = object
-    Dataset = object
+    IterableDataset = object  # type: ignore
+    Dataset = object  # type: ignore
+    torch = None  # type: ignore
 
 import pyarrow as pa
 
@@ -125,7 +128,7 @@ class PaimonIterableDataset(IterableDataset):
         self.config = config or PaimonDatasetConfig()
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
-    def __iter__(self) -> Iterator[Tuple[torch.Tensor, Optional[torch.Tensor]]]:
+    def __iter__(self) -> Iterator[Tuple[Any, Optional[Any]]]:  # Returns (torch.Tensor, torch.Tensor)
         """Iterate over batches of data.
 
         This method implements worker sharding by using get_worker_info() to
@@ -176,7 +179,7 @@ class PaimonIterableDataset(IterableDataset):
 
     def _process_arrow_batch(
         self, arrow_batch: pa.RecordBatch
-    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+    ) -> Tuple[Optional[Any], Optional[Any]]:  # Returns (torch.Tensor, torch.Tensor)
         """Process Arrow RecordBatch into PyTorch tensors.
 
         Args:
@@ -323,7 +326,7 @@ class PaimonMapDataset(Dataset):
         """Return the number of samples in the dataset."""
         return self.num_rows
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    def __getitem__(self, idx: int) -> Tuple[Any, Optional[Any]]:  # Returns (torch.Tensor, torch.Tensor)
         """Get a single sample by index.
 
         Args:
