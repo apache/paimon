@@ -32,6 +32,7 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
+    torch = None  # type: ignore
 
 import pyarrow as pa
 
@@ -101,7 +102,7 @@ class ArrowToTorchTransformer(DataTransformer):
         self.handle_missing = handle_missing
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
-    def transform(self, arrow_batch: pa.RecordBatch) -> torch.Tensor:
+    def transform(self, arrow_batch: pa.RecordBatch) -> 'Any':  # Returns torch.Tensor
         """Transform Arrow RecordBatch to PyTorch tensor.
 
         Args:
