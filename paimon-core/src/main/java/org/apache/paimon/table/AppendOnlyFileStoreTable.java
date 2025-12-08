@@ -88,8 +88,9 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     protected SplitGenerator splitGenerator() {
-        long targetSplitSize = store().options().splitTargetSize();
-        long openFileCost = store().options().splitOpenFileCost();
+        CoreOptions options = store().options();
+        long targetSplitSize = options.splitTargetSize();
+        long openFileCost = options.splitOpenFileCost();
         return coreOptions().dataEvolutionEnabled()
                 ? new DataEvolutionSplitGenerator(targetSplitSize, openFileCost)
                 : new AppendOnlySplitGenerator(targetSplitSize, openFileCost, bucketMode());
