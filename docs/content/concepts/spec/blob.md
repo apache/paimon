@@ -474,7 +474,7 @@ public class BlobDescriptorExample {
                 .column("video", DataTypes.BLOB())
                 .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
                 .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                .option(CoreOptions.BLOB_AS_DESCRIPTOR.key(), "true")  // Enable descriptor mode
+                .option(CoreOptions.BLOB_AS_DESCRIPTOR.key(), "true")  // This is not necessary in java api
                 .build();
 
         Identifier tableId = Identifier.create("my_db", "video_table");
@@ -502,14 +502,17 @@ public class BlobDescriptorExample {
             long fileSize = 2L * 1024 * 1024 * 1024;  // 2GB
 
             BlobDescriptor descriptor = new BlobDescriptor(externalUri, 0, fileSize);
+            // file io should be accessable to externalUri
+            FileIO fileIO = Table.fileIO();
+            UriReader uriReader = UriReader.fromFile(fileIO);
+            Blob blob = Blob.fromDescriptor(uriReader, descriptor);
 
             // Write the serialized descriptor as blob data
             // Paimon will read from the URI and copy data to .blob files in chunks
             GenericRow row = GenericRow.of(
                     1,
                     BinaryString.fromString("large_video"),
-                    new BlobData(descriptor.serialize())
-            );
+                    blob);
             write.write(row);
 
             commit.commit(write.prepareCommit());
