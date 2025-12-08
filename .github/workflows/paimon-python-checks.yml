@@ -55,9 +55,12 @@ jobs:
           echo "Disk usage before cleanup:"
           df -h
           echo "Cleaning old pip cache and build artifacts..."
-          # Only clean pip cache older than 7 days, not all /tmp
+          # Only clean pip cache older than 7 days
           find ~/.cache/pip -type f -atime +7 -delete 2>/dev/null || true
-          find /tmp -maxdepth 1 -type d -name 'tmp*' -atime +2 -exec rm -rf {} + 2>/dev/null || true
+          # Clean Maven cache older than 7 days
+          find ~/.m2/repository -type f -atime +7 -delete 2>/dev/null || true
+          # Clean old Maven artifacts in /tmp (but not recent ones)
+          find /tmp -maxdepth 2 -type f -name '*.jar' -o -name '*.pom' -atime +2 2>/dev/null | xargs rm -f 2>/dev/null || true
           echo "Disk usage after cleanup:"
           df -h
 
