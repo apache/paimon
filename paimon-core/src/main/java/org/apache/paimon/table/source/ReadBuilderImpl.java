@@ -274,7 +274,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     private boolean searchGlobalIndex(Table table) {
         return table instanceof FileStoreTable
                 && ((FileStoreTable) table).coreOptions().dataEvolutionEnabled()
-                && ((FileStoreTable) table).coreOptions().globalIndexEnabledInScan();
+                && ((FileStoreTable) table).coreOptions().globalIndexEnabled();
     }
 
     @Override
