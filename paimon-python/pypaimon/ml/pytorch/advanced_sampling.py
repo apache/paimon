@@ -37,7 +37,12 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
-    Sampler = object  # type: ignore
+    # Create a dummy Sampler class that inherits from ABC for proper MRO
+
+    class Sampler(ABC):  # type: ignore
+        """Placeholder Sampler when PyTorch is not available."""
+        pass
+
     torch = None  # type: ignore
 
 logger = logging.getLogger(__name__)
