@@ -33,6 +33,19 @@ from .transforms import (
     ArrowToTorchTransformer,
     ColumnSelector
 )
+from .advanced_sampling import (
+    WeightedRandomSampler,
+    StratifiedSampler,
+    HardExampleMiningSampler,
+    BalancedBatchSampler
+)
+from .feature_engineering import (
+    StandardScaler,
+    MinMaxScaler,
+    OneHotEncoder,
+    FeatureNormalizer,
+    FeatureSelector
+)
 
 __all__ = [
     'PaimonIterableDataset',
@@ -40,5 +53,14 @@ __all__ = [
     'PaimonDatasetConfig',
     'DataTransformer',
     'ArrowToTorchTransformer',
-    'ColumnSelector'
+    'ColumnSelector',
+    'WeightedRandomSampler',
+    'StratifiedSampler',
+    'HardExampleMiningSampler',
+    'BalancedBatchSampler',
+    'StandardScaler',
+    'MinMaxScaler',
+    'OneHotEncoder',
+    'FeatureNormalizer',
+    'FeatureSelector'
 ]

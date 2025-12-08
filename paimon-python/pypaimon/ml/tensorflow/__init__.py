@@ -27,8 +27,20 @@ from .dataset import (
     PaimonTensorFlowDataset,
     PaimonTensorFlowDatasetConfig
 )
+from .distributed import (
+    DistributedPaimonDatasetBuilder,
+    DistributedStrategy
+)
+from .performance import (
+    TensorFlowPipelineOptimizer,
+    DatasetPipelineBuilder
+)
 
 __all__ = [
     'PaimonTensorFlowDataset',
-    'PaimonTensorFlowDatasetConfig'
+    'PaimonTensorFlowDatasetConfig',
+    'DistributedPaimonDatasetBuilder',
+    'DistributedStrategy',
+    'TensorFlowPipelineOptimizer',
+    'DatasetPipelineBuilder'
 ]
