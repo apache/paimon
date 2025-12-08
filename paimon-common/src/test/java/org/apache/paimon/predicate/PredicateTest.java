@@ -523,6 +523,7 @@ public class PredicateTest {
 
     @Test
     public void testLike() {
+        // test eval
         assertThat(testLike("abc", "a.c")).isEqualTo(false);
         assertThat(testLike("a.c", "a.c")).isEqualTo(true);
         assertThat(testLike("abcd", "a.*d")).isEqualTo(false);
@@ -540,12 +541,25 @@ public class PredicateTest {
         assertThat(testLike("startxx", "st_rt%")).isEqualTo(true);
         assertThat(testLike("stbrtxx", "st_rt%")).isEqualTo(true);
         assertThat(testLike("xxstbrtxx", "st_rt%")).isEqualTo(false);
+
+        // test instance
+        assertThat(getLikeFunc("equal")).isEqualTo(Equal.INSTANCE);
+        assertThat(getLikeFunc("start%")).isEqualTo(StartsWith.INSTANCE);
+        assertThat(getLikeFunc("%end")).isEqualTo(EndsWith.INSTANCE);
+        assertThat(getLikeFunc("%middle%")).isEqualTo(Contains.INSTANCE);
+        assertThat(getLikeFunc("a_c")).isEqualTo(Like.INSTANCE);
     }
 
     private boolean testLike(String s, String pattern) {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
         Predicate predicate = builder.like(0, fromString(pattern));
         return predicate.test(GenericRow.of(fromString(s)));
+    }
+
+    private LeafFunction getLikeFunc(String pattern) {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
+        Predicate predicate = builder.like(0, fromString(pattern));
+        return ((LeafPredicate) predicate).function;
     }
 
     @Test
