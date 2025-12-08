@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup.sort;
+package org.apache.paimon.sst;
 
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
@@ -88,6 +88,7 @@ public abstract class BlockIterator implements Iterator<Map.Entry<MemorySlice, M
                 polled = midEntry;
                 right = mid - 1;
             } else {
+                polled = null;
                 left = mid + 1;
             }
         }
@@ -95,7 +96,8 @@ public abstract class BlockIterator implements Iterator<Map.Entry<MemorySlice, M
         return false;
     }
 
-    public abstract void seekTo(int record);
+    /** Seek to the specified record position of current block. */
+    public abstract void seekTo(int recordPosition);
 
     private BlockEntry readEntry() {
         requireNonNull(data, "data is null");

@@ -32,7 +32,7 @@ import org.apache.paimon.table.source.DataSplit
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, EqualTo, Expression, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -148,18 +148,21 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   private def targetRelatedSplits(sparkSession: SparkSession): Seq[DataSplit] = {
-    val targetDss = createDataset(
-      sparkSession,
-      targetRelation
-    )
     val sourceDss = createDataset(sparkSession, sourceRelation)
 
-    val firstRowIdsTouched = mutable.Set.empty[Long]
+    val firstRowIdsTouched = extractSourceRowIdMapping match {
+      case Some(sourceRowIdAttr) =>
+        // Shortcut: Directly get _FIRST_ROW_IDs from the source table.
+        findRelatedFirstRowIds(sourceDss, sparkSession, sourceRowIdAttr.name).toSet
 
-    firstRowIdsTouched ++= findRelatedFirstRowIds(
-      targetDss.alias("_left").join(sourceDss, toColumn(matchedCondition), "inner"),
-      sparkSession,
-      "_left." + ROW_ID_NAME)
+      case None =>
+        // Perform the full join to find related _FIRST_ROW_IDs.
+        val targetDss = createDataset(sparkSession, targetRelation)
+        findRelatedFirstRowIds(
+          targetDss.alias("_left").join(sourceDss, toColumn(matchedCondition), "inner"),
+          sparkSession,
+          "_left." + ROW_ID_NAME).toSet
+    }
 
     table
       .newSnapshotReader()
@@ -310,6 +313,43 @@ case class MergeIntoPaimonDataEvolutionTable(
 
     val toWrite = createDataset(sparkSession, mergeRows)
     writer.write(toWrite)
+  }
+
+  /**
+   * Attempts to identify a direct mapping from sourceTable's attribute to the target table's
+   * `_ROW_ID`.
+   *
+   * This is a shortcut optimization for `MERGE INTO` to avoid a full, expensive join when the merge
+   * condition is a simple equality on the target's `_ROW_ID`.
+   *
+   * @return
+   *   An `Option` containing the sourceTable's attribute if a pattern like
+   *   `target._ROW_ID = source.col` (or its reverse) is found, otherwise `None`.
+   */
+  private def extractSourceRowIdMapping: Option[AttributeReference] = {
+
+    // Helper to check if an attribute is the target's _ROW_ID
+    def isTargetRowId(attr: AttributeReference): Boolean = {
+      attr.name == ROW_ID_NAME && (targetRelation.output ++ targetRelation.metadataOutput)
+        .exists(_.exprId.equals(attr.exprId))
+    }
+
+    // Helper to check if an attribute belongs to the source table
+    def isSourceAttribute(attr: AttributeReference): Boolean = {
+      (sourceRelation.output ++ sourceRelation.metadataOutput).exists(_.exprId.equals(attr.exprId))
+    }
+
+    matchedCondition match {
+      // Case 1: target._ROW_ID = source.col
+      case EqualTo(left: AttributeReference, right: AttributeReference)
+          if isTargetRowId(left) && isSourceAttribute(right) =>
+        Some(right)
+      // Case 2: source.col = target._ROW_ID
+      case EqualTo(left: AttributeReference, right: AttributeReference)
+          if isSourceAttribute(left) && isTargetRowId(right) =>
+        Some(left)
+      case _ => None
+    }
   }
 
   private def findRelatedFirstRowIds(

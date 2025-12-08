@@ -16,29 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.io;
+package org.apache.paimon.sst;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import org.apache.paimon.lookup.LookupStoreFactory.Context;
 
-/** A class to wrap uncompressed {@link FileOutputStream}. */
-public class UncompressedPageFileOutput implements PageFileOutput {
+/** A {@link Context} for sort store. */
+public class SortContext implements Context {
 
-    private final FileOutputStream out;
+    private final long fileSize;
 
-    public UncompressedPageFileOutput(File file) throws FileNotFoundException {
-        this.out = new FileOutputStream(file);
+    public SortContext(long fileSize) {
+        this.fileSize = fileSize;
     }
 
-    @Override
-    public void write(byte[] bytes, int off, int len) throws IOException {
-        this.out.write(bytes, off, len);
-    }
-
-    @Override
-    public void close() throws IOException {
-        this.out.close();
+    public long fileSize() {
+        return fileSize;
     }
 }

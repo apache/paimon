@@ -16,27 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.io;
+package org.apache.paimon.spark.table
 
-import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.table.system.SystemTableLoader
 
-import javax.annotation.Nullable;
+import org.apache.spark.sql.Row
 
-import java.io.Closeable;
-import java.io.File;
-import java.io.IOException;
+import scala.collection.JavaConverters._
 
-/** An interface to write bytes with pages into file. */
-public interface PageFileOutput extends Closeable {
+class PaimonSystemTableTest extends PaimonSparkTestBase {
 
-    void write(byte[] bytes, int off, int len) throws IOException;
-
-    static PageFileOutput create(
-            File file, int pageSize, @Nullable BlockCompressionFactory compressionFactory)
-            throws IOException {
-        if (compressionFactory == null) {
-            return new UncompressedPageFileOutput(file);
-        }
-        return new CompressedPageFileOutput(file, pageSize, compressionFactory);
-    }
+  test("system table: show all global system tables") {
+    checkAnswer(
+      sql("SHOW TABLES IN sys").select("tableName"),
+      SystemTableLoader.GLOBAL_SYSTEM_TABLES.asScala.map(Row(_)).toSeq
+    )
+  }
 }

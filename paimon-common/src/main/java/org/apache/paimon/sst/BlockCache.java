@@ -16,18 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup.sort;
+package org.apache.paimon.sst;
 
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.io.cache.CacheManager.SegmentContainer;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.utils.IOUtils;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -37,32 +37,28 @@ import java.util.function.Function;
 /** Cache for block reading. */
 public class BlockCache implements Closeable {
 
-    private final RandomAccessFile file;
-    private final FileChannel channel;
+    private final Path filePath;
+    private final SeekableInputStream input;
     private final CacheManager cacheManager;
     private final Map<CacheKey, SegmentContainer> blocks;
 
-    public BlockCache(RandomAccessFile file, CacheManager cacheManager) {
-        this.file = file;
-        this.channel = this.file.getChannel();
+    public BlockCache(Path filePath, SeekableInputStream input, CacheManager cacheManager) {
+        this.filePath = filePath;
+        this.input = input;
         this.cacheManager = cacheManager;
         this.blocks = new HashMap<>();
     }
 
     private byte[] readFrom(long offset, int length) throws IOException {
         byte[] buffer = new byte[length];
-        int read = channel.read(ByteBuffer.wrap(buffer), offset);
-
-        if (read != length) {
-            throw new IOException("Could not read all the data");
-        }
+        input.seek(offset);
+        IOUtils.readFully(input, buffer);
         return buffer;
     }
 
     public MemorySegment getBlock(
             long position, int length, Function<byte[], byte[]> decompressFunc, boolean isIndex) {
-
-        CacheKey cacheKey = CacheKey.forPosition(file, position, length, isIndex);
+        CacheKey cacheKey = CacheKey.forPosition(filePath, position, length, isIndex);
 
         SegmentContainer container = blocks.get(cacheKey);
         if (container == null || container.getAccessCount() == CacheManager.REFRESH_COUNT) {

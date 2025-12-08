@@ -16,13 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup.sort;
+package org.apache.paimon.sst;
 
 import org.apache.paimon.memory.MemorySlice;
 
 import java.util.Comparator;
 
-import static org.apache.paimon.lookup.sort.BlockAlignedType.ALIGNED;
+import static org.apache.paimon.sst.BlockAlignedType.ALIGNED;
 
 /** Reader for a block. */
 public class BlockReader {
@@ -64,8 +64,8 @@ public class BlockReader {
         }
 
         @Override
-        public void seekTo(int record) {
-            data.setPosition(record * recordSize);
+        public void seekTo(int recordPosition) {
+            data.setPosition(recordPosition * recordSize);
         }
     }
 
@@ -80,8 +80,8 @@ public class BlockReader {
         }
 
         @Override
-        public void seekTo(int record) {
-            data.setPosition(index.readInt(record * 4));
+        public void seekTo(int recordPosition) {
+            data.setPosition(index.readInt(recordPosition * 4));
         }
     }
 }

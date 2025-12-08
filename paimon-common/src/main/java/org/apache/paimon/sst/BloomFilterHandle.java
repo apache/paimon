@@ -16,40 +16,33 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup.sort;
+package org.apache.paimon.sst;
 
-import org.apache.paimon.memory.MemorySlice;
+import java.util.Objects;
 
-import java.util.Map.Entry;
+/** Handle for bloom filter. */
+public class BloomFilterHandle {
 
-import static java.util.Objects.requireNonNull;
+    private final long offset;
+    private final int size;
+    private final long expectedEntries;
 
-/** Entry represents a key value. */
-public class BlockEntry implements Entry<MemorySlice, MemorySlice> {
-
-    private final MemorySlice key;
-    private final MemorySlice value;
-
-    public BlockEntry(MemorySlice key, MemorySlice value) {
-        requireNonNull(key, "key is null");
-        requireNonNull(value, "value is null");
-        this.key = key;
-        this.value = value;
+    BloomFilterHandle(long offset, int size, long expectedEntries) {
+        this.offset = offset;
+        this.size = size;
+        this.expectedEntries = expectedEntries;
     }
 
-    @Override
-    public MemorySlice getKey() {
-        return key;
+    public long offset() {
+        return offset;
     }
 
-    @Override
-    public MemorySlice getValue() {
-        return value;
+    public int size() {
+        return size;
     }
 
-    @Override
-    public final MemorySlice setValue(MemorySlice value) {
-        throw new UnsupportedOperationException();
+    public long expectedEntries() {
+        return expectedEntries;
     }
 
     @Override
@@ -60,19 +53,14 @@ public class BlockEntry implements Entry<MemorySlice, MemorySlice> {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-
-        BlockEntry entry = (BlockEntry) o;
-
-        if (!key.equals(entry.key)) {
-            return false;
-        }
-        return value.equals(entry.value);
+        BloomFilterHandle that = (BloomFilterHandle) o;
+        return offset == that.offset
+                && size == that.size
+                && expectedEntries == that.expectedEntries;
     }
 
     @Override
     public int hashCode() {
-        int result = key.hashCode();
-        result = 31 * result + value.hashCode();
-        return result;
+        return Objects.hash(offset, size, expectedEntries);
     }
 }
