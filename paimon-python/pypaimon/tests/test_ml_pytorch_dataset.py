@@ -34,8 +34,8 @@ except ImportError:
 
 import pyarrow as pa
 
-from pypaimon.catalog import CatalogFactory
-from pypaimon.schema import Schema
+from pypaimon.catalog.catalog_factory import CatalogFactory
+from pypaimon.schema.schema import Schema
 
 if TORCH_AVAILABLE:
     from pypaimon.ml.pytorch import (

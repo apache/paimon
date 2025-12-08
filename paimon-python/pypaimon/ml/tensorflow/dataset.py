@@ -23,7 +23,7 @@ Provides tf.data.Dataset wrapper for efficient streaming from Paimon.
 """
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 from dataclasses import dataclass, field
 
 try:
@@ -31,8 +31,6 @@ try:
     TENSORFLOW_AVAILABLE = True
 except ImportError:
     TENSORFLOW_AVAILABLE = False
-
-import pyarrow as pa
 
 logger = logging.getLogger(__name__)
 

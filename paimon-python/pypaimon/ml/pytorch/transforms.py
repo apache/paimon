@@ -25,7 +25,7 @@ PyTorch-compatible tensors and applying custom transformations.
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable, List, Optional
+from typing import Any, List, Optional
 
 try:
     import torch
@@ -34,7 +34,6 @@ except ImportError:
     TORCH_AVAILABLE = False
 
 import pyarrow as pa
-import pyarrow.compute as pc
 
 logger = logging.getLogger(__name__)
 

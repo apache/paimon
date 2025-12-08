@@ -24,7 +24,7 @@ streaming and random access to Paimon data.
 """
 
 import logging
-from typing import Any, Callable, List, Optional, Dict, Tuple, Iterator
+from typing import Any, Callable, List, Optional, Tuple, Iterator
 from dataclasses import dataclass, field
 
 try:
