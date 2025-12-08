@@ -14,16 +14,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
+"""Select features by variance.
 
-"""
-特征工程模块。
+Features with large variance are considered more informative.
+Feature engineering module.
 
-提供常见的特征处理技术：
-- 特征标准化（标准化、最小最大化）
-- 特征编码（独热编码、标签编码）
-- 特征交叉
-- 特征选择
+Provides common feature processing techniques:
+- Feature normalization (standardization, min-max scaling)
+- Feature encoding (one-hot encoding, label encoding)
+- Feature crossing
+- Feature selection
 """
 
 import logging
@@ -40,27 +40,27 @@ logger = logging.getLogger(__name__)
 
 
 class FeatureTransformer(ABC):
-    """特征转换器基类。"""
+    """Feature transformer base class."""
 
     @abstractmethod
     def fit(self, X: Any) -> 'FeatureTransformer':
-        """学习转换参数。"""
+        """Learn transformation parameters."""
         pass
 
     @abstractmethod
     def transform(self, X: Any) -> Any:
-        """转换特征。"""
+        """Transform features."""
         pass
 
     def fit_transform(self, X: Any) -> Any:
-        """拟合并转换特征。"""
+        """Fit and transform features."""
         return self.fit(X).transform(X)
 
 
 class StandardScaler(FeatureTransformer):
-    """标准化转换器（Z-score 标准化）。
+    """Standardization transformer (Z-score normalization).
 
-    将特征转换为零均值、单位方差。
+    Convert features to zero mean, unit variance.
 
     Example:
         >>> scaler = StandardScaler()
@@ -71,55 +71,55 @@ class StandardScaler(FeatureTransformer):
     """
 
     def __init__(self):
-        """初始化标准化转换器。"""
+        """Initialize standardization transformer."""
         self.mean = None
         self.std = None
 
     def fit(self, X: Any) -> 'StandardScaler':
-        """学习均值和标准差。"""
+        """Learn mean and standard deviation."""
         if not NUMPY_AVAILABLE:
             raise ImportError("NumPy is required")
 
         X = np.asarray(X)
         self.mean = np.mean(X, axis=0)
         self.std = np.std(X, axis=0)
-        self.std[self.std == 0] = 1  # 避免除以零
+        self.std[self.std == 0] = 1  # Avoiding division by zero
 
-        logger.debug(f"StandardScaler 拟合完成：均值形状={self.mean.shape}")
+        logger.debug(f"StandardScaler fitting completed: mean shape={self.mean.shape}")
         return self
 
     def transform(self, X: Any) -> Any:
-        """应用标准化。"""
+        """Apply standardization."""
         if self.mean is None:
-            raise RuntimeError("需要先调用 fit()")
+            raise RuntimeError("Need to call fit() first")
 
         X = np.asarray(X)
         return (X - self.mean) / self.std
 
 
 class MinMaxScaler(FeatureTransformer):
-    """最小最大化转换器。
+    """Min-Max scaler.
 
-    将特征缩放到 [0, 1] 范围。
+    Scale features to [0, 1] range.
 
     Example:
         >>> scaler = MinMaxScaler()
         >>> scaler.fit([[1], [2], [3]])
-        >>> scaler.transform([[2]])  # 返回 [[0.5]]
+        >>> scaler.transform([[2]])  # Return [[0.5]]
     """
 
     def __init__(self, feature_range: Tuple[float, float] = (0, 1)):
-        """初始化最小最大化转换器。
+        """Initialize MinMax scaler.
 
         Args:
-            feature_range: 目标范围（min, max）
+            feature_range: target range (min, max)
         """
         self.feature_range = feature_range
         self.min_val = None
         self.max_val = None
 
     def fit(self, X: Any) -> 'MinMaxScaler':
-        """学习最小值和最大值。"""
+        """Learn min and max values."""
         if not NUMPY_AVAILABLE:
             raise ImportError("NumPy is required")
 
@@ -127,13 +127,13 @@ class MinMaxScaler(FeatureTransformer):
         self.min_val = np.min(X, axis=0)
         self.max_val = np.max(X, axis=0)
 
-        logger.debug(f"MinMaxScaler 拟合完成：范围=({self.min_val.min()}, {self.max_val.max()})")
+        logger.debug(f"MinMaxScaler fitting completed: range=({self.min_val.min()}, {self.max_val.max()})")
         return self
 
     def transform(self, X: Any) -> Any:
-        """应用最小最大化缩放。"""
+        """Apply min-max scaling."""
         if self.min_val is None:
-            raise RuntimeError("需要先调用 fit()")
+            raise RuntimeError("Need to call fit() first")
 
         X = np.asarray(X)
         X_scaled = (X - self.min_val) / (self.max_val - self.min_val)
@@ -142,39 +142,39 @@ class MinMaxScaler(FeatureTransformer):
 
 
 class OneHotEncoder(FeatureTransformer):
-    """独热编码转换器。
+    """One-Hot encoder.
 
-    将类别特征转换为独热向量。
+    Convert categorical features to one-hot vectors.
 
     Example:
         >>> encoder = OneHotEncoder()
         >>> encoder.fit([['red'], ['green'], ['blue']])
-        >>> encoder.transform([['red']])  # 返回 [[1, 0, 0]]
+        >>> encoder.transform([['red']])  # Return [[1, 0, 0]]
     """
 
     def __init__(self, handle_unknown: str = 'error'):
-        """初始化独热编码转换器。
+        """Initialize one-hot encoder.
 
         Args:
-            handle_unknown: 处理未见过的值（'error' 或 'ignore'）
+            handle_unknown: Handle unseen values ('error' or 'ignore')
         """
         self.categories = None
         self.handle_unknown = handle_unknown
 
     def fit(self, X: List[Any]) -> 'OneHotEncoder':
-        """学习类别。"""
+        """Learn categories."""
         self.categories = {}
         for feature_idx, feature_values in enumerate(zip(*X)):
             self.categories[feature_idx] = list(set(feature_values))
             self.categories[feature_idx].sort()
 
-        logger.debug(f"OneHotEncoder 拟合完成：{len(self.categories)} 个特征")
+        logger.debug(f"OneHotEncoder fitting completed: {len(self.categories)} features")
         return self
 
     def transform(self, X: List[Any]) -> List[List[float]]:
-        """应用独热编码。"""
+        """Apply one-hot encoding."""
         if self.categories is None:
-            raise RuntimeError("需要先调用 fit()")
+            raise RuntimeError("Need to call fit() first")
 
         result = []
         for sample in X:
@@ -186,7 +186,7 @@ class OneHotEncoder(FeatureTransformer):
                         one_hot = [1.0 if cat == value else 0.0 for cat in categories]
                         encoded.extend(one_hot)
                     elif self.handle_unknown == 'error':
-                        raise ValueError(f"未知的类别值：{value}")
+                        raise ValueError(f"Unknown category value: {value}")
                     else:  # ignore
                         encoded.extend([0.0] * len(categories))
 
@@ -196,9 +196,9 @@ class OneHotEncoder(FeatureTransformer):
 
 
 class FeatureNormalizer:
-    """特征归一化工具。
+    """Feature normalization utility.
 
-    处理特征缺失值、异常值等。
+    Handle feature missing values, outliers, etc.
 
     Example:
         >>> normalizer = FeatureNormalizer()
@@ -211,15 +211,15 @@ class FeatureNormalizer:
         strategy: str = 'mean',
         fill_value: Optional[float] = None
     ) -> Any:
-        """处理缺失值。
+        """Handle missing values.
 
         Args:
-            X: 输入数据
-            strategy: 处理策略（'mean', 'median', 'forward_fill', 'value'）
-            fill_value: 当使用 'value' 策略时的填充值
+            X: Input data
+            strategy: Handle strategy ('mean', 'median', 'forward_fill', 'value')
+            fill_value: Fill value when using 'value' strategy
 
         Returns:
-            处理后的数据
+            Data after handling
         """
         if not NUMPY_AVAILABLE:
             raise ImportError("NumPy is required")
@@ -240,9 +240,9 @@ class FeatureNormalizer:
             )
             return X
         else:
-            raise ValueError(f"未知的策略：{strategy}")
+            raise ValueError(f"unknown strategy: {strategy}")
 
-        # 填充 NaN
+        # Fill NaN values
         for i in range(X.shape[1]):
             mask = np.isnan(X[:, i])
             if strategy == 'value':
@@ -250,7 +250,7 @@ class FeatureNormalizer:
             else:
                 X[mask, i] = fill_values[i]
 
-        logger.debug(f"处理缺失值完成，策略={strategy}")
+        logger.debug(f"Handle missing values completed, strategy={strategy}")
         return X
 
     @staticmethod
@@ -259,15 +259,15 @@ class FeatureNormalizer:
         method: str = 'iqr',
         threshold: float = 3.0
     ) -> Any:
-        """处理异常值。
+        """Handle outliers.
 
         Args:
-            X: 输入数据
-            method: 检测方法（'iqr' 或 'zscore'）
-            threshold: 阈值
+            X: Input data
+            method: Detection method ('iqr' or 'zscore')
+            threshold: Threshold
 
         Returns:
-            处理后的数据
+            Data after handling
         """
         if not NUMPY_AVAILABLE:
             raise ImportError("NumPy is required")
@@ -290,16 +290,16 @@ class FeatureNormalizer:
             X[z_scores > threshold] = np.nan
 
         else:
-            raise ValueError(f"未知的方法：{method}")
+            raise ValueError(f"unknown method: {method}")
 
-        logger.debug(f"处理异常值完成，方法={method}")
+        logger.debug(f"Handle outliers completed, method={method}")
         return X
 
 
 class FeatureSelector:
-    """特征选择工具。
+    """Feature selection utility.
 
-    基于方差、相关性等选择重要特征。
+    Select important features based on variance and relevance to label.
 
     Example:
         >>> selector = FeatureSelector()
@@ -308,16 +308,16 @@ class FeatureSelector:
 
     @staticmethod
     def select_by_variance(X: Any, k: int) -> List[int]:
-        """基于方差选择特征。
+        """Select features by variance.
 
-        方差大的特征被认为更有信息量。
+        Features with large variance are considered more informative.
 
         Args:
-            X: 输入数据
-            k: 选择的特征数
+            X: Input data
+            k: number of selected features
 
         Returns:
-            选中的特征索引列表
+            list of selected feature indices
         """
         if not NUMPY_AVAILABLE:
             raise ImportError("NumPy is required")
@@ -326,7 +326,7 @@ class FeatureSelector:
         variances = np.var(X, axis=0)
         selected = np.argsort(variances)[-k:]
 
-        logger.debug(f"基于方差选择了 {k} 个特征")
+        logger.debug(f"Selected {k} features by variance")
         return selected.tolist()
 
     @staticmethod
@@ -335,15 +335,15 @@ class FeatureSelector:
         y: Any,
         k: int
     ) -> List[int]:
-        """基于与标签的相关性选择特征。
+        """Select features by correlation with label.
 
         Args:
-            X: 输入特征
-            y: 标签
-            k: 选择的特征数
+            X: input features
+            y: label
+            k: number of selected features
 
         Returns:
-            选中的特征索引列表
+            list of selected feature indices
         """
         if not NUMPY_AVAILABLE:
             raise ImportError("NumPy is required")
@@ -358,5 +358,5 @@ class FeatureSelector:
 
         selected = np.argsort(correlations)[-k:]
 
-        logger.debug(f"基于相关性选择了 {k} 个特征")
+        logger.debug(f"Selected {k} features by correlation")
         return selected.tolist()

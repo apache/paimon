@@ -17,13 +17,13 @@
 #
 
 """
-在线特征工程模块。
+Online feature engineering module。
 
-提供在训练过程中动态计算特征，包括：
-- 滑动窗口聚合
-- 时间衰减特征
-- 交互特征计算
-- 实时特征缓存
+Provides dynamic feature computation during training, including:
+- Sliding window aggregation
+- Time decay features
+- Interaction feature computation
+- Real-time feature cache
 """
 
 import logging
@@ -41,18 +41,18 @@ logger = logging.getLogger(__name__)
 
 
 class OnlineFeatureComputer(ABC):
-    """在线特征计算器基类。"""
+    """Online feature computer base class."""
 
     @abstractmethod
     def compute(self, data: Any) -> Any:
-        """计算特征。"""
+        """Compute features."""
         pass
 
 
 class SlidingWindowAggregator(OnlineFeatureComputer):
-    """滑动窗口聚合器。
+    """Sliding window aggregator。
 
-    基于时间或序列长度的滑动窗口聚合。
+    Sliding window aggregation based on time or sequence length。
 
     Example:
         >>> aggregator = SlidingWindowAggregator(
@@ -68,12 +68,12 @@ class SlidingWindowAggregator(OnlineFeatureComputer):
         agg_functions: Dict[str, Callable],
         step_size: int = 1
     ):
-        """初始化滑动窗口聚合器。
+        """Initialize sliding window aggregator。
 
         Args:
-            window_size: 窗口大小
-            agg_functions: 聚合函数字典 {'name': function}
-            step_size: 窗口步长
+            window_size: Window size
+            agg_functions: Aggregation functions dictionary {'name': function}
+            step_size: Window step size
         """
         if not NUMPY_AVAILABLE:
             raise ImportError("NumPy is required")
@@ -85,13 +85,13 @@ class SlidingWindowAggregator(OnlineFeatureComputer):
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def aggregate(self, values: List[float]) -> List[Dict[str, float]]:
-        """对值序列进行滑动窗口聚合。
+        """Apply sliding window aggregation to a sequence of values.
 
         Args:
-            values: 值列表
+            values: List of values
 
         Returns:
-            每个窗口位置的聚合结果列表
+            List of aggregation results for each window position
 
         Example:
             >>> aggregator = SlidingWindowAggregator(
@@ -118,24 +118,24 @@ class SlidingWindowAggregator(OnlineFeatureComputer):
 
                 results.append(agg_result)
 
-            self.logger.debug(f"滑动窗口聚合完成：{len(results)} 个窗口")
+            self.logger.debug(f"Sliding window aggregation completed: {len(results)} windows")
             return results
 
         except Exception as e:
-            self.logger.error(f"滑动窗口聚合失败：{e}", exc_info=True)
+            self.logger.error(f"Sliding window aggregation failed: {e}", exc_info=True)
             raise
 
     def compute(self, data: Any) -> Any:
-        """计算特征（实现 ABC 接口）。"""
+        """Compute features (implementing ABC interface)."""
         if isinstance(data, list):
             return self.aggregate(data)
         return data
 
 
 class TimeDecayFeatureBuilder(OnlineFeatureComputer):
-    """时间衰减特征构建器。
+    """Time decay feature builder。
 
-    使用指数衰减权重计算时间序列特征。
+    Compute time series features using exponential decay weights。
 
     Example:
         >>> builder = TimeDecayFeatureBuilder(decay_factor=0.9)
@@ -147,17 +147,17 @@ class TimeDecayFeatureBuilder(OnlineFeatureComputer):
         decay_factor: float = 0.9,
         aggregation: str = 'weighted_mean'
     ):
-        """初始化时间衰减特征构建器。
+        """Initialize time decay feature builder.
 
         Args:
-            decay_factor: 衰减因子（0-1）
-            aggregation: 聚合方式 ('weighted_mean', 'weighted_sum')
+            decay_factor: Decay factor（0-1）
+            aggregation: Aggregation method ('weighted_mean', 'weighted_sum')
         """
         if not NUMPY_AVAILABLE:
             raise ImportError("NumPy is required")
 
         if not 0 < decay_factor <= 1:
-            raise ValueError("decay_factor 必须在 (0, 1] 范围内")
+            raise ValueError("decay_factor must be in (0, 1] range")
 
         self.decay_factor = decay_factor
         self.aggregation = aggregation
@@ -169,14 +169,14 @@ class TimeDecayFeatureBuilder(OnlineFeatureComputer):
         values: List[float],
         timestamps: Optional[List[int]] = None
     ) -> Dict[str, float]:
-        """构建时间衰减特征。
+        """Build time decay features。
 
         Args:
-            values: 值列表
-            timestamps: 时间戳列表（默认使用索引）
+            values: List of values
+            timestamps: List of timestamps (default to using index)
 
         Returns:
-            特征字典
+            Feature dictionary
 
         Example:
             >>> builder = TimeDecayFeatureBuilder(decay_factor=0.9)
@@ -193,11 +193,11 @@ class TimeDecayFeatureBuilder(OnlineFeatureComputer):
             else:
                 timestamps = np.asarray(timestamps)
 
-            # 计算衰减权重（最新数据权重最大）
+            # Calculate decay weights (latest data has largest weight)
             time_diff = timestamps[-1] - timestamps
             weights = np.power(self.decay_factor, time_diff)
 
-            # 归一化权重
+            # Normalize weights
             weights = weights / weights.sum()
 
             if self.aggregation == 'weighted_mean':
@@ -205,9 +205,9 @@ class TimeDecayFeatureBuilder(OnlineFeatureComputer):
             elif self.aggregation == 'weighted_sum':
                 result = float(np.sum(values * weights))
             else:
-                raise ValueError(f"未知的聚合方式：{self.aggregation}")
+                raise ValueError(f"Unknown aggregation method: {self.aggregation}")
 
-            self.logger.debug(f"时间衰减特征构建完成：{result:.4f}")
+            self.logger.debug(f"Time decay feature builder completed: {result:.4f}")
 
             return {
                 'time_decay_feature': result,
@@ -216,19 +216,19 @@ class TimeDecayFeatureBuilder(OnlineFeatureComputer):
             }
 
         except Exception as e:
-            self.logger.error(f"时间衰减特征构建失败：{e}", exc_info=True)
+            self.logger.error(f"Time decay feature builder failed: {e}", exc_info=True)
             raise
 
     def compute(self, data: Tuple[List[float], List[int]]) -> Dict[str, float]:
-        """计算特征（实现 ABC 接口）。"""
+        """Compute features (implementing ABC interface)."""
         values, timestamps = data
         return self.build(values, timestamps)
 
 
 class InteractionFeatureBuilder:
-    """交互特征构建器。
+    """Interaction feature builder。
 
-    计算特征之间的交互特征（乘积、差、比等）。
+    Compute interaction features between features (product, difference, ratio, etc.)。
 
     Example:
         >>> builder = InteractionFeatureBuilder()
@@ -239,7 +239,7 @@ class InteractionFeatureBuilder:
     """
 
     def __init__(self):
-        """初始化交互特征构建器。"""
+        """Initialize interaction feature builder。"""
         if not NUMPY_AVAILABLE:
             raise ImportError("NumPy is required")
 
@@ -250,15 +250,15 @@ class InteractionFeatureBuilder:
         features: Dict[str, float],
         interactions: List[Tuple[str, str, str]]
     ) -> Dict[str, float]:
-        """构建交互特征。
+        """Build interaction features。
 
         Args:
-            features: 特征字典
-            interactions: 交互列表 [(feature1, feature2, operation)]
-                         operation 可以是: 'mul', 'add', 'sub', 'div', 'pow'
+            features: Feature dictionary
+            interactions: Interaction list [(feature1, feature2, operation)]
+                         operation can be: 'mul', 'add', 'sub', 'div', 'pow'
 
         Returns:
-            包含交互特征的字典
+            Dictionary containing interaction features
 
         Example:
             >>> features = {'age': 30, 'income': 50000}
@@ -272,7 +272,7 @@ class InteractionFeatureBuilder:
             for feat1, feat2, op in interactions:
                 if feat1 not in features or feat2 not in features:
                     self.logger.warning(
-                        f"特征缺失：{feat1} 或 {feat2} 不存在"
+                        f"Missing features: {feat1} or {feat2} does not exist"
                     )
                     continue
 
@@ -295,25 +295,25 @@ class InteractionFeatureBuilder:
                     interaction_value = val1 ** val2
                     interaction_name = f"{feat1}_pow_{feat2}"
                 else:
-                    self.logger.warning(f"未知的操作：{op}")
+                    self.logger.warning(f"Unknown operation: {op}")
                     continue
 
                 result[interaction_name] = interaction_value
 
             self.logger.debug(
-                f"交互特征构建完成：{len(interactions)} 个交互"
+                f"Interaction features construction completed: {len(interactions)} interactions"
             )
             return result
 
         except Exception as e:
-            self.logger.error(f"交互特征构建失败：{e}", exc_info=True)
+            self.logger.error(f"Interaction feature construction failed: {e}", exc_info=True)
             raise
 
 
 class FeatureCache:
-    """特征缓存。
+    """Feature cache。
 
-    缓存已计算的特征，避免重复计算。
+    Cache computed features to avoid recomputation。
 
     Example:
         >>> cache = FeatureCache(max_size=10000)
@@ -322,10 +322,10 @@ class FeatureCache:
     """
 
     def __init__(self, max_size: int = 10000):
-        """初始化特征缓存。
+        """Initialize feature cache.
 
         Args:
-            max_size: 最大缓存条目数
+            max_size: Maximum number of cache entries
         """
         self.max_size = max_size
         self.cache: Dict[str, Any] = {}
@@ -334,62 +334,62 @@ class FeatureCache:
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def put(self, key: str, value: Any) -> None:
-        """存储特征到缓存。
+        """Store features to cache.
 
         Args:
-            key: 缓存键（例如：用户 ID）
-            value: 特征值
+            key: Cache key (e.g., user ID)
+            value: Feature values
         """
         try:
-            # 如果缓存满了，删除最少访问的项
+            # If cache is full, remove least recently used item
             if len(self.cache) >= self.max_size:
-                # LRU 淘汰策略
+                # LRU eviction strategy
                 lru_key = min(self.access_count, key=self.access_count.get)
                 del self.cache[lru_key]
                 del self.access_count[lru_key]
-                self.logger.debug(f"缓存满，淘汰项：{lru_key}")
+                self.logger.debug(f"Cache full, evicting: {lru_key}")
 
             self.cache[key] = value
             self.access_count[key] = 0
 
-            self.logger.debug(f"特征缓存：{key}")
+            self.logger.debug(f"Feature cache：{key}")
 
         except Exception as e:
-            self.logger.error(f"缓存存储失败：{e}", exc_info=True)
+            self.logger.error(f"Cache storage failed: {e}", exc_info=True)
 
     def get(self, key: str) -> Optional[Any]:
-        """从缓存获取特征。
+        """Get features from cache.
 
         Args:
-            key: 缓存键
+            key: Cache key
 
         Returns:
-            缓存的特征值，如果不存在返回 None
+            Cached feature values, return None if not exists
         """
         try:
             if key in self.cache:
                 self.access_count[key] += 1
-                self.logger.debug(f"缓存命中：{key}")
+                self.logger.debug(f"Cache hit: {key}")
                 return self.cache[key]
 
-            self.logger.debug(f"缓存未命中：{key}")
+            self.logger.debug(f"Cache miss: {key}")
             return None
 
         except Exception as e:
-            self.logger.error(f"缓存读取失败：{e}", exc_info=True)
+            self.logger.error(f"Cache read failed: {e}", exc_info=True)
             return None
 
     def clear(self) -> None:
-        """清空缓存。"""
+        """Clear the cache."""
         self.cache.clear()
         self.access_count.clear()
-        self.logger.info("特征缓存已清空")
+        self.logger.info("Feature cache cleared")
 
     def get_stats(self) -> Dict[str, Any]:
-        """获取缓存统计信息。
+        """Get cache statistics.
 
         Returns:
-            统计字典
+            Statistics dictionary
         """
         total_accesses = sum(self.access_count.values())
         return {

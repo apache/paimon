@@ -17,7 +17,7 @@
 #
 
 """
-Phase 3 集成测试 - 生产优化功能测试。
+integration tests - production optimization feature tests.
 """
 
 import unittest
@@ -44,18 +44,18 @@ from pypaimon.ml.monitoring import (
 
 
 class TestZeroCopyConversion(unittest.TestCase):
-    """测试零拷贝转换功能。"""
+    """Test zero-copy conversion functionality."""
 
     def test_zero_copy_converter_creation(self):
-        """测试零拷贝转换器创建。"""
+        """Test zero-copy converter creation."""
         try:
             converter = ZeroCopyConverter()
             self.assertIsNotNone(converter)
         except ImportError:
-            self.skipTest("NumPy/PyArrow 未安装")
+            self.skipTest("NumPy/PyArrow not installed")
 
     def test_memory_estimation(self):
-        """测试内存使用估计。"""
+        """Test memory usage estimation."""
         try:
             import pyarrow as pa
             converter = ZeroCopyConverter()
@@ -65,14 +65,14 @@ class TestZeroCopyConversion(unittest.TestCase):
 
             self.assertGreater(memory_usage, 0)
         except ImportError:
-            self.skipTest("PyArrow 未安装")
+            self.skipTest("PyArrow not installed")
 
 
 class TestAdaptiveBatchSizing(unittest.TestCase):
-    """测试自适应批大小调整。"""
+    """Test adaptive batch sizing."""
 
     def test_batch_sizer_creation(self):
-        """测试批大小调整器创建。"""
+        """Test batch sizer creation."""
         try:
             sizer = AdaptiveBatchSizer(
                 initial_batch_size=32,
@@ -80,34 +80,34 @@ class TestAdaptiveBatchSizing(unittest.TestCase):
             )
             self.assertIsNotNone(sizer)
         except ImportError:
-            self.skipTest("PyTorch 未安装")
+            self.skipTest("PyTorch not installed")
 
     @unittest.skipIf(not TORCH_AVAILABLE, "PyTorch not available")
     def test_batch_size_calculation(self):
-        """测试批大小计算。"""
+        """Test batch size calculation."""
         sizer = AdaptiveBatchSizer(initial_batch_size=32, max_memory_mb=256)
 
         sample_tensor = torch.randn(1, 10)
         batch_size = sizer.calculate_batch_size(sample_tensor)
 
         self.assertGreater(batch_size, 0)
-        self.assertTrue(batch_size & (batch_size - 1) == 0)  # 2 的幂
+        self.assertTrue(batch_size & (batch_size - 1) == 0)  # Power of 2
 
 
 class TestMemoryPoolManager(unittest.TestCase):
-    """测试内存池管理。"""
+    """Test memory pool management."""
 
     def test_memory_pool_creation(self):
-        """测试内存池创建。"""
+        """Test memory pool creation."""
         try:
             manager = MemoryPoolManager(pool_size_mb=256)
             self.assertIsNotNone(manager)
         except ImportError:
-            self.skipTest("PyTorch 未安装")
+            self.skipTest("PyTorch not installed")
 
     @unittest.skipIf(not TORCH_AVAILABLE, "PyTorch not available")
     def test_memory_allocation(self):
-        """测试内存分配。"""
+        """Test memory allocation."""
         manager = MemoryPoolManager(pool_size_mb=256)
 
         tensor = manager.allocate((10, 10), torch.float32)
@@ -116,7 +116,7 @@ class TestMemoryPoolManager(unittest.TestCase):
 
     @unittest.skipIf(not TORCH_AVAILABLE, "PyTorch not available")
     def test_memory_stats(self):
-        """测试内存池统计。"""
+        """Test memory pool statistics."""
         manager = MemoryPoolManager(pool_size_mb=256)
 
         tensor = manager.allocate((10, 10), torch.float32)
@@ -128,10 +128,10 @@ class TestMemoryPoolManager(unittest.TestCase):
 
 
 class TestSlidingWindowAggregation(unittest.TestCase):
-    """测试滑动窗口聚合。"""
+    """Test sliding window aggregation."""
 
     def test_sliding_window_aggregator(self):
-        """测试滑动窗口聚合器。"""
+        """Test sliding window aggregator."""
         import numpy as np
 
         aggregator = SlidingWindowAggregator(
@@ -148,10 +148,10 @@ class TestSlidingWindowAggregation(unittest.TestCase):
 
 
 class TestTimeDecayFeatures(unittest.TestCase):
-    """测试时间衰减特征。"""
+    """Test time decay features."""
 
     def test_time_decay_feature_builder(self):
-        """测试时间衰减特征构建器。"""
+        """Test time decay feature builder."""
         builder = TimeDecayFeatureBuilder(decay_factor=0.9)
 
         values = [1.0, 2.0, 3.0]
@@ -164,10 +164,10 @@ class TestTimeDecayFeatures(unittest.TestCase):
 
 
 class TestInteractionFeatures(unittest.TestCase):
-    """测试交互特征。"""
+    """Test interaction features."""
 
     def test_interaction_feature_builder(self):
-        """测试交互特征构建器。"""
+        """Test interaction feature builder."""
         builder = InteractionFeatureBuilder()
 
         features = {'age': 30, 'income': 50000}
@@ -180,10 +180,10 @@ class TestInteractionFeatures(unittest.TestCase):
 
 
 class TestFeatureCache(unittest.TestCase):
-    """测试特征缓存。"""
+    """Test feature cache."""
 
     def test_feature_cache(self):
-        """测试特征缓存功能。"""
+        """Test feature cache functionality."""
         cache = FeatureCache(max_size=100)
 
         cache.put('user_1', {'age': 30, 'income': 50000})
@@ -193,7 +193,7 @@ class TestFeatureCache(unittest.TestCase):
         self.assertEqual(features['age'], 30)
 
     def test_cache_stats(self):
-        """测试缓存统计。"""
+        """Test cache statistics."""
         cache = FeatureCache(max_size=100)
 
         cache.put('user_1', {'data': 'test'})
@@ -207,19 +207,19 @@ class TestFeatureCache(unittest.TestCase):
 
 
 class TestMixupAugmentation(unittest.TestCase):
-    """测试 Mixup 增强。"""
+    """Test Mixup augmentation."""
 
     def test_mixup_creation(self):
-        """测试 Mixup 创建。"""
+        """Test Mixup creation."""
         try:
             augment = Mixup(alpha=0.2)
             self.assertIsNotNone(augment)
         except ImportError:
-            self.skipTest("PyTorch 未安装")
+            self.skipTest("PyTorch not installed")
 
     @unittest.skipIf(not TORCH_AVAILABLE, "PyTorch not available")
     def test_mixup_augmentation(self):
-        """测试 Mixup 增强。"""
+        """Test Mixup augmentation."""
         augment = Mixup(alpha=0.2)
 
         features = torch.randn(4, 10)
@@ -232,19 +232,19 @@ class TestMixupAugmentation(unittest.TestCase):
 
 
 class TestNoiseInjection(unittest.TestCase):
-    """测试噪声注入。"""
+    """Test noise injection."""
 
     def test_noise_injection(self):
-        """测试噪声注入增强。"""
+        """Test noise injection augmentation."""
         try:
             augment = NoiseInjection(noise_type='gaussian', std=0.1)
             self.assertIsNotNone(augment)
         except ImportError:
-            self.skipTest("PyTorch 未安装")
+            self.skipTest("PyTorch not installed")
 
     @unittest.skipIf(not TORCH_AVAILABLE, "PyTorch not available")
     def test_gaussian_noise(self):
-        """测试高斯噪声注入。"""
+        """Test Gaussian noise injection."""
         augment = NoiseInjection(noise_type='gaussian', std=0.1)
 
         data = torch.randn(10, 5)
@@ -255,16 +255,16 @@ class TestNoiseInjection(unittest.TestCase):
 
 
 class TestAugmentationPipeline(unittest.TestCase):
-    """测试增强管道。"""
+    """Test augmentation pipeline."""
 
     def test_pipeline_creation(self):
-        """测试增强管道创建。"""
+        """Test augmentation pipeline creation."""
         pipeline = AugmentationPipeline()
         self.assertIsNotNone(pipeline)
 
     @unittest.skipIf(not TORCH_AVAILABLE, "PyTorch not available")
     def test_pipeline_application(self):
-        """测试增强管道应用。"""
+        """Test augmentation pipeline application."""
         pipeline = AugmentationPipeline()
         pipeline.add_augmentation(NoiseInjection(std=0.1), probability=1.0)
 
@@ -275,10 +275,10 @@ class TestAugmentationPipeline(unittest.TestCase):
 
 
 class TestPerformanceMonitor(unittest.TestCase):
-    """测试性能监控。"""
+    """Test performance monitoring."""
 
     def test_performance_monitor(self):
-        """测试性能监控。"""
+        """Test performance monitoring."""
         monitor = PerformanceMonitor()
 
         monitor.start_timer('test_op')
@@ -288,7 +288,7 @@ class TestPerformanceMonitor(unittest.TestCase):
         self.assertGreater(elapsed, 0)
 
     def test_metrics_retrieval(self):
-        """测试性能指标检索。"""
+        """Test performance metrics retrieval."""
         monitor = PerformanceMonitor()
 
         monitor.start_timer('op1')
@@ -302,10 +302,10 @@ class TestPerformanceMonitor(unittest.TestCase):
 
 
 class TestDataSampler(unittest.TestCase):
-    """测试数据采样。"""
+    """Test data sampling."""
 
     def test_data_sampler(self):
-        """测试数据采样。"""
+        """Test data sampling."""
         sampler = DataSampler(sample_size=10)
 
         data = range(100)
@@ -314,7 +314,7 @@ class TestDataSampler(unittest.TestCase):
         self.assertLessEqual(len(samples), 10)
 
     def test_sampler_statistics(self):
-        """测试采样统计。"""
+        """Test sampling statistics."""
         sampler = DataSampler(sample_size=10)
 
         data = range(100)
@@ -326,10 +326,10 @@ class TestDataSampler(unittest.TestCase):
 
 
 class TestRetryPolicy(unittest.TestCase):
-    """测试重试策略。"""
+    """Test retry strategy."""
 
     def test_retry_success(self):
-        """测试成功执行（不需要重试）。"""
+        """Test successful execution (no retry needed)."""
         policy = RetryPolicy(max_retries=3)
 
         def success_func():
@@ -339,7 +339,7 @@ class TestRetryPolicy(unittest.TestCase):
         self.assertEqual(result, 'success')
 
     def test_retry_with_failure(self):
-        """测试重试机制。"""
+        """Test retry mechanism."""
         policy = RetryPolicy(max_retries=3, initial_delay=0.01)
         attempt_count = {'count': 0}
 
@@ -355,13 +355,13 @@ class TestRetryPolicy(unittest.TestCase):
 
 
 class TestDataValidator(unittest.TestCase):
-    """测试数据验证。"""
+    """Test data validation."""
 
     def test_data_validation(self):
-        """测试数据验证。"""
+        """Test data validation."""
         validator = DataValidator()
-        validator.add_rule('age', lambda x: 0 <= x <= 150, '年龄无效')
-        validator.add_rule('name', lambda x: len(x) > 0, '姓名不能为空')
+        validator.add_rule('age', lambda x: 0 <= x <= 150, 'Age invalid')
+        validator.add_rule('name', lambda x: len(x) > 0, 'Name cannot be empty')
 
         data = {'age': 30, 'name': 'John'}
         is_valid, errors = validator.validate(data)
@@ -370,7 +370,7 @@ class TestDataValidator(unittest.TestCase):
         self.assertEqual(len(errors), 0)
 
     def test_validation_failure(self):
-        """测试验证失败。"""
+        """Test validation failure."""
         validator = DataValidator()
         validator.add_rule('age', lambda x: 0 <= x <= 150)
 

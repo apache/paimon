@@ -17,13 +17,13 @@
 #
 
 """
-高级采样策略模块。
+Advanced sampling strategy module.
 
-提供高级采样方式，用于：
-- 类别不平衡处理
-- 分层采样
-- 优先级采样
-- 困难样本挖掘
+Provides advanced sampling methods for:
+- Class imbalance handling
+- Stratified sampling
+- Priority sampling
+- Hard example mining
 """
 
 import logging
@@ -42,52 +42,52 @@ logger = logging.getLogger(__name__)
 
 
 class AdvancedSampler(Sampler, ABC):
-    """高级采样器基类。"""
+    """Advanced sampler base class."""
 
     @abstractmethod
     def __iter__(self):
-        """返回样本索引迭代器。"""
+        """Return iterator of sample indices."""
         pass
 
     @abstractmethod
     def __len__(self):
-        """返回数据集长度。"""
+        """Return dataset length."""
         pass
 
 
 class WeightedRandomSampler(AdvancedSampler):
-    """加权随机采样器，用于处理类别不平衡。
+    """Weighted random sampler for handling class imbalance.
 
     Example:
-        >>> weights = [1, 1, 1, 10]  # 最后一个样本权重更高
+        >>> weights = [1, 1, 1, 10]  # Last sample has higher weight
         >>> sampler = WeightedRandomSampler(weights, num_samples=100)
     """
 
     def __init__(self, weights: List[float], num_samples: int, replacement: bool = True):
-        """初始化加权采样器。
+        """Initialize weighted sampler.
 
         Args:
-            weights: 每个样本的权重
-            num_samples: 采样数量
-            replacement: 是否有放回采样
+            weights: Weight for each sample
+            num_samples: Number of samples to draw
+            replacement: Whether to sample with replacement
         """
         if not TORCH_AVAILABLE:
             raise ImportError("PyTorch is required")
 
         if len(weights) == 0:
-            raise ValueError("weights 不能为空")
+            raise ValueError("weights cannot be empty")
 
         self.weights = torch.as_tensor(weights, dtype=torch.double)
         self.num_samples = num_samples
         self.replacement = replacement
 
         logger.debug(
-            f"WeightedRandomSampler 初始化：采样数={num_samples}，"
-            f"权重范围=[{self.weights.min():.2f}, {self.weights.max():.2f}]"
+            f"WeightedRandomSampler initialized: num_samples={num_samples}, "
+            f"weight_range=[{self.weights.min():.2f}, {self.weights.max():.2f}]"
         )
 
     def __iter__(self):
-        """返回加权随机采样的索引。"""
+        """Return indices of weighted random sampling."""
         rand_tensor = torch.multinomial(
             self.weights,
             self.num_samples,
@@ -96,12 +96,12 @@ class WeightedRandomSampler(AdvancedSampler):
         return iter(rand_tensor.tolist())
 
     def __len__(self):
-        """返回采样数量。"""
+        """Return number of samples."""
         return self.num_samples
 
 
 class StratifiedSampler(AdvancedSampler):
-    """分层采样器，用于保持各类别比例。
+    """Stratified sampler for maintaining class proportions.
 
     Example:
         >>> labels = [0, 0, 1, 1, 1, 2]
@@ -114,12 +114,12 @@ class StratifiedSampler(AdvancedSampler):
         num_samples_per_class: Optional[int] = None,
         proportional: bool = True
     ):
-        """初始化分层采样器。
+        """Initialize stratified sampler.
 
         Args:
-            labels: 样本标签列表
-            num_samples_per_class: 每个类别的采样数量
-            proportional: 是否按原始比例采样
+            labels: List of sample labels
+            num_samples_per_class: Number of samples per class
+            proportional: Whether to sample proportionally to original distribution
         """
         if not TORCH_AVAILABLE:
             raise ImportError("PyTorch is required")
@@ -128,25 +128,25 @@ class StratifiedSampler(AdvancedSampler):
         self.num_samples_per_class = num_samples_per_class
         self.proportional = proportional
 
-        # 统计类别分布
+        # Count class distribution
         self.class_indices: Dict[int, List[int]] = {}
         for idx, label in enumerate(labels):
             if label not in self.class_indices:
                 self.class_indices[label] = []
             self.class_indices[label].append(idx)
 
-        logger.debug(f"StratifiedSampler 初始化：{len(self.class_indices)} 个类别")
+        logger.debug(f"StratifiedSampler initialized: {len(self.class_indices)} classes")
 
     def __iter__(self):
-        """返回分层采样的索引。"""
+        """Return indices of stratified sampling."""
         sampled_indices = []
 
         for class_id, indices in self.class_indices.items():
             if self.num_samples_per_class:
                 num_samples = min(self.num_samples_per_class, len(indices))
             elif self.proportional:
-                # 按原始比例采样
-                num_samples = max(1, int(len(indices) * 0.8))  # 采样 80%
+                # Sample proportionally to original distribution
+                num_samples = max(1, int(len(indices) * 0.8))  # Sample 80%
             else:
                 num_samples = len(indices)
 
@@ -157,7 +157,7 @@ class StratifiedSampler(AdvancedSampler):
         return iter(sampled_indices)
 
     def __len__(self):
-        """返回采样总数。"""
+        """Return total number of samples."""
         if self.num_samples_per_class:
             return self.num_samples_per_class * len(self.class_indices)
         else:
@@ -165,13 +165,13 @@ class StratifiedSampler(AdvancedSampler):
 
 
 class HardExampleMiningSampler(AdvancedSampler):
-    """困难样本挖掘采样器，优先采样困难样本。
+    """Hard example mining sampler for prioritizing hard samples.
 
-    用于训练过程中自动增加困难样本的采样比例。
+    Automatically increase sampling ratio of hard samples during training.
 
     Example:
         >>> def compute_difficulty(batch):
-        ...     # 返回每个样本的困难度分数（0-1）
+        ...     # Return difficulty score (0-1) for each sample
         ...     return torch.rand(batch.shape[0])
         >>> sampler = HardExampleMiningSampler(
         ...     num_samples=1000,
@@ -186,13 +186,13 @@ class HardExampleMiningSampler(AdvancedSampler):
         difficulty_fn: Optional[Callable] = None,
         hard_ratio: float = 0.3
     ):
-        """初始化困难样本挖掘采样器。
+        """Initialize hard example mining sampler.
 
         Args:
-            num_samples: 总采样数
-            difficulty_scores: 预计算的困难度分数
-            difficulty_fn: 困难度计算函数
-            hard_ratio: 困难样本比例
+            num_samples: Total number of samples
+            difficulty_scores: Pre-computed difficulty scores
+            difficulty_fn: Function to compute difficulty
+            hard_ratio: Ratio of hard samples
         """
         if not TORCH_AVAILABLE:
             raise ImportError("PyTorch is required")
@@ -203,28 +203,28 @@ class HardExampleMiningSampler(AdvancedSampler):
         self.hard_ratio = hard_ratio
 
         if difficulty_scores is None and difficulty_fn is None:
-            raise ValueError("必须提供 difficulty_scores 或 difficulty_fn")
+            raise ValueError("Must provide difficulty_scores or difficulty_fn")
 
-        logger.debug(f"HardExampleMiningSampler 初始化：困难样本比例={hard_ratio}")
+        logger.debug(f"HardExampleMiningSampler initialized: hard_ratio={hard_ratio}")
 
     def __iter__(self):
-        """返回包含困难样本的采样索引。"""
+        """Return indices with hard examples."""
         if self.difficulty_scores is None:
-            raise RuntimeError("未设置困难度分数")
+            raise RuntimeError("Difficulty scores not set")
 
         scores = torch.tensor(self.difficulty_scores)
         num_hard = int(self.num_samples * self.hard_ratio)
         num_easy = self.num_samples - num_hard
 
-        # 选择最困难的样本
+        # Select hardest samples
         _, hard_indices = torch.topk(scores, k=num_hard)
 
-        # 随机选择简单样本
+        # Randomly select easy samples
         easy_indices = torch.where(scores < scores.median())[0]
         if len(easy_indices) > num_easy:
             easy_indices = easy_indices[torch.randperm(len(easy_indices))[:num_easy]]
         else:
-            # 如果简单样本不足，补充困难样本
+            # If not enough easy samples, supplement with hard samples
             remaining = num_easy - len(easy_indices)
             additional = torch.where(scores >= scores.median())[0]
             if len(additional) > remaining:
@@ -235,12 +235,12 @@ class HardExampleMiningSampler(AdvancedSampler):
         return iter(sampled_indices[torch.randperm(len(sampled_indices))].tolist())
 
     def __len__(self):
-        """返回采样数量。"""
+        """Return number of samples."""
         return self.num_samples
 
 
 class BalancedBatchSampler(AdvancedSampler):
-    """平衡批采样器，确保每个批次中各类别比例均衡。
+    """Balanced batch sampler ensuring balanced class proportions in each batch.
 
     Example:
         >>> labels = [0, 0, 1, 1, 1, 2, 2]
@@ -248,11 +248,11 @@ class BalancedBatchSampler(AdvancedSampler):
     """
 
     def __init__(self, labels: List[int], batch_size: int):
-        """初始化平衡批采样器。
+        """Initialize balanced batch sampler.
 
         Args:
-            labels: 样本标签列表
-            batch_size: 批大小
+            labels: List of sample labels
+            batch_size: Batch size
         """
         if not TORCH_AVAILABLE:
             raise ImportError("PyTorch is required")
@@ -260,7 +260,7 @@ class BalancedBatchSampler(AdvancedSampler):
         self.labels = labels
         self.batch_size = batch_size
 
-        # 构建类别索引
+        # Build class indices
         self.class_indices: Dict[int, List[int]] = {}
         for idx, label in enumerate(labels):
             if label not in self.class_indices:
@@ -268,19 +268,19 @@ class BalancedBatchSampler(AdvancedSampler):
             self.class_indices[label].append(idx)
 
         logger.debug(
-            f"BalancedBatchSampler 初始化：批大小={batch_size}，"
-            f"{len(self.class_indices)} 个类别"
+            f"BalancedBatchSampler initialized: batch_size={batch_size}, "
+            f"{len(self.class_indices)} classes"
         )
 
     def __iter__(self):
-        """返回平衡的批索引。"""
+        """Return balanced batch indices."""
         batches = []
         class_iterators = {
             class_id: iter(random.sample(indices, len(indices)))
             for class_id, indices in self.class_indices.items()
         }
 
-        # 创建平衡批次
+        # Create balanced batches
         num_classes = len(self.class_indices)
         samples_per_class = self.batch_size // num_classes
 
@@ -288,11 +288,11 @@ class BalancedBatchSampler(AdvancedSampler):
             batch = []
             for class_id, iterator in class_iterators.items():
                 try:
-                    # 从每个类别中采样
+                    # Sample from each class
                     for _ in range(samples_per_class):
                         batch.append(next(iterator))
                 except StopIteration:
-                    # 重新开始该类别的迭代
+                    # Restart iterator for this class
                     class_iterators[class_id] = iter(
                         random.sample(self.class_indices[class_id], len(self.class_indices[class_id]))
                     )
@@ -303,5 +303,5 @@ class BalancedBatchSampler(AdvancedSampler):
         return iter(batches[:len(self)])
 
     def __len__(self):
-        """返回总采样数。"""
+        """Return total number of samples."""
         return len(self.labels)

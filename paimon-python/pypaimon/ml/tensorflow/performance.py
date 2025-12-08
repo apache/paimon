@@ -17,14 +17,14 @@
 #
 
 """
-TensorFlow 数据管道性能优化模块。
+TensorFlow data pipeline performance optimization module.
 
-提供一套优化技术和工具：
-- 预取（prefetch）：异步加载数据
-- 缓存（cache）：内存或磁盘缓存
-- 并行处理（parallel_interleave）：并行读取多个文件
-- 批处理（batch）：动态批大小
-- 性能分析：吞吐量和延迟测试
+Provides a set of optimization techniques and tools:
+- Prefetch: asynchronous data loading
+- Cache: memory or disk caching
+- Parallel interleave: read multiple files in parallel
+- Batch: dynamic batch size
+- Performance analysis: throughput and latency testing
 """
 
 import logging
@@ -41,13 +41,13 @@ logger = logging.getLogger(__name__)
 
 
 class TensorFlowPipelineOptimizer:
-    """TensorFlow 数据管道优化器。
+    """TensorFlow data pipeline optimizer.
 
-    提供一套最佳实践来优化数据管道性能，包括：
-    - 预取缓冲大小自动调整
-    - 并行处理优化
-    - 缓存策略
-    - 性能监控
+    Provides best practices to optimize data pipeline performance, including:
+    - Automatic adjustment of prefetch buffer size
+    - Parallel processing optimization
+    - Cache strategy
+    - Performance monitoring
 
     Example:
         >>> optimizer = TensorFlowPipelineOptimizer()
@@ -55,7 +55,7 @@ class TensorFlowPipelineOptimizer:
     """
 
     def __init__(self):
-        """初始化优化器。"""
+        """Initialize optimizer."""
         if not TENSORFLOW_AVAILABLE:
             raise ImportError("TensorFlow is required")
 
@@ -71,19 +71,19 @@ class TensorFlowPipelineOptimizer:
         parallel_map_calls: Optional[int] = None,
         enable_performance_monitoring: bool = False
     ) -> Any:
-        """应用一系列优化到数据管道。
+        """Apply a series of optimizations to the data pipeline.
 
         Args:
-            dataset: tf.data.Dataset 实例
-            num_workers: Worker 数量（用于并行处理）
-            prefetch_buffer_size: 预取缓冲大小（默认：AUTOTUNE）
-            enable_cache: 是否启用缓存
-            cache_file: 缓存文件路径（默认：内存缓存）
-            parallel_map_calls: 并行 map 调用数（默认：AUTOTUNE）
-            enable_performance_monitoring: 是否启用性能监控
+            dataset: tf.data.Dataset instance
+            num_workers: Number of workers (for parallel processing)
+            prefetch_buffer_size: Prefetch buffer size (default: AUTOTUNE)
+            enable_cache: Whether to enable caching
+            cache_file: Cache file path (default: memory cache)
+            parallel_map_calls: Number of parallel map calls (default: AUTOTUNE)
+            enable_performance_monitoring: Whether to enable performance monitoring
 
         Returns:
-            优化后的 tf.data.Dataset
+            Optimized tf.data.Dataset
 
         Example:
             >>> optimizer = TensorFlowPipelineOptimizer()
@@ -97,38 +97,38 @@ class TensorFlowPipelineOptimizer:
         try:
             optimized = dataset
 
-            # 1. 缓存（在其他操作之前缓存原始数据）
+            # 1. Cache (cache raw data before other operations)
             if enable_cache:
-                self.logger.debug(f"启用缓存（文件：{cache_file or '内存'}）")
+                self.logger.debug(f"Cache enabled (file: {cache_file or 'memory'})")
                 optimized = optimized.cache(filename=cache_file)
 
-            # 2. 洗牌（在缓存之后洗牌以获得良好的数据分布）
-            # 注意：如果数据集非常大，应在 batch 之前进行
+            # 2. Shuffle (shuffle after cache for good data distribution)
+            # Note: if dataset is very large, should do before batch
             # optimized = optimized.shuffle(buffer_size=10000)
 
-            # 3. 并行 map（如果有转换函数）
+            # 3. Parallel map (if transformation function available)
             if parallel_map_calls is not None:
-                self.logger.debug(f"启用并行 map，并发数：{parallel_map_calls}")
-                # 用户可以通过 map 操作添加转换函数
+                self.logger.debug(f"Parallel map enabled, concurrency: {parallel_map_calls}")
+                # Users can add transformation functions via map operation
 
-            # 4. 批处理
-            # 批处理通常由用户控制，这里提供建议
+            # 4. Batching
+            # Batching is usually controlled by user, suggestions provided here
             # optimized = optimized.batch(batch_size)
 
-            # 5. 预取（在所有其他操作之后）
+            # 5. Prefetch (after all other operations)
             if prefetch_buffer_size is None:
                 prefetch_buffer_size = tf.data.AUTOTUNE
 
-            self.logger.debug(f"启用预取，缓冲大小：{prefetch_buffer_size}")
+            self.logger.debug(f"Prefetch enabled, buffer size: {prefetch_buffer_size}")
             optimized = optimized.prefetch(buffer_size=prefetch_buffer_size)
 
             if enable_performance_monitoring:
-                self.logger.info("性能监控已启用，使用 benchmark() 测试吞吐量")
+                self.logger.info("Performance monitoring enabled, use benchmark() to test throughput")
 
             return optimized
 
         except Exception as e:
-            self.logger.error(f"数据管道优化失败：{e}", exc_info=True)
+            self.logger.error(f"Data pipeline optimization failed: {e}", exc_info=True)
             raise
 
     @staticmethod
@@ -138,20 +138,20 @@ class TensorFlowPipelineOptimizer:
         batch_size: int = 32,
         verbose: bool = True
     ) -> dict:
-        """测试数据管道的性能。
+        """Benchmark the data pipeline performance.
 
         Args:
-            dataset: tf.data.Dataset 实例
-            num_batches: 测试的批数（默认：全部）
-            batch_size: 批大小
-            verbose: 是否打印详细信息
+            dataset: tf.data.Dataset instance
+            num_batches: Number of batches to test (default: all)
+            batch_size: Batch size
+            verbose: Whether to print detailed information
 
         Returns:
-            性能指标字典（吞吐量、延迟等）
+            Dictionary of performance metrics (throughput, latency, etc.)
 
         Example:
             >>> metrics = optimizer.benchmark(dataset, num_batches=100)
-            >>> print(f"吞吐量：{metrics['throughput']:.2f} batches/sec")
+            >>> print(f"Throughput: {metrics['throughput']:.2f} batches/sec")
         """
         try:
             start_time = time.time()
@@ -167,7 +167,7 @@ class TensorFlowPipelineOptimizer:
 
             elapsed_time = time.time() - start_time
 
-            # 计算指标
+            # Calculate metrics
             throughput = batch_count / elapsed_time if elapsed_time > 0 else 0
             samples_per_sec = total_samples / elapsed_time if elapsed_time > 0 else 0
             latency_per_batch = (elapsed_time / batch_count) * 1000 if batch_count > 0 else 0
@@ -183,31 +183,31 @@ class TensorFlowPipelineOptimizer:
 
             if verbose:
                 logger.info(
-                    f"性能测试完成：\n"
-                    f"  批数：{batch_count}\n"
-                    f"  总样本数：{total_samples}\n"
-                    f"  耗时：{elapsed_time:.2f}s\n"
-                    f"  吞吐量：{throughput:.2f} batches/sec\n"
-                    f"  样本吞吐量：{samples_per_sec:.2f} samples/sec\n"
-                    f"  批延迟：{latency_per_batch:.2f}ms"
+                    f"Benchmark completed:\n"
+                    f"  Number of batches: {batch_count}\n"
+                    f"  Total samples: {total_samples}\n"
+                    f"  Elapsed time: {elapsed_time:.2f}s\n"
+                    f"  Throughput: {throughput:.2f} batches/sec\n"
+                    f"  Sample throughput: {samples_per_sec:.2f} samples/sec\n"
+                    f"  Batch latency: {latency_per_batch:.2f}ms"
                 )
 
             return metrics
 
         except Exception as e:
-            logger.error(f"性能测试失败：{e}", exc_info=True)
+            logger.error(f"Benchmark failed: {e}", exc_info=True)
             raise
 
     @staticmethod
     def get_optimization_recommendations(dataset_size: int, num_workers: int = 1) -> dict:
-        """根据数据集大小提供优化建议。
+        """Provide optimization suggestions based on dataset size.
 
         Args:
-            dataset_size: 数据集大小（行数）
-            num_workers: Worker 数量
+            dataset_size: Dataset size (number of rows)
+            num_workers: Number of workers
 
         Returns:
-            优化建议字典
+            Dictionary of optimization suggestions
 
         Example:
             >>> recommendations = optimizer.get_optimization_recommendations(
@@ -215,7 +215,7 @@ class TensorFlowPipelineOptimizer:
             ...     num_workers=4
             ... )
         """
-        # 根据数据集大小提供建议
+        # Provide suggestions based on dataset size
         if dataset_size < 1000:
             prefetch_buffer = 1
             cache_enabled = False
@@ -237,7 +237,7 @@ class TensorFlowPipelineOptimizer:
             parallel_calls = 16
             batch_size = 256
 
-        # 根据 Worker 数量调整批大小
+        # Adjust batch size based on number of workers
         batch_size = max(32, batch_size // (num_workers or 1))
 
         recommendations = {
@@ -248,13 +248,13 @@ class TensorFlowPipelineOptimizer:
             'enable_performance_monitoring': True,
         }
 
-        logger.info(f"优化建议（数据集大小：{dataset_size}）：\n{recommendations}")
+        logger.info(f"Optimization suggestions (dataset size: {dataset_size}):\n{recommendations}")
 
         return recommendations
 
 
 class DatasetPipelineBuilder:
-    """数据管道构建器，提供流畅的 API 进行优化。
+    """Data pipeline builder, provides fluent API for optimization.
 
     Example:
         >>> builder = DatasetPipelineBuilder(dataset)
@@ -267,10 +267,10 @@ class DatasetPipelineBuilder:
     """
 
     def __init__(self, dataset: Any):
-        """初始化管道构建器。
+        """Initialize pipeline builder.
 
         Args:
-            dataset: tf.data.Dataset 实例
+            dataset: tf.data.Dataset instance
         """
         if not TENSORFLOW_AVAILABLE:
             raise ImportError("TensorFlow is required")
@@ -279,75 +279,75 @@ class DatasetPipelineBuilder:
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def cache(self, filename: Optional[str] = None) -> 'DatasetPipelineBuilder':
-        """添加缓存操作。
+        """Add cache operation.
 
         Args:
-            filename: 缓存文件路径（默认：内存缓存）
+            filename: Cache file path (default: memory cache)
 
         Returns:
-            self（用于链式调用）
+            self (for chaining)
         """
         try:
             self.dataset = self.dataset.cache(filename=filename)
-            self.logger.debug(f"添加缓存操作（文件：{filename or '内存'}）")
+            self.logger.debug(f"Cache operation added (file: {filename or 'memory'})")
             return self
         except Exception as e:
-            self.logger.error(f"添加缓存失败：{e}", exc_info=True)
+            self.logger.error(f"Failed to add cache: {e}", exc_info=True)
             raise
 
     def shuffle(self, buffer_size: int) -> 'DatasetPipelineBuilder':
-        """添加 shuffle 操作。
+        """Add shuffle operation.
 
         Args:
-            buffer_size: Shuffle 缓冲大小
+            buffer_size: Shuffle buffer size
 
         Returns:
-            self（用于链式调用）
+            self (for chaining)
         """
         try:
             self.dataset = self.dataset.shuffle(buffer_size=buffer_size)
-            self.logger.debug(f"添加 shuffle 操作，缓冲大小：{buffer_size}")
+            self.logger.debug(f"Shuffle operation added, buffer size: {buffer_size}")
             return self
         except Exception as e:
-            self.logger.error(f"添加 shuffle 失败：{e}", exc_info=True)
+            self.logger.error(f"Failed to add shuffle: {e}", exc_info=True)
             raise
 
     def batch(self, batch_size: int, drop_remainder: bool = False) -> 'DatasetPipelineBuilder':
-        """添加 batch 操作。
+        """Add batch operation.
 
         Args:
-            batch_size: 批大小
-            drop_remainder: 是否丢弃不完整的最后一批
+            batch_size: Batch size
+            drop_remainder: Whether to drop incomplete last batch
 
         Returns:
-            self（用于链式调用）
+            self (for chaining)
         """
         try:
             self.dataset = self.dataset.batch(batch_size, drop_remainder=drop_remainder)
-            self.logger.debug(f"添加 batch 操作，批大小：{batch_size}")
+            self.logger.debug(f"Batch operation added, batch size: {batch_size}")
             return self
         except Exception as e:
-            self.logger.error(f"添加 batch 失败：{e}", exc_info=True)
+            self.logger.error(f"Failed to add batch: {e}", exc_info=True)
             raise
 
     def prefetch(self, buffer_size: Any = None) -> 'DatasetPipelineBuilder':
-        """添加 prefetch 操作。
+        """Add prefetch operation.
 
         Args:
-            buffer_size: 预取缓冲大小（默认：AUTOTUNE）
+            buffer_size: Prefetch buffer size (default: AUTOTUNE)
 
         Returns:
-            self（用于链式调用）
+            self (for chaining)
         """
         try:
             if buffer_size is None:
                 buffer_size = tf.data.AUTOTUNE
 
             self.dataset = self.dataset.prefetch(buffer_size=buffer_size)
-            self.logger.debug(f"添加 prefetch 操作，缓冲大小：{buffer_size}")
+            self.logger.debug(f"Prefetch operation added, buffer size: {buffer_size}")
             return self
         except Exception as e:
-            self.logger.error(f"添加 prefetch 失败：{e}", exc_info=True)
+            self.logger.error(f"Failed to add prefetch: {e}", exc_info=True)
             raise
 
     def map(
@@ -355,47 +355,47 @@ class DatasetPipelineBuilder:
         map_func: Callable,
         num_parallel_calls: Any = None
     ) -> 'DatasetPipelineBuilder':
-        """添加 map 操作。
+        """Add map operation.
 
         Args:
-            map_func: 转换函数
-            num_parallel_calls: 并行调用数（默认：1）
+            map_func: Transformation function
+            num_parallel_calls: Number of parallel calls (default: 1)
 
         Returns:
-            self（用于链式调用）
+            self (for chaining)
         """
         try:
             if num_parallel_calls is None:
                 num_parallel_calls = 1
 
             self.dataset = self.dataset.map(map_func, num_parallel_calls=num_parallel_calls)
-            self.logger.debug(f"添加 map 操作，并行调用数：{num_parallel_calls}")
+            self.logger.debug(f"Map operation added, parallel calls: {num_parallel_calls}")
             return self
         except Exception as e:
-            self.logger.error(f"添加 map 失败：{e}", exc_info=True)
+            self.logger.error(f"Failed to add map: {e}", exc_info=True)
             raise
 
     def repeat(self, count: int = -1) -> 'DatasetPipelineBuilder':
-        """添加 repeat 操作。
+        """Add repeat operation.
 
         Args:
-            count: 重复次数（-1 表示无限重复）
+            count: Repeat count (-1 for infinite repeat)
 
         Returns:
-            self（用于链式调用）
+            self (for chaining)
         """
         try:
             self.dataset = self.dataset.repeat(count=count)
-            self.logger.debug(f"添加 repeat 操作，重复次数：{count}")
+            self.logger.debug(f"Repeat operation added, repeat count: {count}")
             return self
         except Exception as e:
-            self.logger.error(f"添加 repeat 失败：{e}", exc_info=True)
+            self.logger.error(f"Failed to add repeat: {e}", exc_info=True)
             raise
 
     def build(self) -> Any:
-        """构建最终的数据集。
+        """Build the final dataset.
 
         Returns:
-            优化后的 tf.data.Dataset
+            Optimized tf.data.Dataset
         """
         return self.dataset

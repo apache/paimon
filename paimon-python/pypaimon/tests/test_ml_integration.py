@@ -17,7 +17,7 @@
 #
 
 """
-Phase 2 集成测试 - TensorFlow 优化和 PyTorch 增强功能测试。
+integration tests - TensorFlow optimization and PyTorch enhancement feature tests.
 """
 
 import os
@@ -59,10 +59,10 @@ if TENSORFLOW_AVAILABLE:
 
 @unittest.skipIf(not TORCH_AVAILABLE, "PyTorch not available")
 class TestAdvancedSampling(unittest.TestCase):
-    """测试 PyTorch 高级采样功能。"""
+    """Test PyTorch advanced sampling functionality."""
 
     def test_weighted_random_sampler(self):
-        """测试加权随机采样器。"""
+        """Test weighted random sampler."""
         weights = [1.0, 1.0, 1.0, 10.0]
         sampler = WeightedRandomSampler(weights, num_samples=100)
 
@@ -73,57 +73,57 @@ class TestAdvancedSampling(unittest.TestCase):
         self.assertTrue(all(0 <= idx < 4 for idx in samples))
 
     def test_weighted_sampler_high_weight_sample(self):
-        """测试高权重样本被优先采样。"""
-        weights = [1.0, 1.0, 1.0, 100.0]  # 最后一个样本权重非常高
+        """Test that high-weight samples are prioritized for sampling."""
+        weights = [1.0, 1.0, 1.0, 100.0]  # Last sample has very high weight
         sampler = WeightedRandomSampler(weights, num_samples=1000)
 
         samples = list(sampler)
         count_last = samples.count(3)
 
-        # 最后一个样本应该被采样约 100 倍以上
+        # Last sample should be sampled approximately 100 times or more
         self.assertGreater(count_last, 500)
 
 
 @unittest.skipIf(not TORCH_AVAILABLE, "PyTorch not available")
 class TestFeatureEngineering(unittest.TestCase):
-    """测试特征工程功能。"""
+    """Test feature engineering functionality."""
 
     def test_standard_scaler(self):
-        """测试标准化转换器。"""
+        """Test standardization transformer."""
         scaler = StandardScaler()
         X_train = [[1, 2], [3, 4], [5, 6]]
 
         scaler.fit(X_train)
         X_scaled = scaler.transform([[3, 4]])
 
-        # 检查转换结果
+        # Check transformation result
         self.assertEqual(X_scaled.shape, (1, 2))
 
     def test_minmax_scaler(self):
-        """测试最小最大化转换器。"""
+        """Test Min-Max scaler."""
         scaler = MinMaxScaler(feature_range=(0, 1))
         X_train = [[1], [2], [3], [4], [5]]
 
         scaler.fit(X_train)
         X_scaled = scaler.transform([[3]])
 
-        # 3 应该映射到 0.5（中间值）
+        # 3 should map to 0.5 (middle value)
         self.assertAlmostEqual(X_scaled[0][0], 0.5, places=5)
 
     def test_onehot_encoder(self):
-        """测试独热编码转换器。"""
+        """Test one-hot encoder."""
         encoder = OneHotEncoder()
         X_train = [['red'], ['green'], ['blue']]
 
         encoder.fit(X_train)
         X_encoded = encoder.transform([['red']])
 
-        # red 应该被编码为 one-hot 向量
-        # 由于字母顺序是 'blue', 'green', 'red'，red 应该在最后
+        # red should be encoded as one-hot vector
+        # Since alphabetical order is 'blue', 'green', 'red', red should be last
         self.assertEqual(X_encoded[0], [0.0, 0.0, 1.0])
 
     def test_feature_normalizer_missing_values(self):
-        """测试特征归一化器处理缺失值。"""
+        """Test feature normalizer handles missing values."""
         import numpy as np
 
         X = np.array([[1, 2], [3, np.nan], [5, 6]], dtype=float)
@@ -131,23 +131,23 @@ class TestFeatureEngineering(unittest.TestCase):
 
         X_clean = normalizer.handle_missing_values(X, strategy='mean')
 
-        # 检查缺失值被填充
+        # Check missing values are filled
         self.assertFalse(np.isnan(X_clean).any())
         self.assertEqual(X_clean.shape, (3, 2))
 
 
 @unittest.skipIf(not TENSORFLOW_AVAILABLE, "TensorFlow not available")
 class TestTensorFlowPerformance(unittest.TestCase):
-    """测试 TensorFlow 性能优化。"""
+    """Test TensorFlow performance optimization."""
 
     def test_pipeline_optimizer_creation(self):
-        """测试管道优化器创建。"""
+        """Test pipeline optimizer creation."""
         optimizer = TensorFlowPipelineOptimizer()
         self.assertIsNotNone(optimizer)
 
     def test_dataset_pipeline_builder(self):
-        """测试数据集管道构建器。"""
-        # 创建简单数据集
+        """Test dataset pipeline builder."""
+        # Create simple dataset
         dataset = tf.data.Dataset.from_tensor_slices(
             (tf.range(100), tf.range(100))
         )
@@ -158,7 +158,7 @@ class TestTensorFlowPerformance(unittest.TestCase):
         self.assertIsNotNone(optimized)
 
     def test_optimization_recommendations(self):
-        """测试优化建议生成。"""
+        """Test optimization recommendation generation."""
         optimizer = TensorFlowPipelineOptimizer()
 
         recommendations = optimizer.get_optimization_recommendations(
@@ -174,15 +174,15 @@ class TestTensorFlowPerformance(unittest.TestCase):
 
 @unittest.skipIf(not TENSORFLOW_AVAILABLE, "TensorFlow not available")
 class TestDistributedTraining(unittest.TestCase):
-    """测试分布式训练支持。"""
+    """Test distributed training support."""
 
     def test_distributed_builder_creation(self):
-        """测试分布式数据集构建器创建。"""
+        """Test distributed dataset builder creation."""
         builder = DistributedPaimonDatasetBuilder()
         self.assertIsNotNone(builder)
 
     def test_distributed_builder_with_strategy(self):
-        """测试使用分布式策略的构建器。"""
+        """Test builder with distributed strategy."""
         strategy = tf.distribute.get_strategy()
         builder = DistributedPaimonDatasetBuilder(strategy)
 
@@ -191,11 +191,11 @@ class TestDistributedTraining(unittest.TestCase):
 
 @unittest.skipIf(not (TORCH_AVAILABLE and TENSORFLOW_AVAILABLE), "Both PyTorch and TensorFlow required")
 class TestCrossFrameworkIntegration(unittest.TestCase):
-    """测试 PyTorch 和 TensorFlow 跨框架集成。"""
+    """Test cross-framework integration between PyTorch and TensorFlow."""
 
     @classmethod
     def setUpClass(cls):
-        """设置测试数据。"""
+        """Set up test data."""
         cls.tempdir = tempfile.mkdtemp()
         cls.warehouse = os.path.join(cls.tempdir, 'warehouse')
         cls.catalog = CatalogFactory.create({'warehouse': cls.warehouse})
@@ -228,18 +228,18 @@ class TestCrossFrameworkIntegration(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        """清理测试数据。"""
+        """Clean up test data."""
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def test_pytorch_to_tensorflow_interoperability(self):
-        """测试 PyTorch 和 TensorFlow 数据互操作性。"""
+        """Test data interoperability between PyTorch and TensorFlow."""
         read_builder = self.table.new_read_builder()
 
-        # PyTorch 数据集
+        # PyTorch dataset
         config = PaimonDatasetConfig(target_column='label')
         pytorch_dataset = PaimonIterableDataset(read_builder=read_builder, config=config)
 
-        # 验证 PyTorch 数据集可以迭代
+        # Verify PyTorch dataset can be iterated
         batch_count = 0
         for features, labels in pytorch_dataset:
             batch_count += 1

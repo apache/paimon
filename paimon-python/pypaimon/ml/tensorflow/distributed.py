@@ -17,13 +17,13 @@
 #
 
 """
-分布式训练支持模块。
+Distributed training support module.
 
-提供与 TensorFlow 分布式策略的集成，包括：
-- MirroredStrategy（单机多 GPU）
-- MultiWorkerMirroredStrategy（多机多 GPU）
-- TPUStrategy（TPU 集群）
-- ParameterServerStrategy（参数服务器）
+Provides integration with TensorFlow distributed strategies, including:
+- MirroredStrategy (single machine, multi-GPU)
+- MultiWorkerMirroredStrategy (multi-machine, multi-GPU)
+- TPUStrategy (TPU cluster)
+- ParameterServerStrategy (parameter server)
 """
 
 import logging
@@ -39,9 +39,9 @@ logger = logging.getLogger(__name__)
 
 
 class DistributedPaimonDatasetBuilder:
-    """为分布式训练构建 Paimon Dataset。
+    """Build Paimon Dataset for distributed training.
 
-    自动处理数据分片和批处理，确保每个 Worker 获得不同的数据片段。
+    Automatically handles data sharding and batching, ensuring each worker gets different data shards.
 
     Example:
         >>> strategy = tf.distribute.MirroredStrategy()
@@ -52,13 +52,13 @@ class DistributedPaimonDatasetBuilder:
     """
 
     def __init__(self, strategy: Optional[Any] = None):
-        """初始化分布式数据集构建器。
+        """Initialize distributed dataset builder.
 
         Args:
-            strategy: TensorFlow 分布式策略（默认：None，使用单机）
+            strategy: TensorFlow distributed strategy (default: None, single machine)
 
         Raises:
-            ImportError: 如果 TensorFlow 未安装
+            ImportError: if TensorFlow is not installed
         """
         if not TENSORFLOW_AVAILABLE:
             raise ImportError("TensorFlow is required")
@@ -74,22 +74,22 @@ class DistributedPaimonDatasetBuilder:
         label_column: Optional[str] = None,
         **kwargs
     ) -> Any:
-        """构建分布式数据集。
+        """Build distributed dataset.
 
         Args:
-            table: Paimon 表实例
-            read_builder: 配置的 ReadBuilder
-            feature_columns: 特征列名
-            label_column: 标签列名
-            **kwargs: 其他参数
+            table: Paimon table instance
+            read_builder: configured ReadBuilder
+            feature_columns: feature column names
+            label_column: label column name
+            **kwargs: other parameters
 
         Returns:
-            tf.data.Dataset 实例
+            tf.data.Dataset instance
         """
         from .dataset import PaimonTensorFlowDataset
 
         try:
-            # 创建基础数据集
+            # Create base dataset
             paimon_dataset = PaimonTensorFlowDataset.from_paimon(
                 table=table,
                 read_builder=read_builder,
@@ -98,17 +98,17 @@ class DistributedPaimonDatasetBuilder:
                 **kwargs
             )
 
-            # 如果提供了策略，自动调整批大小
+            # If strategy is provided, automatically adjust batch size
             if self.strategy:
                 batch_size = kwargs.get('batch_size', 32)
                 global_batch_size = batch_size * self.strategy.num_replicas_in_sync
 
                 self.logger.info(
-                    f"分布式训练：全局批大小 = {global_batch_size} "
-                    f"（本地批大小 {batch_size} × {self.strategy.num_replicas_in_sync} replicas）"
+                    f"Distributed training: global batch size = {global_batch_size} "
+                    f"(local batch size {batch_size} × {self.strategy.num_replicas_in_sync} replicas)"
                 )
 
-                # 返回可用于分布式训练的数据集
+                # Return dataset for distributed training
                 dataset = paimon_dataset.dataset
                 return dataset.batch(
                     batch_size=batch_size,
@@ -118,25 +118,25 @@ class DistributedPaimonDatasetBuilder:
                 return paimon_dataset
 
         except Exception as e:
-            self.logger.error(f"构建分布式数据集失败：{e}", exc_info=True)
+            self.logger.error(f"Failed to build distributed dataset: {e}", exc_info=True)
             raise
 
 
 class DistributedStrategy:
-    """分布式策略工厂类。
+    """Distributed strategy factory class.
 
-    提供简便的方式创建和配置常见的分布式策略。
+    Provides simple ways to create and configure common distributed strategies.
     """
 
     @staticmethod
     def mirrored_strategy(devices: Optional[list] = None) -> Any:
-        """创建 MirroredStrategy（单机多 GPU）。
+        """Create MirroredStrategy (single machine, multi-GPU).
 
         Args:
-            devices: GPU 设备列表（默认：所有可用 GPU）
+            devices: GPU device list (default: all available GPUs)
 
         Returns:
-            MirroredStrategy 实例
+            MirroredStrategy instance
         """
         if not TENSORFLOW_AVAILABLE:
             raise ImportError("TensorFlow is required")
@@ -148,20 +148,20 @@ class DistributedStrategy:
                 strategy = tf.distribute.MirroredStrategy()
 
             logger.info(
-                f"MirroredStrategy 创建成功，使用 {strategy.num_replicas_in_sync} 个副本"
+                f"MirroredStrategy created successfully, using {strategy.num_replicas_in_sync} replicas"
             )
             return strategy
 
         except Exception as e:
-            logger.error(f"创建 MirroredStrategy 失败：{e}", exc_info=True)
+            logger.error(f"Failed to create MirroredStrategy: {e}", exc_info=True)
             raise
 
     @staticmethod
     def multi_worker_strategy() -> Any:
-        """创建 MultiWorkerMirroredStrategy（多机多 GPU）。
+        """Create MultiWorkerMirroredStrategy (multi-machine, multi-GPU).
 
         Returns:
-            MultiWorkerMirroredStrategy 实例
+            MultiWorkerMirroredStrategy instance
         """
         if not TENSORFLOW_AVAILABLE:
             raise ImportError("TensorFlow is required")
@@ -169,23 +169,23 @@ class DistributedStrategy:
         try:
             strategy = tf.distribute.MultiWorkerMirroredStrategy()
             logger.info(
-                f"MultiWorkerMirroredStrategy 创建成功，使用 {strategy.num_replicas_in_sync} 个副本"
+                f"MultiWorkerMirroredStrategy created successfully, using {strategy.num_replicas_in_sync} replicas"
             )
             return strategy
 
         except Exception as e:
-            logger.error(f"创建 MultiWorkerMirroredStrategy 失败：{e}", exc_info=True)
+            logger.error(f"Failed to create MultiWorkerMirroredStrategy: {e}", exc_info=True)
             raise
 
     @staticmethod
     def tpu_strategy(tpu_address: str) -> Any:
-        """创建 TPUStrategy（TPU 集群）。
+        """Create TPUStrategy (TPU cluster).
 
         Args:
-            tpu_address: TPU 地址（例如：'grpc://10.0.0.2:8431'）
+            tpu_address: TPU address (e.g., 'grpc://10.0.0.2:8431')
 
         Returns:
-            TPUStrategy 实例
+            TPUStrategy instance
         """
         if not TENSORFLOW_AVAILABLE:
             raise ImportError("TensorFlow is required")
@@ -197,12 +197,12 @@ class DistributedStrategy:
 
             strategy = tf.distribute.TPUStrategy(resolver)
             logger.info(
-                f"TPUStrategy 创建成功，使用 {strategy.num_replicas_in_sync} 个 TPU cores"
+                f"TPUStrategy created successfully, using {strategy.num_replicas_in_sync} TPU cores"
             )
             return strategy
 
         except Exception as e:
-            logger.error(f"创建 TPUStrategy 失败：{e}", exc_info=True)
+            logger.error(f"Failed to create TPUStrategy: {e}", exc_info=True)
             raise
 
     @staticmethod
@@ -211,15 +211,15 @@ class DistributedStrategy:
         ps_hosts: list,
         worker_index: int
     ) -> Any:
-        """创建 ParameterServerStrategy（参数服务器）。
+        """Create ParameterServerStrategy (parameter server).
 
         Args:
-            worker_hosts: Worker 主机列表（例如：['localhost:12355', 'localhost:12356']）
-            ps_hosts: 参数服务器主机列表（例如：['localhost:12357']）
-            worker_index: 当前 Worker 的索引
+            worker_hosts: Worker host list (e.g., ['localhost:12355', 'localhost:12356'])
+            ps_hosts: Parameter server host list (e.g., ['localhost:12357'])
+            worker_index: Current worker index
 
         Returns:
-            ParameterServerStrategy 实例
+            ParameterServerStrategy instance
         """
         if not TENSORFLOW_AVAILABLE:
             raise ImportError("TensorFlow is required")
@@ -227,13 +227,13 @@ class DistributedStrategy:
         try:
             cluster_def = tf.train.ClusterDef()
 
-            # 添加 Worker
+            # Add workers
             job_def = cluster_def.job.add()
             job_def.name = 'worker'
             for i, host in enumerate(worker_hosts):
                 job_def.tasks[i] = host
 
-            # 添加参数服务器
+            # Add parameter servers
             job_def = cluster_def.job.add()
             job_def.name = 'ps'
             for i, host in enumerate(ps_hosts):
@@ -247,9 +247,9 @@ class DistributedStrategy:
             )
 
             strategy = tf.distribute.ParameterServerStrategy(resolver)
-            logger.info("ParameterServerStrategy 创建成功")
+            logger.info("ParameterServerStrategy created successfully")
             return strategy
 
         except Exception as e:
-            logger.error(f"创建 ParameterServerStrategy 失败：{e}", exc_info=True)
+            logger.error(f"Failed to create ParameterServerStrategy: {e}", exc_info=True)
             raise
