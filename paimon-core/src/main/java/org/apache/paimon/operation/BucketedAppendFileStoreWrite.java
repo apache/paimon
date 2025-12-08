@@ -106,7 +106,6 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
                     options.compactionMinFileNum(),
                     options.targetFileSize(false),
                     options.forceRewriteAllFiles(),
-                    options.bucketAppendOrdered(),
                     files -> compactRewrite(partition, bucket, dvFactory, files),
                     compactionMetrics == null
                             ? null

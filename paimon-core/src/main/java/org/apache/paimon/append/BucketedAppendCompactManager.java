@@ -55,7 +55,6 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
 
     private static final int FULL_COMPACT_MIN_FILE = 3;
 
-    private final Comparator<DataFileMeta> comparator;
     private final ExecutorService executor;
     private final BucketedDvMaintainer dvMaintainer;
     private final PriorityQueue<DataFileMeta> toCompact;
@@ -75,17 +74,11 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             int minFileNum,
             long targetFileSize,
             boolean forceRewriteAllFiles,
-            boolean ordered,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter) {
-        this.comparator =
-                ordered
-                        ? Comparator.comparing(DataFileMeta::minSequenceNumber)
-                        : Comparator.comparing(DataFileMeta::creationTime)
-                                .thenComparing(DataFileMeta::fileName);
         this.executor = executor;
         this.dvMaintainer = dvMaintainer;
-        this.toCompact = new PriorityQueue<>(comparator);
+        this.toCompact = new PriorityQueue<>(Comparator.comparing(DataFileMeta::minSequenceNumber));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.targetFileSize = targetFileSize;

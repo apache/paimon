@@ -208,7 +208,6 @@ public class BucketedAppendCompactManagerTest {
                         minFileNum,
                         targetFileSize,
                         false,
-                        true,
                         null, // not used
                         null);
         Optional<List<DataFileMeta>> actual = manager.pickCompactBefore();

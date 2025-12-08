@@ -2929,10 +2929,6 @@ public class CoreOptions implements Serializable {
         return consumerId;
     }
 
-    public boolean bucketAppendOrdered() {
-        return options.get(BUCKET_APPEND_ORDERED);
-    }
-
     @Nullable
     public Integer fullCompactionDeltaCommits() {
         return options.get(FULL_COMPACTION_DELTA_COMMITS);
