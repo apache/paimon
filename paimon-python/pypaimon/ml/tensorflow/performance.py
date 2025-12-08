@@ -32,7 +32,7 @@ import time
 from typing import Any, Optional, Callable
 
 try:
-    import tensorflow
+    import tensorflow as tf
     TENSORFLOW_AVAILABLE = True
 except ImportError:
     TENSORFLOW_AVAILABLE = False
@@ -140,8 +140,8 @@ class TensorFlowPipelineOptimizer:
 
             # 5. Prefetch (after all other operations)
             if prefetch_buffer_size is None:
-                # Use a reasonable default buffer size for prefetch
-                prefetch_buffer_size = 1  # This allows async prefetch without AUTOTUNE
+                # Use AUTOTUNE for automatic prefetch optimization
+                prefetch_buffer_size = tf.data.AUTOTUNE
 
             try:
                 self.logger.debug(f"Prefetch enabled, buffer size: {prefetch_buffer_size}")
@@ -369,8 +369,8 @@ class DatasetPipelineBuilder:
         """
         try:
             if buffer_size is None:
-                # Use a reasonable default for prefetch buffer
-                buffer_size = 1
+                # Use AUTOTUNE for automatic prefetch optimization
+                buffer_size = tf.data.AUTOTUNE
 
             self.dataset = self.dataset.prefetch(buffer_size=buffer_size)
             self.logger.debug(f"Prefetch operation added, buffer size: {buffer_size}")
