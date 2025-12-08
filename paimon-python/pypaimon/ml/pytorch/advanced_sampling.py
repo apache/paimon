@@ -37,6 +37,8 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
+    Sampler = object  # type: ignore
+    torch = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
