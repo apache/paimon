@@ -20,17 +20,14 @@ name: End to End Tests Flink 2.x on JDK 11
 
 on:
   push:
-    paths-ignore:
-      - 'paimon-vector/**'
-      - '.github/workflows/utitcase-paimon-vector.yml'
   pull_request:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
-      - 'paimon-vector/**'
-      - '.github/workflows/utitcase-paimon-vector.yml'
+      - 'paimon-vector-index/**'
+      - 'utitcase-paimon-vector-index.yml'
 
 env:
   JDK_VERSION: 11

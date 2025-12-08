@@ -22,7 +22,7 @@ on:
       - 'docs/**'
       - '**/*.md'
       - 'paimon-python/**'
-      - 'paimon-vector/**'
+      - 'paimon-vector-index/**'
 
 env:
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true

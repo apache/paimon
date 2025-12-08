@@ -15,21 +15,17 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-name: UTCase and ITCase Flink 1.x
+
+name: UTCase and ITCase Paimon Vector
 
 on:
   push:
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'paimon-python/**'
-      - '.github/workflows/paimon-python-checks.yml'
+    paths:
       - 'paimon-vector-index/**'
-      - 'utitcase-paimon-vector-index.yml'
 
 env:
-  JDK_VERSION: 8
+  JDK_VERSION: 11
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
 
 concurrency:
@@ -39,11 +35,6 @@ concurrency:
 jobs:
   build_test:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: true
-      matrix:
-        flink_version: ['common', 'cdc', '1.16', '1.17', '1.18', '1.19', '1.20']
 
     steps:
       - name: Checkout code
@@ -55,20 +46,17 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
-      - name: Build Flink
-        run: |
-          COMPILE_MODULE="org.apache.paimon:paimon-flink-${{ matrix.flink_version }}"
-          echo "Start compiling modules: $COMPILE_MODULE"
-          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3 -pl "${COMPILE_MODULE}" -am
+      - name: Build Paimon Vector
+        run:  mvn -T 2C -B clean install -DskipTests -Ppaimon-vector-index
 
-      - name: Test Flink
+      - name: Test Paimon Vector
         run: |
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          TEST_MODULE="org.apache.paimon:paimon-flink-${{ matrix.flink_version }}" 
+          TEST_MODULE="org.apache.paimon:paimon-vector-index"
           echo "Start testing module: $TEST_MODULE"
-          mvn -T 2C -B test verify -Pflink1,spark3 -pl "${TEST_MODULE}" -Duser.timezone=$jvm_timezone
+          mvn -T 2C -B test verify -Ppaimon-vector-index -pl "${TEST_MODULE}" -Duser.timezone=$jvm_timezone
           echo "All modules tested"
         env:
           MAVEN_OPTS: -Xmx4096m -XX:+UseG1GC -XX:CICompilerCount=2
