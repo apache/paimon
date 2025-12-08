@@ -47,8 +47,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
 import static java.util.Collections.emptyList;
-import static org.apache.paimon.table.source.AppendOnlySplitGenerator.CREATION_TIME_COMPARATOR;
-import static org.apache.paimon.table.source.AppendOnlySplitGenerator.SEQUENCE_NUMBER_COMPARATOR;
 
 /** Compact manager for {@link AppendOnlyFileStore}. */
 public class BucketedAppendCompactManager extends CompactFutureManager {
@@ -80,7 +78,11 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             boolean ordered,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter) {
-        this.comparator = ordered ? SEQUENCE_NUMBER_COMPARATOR : CREATION_TIME_COMPARATOR;
+        this.comparator =
+                ordered
+                        ? Comparator.comparing(DataFileMeta::minSequenceNumber)
+                        : Comparator.comparing(DataFileMeta::creationTime)
+                                .thenComparing(DataFileMeta::fileName);
         this.executor = executor;
         this.dvMaintainer = dvMaintainer;
         this.toCompact = new PriorityQueue<>(comparator);

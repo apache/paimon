@@ -23,7 +23,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
@@ -46,13 +45,9 @@ import org.apache.paimon.utils.RowKindFilter;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
-
-import static org.apache.paimon.table.source.AppendOnlySplitGenerator.CREATION_TIME_COMPARATOR;
-import static org.apache.paimon.table.source.AppendOnlySplitGenerator.SEQUENCE_NUMBER_COMPARATOR;
 
 /** {@link FileStoreTable} for append table. */
 public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
@@ -96,14 +91,9 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         CoreOptions options = store().options();
         long targetSplitSize = options.splitTargetSize();
         long openFileCost = options.splitOpenFileCost();
-        Comparator<DataFileMeta> comparator = CREATION_TIME_COMPARATOR;
-        if (bucketMode() == BucketMode.HASH_FIXED && options.bucketAppendOrdered()) {
-            comparator = SEQUENCE_NUMBER_COMPARATOR;
-        }
         return coreOptions().dataEvolutionEnabled()
                 ? new DataEvolutionSplitGenerator(targetSplitSize, openFileCost)
-                : new AppendOnlySplitGenerator(
-                        targetSplitSize, openFileCost, bucketMode(), comparator);
+                : new AppendOnlySplitGenerator(targetSplitSize, openFileCost, bucketMode());
     }
 
     @Override

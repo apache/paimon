@@ -37,7 +37,6 @@ import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.io.DataFileTestUtils.fromMinMax;
 import static org.apache.paimon.io.DataFileTestUtils.newFile;
-import static org.apache.paimon.table.source.AppendOnlySplitGenerator.SEQUENCE_NUMBER_COMPARATOR;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link AppendOnlySplitGenerator} and {@link MergeTreeSplitGenerator}. */
@@ -77,11 +76,7 @@ public class SplitGeneratorTest {
                         newFileFromSequence("6", 101, 61, 100));
         assertThat(
                         toNames(
-                                new AppendOnlySplitGenerator(
-                                                40,
-                                                2,
-                                                BucketMode.HASH_FIXED,
-                                                SEQUENCE_NUMBER_COMPARATOR)
+                                new AppendOnlySplitGenerator(40, 2, BucketMode.HASH_FIXED)
                                         .splitForBatch(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2"),
@@ -91,11 +86,7 @@ public class SplitGeneratorTest {
 
         assertThat(
                         toNames(
-                                new AppendOnlySplitGenerator(
-                                                70,
-                                                2,
-                                                BucketMode.HASH_FIXED,
-                                                SEQUENCE_NUMBER_COMPARATOR)
+                                new AppendOnlySplitGenerator(70, 2, BucketMode.HASH_FIXED)
                                         .splitForBatch(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2", "3"),
@@ -104,11 +95,7 @@ public class SplitGeneratorTest {
 
         assertThat(
                         toNames(
-                                new AppendOnlySplitGenerator(
-                                                40,
-                                                20,
-                                                BucketMode.HASH_FIXED,
-                                                SEQUENCE_NUMBER_COMPARATOR)
+                                new AppendOnlySplitGenerator(40, 20, BucketMode.HASH_FIXED)
                                         .splitForBatch(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2"),

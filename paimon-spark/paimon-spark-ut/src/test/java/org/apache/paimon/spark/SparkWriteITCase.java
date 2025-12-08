@@ -103,14 +103,12 @@ public class SparkWriteITCase {
         // test partial write
         spark.sql("INSERT INTO T (a) VALUES (1), (2)").collectAsList();
         List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
-        assertThat(rows.stream().map(Row::toString))
-                .containsExactlyInAnyOrder("[1,2,my_value]", "[2,2,my_value]");
+        assertThat(rows.toString()).isEqualTo("[[1,2,my_value], [2,2,my_value]]");
 
         // test write with DEFAULT
         spark.sql("INSERT INTO T VALUES (3, DEFAULT, DEFAULT)").collectAsList();
         rows = spark.sql("SELECT * FROM T").collectAsList();
-        assertThat(rows.stream().map(Row::toString))
-                .containsExactlyInAnyOrder("[1,2,my_value]", "[2,2,my_value]", "[3,2,my_value]");
+        assertThat(rows.toString()).isEqualTo("[[1,2,my_value], [2,2,my_value], [3,2,my_value]]");
 
         // test add column with DEFAULT not support
         assertThatThrownBy(() -> spark.sql("ALTER TABLE T ADD COLUMN d INT DEFAULT 5"))
@@ -121,21 +119,16 @@ public class SparkWriteITCase {
         spark.sql("ALTER TABLE T ALTER COLUMN b TYPE STRING").collectAsList();
         spark.sql("INSERT INTO T (a) VALUES (4)").collectAsList();
         rows = spark.sql("SELECT * FROM T").collectAsList();
-        assertThat(rows.stream().map(Row::toString))
-                .containsExactlyInAnyOrder(
-                        "[1,2,my_value]", "[2,2,my_value]", "[3,2,my_value]", "[4,2,my_value]");
+        assertThat(rows.toString())
+                .isEqualTo("[[1,2,my_value], [2,2,my_value], [3,2,my_value], [4,2,my_value]]");
 
         // test alter default column
         spark.sql("ALTER TABLE T ALTER COLUMN b SET DEFAULT '3'");
         spark.sql("INSERT INTO T (a) VALUES (5)").collectAsList();
         rows = spark.sql("SELECT * FROM T").collectAsList();
-        assertThat(rows.stream().map(Row::toString))
-                .containsExactlyInAnyOrder(
-                        "[1,2,my_value]",
-                        "[2,2,my_value]",
-                        "[3,2,my_value]",
-                        "[4,2,my_value]",
-                        "[5,3,my_value]");
+        assertThat(rows.toString())
+                .isEqualTo(
+                        "[[1,2,my_value], [2,2,my_value], [3,2,my_value], [4,2,my_value], [5,3,my_value]]");
     }
 
     @Test
