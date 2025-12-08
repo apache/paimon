@@ -1116,6 +1116,181 @@ paths:
           $ref: '#/components/responses/BranchNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/tags:
+    get:
+      tags:
+        - tag
+      summary: List tags
+      operationId: listTags
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+        - name: tagNamePattern
+          description: A sql LIKE pattern (%) for tag names. All tags will be returned if not set or empty. Currently, only prefix matching is supported.
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTagsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+    post:
+      tags:
+        - tag
+      summary: Create tag
+      operationId: createTag
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTagRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          description:
+            Not Found
+            - TableNotExistException, table does not exist
+            - SnapshotNotExistException, the requested snapshot does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+              examples:
+                TableNotExist:
+                  $ref: '#/components/examples/TableNotExistError'
+                SnapshotNotExist:
+                  $ref: '#/components/examples/SnapshotNotExistError'
+        "409":
+          $ref: '#/components/responses/TagAlreadyExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/tags/{tag}:
+    get:
+      tags:
+        - tag
+      summary: Get tag
+      operationId: getTag
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tag
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTagResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TagNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+    delete:
+      tags:
+        - tag
+      summary: Delete tag
+      operationId: deleteTag
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tag
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TagNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/views:
     get:
       tags:
@@ -1790,6 +1965,20 @@ components:
               "resourceName": "branch",
               "code": 404
             }
+    TagNotExistErrorResponse:
+      description:
+        Not Found - TagNotExistException, the tag does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+          example:
+            {
+              "message": "The given tag does not exist",
+              "resourceType": "TAG",
+              "resourceName": "tag1",
+              "code": 404
+            }
     ViewNotExistErrorResponse:
       description:
         Not Found - ViewNotExistException, the view does not exist
@@ -1868,6 +2057,19 @@ components:
               "message": "The given branch already exists",
               "resourceType": "BRANCH",
               "resourceName": "branch",
+              "code": 409
+            }
+    TagAlreadyExistErrorResponse:
+      description: Conflict - The tag already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+          example:
+            {
+              "message": "The given tag already exists",
+              "resourceType": "TAG",
+              "resourceName": "tag1",
               "code": 409
             }
     ViewAlreadyExistErrorResponse:
@@ -2844,6 +3046,64 @@ components:
           type: array
           items:
             type: string
+    CreateTagRequest:
+      type: object
+      required:
+        - tagName
+      properties:
+        tagName:
+          type: string
+        snapshotId:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional snapshot id, if not provided uses latest snapshot
+        timeRetained:
+          type: string
+          nullable: true
+          description: Optional time retained as string (e.g., "1d", "12h", "30m")
+        ignoreIfExists:
+          type: boolean
+          default: false
+          description: If true, ignore if tag already exists
+    GetTagResponse:
+      type: object
+      properties:
+        tagName:
+          type: string
+        snapshot:
+          $ref: '#/components/schemas/Snapshot'
+        tagCreateTime:
+          type: integer
+          format: int64
+          nullable: true
+        tagTimeRetained:
+          type: string
+          nullable: true
+    ListTagsResponse:
+      type: object
+      properties:
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/TagInfo'
+        nextPageToken:
+          type: string
+    TagInfo:
+      type: object
+      properties:
+        tagName:
+          type: string
+        snapshotId:
+          type: integer
+          format: int64
+        tagCreateTime:
+          type: integer
+          format: int64
+          nullable: true
+        tagTimeRetained:
+          type: string
+          nullable: true
     GetViewResponse:
       type: object
       properties:
