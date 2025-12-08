@@ -17,7 +17,7 @@
 ################################################################################
 
 import logging
-from typing import Dict, List, Tuple, Any, Optional
+from typing import List, Tuple, Any, Optional
 from datetime import datetime, timedelta
 
 from pypaimon.compact.compact_task import CompactTask, AppendCompactTask

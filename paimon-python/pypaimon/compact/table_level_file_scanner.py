@@ -462,7 +462,8 @@ class TableLevelFileScanner:
             f"  Average file size: {self._format_size(avg_file_size)}\n"
             f"  Total rows: {self.total_row_count}\n"
             f"  Total deletes: {self.total_delete_count}\n"
-            f"  Delete ratio: {(self.total_delete_count / self.total_row_count * 100) if self.total_row_count else 0:.2f}%\n"
+            f"  Delete ratio: "
+            f"{(self.total_delete_count / self.total_row_count * 100) if self.total_row_count else 0:.2f}%\n"
             f"  Partitions: {len(self.partition_stats)}"
         )
 
