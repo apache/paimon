@@ -17,9 +17,9 @@
 #
 
 """
-监控和诊断模块。
+Monitoring and diagnostics module.
 
-提供性能监控、数据采样预览和错误重试机制。
+Provides performance monitoring, data sampling preview, and error retry mechanisms.
 """
 
 import logging
@@ -31,20 +31,20 @@ logger = logging.getLogger(__name__)
 
 
 class PerformanceMonitor:
-    """性能监控器。
+    """Performance monitor.
 
-    跟踪关键操作的性能指标（吞吐量、延迟、错误率）。
+    Tracks performance metrics (throughput, latency, error rate) of critical operations.
 
     Example:
         >>> monitor = PerformanceMonitor()
         >>> monitor.start_timer('data_loading')
-        >>> # 执行数据加载操作
+        >>> # Perform data loading operation
         >>> monitor.end_timer('data_loading')
         >>> metrics = monitor.get_metrics()
     """
 
     def __init__(self):
-        """初始化性能监控器。"""
+        """Initialize the performance monitor."""
         self.timers: Dict[str, float] = {}
         self.metrics: Dict[str, Dict[str, Any]] = defaultdict(
             lambda: {'count': 0, 'total_time': 0, 'errors': 0}
@@ -52,26 +52,26 @@ class PerformanceMonitor:
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def start_timer(self, operation_name: str) -> None:
-        """启动计时器。
+        """Start timer.
 
         Args:
-            operation_name: 操作名称
+            operation_name: Operation name
         """
         self.timers[operation_name] = time.time()
-        self.logger.debug(f"启动计时器：{operation_name}")
+        self.logger.debug(f"Timer started: {operation_name}")
 
     def end_timer(self, operation_name: str) -> float:
-        """结束计时器并记录时间。
+        """End timer and record elapsed time.
 
         Args:
-            operation_name: 操作名称
+            operation_name: Operation name
 
         Returns:
-            耗时（秒）
+            Elapsed time (seconds)
         """
         try:
             if operation_name not in self.timers:
-                self.logger.warning(f"计时器未启动：{operation_name}")
+                self.logger.warning(f"Timer not started: {operation_name}")
                 return 0
 
             elapsed = time.time() - self.timers[operation_name]
@@ -80,31 +80,31 @@ class PerformanceMonitor:
             self.metrics[operation_name]['count'] += 1
             self.metrics[operation_name]['total_time'] += elapsed
 
-            self.logger.debug(f"计时器结束：{operation_name}，耗时={elapsed:.3f}s")
+            self.logger.debug(f"Timer ended: {operation_name}, elapsed={elapsed:.3f}s")
 
             return elapsed
 
         except Exception as e:
-            self.logger.error(f"计时器结束失败：{e}")
+            self.logger.error(f"Timer end failed: {e}")
             return 0
 
     def record_error(self, operation_name: str) -> None:
-        """记录错误。
+        """Record error.
 
         Args:
-            operation_name: 操作名称
+            operation_name: Operation name
         """
         if operation_name not in self.metrics:
             self.metrics[operation_name]['count'] = 1
 
         self.metrics[operation_name]['errors'] += 1
-        self.logger.debug(f"记录错误：{operation_name}")
+        self.logger.debug(f"Error recorded: {operation_name}")
 
     def get_metrics(self) -> Dict[str, Dict[str, float]]:
-        """获取所有性能指标。
+        """Get all performance metrics.
 
         Returns:
-            性能指标字典
+            Performance metrics dictionary
 
         Example:
             >>> metrics = monitor.get_metrics()
@@ -140,28 +140,28 @@ class PerformanceMonitor:
         return result
 
     def print_report(self) -> None:
-        """打印性能报告。"""
+        """Print performance report."""
         metrics = self.get_metrics()
 
         print("\n" + "="*80)
-        print("性能监控报告")
+        print("Performance Monitoring Report")
         print("="*80)
 
         for op_name, stats in metrics.items():
             print(f"\n{op_name}:")
-            print(f"  调用次数：{stats['count']}")
-            print(f"  总耗时：{stats['total_time']:.3f}s")
-            print(f"  平均耗时：{stats['avg_time']:.3f}s")
-            print(f"  吞吐量：{stats['throughput']:.2f} ops/sec")
-            print(f"  错误率：{stats['error_rate']*100:.2f}%")
+            print(f"  Invocation count: {stats['count']}")
+            print(f"  Total time: {stats['total_time']:.3f}s")
+            print(f"  Average time: {stats['avg_time']:.3f}s")
+            print(f"  Throughput: {stats['throughput']:.2f} ops/sec")
+            print(f"  Error rate: {stats['error_rate']*100:.2f}%")
 
         print("\n" + "="*80)
 
 
 class DataSampler:
-    """数据采样预览器。
+    """Data sampling previewer.
 
-    从大型数据集中采样数据进行预览和验证。
+    Sample data from large datasets for preview and validation.
 
     Example:
         >>> sampler = DataSampler(sample_size=100)
@@ -169,11 +169,11 @@ class DataSampler:
     """
 
     def __init__(self, sample_size: int = 100, random_seed: Optional[int] = None):
-        """初始化数据采样器。
+        """Initialize data sampler.
 
         Args:
-            sample_size: 采样大小
-            random_seed: 随机种子
+            sample_size: Sample size
+            random_seed: Random seed
         """
         self.sample_size = sample_size
         self.random_seed = random_seed
@@ -182,13 +182,13 @@ class DataSampler:
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def sample(self, data_iterator: Any) -> List[Any]:
-        """从迭代器采样数据。
+        """Sample data from iterator.
 
         Args:
-            data_iterator: 数据迭代器
+            data_iterator: Data iterator
 
         Returns:
-            采样数据列表
+            List of sampled data
 
         Example:
             >>> dataset = [i for i in range(1000)]
@@ -202,7 +202,7 @@ class DataSampler:
             for data in data_iterator:
                 count += 1
 
-                # 使用储水库采样算法
+                # Use reservoir sampling algorithm
                 if len(self.samples) < self.sample_size:
                     self.samples.append(data)
                 else:
@@ -212,20 +212,20 @@ class DataSampler:
                         self.samples[j] = data
 
             self.logger.info(
-                f"采样完成：从 {count} 条数据中采样 {len(self.samples)} 条"
+                f"Sampling completed: sampled {len(self.samples)} items from {count} items"
             )
 
             return self.samples
 
         except Exception as e:
-            self.logger.error(f"数据采样失败：{e}", exc_info=True)
+            self.logger.error(f"Data sampling failed: {e}", exc_info=True)
             return []
 
     def get_statistics(self) -> Dict[str, Any]:
-        """获取采样数据的统计信息。
+        """Get statistics of sampled data.
 
         Returns:
-            统计信息字典
+            Statistics dictionary
         """
         if not self.samples:
             return {'sample_count': 0}
@@ -239,14 +239,14 @@ class DataSampler:
             }
 
         except Exception as e:
-            self.logger.error(f"统计信息获取失败：{e}")
+            self.logger.error(f"Statistics retrieval failed: {e}")
             return {'sample_count': len(self.samples)}
 
 
 class RetryPolicy:
-    """重试策略。
+    """Retry policy.
 
-    定义错误处理的重试行为（指数退避、最大重试次数等）。
+    Defines retry behavior for error handling (exponential backoff, max retries, etc.).
 
     Example:
         >>> policy = RetryPolicy(max_retries=3, initial_delay=1.0)
@@ -261,14 +261,14 @@ class RetryPolicy:
         exponential_base: float = 2.0,
         retry_on_exceptions: Optional[tuple] = None
     ):
-        """初始化重试策略。
+        """Initialize retry policy.
 
         Args:
-            max_retries: 最大重试次数
-            initial_delay: 初始延迟（秒）
-            max_delay: 最大延迟（秒）
-            exponential_base: 指数退避基数
-            retry_on_exceptions: 需要重试的异常类型
+            max_retries: Maximum number of retries
+            initial_delay: Initial delay (seconds)
+            max_delay: Maximum delay (seconds)
+            exponential_base: Exponential backoff base
+            retry_on_exceptions: Exception types to retry on
         """
         self.max_retries = max_retries
         self.initial_delay = initial_delay
@@ -279,15 +279,15 @@ class RetryPolicy:
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def execute(self, func: Callable, *args, **kwargs) -> Any:
-        """执行函数，带重试逻辑。
+        """Execute function with retry logic.
 
         Args:
-            func: 要执行的函数
-            *args: 位置参数
-            **kwargs: 关键字参数
+            func: Function to execute
+            *args: Positional arguments
+            **kwargs: Keyword arguments
 
         Returns:
-            函数返回值
+            Function return value
 
         Example:
             >>> def fetch_data():
@@ -306,7 +306,7 @@ class RetryPolicy:
                 result = func(*args, **kwargs)
                 if attempt > 0:
                     self.logger.info(
-                        f"执行成功（第 {attempt + 1} 次尝试）"
+                        f"Execution successful (attempt {attempt + 1})"
                     )
                 return result
 
@@ -315,36 +315,36 @@ class RetryPolicy:
 
                 if attempt >= self.max_retries:
                     self.logger.error(
-                        f"执行失败，已达最大重试次数：{self.max_retries}"
+                        f"Execution failed, maximum retries reached: {self.max_retries}"
                     )
                     raise
 
-                # 计算延迟
+                # Calculate delay
                 delay = min(
                     self.initial_delay * (self.exponential_base ** attempt),
                     self.max_delay
                 )
 
                 self.logger.warning(
-                    f"执行失败（尝试 {attempt + 1}/{self.max_retries + 1}），"
-                    f"{delay:.2f}s 后重试：{str(e)}"
+                    f"Execution failed (attempt {attempt + 1}/{self.max_retries + 1}), "
+                    f"retrying in {delay:.2f}s: {str(e)}"
                 )
 
                 time.sleep(delay)
 
             except Exception as e:
-                self.logger.error(f"执行失败，不进行重试：{str(e)}")
+                self.logger.error(f"Execution failed, no retry: {str(e)}")
                 raise
 
         if last_exception:
             raise last_exception
-        raise RuntimeError("执行失败")
+        raise RuntimeError("Execution failed")
 
 
 class DataValidator:
-    """数据验证器。
+    """Data validator.
 
-    验证数据的有效性和完整性。
+    Validate data validity and completeness.
 
     Example:
         >>> validator = DataValidator()
@@ -353,7 +353,7 @@ class DataValidator:
     """
 
     def __init__(self):
-        """初始化数据验证器。"""
+        """Initialize data validator."""
         self.rules: Dict[str, List[Tuple[Callable, Optional[str]]]] = defaultdict(list)
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
@@ -363,32 +363,32 @@ class DataValidator:
         rule: Callable,
         error_message: Optional[str] = None
     ) -> 'DataValidator':
-        """添加验证规则。
+        """Add validation rule.
 
         Args:
-            field: 字段名
-            rule: 验证函数（返回 True/False）
-            error_message: 错误消息
+            field: Field name
+            rule: Validation function (returns True/False)
+            error_message: Error message
 
         Returns:
-            self（用于链式调用）
+            self (for chaining)
 
         Example:
             >>> validator = DataValidator()
-            >>> validator.add_rule('email', lambda x: '@' in x, '无效的邮箱')
-            >>> validator.add_rule('age', lambda x: x > 0, '年龄必须大于 0')
+            >>> validator.add_rule('email', lambda x: '@' in x, 'Invalid email')
+            >>> validator.add_rule('age', lambda x: x > 0, 'Age must be greater than 0')
         """
         self.rules[field].append((rule, error_message))
         return self
 
     def validate(self, data: Dict[str, Any]) -> Tuple[bool, List[str]]:
-        """验证数据。
+        """Validate data.
 
         Args:
-            data: 要验证的数据字典
+            data: Data dictionary to validate
 
         Returns:
-            (验证结果, 错误消息列表)
+            (validation result, error message list)
 
         Example:
             >>> validator = DataValidator()
@@ -399,7 +399,7 @@ class DataValidator:
 
         for field, field_rules in self.rules.items():
             if field not in data:
-                errors.append(f"字段缺失：{field}")
+                errors.append(f"Field missing: {field}")
                 continue
 
             value = data[field]
@@ -407,17 +407,17 @@ class DataValidator:
             for rule, error_message in field_rules:
                 try:
                     if not rule(value):
-                        error = error_message or f"字段验证失败：{field}"
+                        error = error_message or f"Field validation failed: {field}"
                         errors.append(error)
 
                 except Exception as e:
-                    errors.append(f"字段验证异常：{field}，{str(e)}")
+                    errors.append(f"Field validation exception: {field}, {str(e)}")
 
         is_valid = len(errors) == 0
 
         if not is_valid:
-            self.logger.warning(f"数据验证失败：{errors}")
+            self.logger.warning(f"Data validation failed: {errors}")
         else:
-            self.logger.debug("数据验证通过")
+            self.logger.debug("Data validation passed")
 
         return is_valid, errors

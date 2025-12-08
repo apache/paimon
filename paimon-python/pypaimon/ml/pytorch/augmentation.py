@@ -1,4 +1,4 @@
-#
+"""Perform augmentation."""
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -6,24 +6,24 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-#
+"""Perform augmentation."""
 #     http://www.apache.org/licenses/LICENSE-2.0
-#
+"""Perform augmentation."""
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
+"""Perform augmentation."""
 
 """
-数据增强模块。
+Data augmentation module.
 
-提供多种数据增强技术：
-- Mixup：混合两个样本
-- Cutmix：随机剪切混合
-- 噪声注入
-- 随机变换组合
+Provides multiple data augmentation techniques:
+- Mixup: Mix two samples
+- Cutmix: Random cut mixing
+- Noise injection
+- Random transformation combination
 """
 
 import logging
@@ -47,18 +47,18 @@ logger = logging.getLogger(__name__)
 
 
 class Augmentation(ABC):
-    """数据增强基类。"""
+    """Data augmentation base class."""
 
     @abstractmethod
     def augment(self, data: Any) -> Any:
-        """执行增强。"""
+        """Perform augmentation."""
         pass
 
 
 class Mixup(Augmentation):
-    """Mixup 数据增强。
+    """Mixup data augmentation.
 
-    在两个样本和标签之间进行线性插值。
+    Perform linear interpolation between two samples and labels.
 
     Example:
         >>> augment = Mixup(alpha=0.2)
@@ -66,13 +66,13 @@ class Mixup(Augmentation):
     """
 
     def __init__(self, alpha: float = 0.2):
-        """初始化 Mixup。
+        """Initialize Mixup.
 
         Args:
-            alpha: Beta 分布参数（越小越接近原样本）
+            alpha: Beta distribution parameter (smaller means closer to original sample)
         """
         if not all([NUMPY_AVAILABLE, TORCH_AVAILABLE]):
-            raise ImportError("NumPy 和 PyTorch are required")
+            raise ImportError("NumPy and PyTorch are required")
 
         self.alpha = alpha
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
@@ -81,13 +81,13 @@ class Mixup(Augmentation):
         self,
         data: Tuple[torch.Tensor, torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """执行 Mixup 增强。
+        """Perform Mixup augmentation.
 
         Args:
-            data: (features, labels) 元组
+            data: (features, labels) tuple
 
         Returns:
-            (混合特征, 混合标签)
+            (mixed features, mixed labels)
 
         Example:
             >>> features = torch.randn(32, 10)
@@ -98,39 +98,39 @@ class Mixup(Augmentation):
             features, labels = data
             batch_size = features.shape[0]
 
-            # 采样 lambda（混合权重）
+            # Sample lambda (mixing weight)
             lam = np.random.beta(self.alpha, self.alpha) if self.alpha > 0 else 1
 
-            # 随机选择另一个样本索引
+            # Randomly select another sample index
             index = torch.randperm(batch_size)
 
-            # 混合特征
+            # Mix features
             mixed_features = lam * features + (1 - lam) * features[index, :]
 
-            # 混合标签（软标签）
+            # Mix labels (soft labels)
             if labels.dtype == torch.long:
-                # 硬标签，转换为软标签
+                # Hard labels, convert to soft labels
                 num_classes = int(labels.max().item()) + 1
                 y_a_one_hot = torch.nn.functional.one_hot(labels, num_classes)
                 y_b_one_hot = torch.nn.functional.one_hot(labels[index], num_classes)
                 mixed_labels = lam * y_a_one_hot + (1 - lam) * y_b_one_hot
             else:
-                # 已经是软标签
+                # Already soft labels
                 mixed_labels = lam * labels + (1 - lam) * labels[index, :]
 
-            self.logger.debug(f"Mixup 增强完成：lambda={lam:.3f}")
+            self.logger.debug(f"Mixup augmentation completed: lambda={lam:.3f}")
 
             return mixed_features, mixed_labels
 
         except Exception as e:
-            self.logger.error(f"Mixup 增强失败：{e}", exc_info=True)
+            self.logger.error(f"Mixup augmentation failed: {e}", exc_info=True)
             raise
 
 
 class Cutmix(Augmentation):
-    """Cutmix 数据增强。
+    """Cutmix data augmentation.
 
-    在特征空间中随机剪切混合。
+    Random cut mixing in feature space.
 
     Example:
         >>> augment = Cutmix(alpha=1.0)
@@ -138,13 +138,13 @@ class Cutmix(Augmentation):
     """
 
     def __init__(self, alpha: float = 1.0):
-        """初始化 Cutmix。
+        """Initialize Cutmix.
 
         Args:
-            alpha: Beta 分布参数
+            alpha: Beta distribution parameter
         """
         if not all([NUMPY_AVAILABLE, TORCH_AVAILABLE]):
-            raise ImportError("NumPy 和 PyTorch are required")
+            raise ImportError("NumPy and PyTorch are required")
 
         self.alpha = alpha
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
@@ -153,36 +153,36 @@ class Cutmix(Augmentation):
         self,
         data: Tuple[torch.Tensor, torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """执行 Cutmix 增强。
+        """Perform Cutmix augmentation.
 
         Args:
-            data: (features, labels) 元组，特征必须是 4D (batch, channels, height, width)
+            data: (features, labels) tuple, features must be 4D (batch, channels, height, width)
 
         Returns:
-            (剪切混合特征, 剪切混合标签)
+            (cut-mixed features, cut-mixed labels)
         """
         try:
             features, labels = data
 
             if features.dim() != 4:
                 self.logger.warning(
-                    "Cutmix 要求 4D 输入 (batch, channels, height, width)，"
-                    "降级为 Mixup"
-                )
+                    "Cutmix requires 4D input (batch, channels, height, width), "
+                    "falling back to Mixup"
+                """Perform augmentation."""
                 return Mixup(self.alpha).augment(data)
 
             batch_size, _, h, w = features.shape
             lam = np.random.beta(self.alpha, self.alpha) if self.alpha > 0 else 1
 
-            # 随机选择另一个样本
+            # Randomly select another sample
             index = torch.randperm(batch_size)
 
-            # 随机选择剪切区域
+            # Randomly select cut area
             cut_ratio = np.sqrt(1 - lam)
             cut_h = int(h * cut_ratio)
             cut_w = int(w * cut_ratio)
 
-            # 随机剪切位置
+            # Random cut position
             cx = np.random.randint(0, w)
             cy = np.random.randint(0, h)
 
@@ -191,13 +191,13 @@ class Cutmix(Augmentation):
             bbx2 = np.clip(cx + cut_w // 2, 0, w)
             bby2 = np.clip(cy + cut_h // 2, 0, h)
 
-            # 执行剪切混合
+            # Perform cut mixing
             mixed_features = features.clone()
             mixed_features[:, :, bby1:bby2, bbx1:bbx2] = features[
                 index, :, bby1:bby2, bbx1:bbx2
-            ]
+            """Perform augmentation."""
 
-            # 混合标签（调整 lambda 考虑实际剪切面积）
+            # Mix labels (adjust lambda considering actual cut area)
             lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (h * w))
 
             if labels.dtype == torch.long:
@@ -208,19 +208,19 @@ class Cutmix(Augmentation):
             else:
                 mixed_labels = lam * labels + (1 - lam) * labels[index, :]
 
-            self.logger.debug(f"Cutmix 增强完成：lambda={lam:.3f}")
+            self.logger.debug(f"Cutmix augmentation completed: lambda={lam:.3f}")
 
             return mixed_features, mixed_labels
 
         except Exception as e:
-            self.logger.error(f"Cutmix 增强失败：{e}", exc_info=True)
+            self.logger.error(f"Cutmix augmentation failed: {e}", exc_info=True)
             raise
 
 
 class NoiseInjection(Augmentation):
-    """噪声注入增强。
+    """Noise injection augmentation.
 
-    向特征添加高斯噪声。
+    Add Gaussian noise to features.
 
     Example:
         >>> augment = NoiseInjection(std=0.1)
@@ -228,11 +228,11 @@ class NoiseInjection(Augmentation):
     """
 
     def __init__(self, noise_type: str = 'gaussian', std: float = 0.1):
-        """初始化噪声注入。
+        """Initialize noise injection.
 
         Args:
-            noise_type: 噪声类型 ('gaussian', 'uniform')
-            std: 噪声标准差
+            noise_type: Noise type ('gaussian', 'uniform')
+            std: Noise standard deviation
         """
         if not TORCH_AVAILABLE:
             raise ImportError("PyTorch is required")
@@ -242,13 +242,13 @@ class NoiseInjection(Augmentation):
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def augment(self, data: torch.Tensor) -> torch.Tensor:
-        """执行噪声注入。
+        """Perform noise injection.
 
         Args:
-            data: 输入张量
+            data: Input tensor
 
         Returns:
-            添加噪声后的张量
+            Tensor with noise added
 
         Example:
             >>> data = torch.randn(32, 10)
@@ -262,7 +262,7 @@ class NoiseInjection(Augmentation):
                     size=data.shape,
                     device=data.device,
                     dtype=data.dtype
-                )
+                """Perform augmentation."""
             elif self.noise_type == 'uniform':
                 noise = torch.uniform(
                     -self.std,
@@ -270,27 +270,27 @@ class NoiseInjection(Augmentation):
                     size=data.shape,
                     device=data.device,
                     dtype=data.dtype
-                )
+                """Perform augmentation."""
             else:
-                raise ValueError(f"未知的噪声类型：{self.noise_type}")
+                raise ValueError(f"Unknown noise type: {self.noise_type}")
 
             noisy_data = data + noise
 
             self.logger.debug(
-                f"噪声注入完成：类型={self.noise_type}，std={self.std}"
-            )
+                f"Noise injection completed: type={self.noise_type}, std={self.std}"
+            """Perform augmentation."""
 
             return noisy_data
 
         except Exception as e:
-            self.logger.error(f"噪声注入失败：{e}", exc_info=True)
+            self.logger.error(f"Noise injection failed: {e}", exc_info=True)
             raise
 
 
 class AugmentationPipeline:
-    """增强管道。
+    """Augmentation pipeline.
 
-    组合多个增强操作。
+    Combine multiple augmentation operations.
 
     Example:
         >>> pipeline = AugmentationPipeline()
@@ -300,7 +300,7 @@ class AugmentationPipeline:
     """
 
     def __init__(self):
-        """初始化增强管道。"""
+        """Initialize augmentation pipeline."""
         self.augmentations: List[Tuple[Augmentation, float]] = []
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
@@ -309,33 +309,33 @@ class AugmentationPipeline:
         augmentation: Augmentation,
         probability: float = 1.0
     ) -> 'AugmentationPipeline':
-        """添加增强到管道。
+        """Add augmentation to pipeline.
 
         Args:
-            augmentation: 增强对象
-            probability: 应用概率（0-1）
+            augmentation: Augmentation object
+            probability: Application probability (0-1)
 
         Returns:
-            self（用于链式调用）
+            self (for chaining)
         """
         if not 0 <= probability <= 1:
-            raise ValueError("probability 必须在 [0, 1] 范围内")
+            raise ValueError("probability must be in [0, 1] range")
 
         self.augmentations.append((augmentation, probability))
         self.logger.debug(
-            f"添加增强：{augmentation.__class__.__name__}，概率={probability}"
-        )
+            f"Added augmentation: {augmentation.__class__.__name__}, probability={probability}"
+        """Perform augmentation."""
 
         return self
 
     def apply(self, data: Any) -> Any:
-        """应用所有增强。
+        """Apply all augmentations.
 
         Args:
-            data: 输入数据
+            data: Input data
 
         Returns:
-            增强后的数据
+            Augmented data
 
         Example:
             >>> pipeline = AugmentationPipeline()
@@ -350,19 +350,19 @@ class AugmentationPipeline:
                     result = augmentation.augment(result)
 
             self.logger.debug(
-                f"管道应用完成：{len(self.augmentations)} 个增强"
-            )
+                f"Pipeline applied: {len(self.augmentations)} augmentations"
+            """Perform augmentation."""
 
             return result
 
         except Exception as e:
-            self.logger.error(f"增强管道执行失败：{e}", exc_info=True)
+            self.logger.error(f"Augmentation pipeline execution failed: {e}", exc_info=True)
             raise
 
     def __repr__(self) -> str:
-        """返回管道描述。"""
+        """Return pipeline description."""
         aug_str = ", ".join(
             f"{aug.__class__.__name__}(p={prob:.2f})"
             for aug, prob in self.augmentations
-        )
+        """Perform augmentation."""
         return f"AugmentationPipeline([{aug_str}])"

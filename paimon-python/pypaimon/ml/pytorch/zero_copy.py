@@ -17,9 +17,9 @@
 #
 
 """
-零拷贝转换和内存优化模块。
+Zero-copy conversion and memory optimization module.
 
-提供高效的 Arrow 到 PyTorch 张量转换，避免不必要的数据复制。
+Provides efficient Arrow to PyTorch tensor conversion, avoiding unnecessary data copies.
 """
 
 import logging
@@ -47,10 +47,10 @@ logger = logging.getLogger(__name__)
 
 
 class ZeroCopyConverter:
-    """零拷贝数据转换器。
+    """Zero-copy data converter.
 
-    最小化 Arrow → NumPy → PyTorch 转换过程中的数据复制，
-    利用内存的连续性和指针共享。
+    Minimizes data copies during Arrow → NumPy → PyTorch conversion,
+    leveraging memory continuity and pointer sharing.
 
     Example:
         >>> converter = ZeroCopyConverter()
@@ -59,10 +59,10 @@ class ZeroCopyConverter:
     """
 
     def __init__(self):
-        """初始化零拷贝转换器。"""
+        """Initialize zero-copy converter."""
         if not all([NUMPY_AVAILABLE, TORCH_AVAILABLE, PYARROW_AVAILABLE]):
-            raise ImportError("NumPy, PyTorch 和 PyArrow are required")
-
+            raise ImportError("NumPy, PyTorch and PyArrow are required")
+        
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def convert_to_tensor(
@@ -71,53 +71,53 @@ class ZeroCopyConverter:
         dtype: Optional[torch.dtype] = None,
         copy: bool = False
     ) -> torch.Tensor:
-        """将 Arrow 数组转换为 PyTorch 张量。
+        """Convert Arrow array to PyTorch tensor.
 
         Args:
-            arrow_array: PyArrow Array 或 ChunkedArray
-            dtype: 目标张量数据类型
-            copy: 是否强制复制（默认尽量避免）
+            arrow_array: PyArrow Array or ChunkedArray
+            dtype: Target tensor data type
+            copy: Whether to force copy (default tries to avoid)
 
         Returns:
-            PyTorch 张量
+            PyTorch tensor
 
         Example:
             >>> arrow_array = pa.array([1.0, 2.0, 3.0])
             >>> tensor = converter.convert_to_tensor(arrow_array, torch.float32)
         """
         try:
-            # 处理 ChunkedArray
+            # Handle ChunkedArray
             if isinstance(arrow_array, pa.ChunkedArray):
                 if arrow_array.num_chunks == 1:
                     arrow_array = arrow_array.chunk(0)
                 else:
-                    # 多个 chunk，合并为一个
+                    # Multiple chunks, combine into one
                     arrow_array = arrow_array.combine_chunks()
 
-            # 转换为 NumPy（尽量零拷贝）
+            # Convert to NumPy (try to zero-copy)
             numpy_array = arrow_array.to_numpy(zero_copy_only=not copy)
 
-            # 转换为 PyTorch 张量
+            # Convert to PyTorch tensor
             if numpy_array.flags['C_CONTIGUOUS']:
-                # C 连续内存，可以直接创建张量
+                # C-contiguous memory, can create tensor directly
                 tensor = torch.from_numpy(numpy_array)
                 if dtype and tensor.dtype != dtype:
                     tensor = tensor.to(dtype)
             else:
-                # 非连续内存，需要复制
+                # Non-contiguous memory, needs copy
                 tensor = torch.from_numpy(np.ascontiguousarray(numpy_array))
                 if dtype and tensor.dtype != dtype:
                     tensor = tensor.to(dtype)
 
             self.logger.debug(
-                f"转换完成：Arrow {arrow_array.type} → "
+                f"Conversion completed: Arrow {arrow_array.type} → "
                 f"Tensor {tensor.shape} {tensor.dtype}"
             )
 
             return tensor
 
         except Exception as e:
-            self.logger.error(f"零拷贝转换失败：{e}", exc_info=True)
+            self.logger.error(f"Zero-copy conversion failed: {e}", exc_info=True)
             raise
 
     def convert_batch_to_tensors(
@@ -126,17 +126,17 @@ class ZeroCopyConverter:
         column_names: List[str],
         dtypes: Optional[Dict[str, torch.dtype]] = None
     ) -> Dict[str, torch.Tensor]:
-        """将 Arrow RecordBatch 转换为张量字典。
+        """Convert Arrow RecordBatch to tensor dictionary.
 
-        最小化内存复制，直接利用 Arrow 内存块。
+        Minimizes memory copying, directly utilizing Arrow memory blocks.
 
         Args:
             arrow_batch: PyArrow RecordBatch
-            column_names: 列名列表
-            dtypes: 列名到数据类型的映射
+            column_names: List of column names
+            dtypes: Mapping of column names to data types
 
         Returns:
-            列名到张量的字典
+            Dictionary of column names to tensors
 
         Example:
             >>> batch = pa.RecordBatch.from_pydict({
@@ -152,7 +152,7 @@ class ZeroCopyConverter:
 
             for col_name in column_names:
                 if col_name not in arrow_batch.column_names:
-                    raise ValueError(f"列 {col_name} 不存在")
+                    raise ValueError(f"Column {col_name} does not exist")
 
                 arrow_col = arrow_batch[col_name]
                 target_dtype = dtypes.get(col_name)
@@ -160,22 +160,22 @@ class ZeroCopyConverter:
                 tensor = self.convert_to_tensor(arrow_col, target_dtype)
                 tensors[col_name] = tensor
 
-            self.logger.debug(f"批转换完成：{len(tensors)} 列")
+            self.logger.debug(f"Batch conversion completed: {len(tensors)} columns")
             return tensors
 
         except Exception as e:
-            self.logger.error(f"批转换失败：{e}", exc_info=True)
+            self.logger.error(f"Batch conversion failed: {e}", exc_info=True)
             raise
 
     @staticmethod
     def estimate_memory_usage(arrow_array: Any) -> int:
-        """估计 Arrow 数组的内存使用量。
+        """Estimate memory usage of Arrow array.
 
         Args:
             arrow_array: PyArrow Array
 
         Returns:
-            内存使用量（字节）
+            Memory usage (bytes)
         """
         if isinstance(arrow_array, pa.ChunkedArray):
             total = 0
@@ -187,9 +187,9 @@ class ZeroCopyConverter:
 
 
 class AdaptiveBatchSizer:
-    """自适应批大小调整器。
+    """Adaptive batch size adjuster.
 
-    根据内存使用情况动态调整批处理大小。
+    Dynamically adjusts batch size based on memory usage.
 
     Example:
         >>> sizer = AdaptiveBatchSizer(max_memory_mb=1024)
@@ -203,13 +203,13 @@ class AdaptiveBatchSizer:
         growth_factor: float = 1.5,
         shrink_factor: float = 0.8
     ):
-        """初始化自适应批大小调整器。
+        """Initialize adaptive batch size adjuster.
 
         Args:
-            initial_batch_size: 初始批大小
-            max_memory_mb: 最大内存限制（MB）
-            growth_factor: 增长因子（内存充足时）
-            shrink_factor: 收缩因子（内存不足时）
+            initial_batch_size: Initial batch size
+            max_memory_mb: Maximum memory limit (MB)
+            growth_factor: Growth factor (when memory is sufficient)
+            shrink_factor: Shrink factor (when memory is insufficient)
         """
         if not TORCH_AVAILABLE:
             raise ImportError("PyTorch is required")
@@ -227,14 +227,14 @@ class AdaptiveBatchSizer:
         sample_tensor: torch.Tensor,
         target_memory_ratio: float = 0.8
     ) -> int:
-        """根据样本张量计算最优批大小。
+        """Calculate optimal batch size based on sample tensor.
 
         Args:
-            sample_tensor: 单个样本张量
-            target_memory_ratio: 目标内存使用比例（0-1）
+            sample_tensor: Single sample tensor
+            target_memory_ratio: Target memory usage ratio (0-1)
 
         Returns:
-            建议的批大小
+            Suggested batch size
         """
         try:
             sample_memory = sample_tensor.element_size() * sample_tensor.nelement()
@@ -242,65 +242,65 @@ class AdaptiveBatchSizer:
                 (self.max_memory_bytes * target_memory_ratio) / sample_memory
             )
 
-            # 调整到 2 的幂
+            # Adjust to power of 2
             batch_size = 2 ** int(np.log2(max(max_batch_size, 1)))
             batch_size = max(self.initial_batch_size, batch_size)
 
             self.logger.info(
-                f"计算批大小：样本内存={sample_memory} bytes，"
-                f"推荐批大小={batch_size}"
+                f"Calculate batch size: sample memory={sample_memory} bytes, "
+                f"recommended batch size={batch_size}"
             )
 
             return batch_size
 
         except Exception as e:
-            self.logger.error(f"批大小计算失败：{e}", exc_info=True)
+            self.logger.error(f"Batch size calculation failed: {e}", exc_info=True)
             return self.initial_batch_size
 
     def adjust_batch_size(self, current_memory_usage: float) -> int:
-        """根据实际内存使用动态调整批大小。
+        """Dynamically adjust batch size based on actual memory usage.
 
         Args:
-            current_memory_usage: 当前内存使用（字节）
+            current_memory_usage: Current memory usage (bytes)
 
         Returns:
-            调整后的批大小
+            Adjusted batch size
         """
         try:
             memory_ratio = current_memory_usage / self.max_memory_bytes
 
             if memory_ratio > 0.95:
-                # 内存紧张，缩小批大小
+                # Memory tight, shrink batch size
                 self.current_batch_size = max(
                     1,
                     int(self.current_batch_size * self.shrink_factor)
                 )
-                action = "缩小"
+                action = "shrink"
             elif memory_ratio < 0.5:
-                # 内存充裕，增大批大小
+                # Memory abundant, increase batch size
                 self.current_batch_size = int(
                     self.current_batch_size * self.growth_factor
                 )
-                action = "增大"
+                action = "grow"
             else:
-                action = "保持"
+                action = "keep"
 
             self.logger.info(
-                f"批大小调整({action})：内存使用={memory_ratio*100:.1f}%，"
-                f"新批大小={self.current_batch_size}"
+                f"Batch size adjusted ({action}): memory usage={memory_ratio*100:.1f}%, "
+                f"new batch size={self.current_batch_size}"
             )
 
             return self.current_batch_size
 
         except Exception as e:
-            self.logger.error(f"批大小调整失败：{e}", exc_info=True)
+            self.logger.error(f"Batch size adjustment failed: {e}", exc_info=True)
             return self.current_batch_size
 
 
 class MemoryPoolManager:
-    """内存池管理器。
+    """Memory pool manager.
 
-    管理 PyTorch 内存分配，减少频繁分配/释放的开销。
+    Manages PyTorch memory allocation, reducing overhead of frequent allocation/deallocation.
 
     Example:
         >>> manager = MemoryPoolManager(pool_size_mb=256)
@@ -308,10 +308,10 @@ class MemoryPoolManager:
     """
 
     def __init__(self, pool_size_mb: int = 256):
-        """初始化内存池管理器。
+        """Initialize memory pool manager.
 
         Args:
-            pool_size_mb: 内存池大小（MB）
+            pool_size_mb: Memory pool size (MB)
         """
         if not TORCH_AVAILABLE:
             raise ImportError("PyTorch is required")
@@ -321,7 +321,7 @@ class MemoryPoolManager:
         self.used_blocks: Dict[int, torch.Tensor] = {}
 
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
-        self.logger.info(f"初始化内存池，大小={pool_size_mb} MB")
+        self.logger.info(f"Initialized memory pool, size={pool_size_mb} MB")
 
     def allocate(
         self,
@@ -329,68 +329,68 @@ class MemoryPoolManager:
         dtype: torch.dtype = torch.float32,
         device: Optional[str] = None
     ) -> torch.Tensor:
-        """从内存池分配张量。
+        """Allocate tensor from memory pool.
 
         Args:
-            shape: 张量形状
-            dtype: 数据类型
-            device: 设备（'cpu' 或 'cuda'）
+            shape: Tensor shape
+            dtype: Data type
+            device: Device ('cpu' or 'cuda')
 
         Returns:
-            分配的张量
+            Allocated tensor
         """
         try:
             device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
             needed_size = int(np.prod(shape))
 
-            # 尝试从空闲块中找到合适的块
+            # Try to find a suitable block from free blocks
             for i, block in enumerate(self.free_blocks):
                 if block.numel() >= needed_size and block.device.type == device:
-                    # 使用找到的块
+                    # Use the found block
                     tensor = block[:needed_size].reshape(shape).clone().detach()
                     self.free_blocks.pop(i)
                     self.used_blocks[id(tensor)] = tensor
 
-                    self.logger.debug(f"从空闲块分配内存：大小={needed_size}")
+                    self.logger.debug(f"Allocated memory from free block: size={needed_size}")
                     return tensor
 
-            # 没有合适的块，分配新块
+            # No suitable block, allocate new one
             tensor = torch.zeros(shape, dtype=dtype, device=device)
             self.used_blocks[id(tensor)] = tensor
 
-            self.logger.debug(f"分配新内存块：大小={needed_size}")
+            self.logger.debug(f"Allocated new memory block: size={needed_size}")
             return tensor
 
         except Exception as e:
-            self.logger.error(f"内存分配失败：{e}", exc_info=True)
+            self.logger.error(f"Memory allocation failed: {e}", exc_info=True)
             raise
 
     def release(self, tensor: torch.Tensor) -> None:
-        """将张量归还到内存池。
+        """Return tensor to memory pool.
 
         Args:
-            tensor: 要归还的张量
+            tensor: Tensor to return
         """
         try:
             tensor_id = id(tensor)
             if tensor_id in self.used_blocks:
                 del self.used_blocks[tensor_id]
 
-                # 如果内存池未满，添加到空闲块
+                # If memory pool is not full, add to free blocks
                 if len(self.free_blocks) * tensor.numel() < self.pool_size_bytes:
                     self.free_blocks.append(tensor.detach())
-                    self.logger.debug("张量归还到内存池")
+                    self.logger.debug("Tensor returned to memory pool")
                 else:
-                    self.logger.debug("内存池已满，释放张量")
+                    self.logger.debug("Memory pool full, releasing tensor")
 
         except Exception as e:
-            self.logger.error(f"内存释放失败：{e}", exc_info=True)
+            self.logger.error(f"Memory release failed: {e}", exc_info=True)
 
     def get_stats(self) -> Dict[str, Any]:
-        """获取内存池统计信息。
+        """Get memory pool statistics.
 
         Returns:
-            统计信息字典
+            Statistics dictionary
         """
         total_used = sum(t.numel() for t in self.used_blocks.values())
         total_free = sum(t.numel() for t in self.free_blocks)
