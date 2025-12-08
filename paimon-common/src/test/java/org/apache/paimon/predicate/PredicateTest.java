@@ -522,6 +522,33 @@ public class PredicateTest {
     }
 
     @Test
+    public void testLike() {
+        assertThat(testLike("abc", "a.c")).isEqualTo(false);
+        assertThat(testLike("a.c", "a.c")).isEqualTo(true);
+        assertThat(testLike("abcd", "a.*d")).isEqualTo(false);
+        assertThat(testLike("abcde", "%c.e")).isEqualTo(false);
+        assertThat(testLike("a-c", "a\\_c")).isEqualTo(false);
+        assertThat(testLike("a_c", "a\\_c")).isEqualTo(true);
+        assertThat(testLike("startX", "start%")).isEqualTo(true);
+        assertThat(testLike("not_startX", "start%")).isEqualTo(false);
+        assertThat(testLike("xxmiddleyy", "%middle%")).isEqualTo(true);
+        assertThat(testLike("xxmidxdleyy", "%middle%")).isEqualTo(false);
+        assertThat(testLike("xxend", "%end")).isEqualTo(true);
+        assertThat(testLike("xxendyy", "%end")).isEqualTo(false);
+        assertThat(testLike("equal", "equal")).isEqualTo(true);
+        assertThat(testLike("equalxx", "equal")).isEqualTo(false);
+        assertThat(testLike("startxx", "st_rt%")).isEqualTo(true);
+        assertThat(testLike("stbrtxx", "st_rt%")).isEqualTo(true);
+        assertThat(testLike("xxstbrtxx", "st_rt%")).isEqualTo(false);
+    }
+
+    private boolean testLike(String s, String pattern) {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
+        Predicate predicate = builder.like(0, fromString(pattern));
+        return predicate.test(GenericRow.of(fromString(s)));
+    }
+
+    @Test
     public void testAnd() {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType(), new IntType()));
         Predicate predicate = PredicateBuilder.and(builder.equal(0, 3), builder.equal(1, 5));

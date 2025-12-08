@@ -161,6 +161,14 @@ public class PredicateBuilder {
         return leaf(Contains.INSTANCE, transform, patternLiteral);
     }
 
+    public Predicate like(int idx, Object patternLiteral) {
+        return leaf(Like.INSTANCE, idx, patternLiteral);
+    }
+
+    public Predicate like(Transform transform, Object patternLiteral) {
+        return leaf(Like.INSTANCE, transform, patternLiteral);
+    }
+
     private Predicate leaf(NullFalseLeafBinaryFunction function, int idx, Object literal) {
         DataField field = rowType.getFields().get(idx);
         return new LeafPredicate(function, field.type(), idx, field.name(), singletonList(literal));
