@@ -24,7 +24,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.Instant;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.exc.MismatchedInputException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -771,26 +770,7 @@ public class SnapshotManager implements Serializable {
     }
 
     public static Snapshot tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
-        int retryNumber = 0;
-        MismatchedInputException exception = null;
-        while (retryNumber++ < 10) {
-            try {
-                return Snapshot.fromJson(fileIO.readFileUtf8(path));
-            } catch (MismatchedInputException e) {
-                // retry
-                exception = e;
-                try {
-                    Thread.sleep(1_000);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException(ie);
-                }
-            } catch (FileNotFoundException e) {
-                throw e;
-            } catch (IOException e) {
-                throw new RuntimeException("Fails to read snapshot from path " + path, e);
-            }
-        }
-        throw new UncheckedIOException(exception);
+        return RetryUtils.retry(() -> fileIO.readFileUtf8(path), Snapshot::fromJson)
+                .orElseThrow(() -> new RuntimeException("Cannot read snapshot from " + path));
     }
 }

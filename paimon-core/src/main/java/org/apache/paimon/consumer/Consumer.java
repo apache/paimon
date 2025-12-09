@@ -21,15 +21,13 @@ package org.apache.paimon.consumer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.RetryUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.exc.MismatchedInputException;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.Optional;
 
 /** Consumer which contains next snapshot. */
@@ -59,24 +57,7 @@ public class Consumer {
     }
 
     public static Optional<Consumer> fromPath(FileIO fileIO, Path path) {
-        int retryNumber = 0;
-        MismatchedInputException exception = null;
-        while (retryNumber++ < 10) {
-            try {
-                return fileIO.readOverwrittenFileUtf8(path).map(Consumer::fromJson);
-            } catch (MismatchedInputException e) {
-                // retry
-                exception = e;
-                try {
-                    Thread.sleep(1_000);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException(ie);
-                }
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
-        throw new UncheckedIOException(exception);
+        return RetryUtils.retry(
+                () -> fileIO.readOverwrittenFileUtf8(path).orElse(null), Consumer::fromJson);
     }
 }
