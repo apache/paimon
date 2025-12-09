@@ -209,7 +209,10 @@ public class ReadBuilderImpl implements ReadBuilder {
         // `filter` may contains partition related predicate, but `partitionFilter` will overwrite
         // it if `partitionFilter` is not null. So we must avoid to put part of partition filter in
         // `filter`, another part in `partitionFilter`
-        scan.withFilter(filter).withReadType(readType).withPartitionFilter(partitionFilter);
+        scan.withFilter(filter)
+                .withReadType(readType)
+                .withPartitionFilter(partitionFilter)
+                .withRowRanges(rowRanges);
 
         checkState(
                 bucketFilter == null || shardIndexOfThisSubtask == null,
@@ -223,9 +226,6 @@ public class ReadBuilderImpl implements ReadBuilder {
                 throw new UnsupportedOperationException(
                         "Unsupported table scan type for shard configuring, the scan is: " + scan);
             }
-        }
-        if (rowRanges != null) {
-            scan.withRowRanges(rowRanges);
         }
         if (specifiedBucket != null) {
             scan.withBucket(specifiedBucket);
