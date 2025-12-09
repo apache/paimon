@@ -22,6 +22,7 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.predicate.SimpleColStatsTestUtils.test;
@@ -519,6 +521,54 @@ public class PredicateTest {
                 .isEqualTo(false);
         assertThat(test(predicate, 3, new SimpleColStats[] {new SimpleColStats(29, 32, 0L)}))
                 .isEqualTo(false);
+    }
+
+    @Test
+    public void executeLike() {
+        // test eval
+        assertThat(executeLike("abc", "a.c")).isEqualTo(false);
+        assertThat(executeLike("a.c", "a.c")).isEqualTo(true);
+        assertThat(executeLike("abcd", "a.*d")).isEqualTo(false);
+        assertThat(executeLike("abcde", "%c.e")).isEqualTo(false);
+        assertThat(executeLike("a-c", "a\\_c")).isEqualTo(false);
+        assertThat(executeLike("a_c", "a\\_c")).isEqualTo(true);
+        assertThat(executeLike("startX", "start%")).isEqualTo(true);
+        assertThat(executeLike("not_startX", "start%")).isEqualTo(false);
+        assertThat(executeLike("xxmiddleyy", "%middle%")).isEqualTo(true);
+        assertThat(executeLike("xxmidxdleyy", "%middle%")).isEqualTo(false);
+        assertThat(executeLike("xxend", "%end")).isEqualTo(true);
+        assertThat(executeLike("xxendyy", "%end")).isEqualTo(false);
+        assertThat(executeLike("equal", "equal")).isEqualTo(true);
+        assertThat(executeLike("equalxx", "equal")).isEqualTo(false);
+        assertThat(executeLike("startxx", "st_rt%")).isEqualTo(true);
+        assertThat(executeLike("stbrtxx", "st_rt%")).isEqualTo(true);
+        assertThat(executeLike("xxstbrtxx", "st_rt%")).isEqualTo(false);
+        assertThat(executeLike("abchahadefxx", "abc%def%")).isEqualTo(true);
+        assertThat(executeLike("abchahadafxx", "abc%def%")).isEqualTo(false);
+
+        // test instance
+        assertThat(getLikeFunc("equal")).isEqualTo(Equal.INSTANCE);
+        assertThat(getLikeFunc("start%")).isEqualTo(StartsWith.INSTANCE);
+        assertThat(getLikeFunc("%end")).isEqualTo(EndsWith.INSTANCE);
+        assertThat(getLikeFunc("%middle%")).isEqualTo(Contains.INSTANCE);
+        assertThat(getLikeFunc("a_c")).isEqualTo(Like.INSTANCE);
+    }
+
+    private boolean executeLike(String s, String pattern) {
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+        if (rnd.nextBoolean()) {
+            PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
+            Predicate predicate = builder.like(0, fromString(pattern));
+            return predicate.test(GenericRow.of(fromString(s)));
+        } else {
+            return Like.INSTANCE.test(DataTypes.STRING(), fromString(s), fromString(pattern));
+        }
+    }
+
+    private LeafFunction getLikeFunc(String pattern) {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
+        Predicate predicate = builder.like(0, fromString(pattern));
+        return ((LeafPredicate) predicate).function;
     }
 
     @Test
