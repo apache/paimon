@@ -50,7 +50,11 @@ setup(
     packages=PACKAGES,
     include_package_data=True,
     install_requires=install_requires,
-    extras_require={},
+    extras_require={
+        'pytorch': ['torch>=1.9.0'],
+        'tensorflow': ['tensorflow>=2.8.0'],
+        'ml': ['torch>=1.9.0', 'tensorflow>=2.8.0'],
+    },
     description="Apache Paimon Python API",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -67,5 +71,5 @@ setup(
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
     ],
-    python_requires=">=3.6",
+    python_requires=">=3.7",
 )
