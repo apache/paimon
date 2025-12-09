@@ -28,6 +28,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +37,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -207,14 +209,22 @@ public class WriterRefresherTest {
         return (FileStoreTable) catalog.getTable(Identifier.create("default", "T"));
     }
 
-    private static class TestWriteRefresher implements WriterRefresher.Refresher {
+    /** Test implementation of {@link WriterRefresher.Refresher} for testing purposes. */
+    protected static class TestWriteRefresher implements WriterRefresher.Refresher {
 
         private final Set<String> groups;
         private final Map<String, String> options;
+        private final List<DataField> dataFields;
 
         TestWriteRefresher(Set<String> groups, Map<String, String> options) {
+            this(groups, options, null);
+        }
+
+        TestWriteRefresher(
+                Set<String> groups, Map<String, String> options, List<DataField> fields) {
             this.groups = groups;
             this.options = options;
+            this.dataFields = fields;
         }
 
         @Override
@@ -222,6 +232,10 @@ public class WriterRefresherTest {
             options.clear();
             if (groups != null) {
                 options.putAll(configGroups(groups, table.coreOptions()));
+            }
+            if (dataFields != null) {
+                dataFields.clear();
+                dataFields.addAll(table.schema().fields());
             }
         }
     }

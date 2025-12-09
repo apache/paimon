@@ -26,9 +26,11 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -368,6 +370,62 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
+    public void testStreamingCompactWithAddingColumns() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
+        tableOptions.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        FileStoreTable table =
+                prepareTable(
+                        Arrays.asList("dt", "hh"),
+                        Arrays.asList("dt", "hh", "k"),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        // base records
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        checkLatestSnapshot(table, 1, Snapshot.CommitKind.APPEND);
+        runAction(true);
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.COMPACT, 60_000);
+
+        SchemaChange schemaChange = SchemaChange.addColumn("new_col", DataTypes.INT());
+        table.schemaManager().commitChanges(schemaChange);
+        // wait a checkpoint at least to wait the writer refresh
+        Thread.sleep(1000);
+
+        // incremental records
+        table = getFileStoreTable(tableName);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
+        writeData(
+                rowData(1, 101, 15, BinaryString.fromString("20221208"), 1),
+                rowData(1, 101, 16, BinaryString.fromString("20221208"), 1),
+                rowData(2, 101, 15, BinaryString.fromString("20221209"), 2));
+        checkLatestSnapshot(table, 3, Snapshot.CommitKind.APPEND);
+        checkLatestSnapshot(table, 4, Snapshot.CommitKind.COMPACT, 60_000);
+
+        List<String> res =
+                getResult(
+                        table.newRead(),
+                        table.newSnapshotReader().read().splits(),
+                        table.rowType());
+        assertThat(res)
+                .containsExactlyInAnyOrder(
+                        "+I[1, 101, 15, 20221208, 1]",
+                        "+I[1, 101, 16, 20221208, 1]",
+                        "+I[1, 100, 15, 20221209, NULL]",
+                        "+I[2, 101, 15, 20221209, 2]");
+    }
+
+    @Test
     public void testUnawareBucketStreamingCompact() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
@@ -472,6 +530,56 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         assertThat(fileIO.exists(new Path(externalPath2))).isTrue();
         assertThat(fileIO.listStatus(new Path(externalPath2)).length).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    public void testUnawareBucketStreamingCompactWithWithAddingColumns() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+        tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        // base records
+        writeData(rowData(1, 100, 15, BinaryString.fromString("20221208")));
+        writeData(rowData(1, 100, 16, BinaryString.fromString("20221208")));
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+        // repairing that the ut don't specify the real partition of table
+        runActionForUnawareTable(true);
+
+        checkLatestSnapshot(table, 3, Snapshot.CommitKind.COMPACT, 60_000);
+
+        SchemaChange schemaChange = SchemaChange.addColumn("new_col", DataTypes.INT());
+        table.schemaManager().commitChanges(schemaChange);
+        Thread.sleep(1000);
+
+        table = getFileStoreTable(tableName);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
+        writeData(rowData(1, 101, 15, BinaryString.fromString("20221208"), 1));
+        checkLatestSnapshot(table, 4, Snapshot.CommitKind.APPEND);
+        checkLatestSnapshot(table, 5, Snapshot.CommitKind.COMPACT, 60_000);
+
+        List<String> res =
+                getResult(
+                        table.newRead(),
+                        table.newSnapshotReader().read().splits(),
+                        table.rowType());
+        assertThat(res)
+                .containsExactlyInAnyOrder(
+                        "+I[1, 100, 15, 20221208, NULL]",
+                        "+I[1, 100, 16, 20221208, NULL]",
+                        "+I[1, 101, 15, 20221208, 1]");
     }
 
     @Test

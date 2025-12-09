@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -86,7 +87,7 @@ public abstract class AppendCompactWorkerOperator<IN>
             throws IOException {
         List<Committable> committables =
                 this.unawareBucketCompactor.prepareCommit(waitCompaction, checkpointId);
-        this.unawareBucketCompactor.tryRefreshWrite();
+        this.unawareBucketCompactor.tryRefreshWrite(Collections.emptyList());
         return committables;
     }
 
