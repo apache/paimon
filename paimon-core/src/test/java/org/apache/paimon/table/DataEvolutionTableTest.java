@@ -31,6 +31,7 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -53,7 +54,6 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.system.GlobalIndexedTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -554,7 +554,7 @@ public class DataEvolutionTableTest extends TableTestBase {
                 .isEqualTo(1); // Should return one split containing the first file
 
         // Verify the split contains only the first file (firstRowId=0, rowCount=2)
-        DataSplit dataSplit1 = ((GlobalIndexedTable.IndexedSplit) splits1.get(0)).dataSplit();
+        DataSplit dataSplit1 = ((IndexedSplit) splits1.get(0)).dataSplit();
         assertThat(dataSplit1.dataFiles().size()).isEqualTo(1);
         DataFileMeta file1 = dataSplit1.dataFiles().get(0);
         assertThat(file1.firstRowId()).isEqualTo(0L);
@@ -567,7 +567,7 @@ public class DataEvolutionTableTest extends TableTestBase {
                 .isEqualTo(1); // Should return one split containing the second file
 
         // Verify the split contains only the second file (firstRowId=2, rowCount=2)
-        DataSplit dataSplit2 = ((GlobalIndexedTable.IndexedSplit) splits2.get(0)).dataSplit();
+        DataSplit dataSplit2 = ((IndexedSplit) splits2.get(0)).dataSplit();
         ;
         assertThat(dataSplit2.dataFiles().size()).isEqualTo(1);
         DataFileMeta file2 = dataSplit2.dataFiles().get(0);
@@ -581,7 +581,7 @@ public class DataEvolutionTableTest extends TableTestBase {
                 .isEqualTo(1); // Should return one split containing the third file
 
         // Verify the split contains only the third file (firstRowId=4, rowCount=2)
-        DataSplit dataSplit3 = ((GlobalIndexedTable.IndexedSplit) splits3.get(0)).dataSplit();
+        DataSplit dataSplit3 = ((IndexedSplit) splits3.get(0)).dataSplit();
         assertThat(dataSplit3.dataFiles().size()).isEqualTo(1);
         DataFileMeta file3 = dataSplit3.dataFiles().get(0);
         assertThat(file3.firstRowId()).isEqualTo(4L);
@@ -594,7 +594,7 @@ public class DataEvolutionTableTest extends TableTestBase {
                 .isEqualTo(1); // Should return one split containing all matching files
 
         // Verify the split contains all three files (firstRowId=0,2,4)
-        DataSplit dataSplit4 = ((GlobalIndexedTable.IndexedSplit) splits4.get(0)).dataSplit();
+        DataSplit dataSplit4 = ((IndexedSplit) splits4.get(0)).dataSplit();
         assertThat(dataSplit4.dataFiles().size()).isEqualTo(2);
 
         // Check that all three files are present with correct firstRowIds
@@ -655,7 +655,7 @@ public class DataEvolutionTableTest extends TableTestBase {
                 .isEqualTo(1); // Should return one split containing the first file
 
         // Verify the split contains only the first file (firstRowId=0)
-        DataSplit dataSplit8 = ((GlobalIndexedTable.IndexedSplit) splits8.get(0)).dataSplit();
+        DataSplit dataSplit8 = ((IndexedSplit) splits8.get(0)).dataSplit();
         assertThat(dataSplit8.dataFiles().size()).isEqualTo(1);
         DataFileMeta file8 = dataSplit8.dataFiles().get(0);
         assertThat(file8.firstRowId()).isEqualTo(0L);
@@ -692,8 +692,7 @@ public class DataEvolutionTableTest extends TableTestBase {
         List<Split> split10 = readBuilder.withRowRanges(rowIds10).newScan().plan().splits();
 
         // without projection， all datafiles needed to assemble a row should be scanned out
-        List<DataFileMeta> fileMetas10 =
-                (((GlobalIndexedTable.IndexedSplit) split10.get(0)).dataSplit()).dataFiles();
+        List<DataFileMeta> fileMetas10 = (((IndexedSplit) split10.get(0)).dataSplit()).dataFiles();
         assertThat(fileMetas10.size()).isEqualTo(2);
 
         List<Range> rowIds11 = Collections.singletonList(new Range(0L, 0L));
@@ -706,8 +705,7 @@ public class DataEvolutionTableTest extends TableTestBase {
                         .splits();
 
         // with projection, irrelevant datafiles should be filtered
-        List<DataFileMeta> fileMetas11 =
-                (((GlobalIndexedTable.IndexedSplit) split11.get(0)).dataSplit()).dataFiles();
+        List<DataFileMeta> fileMetas11 = (((IndexedSplit) split11.get(0)).dataSplit()).dataFiles();
         assertThat(fileMetas11.size()).isEqualTo(1);
     }
 
@@ -774,7 +772,7 @@ public class DataEvolutionTableTest extends TableTestBase {
         List<Range> rowIds = Arrays.asList(new Range(0L, 0L), new Range(3L, 3L));
         List<Split> splits = readBuilder.withRowRanges(rowIds).newScan().plan().splits();
         assertThat(splits.size()).isEqualTo(1);
-        DataSplit dataSplit = ((GlobalIndexedTable.IndexedSplit) splits.get(0)).dataSplit();
+        DataSplit dataSplit = ((IndexedSplit) splits.get(0)).dataSplit();
         assertThat(dataSplit.dataFiles().size()).isEqualTo(2);
         DataFileMeta file1 = dataSplit.dataFiles().get(0);
         assertThat(file1.firstRowId()).isEqualTo(0L);

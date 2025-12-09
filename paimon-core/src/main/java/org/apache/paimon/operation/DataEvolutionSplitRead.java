@@ -28,6 +28,9 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.IndexedSplitReadUtil;
+import org.apache.paimon.globalindex.ReaderWithScore;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataFileRecordReader;
@@ -140,14 +143,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withRowRanges(@Nullable List<Range> rowRanges) {
-        this.rowRanges = rowRanges;
-        return this;
+    public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        if (split instanceof DataSplit) {
+            return createReader((DataSplit) split);
+        } else {
+            return createReader((IndexedSplit) split);
+        }
     }
 
-    @Override
-    public RecordReader<InternalRow> createReader(Split split) throws IOException {
-        DataSplit dataSplit = (DataSplit) split;
+    private RecordReader<InternalRow> createReader(DataSplit dataSplit) throws IOException {
         List<DataFileMeta> files = dataSplit.dataFiles();
         BinaryRow partition = dataSplit.partition();
         DataFilePathFactory dataFilePathFactory =
@@ -188,6 +192,22 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
 
         return ConcatRecordReader.create(suppliers);
+    }
+
+    private RecordReader<InternalRow> createReader(IndexedSplit indexedSplit) throws IOException {
+        DataSplit dataSplit = indexedSplit.dataSplit();
+        this.rowRanges = indexedSplit.rowRanges();
+        RowType expectedReturnedType = readRowType;
+        IndexedSplitReadUtil.Info info = IndexedSplitReadUtil.readInfo(readRowType, indexedSplit);
+        this.readRowType = info.actualReadType;
+        ReaderWithScore scoreReader =
+                new ReaderWithScore(
+                        createReader(dataSplit),
+                        info.rowIdToScore,
+                        info.rowIdIndex,
+                        info.projectedRow);
+        this.readRowType = expectedReturnedType;
+        return scoreReader;
     }
 
     private DataEvolutionFileReader createUnionReader(

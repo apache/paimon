@@ -26,10 +26,8 @@ import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.Optional;
 
 /** A {@link InnerTableRead} for data table. */
@@ -47,8 +45,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     public abstract void applyReadType(RowType readType);
 
     public abstract void applyVariantAccess(VariantAccessInfo[] variantAccess);
-
-    public abstract void applyRowRanges(List<Range> rowRanges);
 
     public abstract RecordReader<InternalRow> reader(Split split) throws IOException;
 
@@ -89,12 +85,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     @Override
     public InnerTableRead withVariantAccess(VariantAccessInfo[] variantAccessInfo) {
         applyVariantAccess(variantAccessInfo);
-        return this;
-    }
-
-    @Override
-    public InnerTableRead withRowRanges(List<Range> rowRange) {
-        applyRowRanges(rowRange);
         return this;
     }
 

@@ -31,6 +31,9 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.IndexedSplitReadUtil;
+import org.apache.paimon.globalindex.ReaderWithScore;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataFileRecordReader;
@@ -153,14 +156,31 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withRowRanges(@Nullable List<Range> rowRanges) {
-        this.rowRanges = rowRanges;
-        return this;
+    public RecordReader<InternalRow> createReader(Split s) throws IOException {
+        if (s instanceof DataSplit) {
+            return createReader((DataSplit) s);
+        } else {
+            return createReader((IndexedSplit) s);
+        }
     }
 
-    @Override
-    public RecordReader<InternalRow> createReader(Split s) throws IOException {
-        DataSplit split = (DataSplit) s;
+    private RecordReader<InternalRow> createReader(IndexedSplit indexedSplit) throws IOException {
+        DataSplit dataSplit = indexedSplit.dataSplit();
+        this.rowRanges = indexedSplit.rowRanges();
+        RowType expectedReturnedType = readRowType;
+        IndexedSplitReadUtil.Info info = IndexedSplitReadUtil.readInfo(readRowType, indexedSplit);
+        this.readRowType = info.actualReadType;
+        ReaderWithScore scoreReader =
+                new ReaderWithScore(
+                        createReader(dataSplit),
+                        info.rowIdToScore,
+                        info.rowIdIndex,
+                        info.projectedRow);
+        this.readRowType = expectedReturnedType;
+        return scoreReader;
+    }
+
+    private RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
         if (!split.beforeFiles().isEmpty()) {
             LOG.info("Ignore split before files: {}", split.beforeFiles());
         }

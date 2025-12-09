@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source.splitread;
 
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.DataEvolutionSplitRead;
@@ -50,10 +51,15 @@ public class DataEvolutionSplitReadProvider implements SplitReadProvider {
 
     @Override
     public boolean match(Split split, Context context) {
-        if (!(split instanceof DataSplit)) {
+        DataSplit dataSplit;
+        if (split instanceof DataSplit) {
+            dataSplit = (DataSplit) split;
+        } else if (split instanceof IndexedSplit) {
+            dataSplit = ((IndexedSplit) split).dataSplit();
+        } else {
             return false;
         }
-        DataSplit dataSplit = (DataSplit) split;
+
         List<DataFileMeta> files = dataSplit.dataFiles();
         if (files.size() < 2) {
             return false;
