@@ -2539,6 +2539,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 Schema.newBuilder()
                         .column("pk", DataTypes.INT())
                         .column("f1", DataTypes.INT())
+                        .primaryKey("pk")
                         .partitionKeys("f1")
                         .option("bucket", "1")
                         .build(),
