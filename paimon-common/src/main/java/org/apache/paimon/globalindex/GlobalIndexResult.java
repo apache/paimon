@@ -95,7 +95,11 @@ public interface GlobalIndexResult {
         return create(
                 () -> {
                     RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
-                    result64.addRange(range);
+                    if (range.from == range.to) {
+                        result64.add(range.from);
+                    } else {
+                        result64.addRange(range);
+                    }
                     return result64;
                 });
     }
@@ -106,7 +110,11 @@ public interface GlobalIndexResult {
                 () -> {
                     RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
                     for (Range range : ranges) {
-                        result64.addRange(range);
+                        if (range.from == range.to) {
+                            result64.add(range.from);
+                        } else {
+                            result64.addRange(range);
+                        }
                     }
                     return result64;
                 });

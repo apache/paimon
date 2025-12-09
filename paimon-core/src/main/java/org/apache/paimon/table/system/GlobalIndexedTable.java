@@ -79,7 +79,6 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.globalindex.GlobalIndexScanBuilder.parallelScan;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link Table} for reading table with global index. */
 public class GlobalIndexedTable implements DataTable, ReadonlyTable {
@@ -500,49 +499,46 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
                     }
                 }
 
-                if (rowIdToScore != null) {
-                    int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
-                    RowType actualReadType = readType;
-                    ProjectedRow projectedRow = null;
+                int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
+                RowType actualReadType = readType;
+                ProjectedRow projectedRow = null;
 
-                    if (rowIdIndex == -1) {
-                        actualReadType = SpecialFields.rowTypeWithRowId(readType);
-                        rowIdIndex = actualReadType.getFieldCount() - 1;
-                        int[] mappings = new int[readType.getFieldCount()];
-                        for (int i = 0; i < readType.getFieldCount(); i++) {
-                            mappings[i] = i;
-                        }
-                        projectedRow = ProjectedRow.from(mappings);
+                if (rowIdToScore != null && rowIdIndex == -1) {
+                    actualReadType = SpecialFields.rowTypeWithRowId(readType);
+                    rowIdIndex = actualReadType.getFieldCount() - 1;
+                    int[] mappings = new int[readType.getFieldCount()];
+                    for (int i = 0; i < readType.getFieldCount(); i++) {
+                        mappings[i] = i;
                     }
-
-                    dataRead.withReadType(actualReadType);
-                    return new ReaderWithScore(
-                            dataRead.createReader(indexedSplit.split),
-                            rowIdToScore,
-                            rowIdIndex,
-                            projectedRow);
+                    projectedRow = ProjectedRow.from(mappings);
                 }
-            }
 
-            if (readType != null) {
-                dataRead.withReadType(readType);
+                dataRead.withReadType(actualReadType);
+                return new ReaderWithScore(
+                        dataRead.createReader(indexedSplit.split),
+                        rowIdToScore,
+                        rowIdIndex,
+                        projectedRow);
+            } else {
+                if (readType != null) {
+                    dataRead.withReadType(readType);
+                }
+                return dataRead.createReader(split);
             }
-            return dataRead.createReader(split);
         }
     }
 
     private static class ReaderWithScore implements RecordReader<InternalRow> {
         private final RecordReader<InternalRow> reader;
-        private final Map<Long, Float> rowIdToScore;
+        @Nullable private final Map<Long, Float> rowIdToScore;
         private final int rowIdIndex;
         private final ProjectedRow projectedRow;
 
         public ReaderWithScore(
                 RecordReader<InternalRow> reader,
-                Map<Long, Float> rowIdToScore,
+                @Nullable Map<Long, Float> rowIdToScore,
                 int rowIdIndex,
                 @Nullable ProjectedRow projectedRow) {
-            checkArgument(rowIdToScore != null, "rowIdToScore map must not be null");
             this.reader = reader;
             this.rowIdToScore = rowIdToScore;
             this.rowIdIndex = rowIdIndex;
@@ -568,7 +564,7 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
                 @Override
                 public InternalRow next() throws IOException {
                     InternalRow row = iterator.next();
-                    if (row != null) {
+                    if (row != null && rowIdToScore != null) {
                         Long rowId = row.getLong(rowIdIndex);
                         this.score = rowIdToScore.get(rowId);
                         if (projectedRow != null) {
