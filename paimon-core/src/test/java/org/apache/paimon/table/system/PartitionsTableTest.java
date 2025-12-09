@@ -163,7 +163,7 @@ public class PartitionsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testPartitionAuditFieldsNull() throws Exception {
+    void testPartitionAuditFieldsNull() throws Exception {
         List<InternalRow> result = read(partitionsTable, new int[] {0, 5, 6});
         assertThat(result).hasSize(3);
 
