@@ -21,13 +21,14 @@ package org.apache.paimon.consumer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.JsonSerdeUtil;
-import org.apache.paimon.utils.RetryUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Optional;
 
 /** Consumer which contains next snapshot. */
@@ -57,7 +58,33 @@ public class Consumer {
     }
 
     public static Optional<Consumer> fromPath(FileIO fileIO, Path path) {
-        return RetryUtils.retry(
-                () -> fileIO.readOverwrittenFileUtf8(path).orElse(null), Consumer::fromJson);
+        int retryNumber = 0;
+        Exception exception = null;
+        while (retryNumber++ < 10) {
+            Optional<String> content;
+            try {
+                content = fileIO.readOverwrittenFileUtf8(path);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+
+            if (!content.isPresent()) {
+                return Optional.empty();
+            }
+
+            try {
+                return content.map(Consumer::fromJson);
+            } catch (Exception e) {
+                // retry
+                exception = e;
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(ie);
+                }
+            }
+        }
+        throw new RuntimeException("Retry fail after 10 times", exception);
     }
 }
