@@ -26,7 +26,7 @@ from pypaimon.read.reader.iface.record_reader import RecordReader
 class ConcatRecordReader(RecordReader):
 
     def __init__(self, reader_suppliers: List[Callable]):
-        self.queue = collections.deque(reader_suppliers)
+        self.queue: collections.deque[Callable] = collections.deque(reader_suppliers)
         self.current_reader: Optional[RecordReader] = None
 
     def read_batch(self) -> Optional[RecordIterator]:

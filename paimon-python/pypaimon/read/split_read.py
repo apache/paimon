@@ -19,10 +19,12 @@
 import os
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Callable
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
+from pypaimon.deletionvectors import ApplyDeletionVectorReader
+from pypaimon.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
@@ -39,8 +41,7 @@ from pypaimon.read.reader.format_avro_reader import FormatAvroReader
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.format_lance_reader import FormatLanceReader
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
-from pypaimon.read.reader.format_lance_reader import FormatLanceReader
-from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader, RowPositionReader
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.read.reader.key_value_unwrap_reader import \
     KeyValueUnwrapRecordReader
@@ -71,6 +72,7 @@ class SplitRead(ABC):
         if isinstance(self, MergeFileSplitRead):
             self.read_fields = self._create_key_value_fields(read_type)
         self.schema_id_2_fields = {}
+        self.deletion_file_readers = {}
 
     def _push_down_predicate(self) -> Optional[Predicate]:
         if self.predicate is None:
@@ -87,7 +89,8 @@ class SplitRead(ABC):
     def create_reader(self) -> RecordReader:
         """Create a record reader for the given split."""
 
-    def file_reader_supplier(self, file: DataFileMeta, for_merge_read: bool, read_fields: List[str]):
+    def file_reader_supplier(self, file: DataFileMeta, for_merge_read: bool,
+                             read_fields: List[str]) -> RecordBatchReader:
         (read_file_fields, read_arrow_predicate) = self._get_fields_and_predicate(file.schema_id, read_fields)
 
         # Use external_path if available, otherwise use file_path
@@ -109,14 +112,11 @@ class SplitRead(ABC):
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path,
                                                 read_file_fields, read_arrow_predicate)
-        elif file_format == CoreOptions.FILE_FORMAT_LANCE:
-            format_reader = FormatLanceReader(self.table.file_io, file_path, read_file_fields,
-                                              read_arrow_predicate, batch_size=4096)
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
         index_mapping = self.create_index_mapping()
-        partition_info = self.create_partition_info()
+        partition_info = self._create_partition_info()
         if for_merge_read:
             return DataFileBatchReader(format_reader, index_mapping, partition_info, self.trimmed_primary_key,
                                        self.table.table_schema.fields)
@@ -258,7 +258,7 @@ class SplitRead(ABC):
 
         return trimmed_mapping, trimmed_fields
 
-    def create_partition_info(self):
+    def _create_partition_info(self):
         if not self.table.partition_keys:
             return None
         partition_mapping = self._construct_partition_mapping()
@@ -285,17 +285,33 @@ class SplitRead(ABC):
 
         return mapping
 
+    def _genarate_deletion_file_readers(self):
+        self.deletion_file_readers = {}
+        if self.split.data_deletion_files:
+            for data_file, deletion_file in zip(self.split.files, self.split.data_deletion_files):
+                if deletion_file is not None:
+                    # Create a callable method to read the deletion vector
+                    self.deletion_file_readers[data_file.file_name] = lambda df=deletion_file: DeletionVector.read(
+                        self.table.file_io, df)
+
 
 class RawFileSplitRead(SplitRead):
+    def raw_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> RecordReader:
+        file_batch_reader = self.file_reader_supplier(file, False, self._get_final_read_data_fields())
+        dv = dv_factory() if dv_factory else None
+        if dv:
+            return ApplyDeletionVectorReader(RowPositionReader(file_batch_reader), dv)
+        else:
+            return file_batch_reader
 
     def create_reader(self) -> RecordReader:
+        self._genarate_deletion_file_readers()
         data_readers = []
         for file in self.split.files:
             supplier = partial(
-                self.file_reader_supplier,
+                self.raw_reader_supplier,
                 file=file,
-                for_merge_read=False,
-                read_fields=self._get_final_read_data_fields(),
+                dv_factory=self.deletion_file_readers.get(file.file_name, None)
             )
             data_readers.append(supplier)
 
@@ -316,26 +332,29 @@ class RawFileSplitRead(SplitRead):
 
 
 class MergeFileSplitRead(SplitRead):
-    def kv_reader_supplier(self, file):
-        reader_supplier = partial(
-            self.file_reader_supplier,
-            file=file,
-            for_merge_read=True,
-            read_fields=self._get_final_read_data_fields()
-        )
-        return KeyValueWrapReader(reader_supplier(), len(self.trimmed_primary_key), self.value_arity)
+    def kv_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> RecordReader:
+        file_batch_reader = self.file_reader_supplier(file, True, self._get_final_read_data_fields())
+        dv = dv_factory() if dv_factory else None
+        if dv:
+            return ApplyDeletionVectorReader(
+                KeyValueWrapReader(RowPositionReader(file_batch_reader),
+                                   len(self.trimmed_primary_key), self.value_arity), dv)
+        else:
+            return KeyValueWrapReader(file_batch_reader, len(self.trimmed_primary_key), self.value_arity)
 
-    def section_reader_supplier(self, section: List[SortedRun]):
+    def section_reader_supplier(self, section: List[SortedRun]) -> RecordReader:
         readers = []
         for sorter_run in section:
             data_readers = []
             for file in sorter_run.files:
-                supplier = partial(self.kv_reader_supplier, file)
+                supplier = partial(self.kv_reader_supplier, file, self.deletion_file_readers.get(file.file_name, None))
                 data_readers.append(supplier)
             readers.append(ConcatRecordReader(data_readers))
         return SortMergeReaderWithMinHeap(readers, self.table.table_schema)
 
     def create_reader(self) -> RecordReader:
+        # Create a dict mapping data file name to deletion file reader method
+        self._genarate_deletion_file_readers()
         section_readers = []
         sections = IntervalPartition(self.split.files).partition()
         for section in sections:

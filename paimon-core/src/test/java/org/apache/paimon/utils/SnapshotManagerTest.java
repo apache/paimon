@@ -33,6 +33,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -46,6 +47,7 @@ import static org.apache.paimon.SnapshotTest.newChangelogManager;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.fail;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
@@ -53,6 +55,17 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 public class SnapshotManagerTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    public void testRetry() throws IOException {
+        SnapshotManager snapshotManager =
+                newSnapshotManager(LocalFileIO.create(), new Path(tempDir.toString()));
+        File file = new File(tempDir.toFile(), "/snapshot/snapshot-1");
+        file.getParentFile().mkdir();
+        file.createNewFile();
+        assertThatThrownBy(() -> snapshotManager.snapshot(1))
+                .hasMessageContaining("Retry fail after 10 times");
+    }
 
     @Test
     public void testSnapshotPath() {
