@@ -54,6 +54,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
@@ -293,7 +294,7 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
             if (globalIndexResult == null && filter != null) {
                 PartitionPredicate partitionPredicate = scan.partitionFilter();
                 GlobalIndexScanBuilder globalIndexScanBuilder = wrapped.newIndexScanBuilder();
-                Snapshot snapshot = wrapped.snapshotManager().latestSnapshot();
+                Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(wrapped);
                 globalIndexScanBuilder
                         .withPartitionPredicate(partitionPredicate)
                         .withSnapshot(snapshot);
