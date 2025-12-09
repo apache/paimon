@@ -297,6 +297,11 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public GlobalIndexResult visitLike(FieldRef fieldRef, Object literal) {
+        throw new UnsupportedOperationException("Vector index does not support like predicate");
+    }
+
+    @Override
     public GlobalIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
         throw new UnsupportedOperationException("Vector index does not support lessThan predicate");
     }
