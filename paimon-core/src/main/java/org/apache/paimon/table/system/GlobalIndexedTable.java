@@ -147,7 +147,7 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
 
     @Override
     public DataTableScan newScan() {
-        return new AuditLogBatchScan(wrapped.newScan());
+        return new GlobalIndexBatchScan(wrapped.newScan());
     }
 
     @Override
@@ -215,13 +215,14 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
         return wrapped.fileIO();
     }
 
-    public class AuditLogBatchScan implements DataTableScan {
+    /** Scan for table with global index. */
+    public class GlobalIndexBatchScan implements DataTableScan {
 
         private final DataTableScan batchScan;
         private GlobalIndexResult globalIndexResult;
         private Predicate filter;
 
-        private AuditLogBatchScan(DataTableScan batchScan) {
+        private GlobalIndexBatchScan(DataTableScan batchScan) {
             this.batchScan = batchScan;
         }
 
