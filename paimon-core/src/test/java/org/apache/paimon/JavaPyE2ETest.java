@@ -307,7 +307,7 @@ public class JavaPyE2ETest {
         // Verify the count is 9999
         assertThat(result).hasSize(9999);
 
-        assertThat(result).doesNotContain("+I[1, 81930, 819300L]");
+        assertThat(result).doesNotContain("+I[1, 81930, 819300]");
 
         assertThat(result).contains("+I[1, 10, 100]");
         assertThat(result).contains("+I[1, 100000, 1000000]");
