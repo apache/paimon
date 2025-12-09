@@ -21,9 +21,7 @@ package org.apache.paimon.lucene.index;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 
 import org.apache.lucene.codecs.KnnVectorsFormat;
@@ -33,28 +31,20 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.VectorSimilarityFunction;
-import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.IOContext;
-import org.apache.lucene.store.IndexInput;
 
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Vector global index writer using Apache Lucene 9.x.
+ * Vector global index writer using Apache Lucene.
  *
  * <p>This implementation uses Lucene's native KnnFloatVectorField with HNSW algorithm for efficient
  * approximate nearest neighbor search.
  */
 public class VectorGlobalIndexWriter implements GlobalIndexWriter {
-
-    private static final DataType FLOAT_ARRAY_TYPE = new ArrayType(DataTypes.FLOAT());
-    private static final DataType BYTE_ARRAY_TYPE = new ArrayType(DataTypes.TINYINT());
 
     private final GlobalIndexFileWriter fileWriter;
     private final VectorIndexOptions vectorOptions;
@@ -126,8 +116,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
             int m,
             int efConstruction,
             int writeBufferSize,
-            OutputStream out)
-            throws IOException {
+            OutputStream out) {
 
         IndexWriterConfig config = getIndexWriterConfig(m, efConstruction, writeBufferSize);
         try (IndexMMapDirectory indexMMapDirectory = new IndexMMapDirectory()) {
@@ -140,8 +129,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                 }
                 writer.commit();
             }
-
-            serializeDirectory(indexMMapDirectory.directory(), out);
+            indexMMapDirectory.serialize(out);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -159,34 +147,5 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                     }
                 });
         return config;
-    }
-
-    private void serializeDirectory(Directory directory, OutputStream out) throws IOException {
-        String[] files = directory.listAll();
-        out.write(intToBytes(files.length));
-
-        for (String fileName : files) {
-            byte[] nameBytes = fileName.getBytes(StandardCharsets.UTF_8);
-            out.write(intToBytes(nameBytes.length));
-            out.write(nameBytes);
-            long fileLength = directory.fileLength(fileName);
-            out.write(ByteBuffer.allocate(8).putLong(fileLength).array());
-
-            try (IndexInput input = directory.openInput(fileName, IOContext.DEFAULT)) {
-                byte[] buffer = new byte[32 * 1024];
-                long remaining = fileLength;
-
-                while (remaining > 0) {
-                    int toRead = (int) Math.min(buffer.length, remaining);
-                    input.readBytes(buffer, 0, toRead);
-                    out.write(buffer, 0, toRead);
-                    remaining -= toRead;
-                }
-            }
-        }
-    }
-
-    private byte[] intToBytes(int value) {
-        return ByteBuffer.allocate(4).putInt(value).array();
     }
 }

@@ -35,11 +35,8 @@ import org.apache.lucene.search.KnnByteVectorQuery;
 import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TopDocs;
-import org.apache.lucene.store.IndexOutput;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -47,14 +44,12 @@ import java.util.PriorityQueue;
 import java.util.Set;
 
 /**
- * Vector global index reader using Apache Lucene 9.x.
+ * Vector global index reader using Apache Lucene.
  *
  * <p>This implementation uses Lucene's native KnnFloatVectorQuery with HNSW graph for efficient
  * approximate nearest neighbor search.
  */
 public class VectorGlobalIndexReader implements GlobalIndexReader {
-
-    private static final int BUFFER_SIZE = 8192; // 8KB buffer for streaming
 
     private final List<IndexSearcher> searchers;
     private final List<IndexMMapDirectory> directories;
@@ -177,7 +172,7 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                 IndexReader reader = null;
                 boolean success = false;
                 try {
-                    directory = deserializeDirectory(in);
+                    directory = IndexMMapDirectory.deserialize(in);
                     reader = DirectoryReader.open(directory.directory());
                     IndexSearcher searcher = new IndexSearcher(reader);
                     directories.add(directory);
@@ -201,70 +196,6 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                     }
                 }
             }
-        }
-    }
-
-    private IndexMMapDirectory deserializeDirectory(SeekableInputStream in) throws IOException {
-        IndexMMapDirectory indexMMapDirectory = new IndexMMapDirectory();
-        try {
-            int numFiles = readInt(in);
-            byte[] buffer = new byte[BUFFER_SIZE];
-            for (int i = 0; i < numFiles; i++) {
-                int nameLength = readInt(in);
-                byte[] nameBytes = new byte[nameLength];
-                readFully(in, nameBytes);
-                String fileName = new String(nameBytes, StandardCharsets.UTF_8);
-                long fileLength = readLong(in);
-                try (IndexOutput output =
-                        indexMMapDirectory.directory().createOutput(fileName, null)) {
-                    long remaining = fileLength;
-                    while (remaining > 0) {
-                        int toRead = (int) Math.min(buffer.length, remaining);
-                        readFully(in, buffer, 0, toRead);
-                        output.writeBytes(buffer, 0, toRead);
-                        remaining -= toRead;
-                    }
-                }
-            }
-            return indexMMapDirectory;
-        } catch (Exception e) {
-            try {
-                indexMMapDirectory.close();
-            } catch (Exception closeEx) {
-            }
-            if (e instanceof IOException) {
-                throw (IOException) e;
-            } else {
-                throw new IOException("Failed to deserialize directory", e);
-            }
-        }
-    }
-
-    private int readInt(SeekableInputStream in) throws IOException {
-        byte[] bytes = new byte[4];
-        readFully(in, bytes);
-        return ByteBuffer.wrap(bytes).getInt();
-    }
-
-    private long readLong(SeekableInputStream in) throws IOException {
-        byte[] bytes = new byte[8];
-        readFully(in, bytes);
-        return ByteBuffer.wrap(bytes).getLong();
-    }
-
-    private void readFully(SeekableInputStream in, byte[] buffer) throws IOException {
-        readFully(in, buffer, 0, buffer.length);
-    }
-
-    private void readFully(SeekableInputStream in, byte[] buffer, int offset, int length)
-            throws IOException {
-        int totalRead = 0;
-        while (totalRead < length) {
-            int read = in.read(buffer, offset + totalRead, length - totalRead);
-            if (read == -1) {
-                throw new IOException("Unexpected end of stream");
-            }
-            totalRead += read;
         }
     }
 
