@@ -326,7 +326,6 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
         public Plan plan() {
             configureGlobalIndex(batchScan);
             List<Split> splits = batchScan.plan().splits();
-
             return wrap(splits);
         }
 
