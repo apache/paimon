@@ -180,3 +180,72 @@ class JavaPyReadWriteTest(unittest.TestCase):
         # Note: Normal read filters out system fields, so we verify through Java read
         # which explicitly reads KeyValue objects and checks valueKind
         print(f"Format: {file_format}, Python read completed. ValueKind verification should be done in Java test.")
+
+    def test_pk_dv_read(self):
+        pa_schema = pa.schema([
+            pa.field('pt', pa.int32(), nullable=False),
+            pa.field('a', pa.int32(), nullable=False),
+            ('b', pa.int64())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema,
+                                            partition_keys=['pt'],
+                                            primary_keys=['pt', 'a'],
+                                            options={'bucket': '1'})
+        self.catalog.create_table('default.test_pk_dv', schema, True)
+        table = self.catalog.get_table('default.test_pk_dv')
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_read.to_arrow(splits).sort_by('pt')
+        expected = pa.Table.from_pydict({
+            'pt': [1, 2, 2],
+            'a': [10, 21, 22],
+            'b': [1000, 20001, 202]
+        }, schema=pa_schema)
+        self.assertEqual(expected, actual)
+
+    def test_pk_dv_read_multi_batch(self):
+        pa_schema = pa.schema([
+            pa.field('pt', pa.int32(), nullable=False),
+            pa.field('a', pa.int32(), nullable=False),
+            ('b', pa.int64())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema,
+                                            partition_keys=['pt'],
+                                            primary_keys=['pt', 'a'],
+                                            options={'bucket': '1'})
+        self.catalog.create_table('default.test_pk_dv_multi_batch', schema, True)
+        table = self.catalog.get_table('default.test_pk_dv_multi_batch')
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_read.to_arrow(splits).sort_by('pt')
+        expected = pa.Table.from_pydict({
+            'pt': [1] * 9999,
+            'a': [i * 10 for i in range(1, 10001) if i * 10 != 81930],
+            'b': [i * 100 for i in range(1, 10001) if i * 10 != 81930]
+        }, schema=pa_schema)
+        self.assertEqual(expected, actual)
+
+    def test_pk_dv_read_multi_batch_raw_convertable(self):
+        pa_schema = pa.schema([
+            pa.field('pt', pa.int32(), nullable=False),
+            pa.field('a', pa.int32(), nullable=False),
+            ('b', pa.int64())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema,
+                                            partition_keys=['pt'],
+                                            primary_keys=['pt', 'a'],
+                                            options={'bucket': '1'})
+        self.catalog.create_table('default.test_pk_dv_raw_convertable', schema, True)
+        table = self.catalog.get_table('default.test_pk_dv_raw_convertable')
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_read.to_arrow(splits).sort_by('pt')
+        expected = pa.Table.from_pydict({
+            'pt': [1] * 9999,
+            'a': [i * 10 for i in range(1, 10001) if i * 10 != 81930],
+            'b': [i * 100 for i in range(1, 10001) if i * 10 != 81930]
+        }, schema=pa_schema)
+        self.assertEqual(expected, actual)
