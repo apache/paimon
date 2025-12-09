@@ -17,10 +17,13 @@ limitations under the License.
 """
 import os
 from collections import defaultdict
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Dict, Set
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
+from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -64,6 +67,7 @@ class FullStartingScanner(StartingScanner):
         self.only_read_real_buckets = True if int(
             self.table.options.get('bucket', -1)) == BucketMode.POSTPONE_BUCKET.value else False
         self.data_evolution = self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true'
+        self.deletion_vectors_enabled = self.table.options.get('deletion-vectors.enabled', 'false').lower() == 'true'
 
         def schema_fields_func(schema_id: int):
             return self.table.schema_manager.get_schema(schema_id).fields
@@ -77,12 +81,24 @@ class FullStartingScanner(StartingScanner):
         file_entries = self.plan_files()
         if not file_entries:
             return Plan([])
+
+        # Get deletion files map if deletion vectors are enabled.
+        # {partition-bucket -> {filename -> DeletionFile}}
+        deletion_files_map: dict[tuple, dict[str, DeletionFile]] = {}
+        if self.deletion_vectors_enabled:
+            latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+            # Extract unique partition-bucket pairs from file entries
+            buckets = set()
+            for entry in file_entries:
+                buckets.add((tuple(entry.partition.values), entry.bucket))
+            deletion_files_map = self._scan_dv_index(latest_snapshot, buckets)
+
         if self.table.is_primary_key_table:
-            splits = self._create_primary_key_splits(file_entries)
+            splits = self._create_primary_key_splits(file_entries, deletion_files_map)
         elif self.data_evolution:
-            splits = self._create_data_evolution_splits(file_entries)
+            splits = self._create_data_evolution_splits(file_entries, deletion_files_map)
         else:
-            splits = self._create_append_only_splits(file_entries)
+            splits = self._create_append_only_splits(file_entries, deletion_files_map)
 
         splits = self._apply_push_down_limit(splits)
         return Plan(splits)
@@ -286,7 +302,8 @@ class FullStartingScanner(StartingScanner):
             return False
         if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
             return False
-
+        if self.deletion_vectors_enabled and entry.file.level == 0:  # do not read level 0 file
+            return False
         # Get SimpleStatsEvolution for this schema
         evolution = self.simple_stats_evolutions.get_or_create(entry.file.schema_id)
 
@@ -315,7 +332,95 @@ class FullStartingScanner(StartingScanner):
                 entry.file.row_count
             )
 
-    def _create_append_only_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
+    def _scan_dv_index(self, snapshot, buckets: Set[tuple]) -> Dict[tuple, Dict[str, DeletionFile]]:
+        """
+        Scan deletion vector index from snapshot.
+        Returns a map of (partition, bucket) -> {filename -> DeletionFile}
+
+        Reference: SnapshotReaderImpl.scanDvIndex() in Java
+        """
+        if not snapshot or not snapshot.index_manifest:
+            return {}
+
+        result = {}
+
+        # Read index manifest file
+        index_manifest_file = IndexManifestFile(self.table)
+        index_entries = index_manifest_file.read(snapshot.index_manifest)
+
+        # Filter by DELETION_VECTORS_INDEX type and requested buckets
+        for entry in index_entries:
+            if entry.index_file.index_type != IndexManifestFile.DELETION_VECTORS_INDEX:
+                continue
+
+            partition_bucket = (tuple(entry.partition.values), entry.bucket)
+            if partition_bucket not in buckets:
+                continue
+
+            # Convert to deletion files
+            deletion_files = self._to_deletion_files(entry)
+            if deletion_files:
+                result[partition_bucket] = deletion_files
+
+        return result
+
+    def _to_deletion_files(self, index_entry) -> Dict[str, DeletionFile]:
+        """
+        Convert index manifest entry to deletion files map.
+        Returns {filename -> DeletionFile}
+        """
+        deletion_files = {}
+        index_file = index_entry.index_file
+
+        # Check if dv_ranges exists
+        if not index_file.dv_ranges:
+            return deletion_files
+
+        # Build deletion file path
+        # Format: manifest/index-manifest-{uuid}
+        index_path = self.table.table_path.rstrip('/') + '/index'
+        dv_file_path = f"{index_path}/{index_file.file_name}"
+
+        # Convert each DeletionVectorMeta to DeletionFile
+        for data_file_name, dv_meta in index_file.dv_ranges.items():
+            deletion_file = DeletionFile(
+                dv_index_path=dv_file_path,
+                offset=dv_meta.offset,
+                length=dv_meta.length,
+                cardinality=dv_meta.cardinality
+            )
+            deletion_files[data_file_name] = deletion_file
+
+        return deletion_files
+
+    def _get_deletion_files_for_split(self, data_files: List[DataFileMeta],
+                                      deletion_files_map: dict,
+                                      partition: GenericRow,
+                                      bucket: int) -> Optional[List[DeletionFile]]:
+        """
+        Get deletion files for the given data files in a split.
+        """
+        if not deletion_files_map:
+            return None
+
+        partition_key = (tuple(partition.values), bucket)
+        file_deletion_map = deletion_files_map.get(partition_key, {})
+
+        if not file_deletion_map:
+            return None
+
+        deletion_files = []
+        for data_file in data_files:
+            deletion_file = file_deletion_map.get(data_file.file_name)
+            if deletion_file:
+                deletion_files.append(deletion_file)
+            else:
+                deletion_files.append(None)
+
+        return deletion_files if any(df is not None for df in deletion_files) else None
+
+    def _create_append_only_splits(
+            self, file_entries: List[ManifestEntry], deletion_files_map: dict = None) -> List['Split']:
         partitioned_files = defaultdict(list)
         for entry in file_entries:
             partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
@@ -335,12 +440,13 @@ class FullStartingScanner(StartingScanner):
 
             packed_files: List[List[DataFileMeta]] = self._pack_for_ordered(data_files, weight_func,
                                                                             self.target_split_size)
-            splits += self._build_split_from_pack(packed_files, file_entries, False)
+            splits += self._build_split_from_pack(packed_files, file_entries, False, deletion_files_map)
         if self.idx_of_this_subtask is not None:
             self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
         return splits
 
-    def _create_primary_key_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
+    def _create_primary_key_splits(
+            self, file_entries: List[ManifestEntry], deletion_files_map: dict = None) -> List['Split']:
         if self.idx_of_this_subtask is not None:
             file_entries = self._primary_key_filter_by_shard(file_entries)
         partitioned_files = defaultdict(list)
@@ -368,10 +474,11 @@ class FullStartingScanner(StartingScanner):
                 [file for sub_pack in pack for file in sub_pack]
                 for pack in packed_files
             ]
-            splits += self._build_split_from_pack(flatten_packed_files, file_entries, True)
+            splits += self._build_split_from_pack(flatten_packed_files, file_entries, True, deletion_files_map)
         return splits
 
-    def _create_data_evolution_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
+    def _create_data_evolution_splits(
+            self, file_entries: List[ManifestEntry], deletion_files_map: dict = None) -> List['Split']:
         def sort_key(manifest_entry: ManifestEntry) -> tuple:
             first_row_id = manifest_entry.file.first_row_id if manifest_entry.file.first_row_id is not None else float(
                 '-inf')
@@ -413,7 +520,7 @@ class FullStartingScanner(StartingScanner):
                 for pack in packed_files
             ]
 
-            splits += self._build_split_from_pack(flatten_packed_files, sorted_entries, False)
+            splits += self._build_split_from_pack(flatten_packed_files, sorted_entries, False, deletion_files_map)
 
         if self.idx_of_this_subtask is not None:
             self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
@@ -460,7 +567,8 @@ class FullStartingScanner(StartingScanner):
 
         return split_by_row_id
 
-    def _build_split_from_pack(self, packed_files, file_entries, for_primary_key_split: bool) -> List['Split']:
+    def _build_split_from_pack(self, packed_files, file_entries, for_primary_key_split: bool,
+                               deletion_files_map: dict = None) -> List['Split']:
         splits = []
         for file_group in packed_files:
             raw_convertible = True
@@ -479,6 +587,16 @@ class FullStartingScanner(StartingScanner):
                 total_record_count += data_file.row_count
 
             if file_paths:
+                # Get deletion files for this split
+                data_deletion_files = None
+                if deletion_files_map:
+                    data_deletion_files = self._get_deletion_files_for_split(
+                        file_group,
+                        deletion_files_map,
+                        file_entries[0].partition,
+                        file_entries[0].bucket
+                    )
+
                 split = Split(
                     files=file_group,
                     partition=file_entries[0].partition,
@@ -486,7 +604,8 @@ class FullStartingScanner(StartingScanner):
                     _file_paths=file_paths,
                     _row_count=total_record_count,
                     _file_size=total_file_size,
-                    raw_convertible=raw_convertible
+                    raw_convertible=raw_convertible,
+                    data_deletion_files=data_deletion_files
                 )
                 splits.append(split)
         return splits

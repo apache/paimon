@@ -100,7 +100,13 @@ public class LanceUtils {
 
         Path converted = path;
         Map<String, String> storageOptions = new HashMap<>();
-        if ("oss".equals(schema)) {
+
+        if ("traceable".equals(schema)) {
+            String uriString = uri.toString();
+            if (uriString.startsWith("traceable:/")) {
+                converted = new Path(uriString.replace("traceable:/", "file:/"));
+            }
+        } else if ("oss".equals(schema)) {
             assert originOptions.containsKey("fs.oss.endpoint");
             assert originOptions.containsKey("fs.oss.accessKeyId");
             assert originOptions.containsKey("fs.oss.accessKeySecret");

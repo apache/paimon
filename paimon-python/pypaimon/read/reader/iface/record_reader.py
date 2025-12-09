@@ -26,13 +26,13 @@ T = TypeVar('T')
 
 class RecordReader(Generic[T], ABC):
     """
-    The reader that reads the batches of records as RecordIterator.
+    The reader that reads the batches of records.
     """
 
     @abstractmethod
     def read_batch(self) -> Optional[RecordIterator[T]]:
         """
-        Reads one batch. The method should return null when reaching the end of the input.
+        Reads one batch as a RecordIterator. The method should return null when reaching the end of the input.
         """
 
     @abstractmethod

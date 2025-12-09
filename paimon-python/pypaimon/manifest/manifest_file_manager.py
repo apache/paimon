@@ -21,6 +21,8 @@ from typing import List
 
 import fastavro
 
+from datetime import datetime
+
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
@@ -105,6 +107,22 @@ class ManifestFileManager:
                 max_values=BinaryRow(value_dict['_MAX_VALUES'], fields),
                 null_counts=value_dict['_NULL_COUNTS'],
             )
+            # fastavro returns UTC-aware datetime for timestamp-millis, we need to convert properly
+            from pypaimon.data.timestamp import Timestamp
+            creation_time_value = file_dict['_CREATION_TIME']
+            creation_time_ts = None
+            if creation_time_value is not None:
+                if isinstance(creation_time_value, datetime):
+                    if creation_time_value.tzinfo:
+                        epoch_millis = int(creation_time_value.timestamp() * 1000)
+                        creation_time_ts = Timestamp.from_epoch_millis(epoch_millis)
+                    else:
+                        creation_time_ts = Timestamp.from_local_date_time(creation_time_value)
+                elif isinstance(creation_time_value, (int, float)):
+                    creation_time_ts = Timestamp.from_epoch_millis(int(creation_time_value))
+                else:
+                    raise ValueError(f"Unexpected creation_time type: {type(creation_time_value)}")
+
             file_meta = DataFileMeta(
                 file_name=file_dict['_FILE_NAME'],
                 file_size=file_dict['_FILE_SIZE'],
@@ -118,7 +136,7 @@ class ManifestFileManager:
                 schema_id=file_dict['_SCHEMA_ID'],
                 level=file_dict['_LEVEL'],
                 extra_files=file_dict['_EXTRA_FILES'],
-                creation_time=file_dict['_CREATION_TIME'],
+                creation_time=creation_time_ts,
                 delete_row_count=file_dict['_DELETE_ROW_COUNT'],
                 embedded_index=file_dict['_EMBEDDED_FILE_INDEX'],
                 file_source=file_dict['_FILE_SOURCE'],
@@ -187,7 +205,7 @@ class ManifestFileManager:
                     "_SCHEMA_ID": entry.file.schema_id,
                     "_LEVEL": entry.file.level,
                     "_EXTRA_FILES": entry.file.extra_files,
-                    "_CREATION_TIME": entry.file.creation_time,
+                    "_CREATION_TIME": entry.file.creation_time.get_millisecond() if entry.file.creation_time else None,
                     "_DELETE_ROW_COUNT": entry.file.delete_row_count,
                     "_EMBEDDED_FILE_INDEX": entry.file.embedded_index,
                     "_FILE_SOURCE": entry.file.file_source,
