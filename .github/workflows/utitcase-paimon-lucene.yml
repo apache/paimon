@@ -16,32 +16,26 @@
 # limitations under the License.
 ################################################################################
 
-name: End to End Tests Flink 2.x on JDK 11
+name: UTCase and ITCase Paimon Lucene
 
 on:
   push:
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'paimon-python/**'
-      - '.github/workflows/paimon-python-checks.yml'
+    paths:
       - 'paimon-lucene/**'
-      - '.github/workflows/utitcase-paimon-lucene.yml'
 
 env:
   JDK_VERSION: 11
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   build_test:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: true
-      matrix:
-        # Last element should be the current default flink version
-        flink_version: [ '2.0', '2.1' ]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -52,21 +46,17 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
-      - name: Build Flink
-        run:  |
-          mvn -T 2C -B clean install -DskipTests -Pflink2,spark3 -pl paimon-e2e-tests -am -Pflink-${{ matrix.flink_version }},java11
+      - name: Build Paimon Lucene
+        run:  mvn -T 2C -B clean install -DskipTests -Ppaimon-lucene
 
-      - name: Test Flink
+      - name: Test Paimon Lucene
         run: |
-          # run tests with random timezone to find out timezone related bugs
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          profile="flink-${{ matrix.flink_version }}"
-          if [ "${{ matrix.flink_version }}" = "${{ matrix.flink_version[-1] }}" ]; then
-            mvn -T 1C -B test -Pflink2,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -Pjava11
-          else
-            mvn -T 1C -B test -Pflink2,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -P${profile},java11
-          fi
+          TEST_MODULE="org.apache.paimon:paimon-lucene"
+          echo "Start testing module: $TEST_MODULE"
+          mvn -T 2C -B test verify -Ppaimon-lucene -pl "${TEST_MODULE}" -Duser.timezone=$jvm_timezone
+          echo "All modules tested"
         env:
-          MAVEN_OPTS: -Xmx4096m
+          MAVEN_OPTS: -Xmx4096m -XX:+UseG1GC -XX:CICompilerCount=2

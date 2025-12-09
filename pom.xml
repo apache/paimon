@@ -512,9 +512,9 @@ under the License.
         </profile>
 
         <profile>
-            <id>paimon-vector-index</id>
+            <id>paimon-lucene</id>
             <modules>
-                <module>paimon-vector-index</module>
+                <module>paimon-lucene</module>
             </modules>
             <activation>
                 <jdk>11</jdk>
