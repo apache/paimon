@@ -30,6 +30,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.TinyIntType;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,6 +40,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
@@ -104,9 +106,7 @@ public class VectorGlobalIndexTest {
                     new VectorGlobalIndexWriter(fileWriter, vectorType, options);
 
             List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
-            for (int i = 0; i < numVectors; i++) {
-                writer.write(new FloatVectorIndex(i, testVectors.get(i)));
-            }
+            testVectors.forEach(writer::write);
 
             List<GlobalIndexWriter.ResultEntry> results = writer.finish();
             assertThat(results).hasSize(1);
@@ -142,9 +142,7 @@ public class VectorGlobalIndexTest {
 
             int numVectors = 10;
             List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
-            for (int i = 0; i < numVectors; i++) {
-                writer.write(new FloatVectorIndex(i, testVectors.get(i)));
-            }
+            testVectors.forEach(writer::write);
 
             List<GlobalIndexWriter.ResultEntry> results = writer.finish();
             assertThat(results).hasSize(1);
@@ -177,7 +175,7 @@ public class VectorGlobalIndexTest {
 
         // Try to write vector with wrong dimension
         float[] wrongDimVector = new float[32]; // Wrong dimension
-        assertThatThrownBy(() -> writer.write(new FloatVectorIndex(0, wrongDimVector)))
+        assertThatThrownBy(() -> writer.write(wrongDimVector))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("dimension mismatch");
     }
@@ -186,7 +184,8 @@ public class VectorGlobalIndexTest {
     public void testFloatVectorIndexEndToEnd() throws IOException {
         int dimension = 2;
         Options options = createDefaultOptions(dimension);
-        options.setInteger("vector.size-per-index", 3);
+        int sizePerIndex = 3;
+        options.setInteger("vector.size-per-index", sizePerIndex);
 
         float[][] vectors =
                 new float[][] {
@@ -197,16 +196,15 @@ public class VectorGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer =
                 new VectorGlobalIndexWriter(fileWriter, vectorType, options);
-        for (int i = 0; i < vectors.length; i++) {
-            writer.write(new FloatVectorIndex(i, vectors[i]));
-        }
+        Arrays.stream(vectors).forEach(writer::write);
 
         List<GlobalIndexWriter.ResultEntry> results = writer.finish();
         assertThat(results).hasSize(2);
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         List<GlobalIndexIOMeta> metas = new ArrayList<>();
-        for (GlobalIndexWriter.ResultEntry result : results) {
+        for (int i = 0; i < results.size(); i++) {
+            GlobalIndexWriter.ResultEntry result = results.get(i);
             metas.add(
                     new GlobalIndexIOMeta(
                             result.fileName(),
@@ -218,13 +216,60 @@ public class VectorGlobalIndexTest {
         try (VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas)) {
             GlobalIndexResult result = reader.search(vectors[0], 1);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
-            assertThat(containsRowId(result, 0)).isTrue();
+            assertThat(containsRowId(result, 1)).isTrue();
 
             float[] queryVector = new float[] {0.85f, 0.15f};
             result = reader.search(queryVector, 2);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
+            assertThat(containsRowId(result, 2)).isTrue();
+            assertThat(containsRowId(result, 4)).isTrue();
+        }
+    }
+
+    @Test
+    public void testByteVectorIndexEndToEnd() throws IOException {
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+        int sizePerIndex = 3;
+        options.setInteger("vector.size-per-index", sizePerIndex);
+
+        byte[][] vectors =
+                new byte[][] {
+                    new byte[] {100, 0}, new byte[] {95, 10}, new byte[] {10, 95},
+                    new byte[] {98, 5}, new byte[] {0, 100}, new byte[] {5, 98}
+                };
+
+        DataType byteVectorType = new ArrayType(new TinyIntType());
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        VectorGlobalIndexWriter writer =
+                new VectorGlobalIndexWriter(fileWriter, byteVectorType, options);
+        Arrays.stream(vectors).forEach(writer::write);
+
+        List<GlobalIndexWriter.ResultEntry> results = writer.finish();
+        assertThat(results).hasSize(2);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        List<GlobalIndexIOMeta> metas = new ArrayList<>();
+        for (int i = 0; i < results.size(); i++) {
+            GlobalIndexWriter.ResultEntry result = results.get(i);
+            metas.add(
+                    new GlobalIndexIOMeta(
+                            result.fileName(),
+                            fileIO.getFileSize(new Path(indexPath, result.fileName())),
+                            result.rowRange(),
+                            result.meta()));
+        }
+
+        try (VectorGlobalIndexReader reader = new VectorGlobalIndexReader(fileReader, metas)) {
+            GlobalIndexResult result = reader.search(vectors[0], 1);
+            assertThat(result.results().getLongCardinality()).isEqualTo(1);
             assertThat(containsRowId(result, 1)).isTrue();
-            assertThat(containsRowId(result, 3)).isTrue();
+
+            byte[] queryVector = new byte[] {85, 15};
+            result = reader.search(queryVector, 2);
+            assertThat(result.results().getLongCardinality()).isEqualTo(2);
+            assertThat(containsRowId(result, 2)).isTrue();
+            assertThat(containsRowId(result, 4)).isTrue();
         }
     }
 

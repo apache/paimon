@@ -23,6 +23,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 
 import org.apache.lucene.codecs.KnnVectorsFormat;
@@ -34,6 +35,7 @@ import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
+import org.apache.lucene.store.IndexInput;
 
 import java.io.BufferedOutputStream;
 import java.io.IOException;
@@ -43,8 +45,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /**
  * Vector global index writer using Apache Lucene 9.x.
  *
@@ -53,19 +53,22 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class VectorGlobalIndexWriter implements GlobalIndexWriter {
 
+    private static final DataType FLOAT_ARRAY_TYPE = new ArrayType(DataTypes.FLOAT());
+    private static final DataType BYTE_ARRAY_TYPE = new ArrayType(DataTypes.TINYINT());
+
     private final GlobalIndexFileWriter fileWriter;
     private final VectorIndexOptions vectorOptions;
     private final VectorSimilarityFunction similarityFunction;
     private final int sizePerIndex;
+    private final VectorIndexFactory vectorIndexFactory;
 
+    private long count = 0;
     private final List<VectorIndex> vectorIndices;
     private final List<ResultEntry> results;
 
     public VectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter, DataType fieldType, Options options) {
-        checkArgument(
-                fieldType instanceof ArrayType,
-                "Vector field type must be ARRAY, but was: " + fieldType);
+        this.vectorIndexFactory = VectorIndexFactory.init(fieldType);
         this.fileWriter = fileWriter;
         this.vectorIndices = new ArrayList<>();
         this.results = new ArrayList<>();
@@ -76,15 +79,8 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
 
     @Override
     public void write(Object key) {
-        VectorIndex index;
-        if (key instanceof FloatVectorIndex) {
-            index = (FloatVectorIndex) key;
-        } else if (key instanceof ByteVectorIndex) {
-            index = (ByteVectorIndex) key;
-        } else {
-            throw new IllegalArgumentException(
-                    "Unsupported index type: " + key.getClass().getName());
-        }
+        count++;
+        VectorIndex index = vectorIndexFactory.create(count, key);
         index.checkDimension(vectorOptions.dimension());
         vectorIndices.add(index);
         if (vectorIndices.size() >= sizePerIndex) {
@@ -119,8 +115,8 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
                     this.vectorOptions.writeBufferSize(),
                     out);
         }
-        long minRowIdInBatch = vectorIndices.get(0).rowId();
-        long maxRowIdInBatch = vectorIndices.get(vectorIndices.size() - 1).rowId();
+        long minRowIdInBatch = vectorIndices.get(0).id();
+        long maxRowIdInBatch = vectorIndices.get(vectorIndices.size() - 1).id();
         results.add(ResultEntry.of(fileName, null, new Range(minRowIdInBatch, maxRowIdInBatch)));
         vectorIndices.clear();
     }
@@ -176,8 +172,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
             long fileLength = directory.fileLength(fileName);
             out.write(ByteBuffer.allocate(8).putLong(fileLength).array());
 
-            try (org.apache.lucene.store.IndexInput input =
-                    directory.openInput(fileName, IOContext.DEFAULT)) {
+            try (IndexInput input = directory.openInput(fileName, IOContext.DEFAULT)) {
                 byte[] buffer = new byte[32 * 1024];
                 long remaining = fileLength;
 

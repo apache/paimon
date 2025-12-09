@@ -38,7 +38,7 @@ public class FloatVectorIndex extends VectorIndex<float[]> {
     }
 
     @Override
-    public long rowId() {
+    public long id() {
         return rowId;
     }
 

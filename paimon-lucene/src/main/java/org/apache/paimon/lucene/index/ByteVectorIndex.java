@@ -33,7 +33,7 @@ public class ByteVectorIndex extends VectorIndex<byte[]> {
     }
 
     @Override
-    public long rowId() {
+    public long id() {
         return rowId;
     }
 

@@ -26,9 +26,9 @@ import org.apache.lucene.index.VectorSimilarityFunction;
 public abstract class VectorIndex<T> {
 
     public static final String VECTOR_FIELD = "vector";
-    public static final String ROW_ID_FIELD = "rowId";
+    public static final String ROW_ID_FIELD = "id";
 
-    public abstract long rowId();
+    public abstract long id();
 
     public abstract long dimension();
 
@@ -37,7 +37,7 @@ public abstract class VectorIndex<T> {
     public abstract IndexableField indexableField(VectorSimilarityFunction similarityFunction);
 
     public StoredField rowIdStoredField() {
-        return new StoredField(ROW_ID_FIELD, rowId());
+        return new StoredField(ROW_ID_FIELD, id());
     }
 
     public void checkDimension(int dimension) {
