@@ -19,10 +19,8 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.data.variant.VariantAccessInfoUtils;
-import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -30,20 +28,17 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.system.GlobalIndexedTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
-import static org.apache.paimon.globalindex.GlobalIndexScanBuilder.parallelScan;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -77,7 +72,11 @@ public class ReadBuilderImpl implements ReadBuilder {
     private boolean dropStats = false;
 
     public ReadBuilderImpl(InnerTable table) {
-        this.table = table;
+        if (searchGlobalIndex(table)) {
+            this.table = new GlobalIndexedTable((FileStoreTable) table);
+        } else {
+            this.table = table;
+        }
         this.partitionType = table.rowType().project(table.partitionKeys());
         this.defaultPartitionName = new CoreOptions(table.options()).partitionDefaultName();
     }
@@ -212,9 +211,6 @@ public class ReadBuilderImpl implements ReadBuilder {
         // `filter`, another part in `partitionFilter`
         scan.withFilter(filter).withReadType(readType).withPartitionFilter(partitionFilter);
 
-        // please configure this after filter and partitionFilter are set
-        configureGlobalIndex(scan);
-
         checkState(
                 bucketFilter == null || shardIndexOfThisSubtask == null,
                 "Bucket filter and shard configuration cannot be used together. "
@@ -228,6 +224,9 @@ public class ReadBuilderImpl implements ReadBuilder {
                         "Unsupported table scan type for shard configuring, the scan is: " + scan);
             }
         }
+        if (rowRanges != null) {
+            scan.withRowRanges(rowRanges);
+        }
         if (specifiedBucket != null) {
             scan.withBucket(specifiedBucket);
         }
@@ -238,37 +237,6 @@ public class ReadBuilderImpl implements ReadBuilder {
             scan.dropStats();
         }
         return scan;
-    }
-
-    private void configureGlobalIndex(InnerTableScan scan) {
-        if (rowRanges == null && filter != null && searchGlobalIndex(table)) {
-            FileStoreTable fileStoreTable = (FileStoreTable) table;
-            PartitionPredicate partitionPredicate = scan.partitionFilter();
-            GlobalIndexScanBuilder globalIndexScanBuilder = fileStoreTable.newIndexScanBuilder();
-            Snapshot snapshot = fileStoreTable.snapshotManager().latestSnapshot();
-            globalIndexScanBuilder
-                    .withPartitionPredicate(partitionPredicate)
-                    .withSnapshot(snapshot);
-            List<Range> indexedRowRanges = globalIndexScanBuilder.shardList();
-            if (!indexedRowRanges.isEmpty()) {
-                List<Range> nonIndexedRowRanges =
-                        new Range(0, snapshot.nextRowId() - 1).exclude(indexedRowRanges);
-                Optional<List<Range>> combined =
-                        parallelScan(indexedRowRanges, globalIndexScanBuilder, filter);
-                if (combined.isPresent()) {
-                    List<Range> finalResult = new ArrayList<>(combined.get());
-                    if (!nonIndexedRowRanges.isEmpty()) {
-                        finalResult.addAll(nonIndexedRowRanges);
-                        finalResult.sort(Comparator.comparingLong(f -> f.from));
-                    }
-                    this.rowRanges = finalResult;
-                }
-            }
-        }
-
-        if (this.rowRanges != null) {
-            scan.withRowRanges(this.rowRanges);
-        }
     }
 
     private boolean searchGlobalIndex(Table table) {

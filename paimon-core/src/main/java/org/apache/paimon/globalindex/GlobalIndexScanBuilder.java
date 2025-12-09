@@ -23,7 +23,6 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
-import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -50,7 +49,7 @@ public interface GlobalIndexScanBuilder {
     // Return sorted and no overlap ranges
     List<Range> shardList();
 
-    static Optional<List<Range>> parallelScan(
+    static Optional<GlobalIndexResult> parallelScan(
             final List<Range> ranges,
             final GlobalIndexScanBuilder globalIndexScanBuilder,
             final Predicate filter) {
@@ -61,13 +60,12 @@ public interface GlobalIndexScanBuilder {
                         .collect(Collectors.toList());
 
         try {
-            List<Optional<RoaringNavigableMap64>> rowsResults = new ArrayList<>();
-            Iterator<Optional<RoaringNavigableMap64>> resultIterators =
+            List<Optional<GlobalIndexResult>> rowsResults = new ArrayList<>();
+            Iterator<Optional<GlobalIndexResult>> resultIterators =
                     randomlyExecuteSequentialReturn(
                             scanner -> {
                                 Optional<GlobalIndexResult> result = scanner.scan(filter);
-                                return Collections.singletonList(
-                                        result.map(GlobalIndexResult::results));
+                                return Collections.singletonList(result);
                             },
                             scanners,
                             null);
@@ -77,15 +75,18 @@ public interface GlobalIndexScanBuilder {
             if (rowsResults.stream().noneMatch(Optional::isPresent)) {
                 return Optional.empty();
             }
-            RoaringNavigableMap64 combinedResult = new RoaringNavigableMap64();
+
+            GlobalIndexResult globalIndexResult = GlobalIndexResult.createEmpty();
+
             for (int i = 0; i < ranges.size(); i++) {
                 if (rowsResults.get(i).isPresent()) {
-                    combinedResult.or(rowsResults.get(i).get());
+                    globalIndexResult = globalIndexResult.or(rowsResults.get(i).get());
                 } else {
-                    combinedResult.addRange(ranges.get(i));
+                    globalIndexResult =
+                            globalIndexResult.or(GlobalIndexResult.fromRange(ranges.get(i)));
                 }
             }
-            return Optional.of(combinedResult.toRangeList());
+            return Optional.of(globalIndexResult);
         } finally {
             IOUtils.closeAllQuietly(scanners);
         }

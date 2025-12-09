@@ -152,6 +152,37 @@ public class Range implements Serializable {
         return result;
     }
 
+    public static List<Range> mergeSortedAsPossible(List<Range> ranges) {
+        if (ranges == null || ranges.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        if (ranges.size() == 1) {
+            return new ArrayList<>(ranges);
+        }
+
+        List<Range> result = new ArrayList<>();
+        Range current = ranges.get(0);
+
+        for (int i = 1; i < ranges.size(); i++) {
+            Range next = ranges.get(i);
+            // Try to merge current and next
+            Range merged = Range.union(current, next);
+            if (merged != null) {
+                // Merged successfully
+                current = merged;
+            } else {
+                // Cannot merge: add current to result and move to next
+                result.add(current);
+                current = next;
+            }
+        }
+        // Add the last range
+        result.add(current);
+
+        return result;
+    }
+
     /**
      * Computes the intersection of two lists of ranges.
      *

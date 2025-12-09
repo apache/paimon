@@ -935,7 +935,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         List<Row> result =
                 sql(
                         "SELECT * FROM `test_scan_mode$audit_log` "
-                                + "/*+ OPTIONS('incremental-between'='1,8','incremental-between-scan-mode'='diff') */");
+                                + "/*+ OPTIONS('incremental-between'='1,8','incremental-between-scan-mode'='diff') */ WHERE id > 0");
         assertThat(result).containsExactlyInAnyOrder(Row.of("+I", 3, "C"));
 
         result =

@@ -22,6 +22,9 @@ import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import javax.annotation.Nullable;
+
+import java.util.List;
 import java.util.function.Supplier;
 
 /** Global index result represents row ids as a compressed bitmap. */
@@ -30,13 +33,20 @@ public interface GlobalIndexResult {
     /** Returns the bitmap representing row ids. */
     RoaringNavigableMap64 results();
 
+    @Nullable
+    ScoreFunction scoreFunction();
+
     /**
      * Returns the intersection of this result and the other result.
      *
      * <p>Uses native bitmap AND operation for optimal performance.
      */
     default GlobalIndexResult and(GlobalIndexResult other) {
-        return create(() -> RoaringNavigableMap64.and(this.results(), other.results()));
+        ScoreFunction function1 = this.scoreFunction();
+        ScoreFunction function2 = other.scoreFunction();
+        return create(
+                () -> RoaringNavigableMap64.and(this.results(), other.results()),
+                function1 != null ? function1 : function2);
     }
 
     /**
@@ -45,7 +55,11 @@ public interface GlobalIndexResult {
      * <p>Uses native bitmap OR operation for optimal performance.
      */
     default GlobalIndexResult or(GlobalIndexResult other) {
-        return create(() -> RoaringNavigableMap64.or(this.results(), other.results()));
+        ScoreFunction function1 = this.scoreFunction();
+        ScoreFunction function2 = other.scoreFunction();
+        return create(
+                () -> RoaringNavigableMap64.or(this.results(), other.results()),
+                ScoreFunction.combine(function1, function2));
     }
 
     /** Returns an empty {@link GlobalIndexResult}. */
@@ -55,8 +69,25 @@ public interface GlobalIndexResult {
 
     /** Returns a new {@link GlobalIndexResult} from supplier. */
     static GlobalIndexResult create(Supplier<RoaringNavigableMap64> supplier) {
+        return create(supplier, null);
+    }
+
+    /** Returns a new {@link GlobalIndexResult} from supplier. */
+    static GlobalIndexResult create(
+            Supplier<RoaringNavigableMap64> supplier, @Nullable ScoreFunction scoreFunction) {
         LazyField<RoaringNavigableMap64> lazyField = new LazyField<>(supplier);
-        return lazyField::get;
+        return new GlobalIndexResult() {
+            @Override
+            public RoaringNavigableMap64 results() {
+                return lazyField.get();
+            }
+
+            @Nullable
+            @Override
+            public ScoreFunction scoreFunction() {
+                return scoreFunction;
+            }
+        };
     }
 
     /** Returns a new {@link GlobalIndexResult} from {@link Range}. */
@@ -65,6 +96,18 @@ public interface GlobalIndexResult {
                 () -> {
                     RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
                     result64.addRange(range);
+                    return result64;
+                });
+    }
+
+    /** Returns a new {@link GlobalIndexResult} from {@link Range}s. */
+    static GlobalIndexResult fromRanges(List<Range> ranges) {
+        return create(
+                () -> {
+                    RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
+                    for (Range range : ranges) {
+                        result64.addRange(range);
+                    }
                     return result64;
                 });
     }
