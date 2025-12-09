@@ -233,6 +233,36 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public InnerTableScan withReadType(@Nullable RowType readType) {
+            batchScan.withReadType(readType);
+            return this;
+        }
+
+        @Nullable
+        @Override
+        public PartitionPredicate partitionFilter() {
+            return batchScan.partitionFilter();
+        }
+
+        @Override
+        public InnerTableScan withBucket(int bucket) {
+            batchScan.withBucket(bucket);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withTopN(TopN topN) {
+            batchScan.withTopN(topN);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan dropStats() {
+            batchScan.dropStats();
+            return this;
+        }
+
+        @Override
         public InnerTableScan withMetricRegistry(MetricRegistry metricsRegistry) {
             batchScan.withMetricRegistry(metricsRegistry);
             return this;
@@ -385,7 +415,7 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
         }
     }
 
-    private static class IndexedSplit implements Split {
+    public static class IndexedSplit implements Split {
         private final DataSplit split;
         @NotNull private final List<Range> rowRanges;
         @Nullable private final Float[] scores;
@@ -395,6 +425,10 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
             this.split = split;
             this.rowRanges = rowRanges;
             this.scores = scores;
+        }
+
+        public DataSplit dataSplit() {
+            return split;
         }
 
         @Override
