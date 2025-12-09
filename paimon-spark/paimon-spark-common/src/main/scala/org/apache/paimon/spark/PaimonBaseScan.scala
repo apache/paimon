@@ -55,8 +55,6 @@ abstract class PaimonBaseScan(
 
   protected var inputSplits: Array[Split] = _
 
-  override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
-
   lazy val statistics: Optional[stats.Statistics] = table.statistics()
 
   private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()

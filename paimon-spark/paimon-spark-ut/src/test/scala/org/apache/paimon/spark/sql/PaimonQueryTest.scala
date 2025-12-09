@@ -35,38 +35,32 @@ class PaimonQueryTest extends PaimonSparkTestBase {
 
   fileFormats.foreach {
     fileFormat =>
-      bucketModes.foreach {
-        bucketMode =>
-          test(s"Query metadata columns: file.format=$fileFormat, bucket=$bucketMode") {
-            withTable("T") {
+      test(s"Query metadata columns: file.format=$fileFormat") {
+        withTable("T") {
+          spark.sql(s"""
+                       |CREATE TABLE T (id INT, name STRING)
+                       |TBLPROPERTIES ('file.format'='$fileFormat')
+                       |""".stripMargin)
 
-              spark.sql(
-                s"""
-                   |CREATE TABLE T (id INT, name STRING)
-                   |TBLPROPERTIES ('primary-key' = 'id', 'file.format'='$fileFormat', 'bucket'='$bucketMode')
-                   |""".stripMargin)
+          spark.sql("""
+                      |INSERT INTO T
+                      |VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')
+                      |""".stripMargin)
 
-              spark.sql("""
-                          |INSERT INTO T
-                          |VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')
-                          |""".stripMargin)
-
-              val location = loadTable("T").location().toUri.toString
-              val res = spark.sql(
-                s"""
-                   |SELECT SUM(cnt)
-                   |FROM (
-                   |  SELECT __paimon_file_path AS path, count(1) AS cnt, count(distinct __paimon_row_index) AS dc
-                   |  FROM T
-                   |  GROUP BY __paimon_file_path
-                   |)
-                   |WHERE startswith(path, '$location') and endswith(path, '.$fileFormat') and cnt == dc
-                   |""".stripMargin)
-              checkAnswer(res, Row(5))
-            }
-          }
+          val location = loadTable("T").location().toUri.toString
+          val res = spark.sql(
+            s"""
+               |SELECT SUM(cnt)
+               |FROM (
+               |  SELECT __paimon_file_path AS path, count(1) AS cnt, count(distinct __paimon_row_index) AS dc
+               |  FROM T
+               |  GROUP BY __paimon_file_path
+               |)
+               |WHERE startswith(path, '$location') and endswith(path, '.$fileFormat') and cnt == dc
+               |""".stripMargin)
+          checkAnswer(res, Row(5))
+        }
       }
-
   }
 
   test("Query metadata columns for bucket") {

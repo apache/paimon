@@ -41,7 +41,6 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.col
 
-import java.net.URI
 import java.util.Collections
 
 import scala.collection.JavaConverters._
@@ -165,7 +164,7 @@ trait PaimonRowLevelCommand
     val my_table = table
     val dvBitmap64 = my_table.coreOptions().deletionVectorBitmap64()
     dataset
-      .select(DV_META_COLUMNS.map(col): _*)
+      .select(PATH_AND_INDEX_META_COLUMNS.map(col): _*)
       .as[(String, Long)]
       .groupByKey(_._1)
       .mapGroups {

@@ -39,7 +39,6 @@ abstract class PaimonFormatTableBaseScan(
   with SupportsReportStatistics
   with ScanHelper {
 
-  override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
   protected var inputSplits: Array[Split] = _
   protected var inputPartitions: Seq[PaimonInputPartition] = _
 
