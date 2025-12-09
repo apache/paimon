@@ -78,7 +78,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.globalindex.GlobalIndexScanBuilder.parallelScan;
 
-/** A {@link Table} for reading audit log of table. */
+/** A {@link Table} for reading table with global index. */
 public class GlobalIndexedTable implements DataTable, ReadonlyTable {
 
     private final FileStoreTable wrapped;

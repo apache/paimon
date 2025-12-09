@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex;
 
 import javax.annotation.Nullable;
 
+/** Generate score (may null) for row id in global index topk situation. */
 public interface ScoreFunction {
 
     @Nullable
