@@ -35,6 +35,8 @@ import java.util.UUID;
 /** A wrapper of MMapDirectory for vector index. */
 public class IndexMMapDirectory implements AutoCloseable {
 
+    private static final int VERSION = 1;
+
     private final Path path;
     private final MMapDirectory mmapDirectory;
 
@@ -64,6 +66,7 @@ public class IndexMMapDirectory implements AutoCloseable {
     }
 
     public void serialize(OutputStream out) throws IOException {
+        out.write(intToBytes(VERSION));
         String[] files = this.directory().listAll();
         out.write(intToBytes(files.length));
 
@@ -91,6 +94,10 @@ public class IndexMMapDirectory implements AutoCloseable {
     public static IndexMMapDirectory deserialize(SeekableInputStream in) throws IOException {
         IndexMMapDirectory indexMMapDirectory = new IndexMMapDirectory();
         try {
+            int version = readInt(in);
+            if (version != VERSION) {
+                throw new IOException("Unsupported version: " + version);
+            }
             int numFiles = readInt(in);
             byte[] buffer = new byte[32768];
             for (int i = 0; i < numFiles; i++) {
@@ -100,7 +107,7 @@ public class IndexMMapDirectory implements AutoCloseable {
                 String fileName = new String(nameBytes, StandardCharsets.UTF_8);
                 long fileLength = readLong(in);
                 try (IndexOutput output =
-                        indexMMapDirectory.directory().createOutput(fileName, IOContext.DEFAULT)) {
+                        indexMMapDirectory.directory().createOutput(fileName, IOContext.READONCE)) {
                     long remaining = fileLength;
                     while (remaining > 0) {
                         int toRead = (int) Math.min(buffer.length, remaining);
@@ -114,7 +121,7 @@ public class IndexMMapDirectory implements AutoCloseable {
         } catch (Exception e) {
             try {
                 indexMMapDirectory.close();
-            } catch (Exception closeEx) {
+            } catch (Exception ignored) {
             }
             if (e instanceof IOException) {
                 throw (IOException) e;
