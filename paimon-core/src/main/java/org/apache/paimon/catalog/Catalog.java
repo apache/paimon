@@ -26,11 +26,13 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 
@@ -762,6 +764,42 @@ public interface Catalog extends AutoCloseable {
      */
     List<String> listBranches(Identifier identifier) throws TableNotExistException;
 
+    /**
+     * Get tag for table.
+     *
+     * @param identifier path of the table, cannot be system or branch name.
+     * @param tagName tag name
+     * @return {@link GetTagResponse} containing tag information
+     * @throws TableNotExistException if the table does not exist
+     * @throws TagNotExistException if the tag does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    GetTagResponse getTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException;
+
+    /**
+     * Create tag for table.
+     *
+     * @param identifier path of the table, cannot be system or branch name.
+     * @param tagName tag name
+     * @param snapshotId optional snapshot id, if not provided uses latest snapshot
+     * @param timeRetained optional time retained as string (e.g., "1d", "12h", "30m")
+     * @param ignoreIfExists if true, ignore if tag already exists
+     * @throws TableNotExistException if the table does not exist
+     * @throws SnapshotNotExistException if the snapshot does not exist
+     * @throws TagAlreadyExistException if the tag already exists and ignoreIfExists is false
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    void createTag(
+            Identifier identifier,
+            String tagName,
+            @Nullable Long snapshotId,
+            @Nullable String timeRetained,
+            boolean ignoreIfExists)
+            throws TableNotExistException, SnapshotNotExistException, TagAlreadyExistException;
+
     // ==================== Partition Modifications ==========================
 
     /**
@@ -1335,6 +1373,33 @@ public interface Catalog extends AutoCloseable {
         }
 
         public TagNotExistException(Identifier identifier, String tag, Throwable cause) {
+            super(String.format(MSG, tag, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.tag = tag;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String tag() {
+            return tag;
+        }
+    }
+
+    /** Exception for trying to create a tag that already exists. */
+    class TagAlreadyExistException extends Exception {
+
+        private static final String MSG = "Tag %s in table %s already exists.";
+
+        private final Identifier identifier;
+        private final String tag;
+
+        public TagAlreadyExistException(Identifier identifier, String tag) {
+            this(identifier, tag, null);
+        }
+
+        public TagAlreadyExistException(Identifier identifier, String tag, Throwable cause) {
             super(String.format(MSG, tag, identifier.getFullName()), cause);
             this.identifier = identifier;
             this.tag = tag;

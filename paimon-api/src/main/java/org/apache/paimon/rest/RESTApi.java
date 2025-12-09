@@ -42,6 +42,7 @@ import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
@@ -58,6 +59,7 @@ import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
@@ -844,6 +846,49 @@ public class RESTApi {
             return emptyList();
         }
         return response.branches();
+    }
+
+    /**
+     * Get tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @return {@link GetTagResponse}
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the tag not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public GetTagResponse getTag(Identifier identifier, String tagName) {
+        return client.get(
+                resourcePaths.tag(
+                        identifier.getDatabaseName(), identifier.getObjectName(), tagName),
+                GetTagResponse.class,
+                restAuthFunction);
+    }
+
+    /**
+     * Create tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @param snapshotId optional snapshot id, if not provided uses latest snapshot
+     * @param timeRetained optional time retained as string (e.g., "1d", "12h", "30m")
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or snapshot not
+     *     exists
+     * @throws AlreadyExistsException Exception thrown on HTTP 409 means the tag already exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void createTag(
+            Identifier identifier,
+            String tagName,
+            @Nullable Long snapshotId,
+            @Nullable String timeRetained) {
+        CreateTagRequest request = new CreateTagRequest(tagName, snapshotId, timeRetained);
+        client.post(
+                resourcePaths.tags(identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                restAuthFunction);
     }
 
     /**
