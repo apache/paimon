@@ -440,15 +440,15 @@ public class ArrowFormatWriterTest {
 
     @Test
     public void testTimeFieldWriterWithOffset() {
+        String fieldName = "time_field";
         RowType rowType =
                 new RowType(
-                        Collections.singletonList(
-                                new DataField(0, "time_field", DataTypes.TIME())));
+                        Collections.singletonList(new DataField(0, fieldName, DataTypes.TIME())));
         try (RootAllocator allocator = new RootAllocator();
                 VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator)) {
             ArrowFieldWriter[] fieldWriters = ArrowUtils.createArrowFieldWriters(vsr, rowType);
 
-            IntColumnVector timeVec =
+            IntColumnVector paimonTimeVector =
                     new IntColumnVector() {
                         final int[] values = new int[] {0, 1000, 2000, 3000, 4000};
 
@@ -462,26 +462,28 @@ public class ArrowFormatWriterTest {
                             return false;
                         }
                     };
+            TimeMilliVector arrowTimeVector = (TimeMilliVector) vsr.getVector(fieldName);
 
-            TimeMilliVector timeMilliVector = (TimeMilliVector) vsr.getVector("time_field");
             final int batchRows = 3;
             int startIndex = 0;
-            fieldWriters[0].write(timeVec, null, startIndex, batchRows);
+            int sourceIndex = startIndex;
+            fieldWriters[0].write(paimonTimeVector, null, startIndex, batchRows);
             vsr.setRowCount(batchRows);
-
-            for (int i = 0; i < batchRows; i++) {
-                int arrowValue = timeMilliVector.get(i);
-                int paimonValue = timeVec.getInt(i + startIndex);
+            for (int targetIndex = 0; targetIndex < batchRows; targetIndex++) {
+                int arrowValue = arrowTimeVector.get(targetIndex);
+                int paimonValue = paimonTimeVector.getInt(sourceIndex++);
                 assertThat(arrowValue).isEqualTo(paimonValue);
             }
 
-            timeMilliVector.clear();
+            arrowTimeVector.clear();
+
             startIndex = 2;
-            fieldWriters[0].write(timeVec, null, startIndex, batchRows);
+            sourceIndex = startIndex;
+            fieldWriters[0].write(paimonTimeVector, null, startIndex, batchRows);
             vsr.setRowCount(batchRows);
-            for (int i = 0; i < batchRows; i++) {
-                int arrowValue = timeMilliVector.get(i);
-                int paimonValue = timeVec.getInt(i + startIndex);
+            for (int targetIndex = 0; targetIndex < batchRows; targetIndex++) {
+                int arrowValue = arrowTimeVector.get(targetIndex);
+                int paimonValue = paimonTimeVector.getInt(sourceIndex);
                 assertThat(arrowValue).isEqualTo(paimonValue);
             }
         }
