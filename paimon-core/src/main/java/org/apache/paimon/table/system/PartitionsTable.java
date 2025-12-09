@@ -63,6 +63,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_CREATED_BY;
+import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_UPDATED_BY;
 
 /** A {@link Table} for showing partitions info. */
 public class PartitionsTable implements ReadonlyTable {
@@ -78,7 +80,9 @@ public class PartitionsTable implements ReadonlyTable {
                             new DataField(1, "record_count", new BigIntType(false)),
                             new DataField(2, "file_size_in_bytes", new BigIntType(false)),
                             new DataField(3, "file_count", new BigIntType(false)),
-                            new DataField(4, "last_update_time", DataTypes.TIMESTAMP_MILLIS())));
+                            new DataField(4, "last_update_time", DataTypes.TIMESTAMP_MILLIS()),
+                            new DataField(5, "created_by", DataTypes.STRING()),
+                            new DataField(6, "updated_by", DataTypes.STRING())));
 
     private final FileStoreTable storeTable;
 
@@ -250,6 +254,14 @@ public class PartitionsTable implements ReadonlyTable {
                         .append(partitionValueString);
             }
 
+            String createdBy = fileStoreTable.options().get(FIELD_CREATED_BY);
+            BinaryString createdByString =
+                    createdBy != null ? BinaryString.fromString(createdBy) : null;
+
+            String updatedBy = fileStoreTable.options().get(FIELD_UPDATED_BY);
+            BinaryString updatedByString =
+                    updatedBy != null ? BinaryString.fromString(updatedBy) : null;
+
             return GenericRow.of(
                     BinaryString.fromString(partitionStringBuilder.toString()),
                     entry.recordCount(),
@@ -258,7 +270,9 @@ public class PartitionsTable implements ReadonlyTable {
                     Timestamp.fromLocalDateTime(
                             LocalDateTime.ofInstant(
                                     Instant.ofEpochMilli(entry.lastFileCreationTime()),
-                                    ZoneId.systemDefault())));
+                                    ZoneId.systemDefault())),
+                    createdByString,
+                    updatedByString);
         }
     }
 }
