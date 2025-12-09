@@ -251,6 +251,7 @@ public class JavaPyE2ETest {
         write.write(createRow3Cols(2, 21, 20001L));
         write.write(createRow3Cols(2, 22, 202L));
         write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 11, 1001L));
+        commit.commit(2, write.prepareCommit(true, 2));
         write.write(createRow3ColsWithKind(RowKind.DELETE, 2, 20, 200L));
         commit.commit(2, write.prepareCommit(true, 2));
 
@@ -346,7 +347,7 @@ public class JavaPyE2ETest {
 
         assertThat(result).hasSize(9999);
 
-        assertThat(result).doesNotContain("+I[1, 81930, 819300L]");
+        assertThat(result).doesNotContain("+I[1, 81930, 819300]");
 
         // Verify some sample records exist
         assertThat(result).contains("+I[1, 10, 100]");
