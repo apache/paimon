@@ -76,6 +76,11 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
+    public Optional<OrcFilters.Predicate> visitLike(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<OrcFilters.Predicate> visitLessThan(FieldRef fieldRef, Object literal) {
         return convertBinary(fieldRef, literal, OrcFilters.LessThan::new);
     }

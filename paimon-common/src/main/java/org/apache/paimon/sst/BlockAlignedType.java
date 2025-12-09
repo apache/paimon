@@ -16,20 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup.sort;
+package org.apache.paimon.sst;
 
-import org.apache.paimon.lookup.LookupStoreFactory.Context;
+/** Aligned type for block. */
+public enum BlockAlignedType {
+    ALIGNED((byte) 0),
+    UNALIGNED((byte) 1);
 
-/** A {@link Context} for sort store. */
-public class SortContext implements Context {
+    private final byte b;
 
-    private final long fileSize;
-
-    public SortContext(long fileSize) {
-        this.fileSize = fileSize;
+    BlockAlignedType(byte b) {
+        this.b = b;
     }
 
-    public long fileSize() {
-        return fileSize;
+    public byte toByte() {
+        return b;
+    }
+
+    public static BlockAlignedType fromByte(byte b) {
+        for (BlockAlignedType type : BlockAlignedType.values()) {
+            if (type.toByte() == b) {
+                return type;
+            }
+        }
+        throw new IllegalStateException("Illegal block aligned type: " + b);
     }
 }

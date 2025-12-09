@@ -17,7 +17,7 @@ limitations under the License.
 """
 import logging
 import time
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 from unittest.mock import Mock
 
@@ -208,10 +208,12 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         partition = GenericRow(['East', 'Boston'], partition_fields)
 
         # Create ADD entry
+        from pypaimon.data.timestamp import Timestamp
         add_file_meta = Mock(spec=DataFileMeta)
         add_file_meta.row_count = 200
         add_file_meta.file_size = 2048
-        add_file_meta.creation_time = datetime.now()
+        add_file_meta.creation_time = Timestamp.now()
+        add_file_meta.creation_time_epoch_millis = Mock(return_value=int(time.time() * 1000))
 
         add_entry = ManifestEntry(
             kind=0,  # ADD
@@ -225,7 +227,8 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         delete_file_meta = Mock(spec=DataFileMeta)
         delete_file_meta.row_count = 80
         delete_file_meta.file_size = 800
-        delete_file_meta.creation_time = datetime.now()
+        delete_file_meta.creation_time = Timestamp.now()
+        delete_file_meta.creation_time_epoch_millis = Mock(return_value=int(time.time() * 1000))
 
         delete_entry = ManifestEntry(
             kind=1,  # DELETE
@@ -261,10 +264,12 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
             DataField(1, "city", AtomicType("STRING"))
         ]
         partition1 = GenericRow(['East', 'Boston'], partition_fields)
+        from pypaimon.data.timestamp import Timestamp
         file_meta1 = Mock(spec=DataFileMeta)
         file_meta1.row_count = 150
         file_meta1.file_size = 1500
-        file_meta1.creation_time = datetime.now()
+        file_meta1.creation_time = Timestamp.now()
+        file_meta1.creation_time_epoch_millis = Mock(return_value=int(time.time() * 1000))
 
         entry1 = ManifestEntry(
             kind=0,  # ADD
@@ -279,7 +284,8 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         file_meta2 = Mock(spec=DataFileMeta)
         file_meta2.row_count = 75
         file_meta2.file_size = 750
-        file_meta2.creation_time = datetime.now()
+        file_meta2.creation_time = Timestamp.now()
+        file_meta2.creation_time_epoch_millis = Mock(return_value=int(time.time() * 1000))
 
         entry2 = ManifestEntry(
             kind=1,  # DELETE
@@ -816,6 +822,7 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         )
 
         # Create DataFileMeta with value_stats_cols
+        from pypaimon.data.timestamp import Timestamp
         file_meta = DataFileMeta(
             file_name=f"test-file-{test_name}.parquet",
             file_size=1024,
@@ -829,7 +836,7 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
             schema_id=0,
             level=0,
             extra_files=[],
-            creation_time=1234567890,
+            creation_time=Timestamp.from_epoch_millis(1234567890),
             delete_row_count=0,
             embedded_index=None,
             file_source=None,

@@ -18,12 +18,12 @@
 
 import logging
 import uuid
-from datetime import datetime
 from typing import List, Optional, Tuple, Dict
 
 import pyarrow as pa
 
 from pypaimon.common.core_options import CoreOptions
+from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.generic_row import GenericRow
@@ -256,6 +256,8 @@ class DataBlobWriter(DataWriter):
             self.file_io.write_orc(file_path, data, compression=self.compression)
         elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
             self.file_io.write_avro(file_path, data)
+        elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
+            self.file_io.write_lance(file_path, data)
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
@@ -284,7 +286,7 @@ class DataBlobWriter(DataWriter):
 
         self.sequence_generator.start = self.sequence_generator.current
 
-        return DataFileMeta(
+        return DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
             row_count=data.num_rows,
@@ -303,7 +305,7 @@ class DataBlobWriter(DataWriter):
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],
-            creation_time=datetime.now(),
+            creation_time=Timestamp.now(),
             delete_row_count=0,
             file_source=0,
             value_stats_cols=self.normal_column_names,

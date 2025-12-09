@@ -47,7 +47,7 @@ class KeyValueDataWriter(DataWriter):
         enhanced_table = enhanced_table.add_column(len(self.trimmed_primary_keys), '_SEQUENCE_NUMBER', sequence_column)
 
         # TODO: support real row kind here
-        value_kind_column = pa.array([0] * num_rows, type=pa.int32())
+        value_kind_column = pa.array([0] * num_rows, type=pa.int8())
         enhanced_table = enhanced_table.add_column(len(self.trimmed_primary_keys) + 1, '_VALUE_KIND',
                                                    value_kind_column)
 

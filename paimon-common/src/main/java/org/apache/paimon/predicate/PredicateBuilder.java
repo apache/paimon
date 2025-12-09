@@ -161,7 +161,21 @@ public class PredicateBuilder {
         return leaf(Contains.INSTANCE, transform, patternLiteral);
     }
 
-    private Predicate leaf(NullFalseLeafBinaryFunction function, int idx, Object literal) {
+    public Predicate like(int idx, Object patternLiteral) {
+        Pair<NullFalseLeafBinaryFunction, Object> optimized =
+                LikeOptimization.tryOptimize(patternLiteral)
+                        .orElse(Pair.of(Like.INSTANCE, patternLiteral));
+        return leaf(optimized.getKey(), idx, optimized.getValue());
+    }
+
+    public Predicate like(Transform transform, Object patternLiteral) {
+        Pair<NullFalseLeafBinaryFunction, Object> optimized =
+                LikeOptimization.tryOptimize(patternLiteral)
+                        .orElse(Pair.of(Like.INSTANCE, patternLiteral));
+        return leaf(optimized.getKey(), transform, optimized.getValue());
+    }
+
+    private Predicate leaf(LeafFunction function, int idx, Object literal) {
         DataField field = rowType.getFields().get(idx);
         return new LeafPredicate(function, field.type(), idx, field.name(), singletonList(literal));
     }

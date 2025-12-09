@@ -19,8 +19,6 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.table.system.AllTableOptionsTable;
-import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
@@ -53,6 +51,7 @@ import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
 import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
+import static org.apache.paimon.table.system.SystemTableLoader.GLOBAL_SYSTEM_TABLES;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -207,9 +206,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     public void testSystemDatabase() {
         sql("USE " + Catalog.SYSTEM_DATABASE_NAME);
         assertThat(sql("SHOW TABLES"))
-                .containsExactlyInAnyOrder(
-                        Row.of(AllTableOptionsTable.ALL_TABLE_OPTIONS),
-                        Row.of(CatalogOptionsTable.CATALOG_OPTIONS));
+                .containsAll(
+                        GLOBAL_SYSTEM_TABLES.stream().map(Row::of).collect(Collectors.toList()));
     }
 
     @Test

@@ -68,7 +68,21 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
                 options,
                 dvMaintainerFactory,
                 tableName);
+        if (!options.bucketAppendOrdered()) {
+            super.withIgnorePreviousFiles(options.writeOnly());
+        }
         this.commitUser = commitUser;
+    }
+
+    @Override
+    public void withIgnorePreviousFiles(boolean ignorePrevious) {
+        if (options.bucketAppendOrdered()) {
+            super.withIgnorePreviousFiles(ignorePrevious);
+        } else {
+            // for unordered, don't need sequence number
+            // all writers to be empty if write only
+            super.withIgnorePreviousFiles(options.writeOnly());
+        }
     }
 
     @Override

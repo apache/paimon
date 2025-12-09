@@ -157,6 +157,11 @@ public class ParquetFilters {
         }
 
         @Override
+        public FilterPredicate visitLike(FieldRef fieldRef, Object literal) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public FilterPredicate visitIn(FieldRef fieldRef, List<Object> literals) {
             Operators.Column<?> column = toParquetColumn(fieldRef);
             if (column instanceof Operators.LongColumn) {

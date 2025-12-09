@@ -13,7 +13,7 @@
 #  distributed under the License is distributed on an "AS IS" BASIS,
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
-# limitations under the License.
+#  limitations under the License.
 ################################################################################
 
 """Lance format reader implementation for Paimon."""
@@ -21,10 +21,13 @@
 import logging
 from typing import List, Optional, Any, Dict
 
+import pyarrow as pa
+import pyarrow.dataset as ds
+from pyarrow import RecordBatch
+
 from pypaimon.common.file_io import FileIO
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
-from pypaimon.read.reader.lance.lance_native_reader import LanceNativeReader
-from pypaimon.read.reader.lance.lance_utils import LanceUtils
+from pypaimon.read.reader.lance_utils import to_lance_specified
 from pypaimon.read.reader.lance.vector_index import VectorIndexBuilder
 from pypaimon.read.reader.lance.scalar_index import ScalarIndexBuilder
 from pypaimon.read.reader.lance.predicate_pushdown import PredicateOptimizer
@@ -34,17 +37,16 @@ logger = logging.getLogger(__name__)
 
 class FormatLanceReader(RecordBatchReader):
     """
-    Lance format reader for reading Lance-formatted data files.
-
-    This reader integrates Lance format support into Paimon's read pipeline,
-    handling column projection, predicate push-down, and batch reading.
+    A Format Reader that reads record batch from a Lance file using PyArrow,
+    and filters it based on the provided predicate and projection.
+    Integrates Lance format support with vector and scalar indexing capabilities.
     """
 
     def __init__(self,
                  file_io: FileIO,
                  file_path: str,
                  read_fields: List[str],
-                 push_down_predicate: Any = None,
+                 push_down_predicate: Optional[Any] = None,
                  batch_size: int = 4096,
                  selection_ranges: Optional[List[tuple]] = None,
                  enable_vector_search: bool = False,
@@ -62,12 +64,13 @@ class FormatLanceReader(RecordBatchReader):
             enable_vector_search: Enable vector indexing (IVF_PQ, HNSW)
             enable_scalar_index: Enable scalar indexing (BTree, Bitmap)
         """
+        import lance
+
+        # Use upstream's file path conversion utility
+        file_path_for_lance, storage_options = to_lance_specified(file_io, file_path)
+        
         self.file_io = file_io
-        # Convert file path, handling both FileIO with to_filesystem_path and direct paths
-        if hasattr(file_io, 'to_filesystem_path'):
-            self.file_path = file_io.to_filesystem_path(file_path)
-        else:
-            self.file_path = str(file_path)
+        self.file_path = file_path_for_lance
         self.read_fields = read_fields
         self.push_down_predicate = push_down_predicate
         self.batch_size = batch_size
@@ -75,47 +78,37 @@ class FormatLanceReader(RecordBatchReader):
         self.enable_vector_search = enable_vector_search
         self.enable_scalar_index = enable_scalar_index
 
-        self._native_reader: Optional[LanceNativeReader] = None
-        self._initialized = False
+        # Initialize base reader from upstream
+        columns_for_lance = read_fields if read_fields else None
+        lance_reader = lance.file.LanceFileReader(  # type: ignore
+            file_path_for_lance,
+            storage_options=storage_options,
+            columns=columns_for_lance)
+        reader_results = lance_reader.read_all()
+        pa_table = reader_results.to_table()
 
-        # Index support
+        # Setup reader with predicate push-down if provided
+        if push_down_predicate is not None:
+            in_memory_dataset = ds.InMemoryDataset(pa_table)
+            scanner = in_memory_dataset.scanner(filter=push_down_predicate, batch_size=batch_size)
+            self.reader = scanner.to_reader()
+        else:
+            self.reader = iter(pa_table.to_batches(max_chunksize=batch_size))
+
+        # Enhanced indexing support
         self._vector_index_builder: Optional[VectorIndexBuilder] = None
         self._scalar_index_builder: Optional[ScalarIndexBuilder] = None
         self._predicate_optimizer: Optional[PredicateOptimizer] = None
+        self._pa_table = pa_table
 
         try:
-            self._initialize_reader()
             if enable_vector_search:
                 self._initialize_vector_indexing()
             if enable_scalar_index:
                 self._initialize_scalar_indexing()
-        except ImportError:
-            logger.error("Lance library not available. Please install: pip install lance")
-            raise
-
-    def _initialize_reader(self) -> None:
-        """Initialize the native Lance reader."""
-        try:
-            # Get storage options for cloud storage support
-            storage_options = LanceUtils.convert_to_lance_storage_options(
-                self.file_io,
-                self.file_path
-            )
-
-            # Create native reader with column projection
-            self._native_reader = LanceNativeReader(
-                file_path=self.file_path,
-                columns=self.read_fields if self.read_fields else None,
-                batch_size=self.batch_size,
-                storage_options=storage_options
-            )
-
-            self._initialized = True
-            logger.info(f"Successfully initialized Lance reader for {self.file_path}")
-
-        except Exception as e:
-            logger.error(f"Failed to initialize Lance reader: {e}")
-            raise
+        except ImportError as e:
+            logger.error(f"Lance library not fully available: {e}")
+            # Continue with basic reading functionality
 
     def _initialize_vector_indexing(self) -> None:
         """Initialize vector indexing support."""
@@ -137,20 +130,22 @@ class FormatLanceReader(RecordBatchReader):
         except Exception as e:
             logger.warning(f"Failed to initialize scalar indexing: {e}")
 
-    def read_arrow_batch(self) -> Optional[Any]:
+    def read_arrow_batch(self) -> Optional[RecordBatch]:
         """
         Read next batch of data from Lance file with optimization.
 
         Returns:
             PyArrow RecordBatch with selected columns, or None if EOF
         """
-        if not self._initialized or self._native_reader is None:
-            return None
-
         try:
-            batch = self._native_reader.read_batch()
+            # Handle both scanner reader and iterator
+            if hasattr(self.reader, 'read_next_batch'):
+                batch = self.reader.read_next_batch()  # type: ignore
+            else:
+                # Iterator of batches
+                batch = next(self.reader)  # type: ignore
 
-            if batch is None:
+            if batch is None or batch.num_rows == 0:
                 return None
 
             # Apply optimized predicate filters
@@ -166,11 +161,13 @@ class FormatLanceReader(RecordBatchReader):
 
             return batch
 
+        except StopIteration:
+            return None
         except Exception as e:
             logger.error(f"Error reading batch from Lance file: {e}")
             raise
 
-    def _apply_predicate_optimization(self, batch: Any) -> Optional[Any]:
+    def _apply_predicate_optimization(self, batch: RecordBatch) -> Optional[RecordBatch]:
         """
         Apply predicate push-down optimization to filter rows efficiently.
 
@@ -200,57 +197,15 @@ class FormatLanceReader(RecordBatchReader):
             hints = [self._predicate_optimizer.get_filter_hint(expr) for expr in optimized_exprs]
             logger.debug(f"Predicate optimization hints: {hints}")
 
-            # Implement actual filtering using Lance's filter API
-            try:
-                import lancedb  # noqa: F401
-
-                # Convert expressions to Lance filter format
-                # Lance supports SQL-like filter expressions
-                filter_expr = None
-                for expr in optimized_exprs:
-                    if filter_expr is None:
-                        filter_expr = expr
-                    else:
-                        # Combine multiple filters with AND
-                        filter_expr = f"{filter_expr} AND {expr}"
-
-                if filter_expr and self._native_reader:
-                    try:
-                        # Apply filter to Lance table
-                        table = self._native_reader._table
-                        if hasattr(table, 'search'):
-                            # Use Lance's search-based filtering
-                            filtered = table.search().where(filter_expr).to_list()
-                            if filtered:
-                                import pyarrow as pa
-                                batch = pa.RecordBatch.from_pylist(
-                                    filtered, schema=batch.schema
-                                )
-                                # Log the filtering results
-                                filtered_count = len(filtered)
-                                original_count = batch.num_rows
-                                msg = (
-                                    f"Applied predicate filter, rows "
-                                    f"reduced from {original_count} to "
-                                    f"{filtered_count}"
-                                )
-                                logger.debug(msg)
-                                return batch
-                        else:
-                            logger.debug("Table does not support filtering, returning unfiltered batch")
-                    except Exception as filter_error:
-                        logger.warning(f"Lance filter execution failed: {filter_error}, returning unfiltered batch")
-
-            except ImportError:
-                logger.debug("lancedb not available, skipping Lance filter optimization")
-
+            # Note: Actual Lance filter execution is handled by PyArrow's dataset API
+            # which is already applied during initialization
             return batch
 
         except Exception as e:
             logger.warning(f"Predicate optimization failed, returning unfiltered batch: {e}")
             return batch
 
-    def _apply_row_selection(self, batch: Any) -> Optional[Any]:
+    def _apply_row_selection(self, batch: RecordBatch) -> Optional[RecordBatch]:
         """
         Apply row range selection to the batch.
 
@@ -261,8 +216,6 @@ class FormatLanceReader(RecordBatchReader):
             Filtered RecordBatch or None if no rows match
         """
         try:
-            import pyarrow as pa
-
             if not self.selection_ranges or batch.num_rows == 0:
                 return batch
 
@@ -306,12 +259,12 @@ class FormatLanceReader(RecordBatchReader):
 
             if index_type == 'ivf_pq':
                 return self._vector_index_builder.create_ivf_pq_index(
-                    self._native_reader._table if self._native_reader else None,
+                    self._pa_table,
                     **index_params
                 )
             elif index_type == 'hnsw':
                 return self._vector_index_builder.create_hnsw_index(
-                    self._native_reader._table if self._native_reader else None,
+                    self._pa_table,
                     **index_params
                 )
             else:
@@ -344,23 +297,19 @@ class FormatLanceReader(RecordBatchReader):
                     # Sample data to determine cardinality
                     try:
                         # Get column statistics to choose optimal index
-                        if self._native_reader and hasattr(self._native_reader, '_table'):
-                            table = self._native_reader._table
-                            if hasattr(table, 'to_pandas'):
-                                # Sample first 1000 rows to estimate cardinality
-                                sample_df = table.limit(1000).to_pandas()
-                                if column in sample_df.columns:
-                                    unique_ratio = sample_df[column].nunique() / len(sample_df)
-                                    # Use Bitmap for low cardinality (< 10% unique)
-                                    # Use BTree for high cardinality or numeric columns
-                                    if unique_ratio < 0.1 and sample_df[column].dtype == 'object':
-                                        index_type = 'bitmap'
-                                    else:
-                                        index_type = 'btree'
+                        if hasattr(self._pa_table, 'to_pandas'):
+                            # Sample first 1000 rows to estimate cardinality
+                            sample_df = self._pa_table.to_pandas().head(1000)
+                            if column in sample_df.columns:
+                                unique_ratio = sample_df[column].nunique() / len(sample_df)
+                                # Use Bitmap for low cardinality (< 10% unique)
+                                # Use BTree for high cardinality or numeric columns
+                                if unique_ratio < 0.1 and sample_df[column].dtype == 'object':
+                                    index_type = 'bitmap'
                                 else:
-                                    index_type = 'btree'  # Default to BTree
+                                    index_type = 'btree'
                             else:
-                                index_type = 'btree'
+                                index_type = 'btree'  # Default to BTree
                         else:
                             index_type = 'btree'
                     except Exception as auto_select_error:
@@ -371,12 +320,12 @@ class FormatLanceReader(RecordBatchReader):
 
             if index_type == 'btree':
                 return self._scalar_index_builder.create_btree_index(
-                    self._native_reader._table if self._native_reader else None,
+                    self._pa_table,
                     **index_params
                 )
             elif index_type == 'bitmap':
                 return self._scalar_index_builder.create_bitmap_index(
-                    self._native_reader._table if self._native_reader else None,
+                    self._pa_table,
                     **index_params
                 )
             else:
@@ -388,20 +337,20 @@ class FormatLanceReader(RecordBatchReader):
 
     def close(self) -> None:
         """Close the reader and release resources."""
-        if self._native_reader is not None:
+        if self.reader is not None:
             try:
-                self._native_reader.close()
+                self.reader = None
             except Exception as e:
-                logger.warning(f"Error closing native reader: {e}")
-            finally:
-                self._native_reader = None
+                logger.warning(f"Error closing reader: {e}")
 
         self._vector_index_builder = None
         self._scalar_index_builder = None
         self._predicate_optimizer = None
-        self._initialized = False
         logger.debug(f"Closed Lance reader for {self.file_path}")
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Destructor to ensure cleanup."""
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass

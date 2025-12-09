@@ -54,6 +54,8 @@ public interface FunctionVisitor<T> extends PredicateVisitor<T> {
 
     T visitContains(FieldRef fieldRef, Object literal);
 
+    T visitLike(FieldRef fieldRef, Object literal);
+
     T visitLessThan(FieldRef fieldRef, Object literal);
 
     T visitGreaterOrEqual(FieldRef fieldRef, Object literal);
