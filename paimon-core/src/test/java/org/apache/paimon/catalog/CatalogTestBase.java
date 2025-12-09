@@ -119,7 +119,7 @@ public abstract class CatalogTestBase {
         warehouse = tempFile.toUri().toString();
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
-        CatalogContext catalogContext = CatalogContext.create(catalogOptions);
+        CatalogContext catalogContext = CatalogHadoopContext.create(catalogOptions);
         fileIO = new ResolvingFileIO();
         fileIO.configure(catalogContext);
     }
