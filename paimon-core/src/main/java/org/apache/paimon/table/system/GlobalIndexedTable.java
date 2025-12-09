@@ -65,6 +65,8 @@ import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import org.jetbrains.annotations.NotNull;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -77,6 +79,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.globalindex.GlobalIndexScanBuilder.parallelScan;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link Table} for reading table with global index. */
 public class GlobalIndexedTable implements DataTable, ReadonlyTable {
@@ -384,10 +387,11 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
 
     private static class IndexedSplit implements Split {
         private final DataSplit split;
-        private final List<Range> rowRanges;
-        private final Float[] scores;
+        @NotNull private final List<Range> rowRanges;
+        @Nullable private final Float[] scores;
 
-        public IndexedSplit(DataSplit split, List<Range> rowRanges, Float[] scores) {
+        public IndexedSplit(
+                DataSplit split, @NotNull List<Range> rowRanges, @Nullable Float[] scores) {
             this.split = split;
             this.rowRanges = rowRanges;
             this.scores = scores;
@@ -474,8 +478,19 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             if (split instanceof IndexedSplit) {
                 IndexedSplit indexedSplit = (IndexedSplit) split;
-                Map<Long, Float> rowIdToScore = new HashMap<>();
+                List<Range> pushDownRanges = this.rowRanges;
+                List<Range> splitRowRanges = indexedSplit.rowRanges;
+                if (pushDownRanges != null) {
+                    pushDownRanges = Range.and(this.rowRanges, splitRowRanges);
+                } else {
+                    pushDownRanges = splitRowRanges;
+                }
+
+                dataRead.withRowRanges(pushDownRanges);
+
+                Map<Long, Float> rowIdToScore = null;
                 if (indexedSplit.scores != null) {
+                    rowIdToScore = new HashMap<>();
                     int index = 0;
                     for (Range range : indexedSplit.rowRanges) {
                         for (long i = range.from; i <= range.to; i++) {
@@ -484,43 +499,34 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
                     }
                 }
 
-                List<Range> pushDownRanges = this.rowRanges;
-                List<Range> splitRowRanges = indexedSplit.rowRanges;
-                if (splitRowRanges != null) {
-                    if (pushDownRanges != null) {
-                        pushDownRanges = Range.and(this.rowRanges, splitRowRanges);
-                    } else {
-                        pushDownRanges = splitRowRanges;
+                if (rowIdToScore != null) {
+                    int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
+                    RowType actualReadType = readType;
+                    ProjectedRow projectedRow = null;
+
+                    if (rowIdIndex == -1) {
+                        actualReadType = SpecialFields.rowTypeWithRowId(readType);
+                        rowIdIndex = actualReadType.getFieldCount() - 1;
+                        int[] mappings = new int[readType.getFieldCount()];
+                        for (int i = 0; i < readType.getFieldCount(); i++) {
+                            mappings[i] = i;
+                        }
+                        projectedRow = ProjectedRow.from(mappings);
                     }
+
+                    dataRead.withReadType(actualReadType);
+                    return new ReaderWithScore(
+                            dataRead.createReader(indexedSplit.split),
+                            rowIdToScore,
+                            rowIdIndex,
+                            projectedRow);
                 }
-
-                int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
-                RowType actualReadType = readType;
-                ProjectedRow projectedRow = null;
-
-                if (rowIdIndex == -1) {
-                    actualReadType = SpecialFields.rowTypeWithRowId(readType);
-                    rowIdIndex = actualReadType.getFieldCount() - 1;
-                    int[] mappings = new int[readType.getFieldCount()];
-                    for (int i = 0; i < readType.getFieldCount(); i++) {
-                        mappings[i] = i;
-                    }
-                    projectedRow = ProjectedRow.from(mappings);
-                }
-
-                dataRead.withRowRanges(pushDownRanges).withReadType(actualReadType);
-
-                return new ReaderWithScore(
-                        dataRead.createReader(indexedSplit.split),
-                        rowIdToScore,
-                        rowIdIndex,
-                        projectedRow);
-            } else {
-                if (readType != null) {
-                    dataRead.withReadType(readType);
-                }
-                return dataRead.createReader(split);
             }
+
+            if (readType != null) {
+                dataRead.withReadType(readType);
+            }
+            return dataRead.createReader(split);
         }
     }
 
@@ -535,6 +541,7 @@ public class GlobalIndexedTable implements DataTable, ReadonlyTable {
                 Map<Long, Float> rowIdToScore,
                 int rowIdIndex,
                 @Nullable ProjectedRow projectedRow) {
+            checkArgument(rowIdToScore != null, "rowIdToScore map must not be null");
             this.reader = reader;
             this.rowIdToScore = rowIdToScore;
             this.rowIdIndex = rowIdIndex;
