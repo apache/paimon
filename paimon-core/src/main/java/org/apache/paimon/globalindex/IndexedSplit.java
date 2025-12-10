@@ -26,7 +26,6 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Range;
 
-import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -39,14 +38,15 @@ import java.util.Objects;
 /** Indexed split for global index. */
 public class IndexedSplit implements Split {
 
+    private static final long serialVersionUID = 1L;
     private static final long MAGIC = -938472394838495695L;
     private static final int VERSION = 1;
 
     private DataSplit split;
-    @Nonnull private List<Range> rowRanges;
+    private List<Range> rowRanges;
     @Nullable private Float[] scores;
 
-    public IndexedSplit(DataSplit split, @Nonnull List<Range> rowRanges, @Nullable Float[] scores) {
+    public IndexedSplit(DataSplit split, List<Range> rowRanges, @Nullable Float[] scores) {
         this.split = split;
         this.rowRanges = rowRanges;
         this.scores = scores;
