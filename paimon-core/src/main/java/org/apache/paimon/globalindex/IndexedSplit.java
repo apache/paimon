@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
+/** Indexed split for global index. */
 public class IndexedSplit implements Split {
     private final DataSplit split;
     @NotNull private final List<Range> rowRanges;
