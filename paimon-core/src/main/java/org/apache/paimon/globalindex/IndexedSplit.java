@@ -44,9 +44,9 @@ public class IndexedSplit implements Split {
 
     private DataSplit split;
     private List<Range> rowRanges;
-    @Nullable private Float[] scores;
+    @Nullable private float[] scores;
 
-    public IndexedSplit(DataSplit split, List<Range> rowRanges, @Nullable Float[] scores) {
+    public IndexedSplit(DataSplit split, List<Range> rowRanges, @Nullable float[] scores) {
         this.split = split;
         this.rowRanges = rowRanges;
         this.scores = scores;
@@ -61,7 +61,7 @@ public class IndexedSplit implements Split {
     }
 
     @Nullable
-    public Float[] scores() {
+    public float[] scores() {
         return scores;
     }
 
@@ -116,10 +116,7 @@ public class IndexedSplit implements Split {
             out.writeBoolean(true);
             out.writeInt(scores.length);
             for (Float score : scores) {
-                out.writeByte(score == null ? 0 : 1);
-                if (score != null) {
-                    out.writeFloat(score);
-                }
+                out.writeFloat(score);
             }
         } else {
             out.writeBoolean(false);
@@ -143,15 +140,13 @@ public class IndexedSplit implements Split {
             long to = in.readLong();
             rowRanges.add(new Range(from, to));
         }
-        Float[] scores = null;
+        float[] scores = null;
         boolean hasScores = in.readBoolean();
         if (hasScores) {
             int scoresLength = in.readInt();
-            scores = new Float[scoresLength];
+            scores = new float[scoresLength];
             for (int i = 0; i < scoresLength; i++) {
-                if (in.readByte() == 1) {
-                    scores[i] = in.readFloat();
-                }
+                scores[i] = in.readFloat();
             }
         }
         return new IndexedSplit(split, rowRanges, scores);
