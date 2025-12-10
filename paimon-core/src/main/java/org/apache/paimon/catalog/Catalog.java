@@ -767,7 +767,7 @@ public interface Catalog extends AutoCloseable {
     /**
      * Get tag for table.
      *
-     * @param identifier path of the table, cannot be system or branch name.
+     * @param identifier path of the table, cannot be system name.
      * @param tagName tag name
      * @return {@link GetTagResponse} containing tag information
      * @throws TableNotExistException if the table does not exist
@@ -781,7 +781,7 @@ public interface Catalog extends AutoCloseable {
     /**
      * Create tag for table.
      *
-     * @param identifier path of the table, cannot be system or branch name.
+     * @param identifier path of the table, cannot be system name.
      * @param tagName tag name
      * @param snapshotId optional snapshot id, if not provided uses latest snapshot
      * @param timeRetained optional time retained as string (e.g., "1d", "12h", "30m")

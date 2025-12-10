@@ -45,6 +45,7 @@ import org.apache.paimon.rest.auth.DLFToken;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -64,6 +65,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 
@@ -1886,6 +1888,74 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 Catalog.BranchNotExistException.class,
                 () -> restCatalog.fastForward(identifier, "no_exist_branch"));
         assertThat(restCatalog.listBranches(identifier)).isEmpty();
+    }
+
+    @Test
+    void testTags() throws Exception {
+        String databaseName = "testTagTable";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        // Test table not exist
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> restCatalog.createTag(identifier, "my_tag", null, null, false));
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> restCatalog.getTag(identifier, "my_tag"));
+
+        // Create table
+        catalog.createTable(
+                identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
+
+        // Test tag not exist
+        assertThrows(
+                Catalog.TagNotExistException.class,
+                () -> restCatalog.getTag(identifier, "non_exist_tag"));
+
+        // Create snapshot by writing data
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        batchWrite(table, Lists.newArrayList(1, 2, 3));
+
+        // Get latest snapshot
+        SnapshotManager snapshotManager = table.snapshotManager();
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        assertThat(latestSnapshot).isNotNull();
+
+        // Create tag from latest snapshot (snapshotId = null)
+        restCatalog.createTag(identifier, "my_tag", null, null, false);
+
+        // Get tag and verify
+        GetTagResponse tagResponse = restCatalog.getTag(identifier, "my_tag");
+        assertThat(tagResponse.tagName()).isEqualTo("my_tag");
+        assertThat(tagResponse.snapshot().id()).isEqualTo(latestSnapshot.id());
+        assertThat(tagResponse.snapshot()).isEqualTo(latestSnapshot);
+
+        // Create another snapshot
+        batchWrite(table, Lists.newArrayList(4, 5, 6));
+        Snapshot newSnapshot = snapshotManager.latestSnapshot();
+        // Create tag from specific snapshot
+        restCatalog.createTag(identifier, "my_tag_v2", newSnapshot.id(), null, false);
+
+        // Get tag and verify
+        GetTagResponse tagResponse2 = restCatalog.getTag(identifier, "my_tag_v2");
+        assertThat(tagResponse2.tagName()).isEqualTo("my_tag_v2");
+        assertThat(tagResponse2.snapshot().id()).isEqualTo(newSnapshot.id());
+        assertThat(tagResponse2.snapshot()).isEqualTo(newSnapshot);
+
+        // Test tag already exists
+        assertThrows(
+                Catalog.TagAlreadyExistException.class,
+                () -> restCatalog.createTag(identifier, "my_tag", null, null, false));
+
+        // Test create tag with ignoreIfExists = true
+        assertDoesNotThrow(() -> restCatalog.createTag(identifier, "my_tag", null, null, true));
+
+        // Test snapshot not exist
+        assertThrows(
+                SnapshotNotExistException.class,
+                () -> restCatalog.createTag(identifier, "my_tag_v3", 99999L, null, false));
     }
 
     @Test
