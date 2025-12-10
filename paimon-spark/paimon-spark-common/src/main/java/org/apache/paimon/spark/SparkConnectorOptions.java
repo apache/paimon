@@ -91,4 +91,11 @@ public class SparkConnectorOptions {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to read row in the form of changelog (add rowkind column in row to represent its change type).");
+
+    public static final ConfigOption<Boolean> READ_ALLOW_FULL_SCAN =
+            key("read.allow.fullScan")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to allow full scan when reading a partitioned table.");
 }

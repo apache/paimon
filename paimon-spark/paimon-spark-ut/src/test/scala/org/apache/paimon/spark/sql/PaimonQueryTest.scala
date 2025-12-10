@@ -401,6 +401,33 @@ class PaimonQueryTest extends PaimonSparkTestBase {
         .contains("Only append table or deletion vector table support querying metadata columns."))
   }
 
+  test("Paimon Query: disallow full scan") {
+    withTable("t", "t_p") {
+      sql("CREATE TABLE t (a INT)")
+      sql("INSERT INTO t VALUES (1), (2)")
+      withSparkSQLConf("spark.paimon.read.allow.fullScan" -> "false") {
+        checkAnswer(sql("SELECT * FROM t"), Seq(Row(1), Row(2)))
+      }
+
+      sql("CREATE TABLE t_p (a INT, p INT) PARTITIONED BY (p)")
+      sql("INSERT INTO t_p VALUES (1, 1), (2, 2)")
+      withSparkSQLConf("spark.paimon.read.allow.fullScan" -> "false") {
+        assert(
+          intercept[Exception](sql("SELECT * FROM t_p").collect()).getMessage
+            .contains("Full scan is not supported."))
+        assert(
+          intercept[Exception](sql("SELECT * FROM t_p WHERE p > 0").collect()).getMessage
+            .contains("Full scan is not supported."))
+        checkAnswer(sql("SELECT * FROM t_p WHERE p > 1"), Seq(Row(2, 2)))
+
+        checkAnswer(sql("select sys.max_pt('t_p')"), Seq(Row("2")))
+        assert(
+          intercept[Exception](sql("select sys.max_pt('t_p') from t_p").collect()).getMessage
+            .contains("Full scan is not supported."))
+      }
+    }
+  }
+
   private def getAllFiles(
       tableName: String,
       partitions: Seq[String],
