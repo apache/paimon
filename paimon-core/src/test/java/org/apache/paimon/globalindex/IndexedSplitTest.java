@@ -26,6 +26,7 @@ import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;

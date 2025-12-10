@@ -28,6 +28,7 @@ import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -80,16 +81,21 @@ public class IndexedSplit implements Split {
 
         IndexedSplit that = (IndexedSplit) o;
 
-        return split.equals(that.split) && rowRanges.equals(that.rowRanges) && Arrays.equals(scores, that.scores);
+        return split.equals(that.split)
+                && rowRanges.equals(that.rowRanges)
+                && Arrays.equals(scores, that.scores);
     }
 
     @Override
     public String toString() {
-        return "IndexedSplit{" +
-                "split=" + split +
-                ", rowRanges=" + rowRanges +
-                ", scores=" + Arrays.toString(scores) +
-                '}';
+        return "IndexedSplit{"
+                + "split="
+                + split
+                + ", rowRanges="
+                + rowRanges
+                + ", scores="
+                + Arrays.toString(scores)
+                + '}';
     }
 
     @Override
