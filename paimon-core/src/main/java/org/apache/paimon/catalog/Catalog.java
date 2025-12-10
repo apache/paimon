@@ -800,6 +800,39 @@ public interface Catalog extends AutoCloseable {
             boolean ignoreIfExists)
             throws TableNotExistException, SnapshotNotExistException, TagAlreadyExistException;
 
+    /**
+     * Get paged list names of tags under this table. An empty list is returned if none tag exists.
+     *
+     * @param identifier path of the table, cannot be system name.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the names of tags with provided page size in this table and next page
+     *     token, or a list of the names of all tags in this table if the catalog does not {@link
+     *     #supportsListObjectsPaged()}.
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()} or it does not {@link #supportsListByPattern()}
+     */
+    PagedList<String> listTagsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException;
+
+    /**
+     * Delete tag for table.
+     *
+     * @param identifier path of the table, cannot be system name.
+     * @param tagName tag name
+     * @throws TableNotExistException if the table does not exist
+     * @throws TagNotExistException if the tag does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    void deleteTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException;
+
     // ==================== Partition Modifications ==========================
 
     /**

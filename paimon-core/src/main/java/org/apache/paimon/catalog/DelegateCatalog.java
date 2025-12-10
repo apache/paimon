@@ -251,6 +251,19 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public PagedList<String> listTagsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        return wrapped.listTagsPaged(identifier, maxResults, pageToken);
+    }
+
+    @Override
+    public void deleteTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
+        wrapped.deleteTag(identifier, tagName);
+    }
+
+    @Override
     public boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,

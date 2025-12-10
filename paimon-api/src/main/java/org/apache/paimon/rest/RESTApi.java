@@ -72,6 +72,7 @@ import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListTagsResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
@@ -888,6 +889,52 @@ public class RESTApi {
         client.post(
                 resourcePaths.tags(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
+                restAuthFunction);
+    }
+
+    /**
+     * Get paged list names of tags under this table. An empty list is returned if none tag exists.
+     *
+     * @param identifier database name and table name.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return {@link PagedList}: elements and nextPageToken.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public PagedList<String> listTagsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
+        ListTagsResponse response =
+                client.get(
+                        resourcePaths.tags(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        buildPagedQueryParams(maxResults, pageToken),
+                        ListTagsResponse.class,
+                        restAuthFunction);
+        List<String> tags = response.tags();
+        if (tags == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(tags, response.getNextPageToken());
+    }
+
+    /**
+     * Delete tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the tag not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void deleteTag(Identifier identifier, String tagName) {
+        client.delete(
+                resourcePaths.tag(
+                        identifier.getDatabaseName(), identifier.getObjectName(), tagName),
                 restAuthFunction);
     }
 

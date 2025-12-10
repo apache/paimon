@@ -1147,11 +1147,6 @@ paths:
           in: query
           schema:
             type: string
-        - name: tagNamePattern
-          description: A sql LIKE pattern (%) for tag names. All tags will be returned if not set or empty. Currently, only prefix matching is supported.
-          in: query
-          schema:
-            type: string
       responses:
         "200":
           description: OK
@@ -3086,7 +3081,7 @@ components:
         tags:
           type: array
           items:
-            $ref: '#/components/schemas/TagInfo'
+            type: string
         nextPageToken:
           type: string
     TagInfo:

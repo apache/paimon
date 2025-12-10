@@ -1923,7 +1923,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
         assertThat(latestSnapshot).isNotNull();
 
-        // Create tag from latest snapshot (snapshotId = null)
+        // Create tag from latest snapshot
         restCatalog.createTag(identifier, "my_tag", null, null, false);
 
         // Get tag and verify
@@ -1956,6 +1956,29 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 SnapshotNotExistException.class,
                 () -> restCatalog.createTag(identifier, "my_tag_v3", 99999L, null, false));
+
+        // Test listTags
+        PagedList<String> tags = restCatalog.listTagsPaged(identifier, null, null);
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag", "my_tag_v2");
+
+        // Test deleteTag
+        restCatalog.deleteTag(identifier, "my_tag");
+        tags = restCatalog.listTagsPaged(identifier, null, null);
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
+
+        // Test deleteTag with non-existent tag
+        assertThrows(
+                Catalog.TagNotExistException.class,
+                () -> restCatalog.deleteTag(identifier, "non_exist_tag"));
+
+        // Verify tag is deleted
+        assertThrows(
+                Catalog.TagNotExistException.class, () -> restCatalog.getTag(identifier, "my_tag"));
+
+        // Delete remaining tag
+        restCatalog.deleteTag(identifier, "my_tag_v2");
+        tags = restCatalog.listTagsPaged(identifier, null, null);
+        assertThat(tags.getElements()).isEmpty();
     }
 
     @Test

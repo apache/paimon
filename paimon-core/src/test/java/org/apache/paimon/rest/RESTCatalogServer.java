@@ -81,6 +81,7 @@ import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListTagsResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
@@ -450,6 +451,7 @@ public class RESTCatalogServer {
                                     resources,
                                     restAuthParameter.method(),
                                     restAuthParameter.data(),
+                                    parameters,
                                     identifier);
                         } else if (isTableToken) {
                             return getDataTokenHandle(identifier);
@@ -1705,7 +1707,11 @@ public class RESTCatalogServer {
     }
 
     private MockResponse tagApiHandle(
-            String[] resources, String method, String data, Identifier identifier)
+            String[] resources,
+            String method,
+            String data,
+            Map<String, String> parameters,
+            Identifier identifier)
             throws Exception {
         RESTResponse response;
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
@@ -1714,10 +1720,67 @@ public class RESTCatalogServer {
         try {
             switch (method) {
                 case "GET":
-                    // GET /v1/{prefix}/databases/{database}/tables/{table}/tags/{tag}
+                    if (resources.length == 4) {
+                        // GET /v1/{prefix}/databases/{database}/tables/{table}/tags
+                        // Page list tags
+                        List<String> tags = new ArrayList<>(tagManager.allTagNames());
+                        if (tags.isEmpty()) {
+                            response = new ListTagsResponse(Collections.emptyList(), null);
+                            return mockResponse(response, 200);
+                        }
+                        int maxResults;
+                        try {
+                            maxResults = getMaxResults(parameters);
+                        } catch (NumberFormatException e) {
+                            return handleInvalidMaxResults(parameters);
+                        }
+                        String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
+                        PagedList<String> pagedTags =
+                                buildPagedEntities(tags, maxResults, pageToken);
+                        response =
+                                new ListTagsResponse(
+                                        pagedTags.getElements(), pagedTags.getNextPageToken());
+                        return mockResponse(response, 200);
+                    } else {
+                        // GET /v1/{prefix}/databases/{database}/tables/{table}/tags/{tag}
+                        tagName = RESTUtil.decodeString(resources[4]);
+                        Optional<Tag> tag = tagManager.get(tagName);
+                        if (!tag.isPresent()) {
+                            response =
+                                    new ErrorResponse(
+                                            ErrorResponse.RESOURCE_TYPE_TAG,
+                                            tagName,
+                                            String.format(
+                                                    "Tag %s in table %s doesn't exist.",
+                                                    tagName, identifier.getFullName()),
+                                            404);
+                            return mockResponse(response, 404);
+                        }
+                        Tag tagObj = tag.get();
+                        Long tagCreateTimeMillis =
+                                tagObj.getTagCreateTime() != null
+                                        ? tagObj.getTagCreateTime()
+                                                .atZone(ZoneId.systemDefault())
+                                                .toInstant()
+                                                .toEpochMilli()
+                                        : null;
+                        String timeRetainedStr =
+                                tagObj.getTagTimeRetained() != null
+                                        ? tagObj.getTagTimeRetained().toString()
+                                        : null;
+                        response =
+                                new GetTagResponse(
+                                        tagName,
+                                        tagObj.trimToSnapshot(),
+                                        tagCreateTimeMillis,
+                                        timeRetainedStr);
+                        return mockResponse(response, 200);
+                    }
+                case "DELETE":
+                    // DELETE /v1/{prefix}/databases/{database}/tables/{table}/tags/{tag}
                     tagName = RESTUtil.decodeString(resources[4]);
-                    Optional<Tag> tag = tagManager.get(tagName);
-                    if (!tag.isPresent()) {
+                    Optional<Tag> tagToDelete = tagManager.get(tagName);
+                    if (!tagToDelete.isPresent()) {
                         response =
                                 new ErrorResponse(
                                         ErrorResponse.RESOURCE_TYPE_TAG,
@@ -1728,25 +1791,8 @@ public class RESTCatalogServer {
                                         404);
                         return mockResponse(response, 404);
                     }
-                    Tag tagObj = tag.get();
-                    Long tagCreateTimeMillis =
-                            tagObj.getTagCreateTime() != null
-                                    ? tagObj.getTagCreateTime()
-                                            .atZone(ZoneId.systemDefault())
-                                            .toInstant()
-                                            .toEpochMilli()
-                                    : null;
-                    String timeRetainedStr =
-                            tagObj.getTagTimeRetained() != null
-                                    ? tagObj.getTagTimeRetained().toString()
-                                    : null;
-                    response =
-                            new GetTagResponse(
-                                    tagName,
-                                    tagObj.trimToSnapshot(),
-                                    tagCreateTimeMillis,
-                                    timeRetainedStr);
-                    return mockResponse(response, 200);
+                    table.deleteTag(tagName);
+                    return new MockResponse().setResponseCode(200);
                 case "POST":
                     // POST /v1/{prefix}/databases/{database}/tables/{table}/tags
                     CreateTagRequest requestBody = RESTApi.fromJson(data, CreateTagRequest.class);
@@ -1794,9 +1840,7 @@ public class RESTCatalogServer {
                     }
 
                     // Create tag
-                    tagManager.createTag(
-                            snapshot, tagName, timeRetained, Collections.emptyList(), false);
-
+                    table.createTag(tagName, snapshot.id(), timeRetained);
                     return new MockResponse().setResponseCode(200);
                 default:
                     return new MockResponse().setResponseCode(404);
