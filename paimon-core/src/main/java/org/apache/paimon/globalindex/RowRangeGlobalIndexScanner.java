@@ -25,7 +25,7 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
@@ -93,7 +93,7 @@ public class RowRangeGlobalIndexScanner implements Closeable {
                         createReaders(
                                 indexFileReadWrite,
                                 indexMetas.get(fieldId),
-                                rowType.getField(fieldId).type());
+                                rowType.getField(fieldId));
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }
 
@@ -104,7 +104,7 @@ public class RowRangeGlobalIndexScanner implements Closeable {
     private Collection<GlobalIndexReader> createReaders(
             GlobalIndexFileReadWrite indexFileReadWrite,
             Map<String, List<IndexFileMeta>> indexMetas,
-            DataType fieldType) {
+            DataField dataField) {
         if (indexMetas == null) {
             return Collections.emptyList();
         }
@@ -116,7 +116,7 @@ public class RowRangeGlobalIndexScanner implements Closeable {
                 List<IndexFileMeta> metas = entry.getValue();
                 GlobalIndexerFactory globalIndexerFactory =
                         GlobalIndexerFactoryUtils.load(indexType);
-                GlobalIndexer globalIndexer = globalIndexerFactory.create(fieldType, options);
+                GlobalIndexer globalIndexer = globalIndexerFactory.create(dataField, options);
                 List<GlobalIndexIOMeta> globalMetas =
                         metas.stream().map(this::toGlobalMeta).collect(Collectors.toList());
                 readers.add(globalIndexer.createReader(indexFileReadWrite, globalMetas));

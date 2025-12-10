@@ -939,7 +939,7 @@ public class DataEvolutionTableTest extends TableTestBase {
 
         GlobalIndexerFactory globalIndexerFactory =
                 GlobalIndexerFactoryUtils.load(BitmapGlobalIndexerFactory.IDENTIFIER);
-        GlobalIndexer globalIndexer = globalIndexerFactory.create(indexField.type(), new Options());
+        GlobalIndexer globalIndexer = globalIndexerFactory.create(indexField, new Options());
         GlobalIndexWriter globaIndexBuilder = globalIndexer.createWriter(indexFileReadWrite);
 
         reader.forEachRemaining(r -> globaIndexBuilder.write(r.getString(0)));

@@ -87,8 +87,7 @@ public abstract class GlobalIndexBuilder {
     private static List<GlobalIndexWriter.ResultEntry> writePaimonRows(
             GlobalIndexBuilderContext context, RecordReader<InternalRow> rows) throws IOException {
         GlobalIndexer globalIndexer =
-                GlobalIndexer.create(
-                        context.indexType(), context.indexField().type(), context.options());
+                GlobalIndexer.create(context.indexType(), context.indexField(), context.options());
         GlobalIndexWriter globalIndexWriter =
                 globalIndexer.createWriter(context.globalIndexFileReadWrite());
         InternalRow.FieldGetter getter =

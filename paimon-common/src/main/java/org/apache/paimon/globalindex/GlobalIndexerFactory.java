@@ -20,12 +20,12 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 
 /** File index factory to construct {@link FileIndexer}. */
 public interface GlobalIndexerFactory {
 
     String identifier();
 
-    GlobalIndexer create(DataType type, Options options);
+    GlobalIndexer create(DataField dataField, Options options);
 }
