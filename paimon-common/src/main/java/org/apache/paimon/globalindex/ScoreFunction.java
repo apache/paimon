@@ -26,6 +26,14 @@ public interface ScoreFunction {
     @Nullable
     Float score(long rowId);
 
+    default ScoreFunction and(ScoreFunction other) {
+        return this;
+    }
+
+    default ScoreFunction or(ScoreFunction other) {
+        return combine(this, other);
+    }
+
     static ScoreFunction combine(
             @Nullable ScoreFunction function1, @Nullable ScoreFunction function2) {
         if (function1 == null) {

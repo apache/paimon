@@ -108,17 +108,11 @@ public class Range implements Serializable {
         return result;
     }
 
-    /**
-     * Sorts and merges overlapping ranges.
-     *
-     * <p>For example, Range[0,10] and Range[5,15] will be merged to Range[0,15] because they
-     * overlap. However, Range[0,10] and Range[11,20] will NOT be merged even though they are
-     * adjacent, because they don't overlap.
-     *
-     * @param ranges the ranges to sort and merge (can be unsorted and overlapping)
-     * @return the sorted and merged ranges with no overlaps
-     */
     public static List<Range> sortAndMergeOverlap(List<Range> ranges) {
+        return sortAndMergeOverlap(ranges, false);
+    }
+
+    public static List<Range> sortAndMergeOverlap(List<Range> ranges, boolean adjacent) {
         if (ranges == null || ranges.isEmpty()) {
             return Collections.emptyList();
         }
@@ -137,7 +131,7 @@ public class Range implements Serializable {
         for (int i = 1; i < sorted.size(); i++) {
             Range next = sorted.get(i);
             // Check if current and next overlap (not just adjacent)
-            if (current.to >= next.from) {
+            if (current.to + (adjacent ? 1 : 0) >= next.from) {
                 // Merge: extend current range
                 current = new Range(current.from, Math.max(current.to, next.to));
             } else {

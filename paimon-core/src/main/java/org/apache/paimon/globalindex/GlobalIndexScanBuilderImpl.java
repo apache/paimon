@@ -28,10 +28,13 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -98,7 +101,7 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
 
     @Override
     public List<Range> shardList() {
-        return Range.sortAndMergeOverlap(
+        Map<String, List<Range>> indexRanges =
                 scan().stream()
                         .map(
                                 entry -> {
@@ -109,9 +112,50 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
                                     }
                                     long start = globalIndexMeta.rowRangeStart();
                                     long end = globalIndexMeta.rowRangeEnd();
-                                    return new Range(start, end);
+                                    return Pair.of(
+                                            entry.indexFile().indexType(), new Range(start, end));
                                 })
                         .filter(Objects::nonNull)
+                        .collect(
+                                Collectors.groupingBy(
+                                        Pair::getLeft,
+                                        Collectors.mapping(Pair::getRight, Collectors.toList())));
+
+        String checkIndexType = null;
+        List<Range> checkRanges = null;
+
+        for (Map.Entry<String, List<Range>> rangeEntry : indexRanges.entrySet()) {
+            String indexType = rangeEntry.getKey();
+            List<Range> ranges = rangeEntry.getValue();
+            if (checkRanges == null) {
+                checkIndexType = indexType;
+                checkRanges = Range.sortAndMergeOverlap(ranges, true);
+            } else {
+                List<Range> merged = Range.sortAndMergeOverlap(ranges, true);
+                if (merged.size() != checkRanges.size()) {
+                    throw new IllegalStateException(
+                            "Inconsistent shard ranges among index types: "
+                                    + checkIndexType
+                                    + " vs "
+                                    + indexType);
+                }
+                for (int i = 0; i < merged.size(); i++) {
+                    Range r1 = merged.get(i);
+                    Range r2 = checkRanges.get(i);
+                    if (r1.from != r2.from || r1.to != r2.to) {
+                        throw new IllegalStateException(
+                                "Inconsistent shard ranges among index types:"
+                                        + checkIndexType
+                                        + " vs "
+                                        + indexType);
+                    }
+                }
+            }
+        }
+
+        return Range.sortAndMergeOverlap(
+                indexRanges.values().stream()
+                        .flatMap(Collection::stream)
                         .collect(Collectors.toList()));
     }
 

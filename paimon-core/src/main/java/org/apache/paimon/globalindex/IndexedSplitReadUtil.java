@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.Map;
 
+/** Utils to read IndexSplit. */
 public class IndexedSplitReadUtil {
 
     public static Info readInfo(RowType readRowType, IndexedSplit indexedSplit) {
@@ -59,6 +60,7 @@ public class IndexedSplitReadUtil {
         return new Info(rowIdToScore, rowIdIndex, actualReadType, projectedRow);
     }
 
+    /** Information package. */
     public static class Info {
         @Nullable public final Map<Long, Float> rowIdToScore;
         public final int rowIdIndex;

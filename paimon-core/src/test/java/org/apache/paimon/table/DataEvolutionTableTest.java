@@ -568,7 +568,6 @@ public class DataEvolutionTableTest extends TableTestBase {
 
         // Verify the split contains only the second file (firstRowId=2, rowCount=2)
         DataSplit dataSplit2 = ((IndexedSplit) splits2.get(0)).dataSplit();
-        ;
         assertThat(dataSplit2.dataFiles().size()).isEqualTo(1);
         DataFileMeta file2 = dataSplit2.dataFiles().get(0);
         assertThat(file2.firstRowId()).isEqualTo(2L);

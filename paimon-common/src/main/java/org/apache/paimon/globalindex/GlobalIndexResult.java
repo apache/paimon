@@ -46,7 +46,7 @@ public interface GlobalIndexResult {
         ScoreFunction function2 = other.scoreFunction();
         return create(
                 () -> RoaringNavigableMap64.and(this.results(), other.results()),
-                function1 != null ? function1 : function2);
+                function1 != null ? function1.and(function2) : function2);
     }
 
     /**
@@ -59,7 +59,7 @@ public interface GlobalIndexResult {
         ScoreFunction function2 = other.scoreFunction();
         return create(
                 () -> RoaringNavigableMap64.or(this.results(), other.results()),
-                ScoreFunction.combine(function1, function2));
+                function1 != null ? function1.or(function2) : function2);
     }
 
     /** Returns an empty {@link GlobalIndexResult}. */

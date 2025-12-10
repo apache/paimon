@@ -51,7 +51,6 @@ public class RowRangeGlobalIndexScanner implements Closeable {
 
     private final Options options;
     private final GlobalIndexEvaluator globalIndexEvaluator;
-    private final Range range;
 
     public RowRangeGlobalIndexScanner(
             Options options,
@@ -61,7 +60,6 @@ public class RowRangeGlobalIndexScanner implements Closeable {
             Range range,
             List<IndexManifestEntry> entries) {
         this.options = options;
-        this.range = range;
         for (IndexManifestEntry entry : entries) {
             GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
             checkArgument(
