@@ -2095,8 +2095,7 @@ public class CoreOptions implements Serializable {
             key("global-index.enabled")
                     .booleanType()
                     .defaultValue(true)
-                    .withDescription(
-                            "Whether to enable global index for scan.");
+                    .withDescription("Whether to enable global index for scan.");
 
     private final Options options;
 

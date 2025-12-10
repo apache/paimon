@@ -102,8 +102,6 @@ public interface FileStoreScan {
 
     List<ManifestEntry> readManifest(ManifestFileMeta manifest);
 
-    List<Range> rowRanges();
-
     /** Produce a {@link Plan}. */
     Plan plan();
 

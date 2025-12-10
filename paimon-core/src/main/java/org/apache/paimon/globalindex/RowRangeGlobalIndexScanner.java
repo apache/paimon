@@ -144,8 +144,4 @@ public class RowRangeGlobalIndexScanner implements Closeable {
     public void close() throws IOException {
         globalIndexEvaluator.close();
     }
-
-    public Range range() {
-        return range;
-    }
 }
