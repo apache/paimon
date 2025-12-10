@@ -420,9 +420,9 @@ class PaimonQueryTest extends PaimonSparkTestBase {
             .contains("Full scan is not supported."))
         checkAnswer(sql("SELECT * FROM t_p WHERE p > 1"), Seq(Row(2, 2)))
 
-        checkAnswer(sql("select sys.max_pt('t_p')"), Seq(Row("2")))
+        checkAnswer(sql("SELECT sys.max_pt('t_p')"), Seq(Row("2")))
         assert(
-          intercept[Exception](sql("select sys.max_pt('t_p') from t_p").collect()).getMessage
+          intercept[Exception](sql("SELECT sys.max_pt('t_p') FROM t_p").collect()).getMessage
             .contains("Full scan is not supported."))
       }
     }
