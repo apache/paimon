@@ -96,6 +96,10 @@ object OptionUtils extends SQLConfHelper {
     getOptionString(SparkCatalogOptions.V1FUNCTION_ENABLED).toBoolean
   }
 
+  def readAllowFullScan(): Boolean = {
+    getOptionString(SparkConnectorOptions.READ_ALLOW_FULL_SCAN).toBoolean
+  }
+
   private def mergeSQLConf(extraOptions: JMap[String, String]): JMap[String, String] = {
     val mergedOptions = new JHashMap[String, String](
       conf.getAllConfs
