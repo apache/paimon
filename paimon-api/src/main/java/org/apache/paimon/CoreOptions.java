@@ -2096,7 +2096,7 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "If the compute system does not handle global index, we can enable it in scanner, but this is a single node index scanner with low speed.");
+                            "Whether to enable global index for scan.");
 
     private final Options options;
 
