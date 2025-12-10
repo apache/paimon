@@ -66,22 +66,11 @@ public class HiveCatalogLock implements CatalogLock {
 
     @Override
     public <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception {
-        Long lockId = null;
+        long lockId = lock(database, table);
         try {
-            lockId = lock(database, table);
             return callable.call();
         } finally {
-            if (lockId != null) {
-                safeUnlock(lockId);
-            }
-        }
-    }
-
-    private void safeUnlock(long lockId) {
-        try {
-            clients.execute(client -> client.unlock(lockId));
-        } catch (Exception e) {
-            LOG.warn("Unlock failed for lockId={}", lockId, e);
+            unlock(lockId);
         }
     }
 
@@ -91,6 +80,8 @@ public class HiveCatalogLock implements CatalogLock {
                 new LockComponent(LockType.EXCLUSIVE, LockLevel.TABLE, database);
         lockComponent.setTablename(table);
         lockComponent.unsetOperationType();
+
+        long startMs = System.currentTimeMillis();
         final LockRequest lockRequest =
                 new LockRequest(
                         Collections.singletonList(lockComponent),
@@ -100,30 +91,49 @@ public class HiveCatalogLock implements CatalogLock {
         long lockId = lockResponse.getLockid();
 
         long nextSleep = 50;
-        long startMs = System.currentTimeMillis();
 
-        while (lockResponse.getState() == LockState.WAITING) {
-            long elapsed = System.currentTimeMillis() - startMs;
-            if (elapsed >= acquireTimeout) {
-                break;
+        try {
+            while (lockResponse.getState() == LockState.WAITING) {
+                long elapsed = System.currentTimeMillis() - startMs;
+                if (elapsed >= acquireTimeout) {
+                    break;
+                }
+
+                nextSleep = Math.min(nextSleep * 2, checkMaxSleep);
+                Thread.sleep(nextSleep);
+
+                lockResponse = clients.run(client -> client.checkLock(lockId));
             }
-
-            nextSleep = Math.min(nextSleep * 2, checkMaxSleep);
-            Thread.sleep(nextSleep);
-
-            lockResponse = clients.run(client -> client.checkLock(lockId));
+        } finally {
+            if (lockResponse.getState() != LockState.ACQUIRED) {
+                // unlock if not acquired
+                unlock(lockId);
+            }
         }
 
-        // final state check
-        if (lockResponse.getState() != LockState.ACQUIRED) {
-            throw new RuntimeException(
-                    "Acquire lock failed after "
-                            + (System.currentTimeMillis() - startMs)
-                            + "ms, state="
-                            + lockResponse.getState());
+        LockState lockState = lockResponse.getState();
+        long duration = System.currentTimeMillis() - startMs;
+        String msg =
+                String.format(
+                        "for table %s.%s (lockId=%d) after %dms. Final lock state: %s",
+                        database, table, lockId, duration, lockState);
+        LOG.info("Acquire lock {}", msg);
+        if (lockState == LockState.ACQUIRED) {
+            return lockId;
         }
 
-        return lockId;
+        throw new RuntimeException("Acquire lock failed " + msg);
+    }
+
+    private void unlock(long lockId) {
+        if (lockId <= 0) {
+            return;
+        }
+        try {
+            clients.execute(client -> client.unlock(lockId));
+        } catch (Exception e) {
+            LOG.warn("Unlock failed for lockId={}", lockId, e);
+        }
     }
 
     @Override
