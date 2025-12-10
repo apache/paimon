@@ -20,15 +20,23 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
@@ -38,17 +46,22 @@ import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
+import org.apache.commons.collections.MapUtils;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -63,8 +76,6 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_CREATED_BY;
-import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_UPDATED_BY;
 
 /** A {@link Table} for showing partitions info. */
 public class PartitionsTable implements ReadonlyTable {
@@ -82,7 +93,10 @@ public class PartitionsTable implements ReadonlyTable {
                             new DataField(3, "file_count", new BigIntType(false)),
                             new DataField(4, "last_update_time", DataTypes.TIMESTAMP_MILLIS()),
                             new DataField(5, "created_by", DataTypes.STRING()),
-                            new DataField(6, "updated_by", DataTypes.STRING())));
+                            new DataField(6, "updated_by", DataTypes.STRING()),
+                            new DataField(7, "options", DataTypes.STRING()),
+                            new DataField(8, "created_at", DataTypes.TIMESTAMP_MILLIS()),
+                            new DataField(9, "last_access_time", DataTypes.TIMESTAMP_MILLIS())));
 
     private final FileStoreTable storeTable;
 
@@ -189,8 +203,7 @@ public class PartitionsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
 
-            List<PartitionEntry> partitions =
-                    fileStoreTable.newScan().withLevelFilter(level -> true).listPartitionEntries();
+            List<Partition> partitions = listPartitions();
 
             List<DataType> fieldTypes =
                     fileStoreTable.schema().logicalPartitionType().getFieldTypes();
@@ -205,9 +218,9 @@ public class PartitionsTable implements ReadonlyTable {
             Iterator<InternalRow> iterator =
                     partitions.stream()
                             .map(
-                                    partitionEntry ->
+                                    partition ->
                                             toRow(
-                                                    partitionEntry,
+                                                    partition,
                                                     fileStoreTable.partitionKeys(),
                                                     castExecutors,
                                                     fieldGetters,
@@ -229,11 +242,13 @@ public class PartitionsTable implements ReadonlyTable {
         }
 
         private InternalRow toRow(
-                PartitionEntry entry,
+                Partition partition,
                 List<String> partitionKeys,
                 List<CastExecutor> castExecutors,
                 InternalRow.FieldGetter[] fieldGetters,
                 String defaultPartitionName) {
+            PartitionEntry entry = toPartitionEntry(partition);
+
             StringBuilder partitionStringBuilder = new StringBuilder();
 
             for (int i = 0; i < partitionKeys.size(); i++) {
@@ -254,25 +269,88 @@ public class PartitionsTable implements ReadonlyTable {
                         .append(partitionValueString);
             }
 
-            String createdBy = fileStoreTable.options().get(FIELD_CREATED_BY);
-            BinaryString createdByString =
-                    createdBy != null ? BinaryString.fromString(createdBy) : null;
-
-            String updatedBy = fileStoreTable.options().get(FIELD_UPDATED_BY);
-            BinaryString updatedByString =
-                    updatedBy != null ? BinaryString.fromString(updatedBy) : null;
+            BinaryString createdByString = BinaryString.fromString(partition.createdBy());
+            Timestamp createdAtTimestamp = toTimestamp(partition.createdAt());
+            BinaryString updatedByString = BinaryString.fromString(partition.updatedBy());
+            Timestamp lastAccessTimeTimestamp = toTimestamp(partition.lastAccessTime());
+            BinaryString optionsString = null;
+            if (!MapUtils.isEmpty(partition.options())) {
+                optionsString =
+                        BinaryString.fromString(JsonSerdeUtil.toFlatJson(partition.options()));
+            }
 
             return GenericRow.of(
                     BinaryString.fromString(partitionStringBuilder.toString()),
-                    entry.recordCount(),
-                    entry.fileSizeInBytes(),
-                    entry.fileCount(),
-                    Timestamp.fromLocalDateTime(
-                            LocalDateTime.ofInstant(
-                                    Instant.ofEpochMilli(entry.lastFileCreationTime()),
-                                    ZoneId.systemDefault())),
+                    partition.recordCount(),
+                    partition.fileSizeInBytes(),
+                    partition.fileCount(),
+                    toTimestamp(partition.lastFileCreationTime()),
                     createdByString,
-                    updatedByString);
+                    createdAtTimestamp,
+                    updatedByString,
+                    lastAccessTimeTimestamp,
+                    optionsString);
+        }
+
+        private PartitionEntry toPartitionEntry(Partition partition) {
+            RowType partitionType = fileStoreTable.schema().logicalPartitionType();
+            String defaultPartitionName = fileStoreTable.coreOptions().partitionDefaultName();
+            InternalRowSerializer serializer = new InternalRowSerializer(partitionType);
+            GenericRow partitionRow =
+                    InternalRowPartitionComputer.convertSpecToInternalRow(
+                            partition.spec(), partitionType, defaultPartitionName);
+            BinaryRow binaryPartition = serializer.toBinaryRow(partitionRow).copy();
+            return new PartitionEntry(
+                    binaryPartition,
+                    partition.recordCount(),
+                    partition.fileSizeInBytes(),
+                    partition.fileCount(),
+                    partition.lastFileCreationTime());
+        }
+
+        private Timestamp toTimestamp(Long epochMillis) {
+            if (epochMillis == null) {
+                return null;
+            }
+            return Timestamp.fromLocalDateTime(
+                    LocalDateTime.ofInstant(
+                            Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault()));
+        }
+
+        private List<Partition> listPartitions() {
+            if (TimeTravelUtil.hasTimeTravelOptions(new Options(fileStoreTable.options()))) {
+                return listPartitionEntries();
+            }
+
+            CatalogLoader catalogLoader = fileStoreTable.catalogEnvironment().catalogLoader();
+            if (catalogLoader == null) {
+                return listPartitionEntries();
+            }
+
+            try (Catalog catalog = catalogLoader.load()) {
+                Identifier identifier = fileStoreTable.catalogEnvironment().identifier();
+                try {
+                    return catalog.listPartitions(identifier);
+                } catch (NotImplementedException e) {
+                    return listPartitionEntries();
+                }
+            } catch (Exception e) {
+                return listPartitionEntries();
+            }
+        }
+
+        private List<Partition> listPartitionEntries() {
+            List<PartitionEntry> partitionEntries =
+                    fileStoreTable.newScan().withLevelFilter(level -> true).listPartitionEntries();
+            RowType partitionType = fileStoreTable.schema().logicalPartitionType();
+            String defaultPartitionName = fileStoreTable.coreOptions().partitionDefaultName();
+            String[] partitionColumns = fileStoreTable.partitionKeys().toArray(new String[0]);
+            InternalRowPartitionComputer computer =
+                    new InternalRowPartitionComputer(
+                            defaultPartitionName, partitionType, partitionColumns, false);
+            return partitionEntries.stream()
+                    .map(entry -> entry.toPartition(computer))
+                    .collect(Collectors.toList());
         }
     }
 }

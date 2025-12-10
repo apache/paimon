@@ -351,15 +351,17 @@ You can query the partition files of the table.
 SELECT * FROM my_table$partitions;
 
 /*
-+---------------+----------------+--------------------+--------------------+------------------------+------------+------------+
-|  partition    |   record_count |  file_size_in_bytes|          file_count|        last_update_time| created_by | updated_by |
-+---------------+----------------+--------------------+--------------------+------------------------+------------+------------+
-|  {1}          |           1    |             645    |                1   | 2024-06-24 10:25:57.400|    admin   |    admin   |
-+---------------+----------------+--------------------+--------------------+------------------------+------------+------------+
++---------------+----------------+--------------------+--------------------+------------------------+------------+---------------------+------------+---------------------+---------------------+--------+
+| partition    |   record_count |  file_size_in_bytes|          file_count|        last_update_time|  created_by|        created_at   | updated_by |   last_access_time  |  options            |
++---------------+----------------+--------------------+--------------------+------------------------+------------+---------------------+------------+---------------------+---------------------+--------+
+| {1}          |           1    |             645    |                1   | 2024-06-24 10:25:57.400|    created | 2024-06-24 10:20:00 |    updated  | 2024-06-24 10:25:57 |{"storageType": "IA"}|
++---------------+----------------+--------------------+--------------------+------------------------+------------+---------------------+------------+---------------------+---------------------+--------+
 */
 ```
 
-**Note**: The `created_by` and `updated_by` fields are populated from REST catalog audit information. For non-REST catalogs, these fields will be `NULL`.
+**Note**: 
+- The `created_by`, `created_at`, `updated_by`, `last_access_time`, and `options` fields are populated from REST catalog audit information. For non-REST catalogs, these fields will be `NULL`.
+- The `options` field stores commercial-specific metadata (e.g., `storageType`) as a JSON string.
 
 ### Buckets Table
 

@@ -43,8 +43,6 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_CREATED_BY;
-import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_UPDATED_BY;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link PartitionsTable}. */
@@ -52,9 +50,9 @@ public class PartitionsTableTest extends TableTestBase {
 
     private static final String tableName = "MyTable";
 
-    private FileStoreTable table;
+    protected FileStoreTable table;
 
-    private PartitionsTable partitionsTable;
+    protected PartitionsTable partitionsTable;
 
     @BeforeEach
     public void before() throws Exception {
@@ -124,52 +122,16 @@ public class PartitionsTableTest extends TableTestBase {
     }
 
     @Test
-    void testPartitionAuditFields() throws Exception {
-        String tableNameWithAudit = "MyTableWithAudit";
-        FileIO fileIO = LocalFileIO.create();
-        Path tablePath =
-                new Path(String.format("%s/%s.db/%s", warehouse, database, tableNameWithAudit));
-        Schema schema =
-                Schema.newBuilder()
-                        .column("pk", DataTypes.INT())
-                        .column("pt", DataTypes.INT())
-                        .column("col1", DataTypes.INT())
-                        .partitionKeys("pt")
-                        .primaryKey("pk", "pt")
-                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
-                        .option("bucket", "1")
-                        .option(FIELD_CREATED_BY, "test_user")
-                        .option(FIELD_UPDATED_BY, "test_user_updated")
-                        .build();
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
-        FileStoreTable tableWithAudit =
-                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
-
-        Identifier partitionsTableId =
-                identifier(tableNameWithAudit + SYSTEM_TABLE_SPLITTER + PartitionsTable.PARTITIONS);
-        PartitionsTable partitionsTableWithAudit =
-                (PartitionsTable) catalog.getTable(partitionsTableId);
-
-        write(tableWithAudit, GenericRow.of(1, 1, 1), GenericRow.of(2, 2, 2));
-
-        List<InternalRow> result = read(partitionsTableWithAudit, new int[] {0, 5, 6});
-        assertThat(result).hasSize(2);
-
-        for (InternalRow row : result) {
-            assertThat(row.getString(1)).isEqualTo(BinaryString.fromString("test_user"));
-            assertThat(row.getString(2)).isEqualTo(BinaryString.fromString("test_user_updated"));
-        }
-    }
-
-    @Test
     void testPartitionAuditFieldsNull() throws Exception {
-        List<InternalRow> result = read(partitionsTable, new int[] {0, 5, 6});
+        List<InternalRow> result = read(partitionsTable, new int[] {0, 5, 6, 7, 8, 9});
         assertThat(result).hasSize(3);
 
         for (InternalRow row : result) {
             assertThat(row.isNullAt(1)).isTrue(); // created_by
-            assertThat(row.isNullAt(2)).isTrue(); // updated_by
+            assertThat(row.isNullAt(2)).isTrue(); // created_at
+            assertThat(row.isNullAt(3)).isTrue(); // updated_by
+            assertThat(row.isNullAt(4)).isTrue(); // last_access_time
+            assertThat(row.isNullAt(5)).isTrue(); // options
         }
     }
 }

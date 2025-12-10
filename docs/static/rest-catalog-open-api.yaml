@@ -2990,6 +2990,20 @@ components:
           format: int64
         done:
           type: boolean
+        createdBy:
+          type: string
+        updatedBy:
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
+        created_at:
+          type: integer
+          format: int64
+        last_access_time:
+          type: integer
+          format: int64
     PartitionStatistics:
       type: object
       properties:
