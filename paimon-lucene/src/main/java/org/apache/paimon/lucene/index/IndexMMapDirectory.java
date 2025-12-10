@@ -25,9 +25,10 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.MMapDirectory;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.UUID;
@@ -66,16 +67,17 @@ public class IndexMMapDirectory implements AutoCloseable {
     }
 
     public void serialize(OutputStream out) throws IOException {
-        out.write(intToBytes(VERSION));
+        DataOutputStream dataOutputStream = new DataOutputStream(out);
+        dataOutputStream.writeInt(VERSION);
         String[] files = this.directory().listAll();
-        out.write(intToBytes(files.length));
+        dataOutputStream.writeInt(files.length);
 
         for (String fileName : files) {
             byte[] nameBytes = fileName.getBytes(StandardCharsets.UTF_8);
-            out.write(intToBytes(nameBytes.length));
-            out.write(nameBytes);
+            dataOutputStream.writeInt(nameBytes.length);
+            dataOutputStream.write(nameBytes);
             long fileLength = this.directory().fileLength(fileName);
-            out.write(ByteBuffer.allocate(8).putLong(fileLength).array());
+            dataOutputStream.writeLong(fileLength);
 
             try (IndexInput input = this.directory().openInput(fileName, IOContext.DEFAULT)) {
                 byte[] buffer = new byte[32768];
@@ -84,7 +86,7 @@ public class IndexMMapDirectory implements AutoCloseable {
                 while (remaining > 0) {
                     int toRead = (int) Math.min(buffer.length, remaining);
                     input.readBytes(buffer, 0, toRead);
-                    out.write(buffer, 0, toRead);
+                    dataOutputStream.write(buffer, 0, toRead);
                     remaining -= toRead;
                 }
             }
@@ -94,24 +96,25 @@ public class IndexMMapDirectory implements AutoCloseable {
     public static IndexMMapDirectory deserialize(SeekableInputStream in) throws IOException {
         IndexMMapDirectory indexMMapDirectory = new IndexMMapDirectory();
         try {
-            int version = readInt(in);
+            DataInputStream dataInputStream = new DataInputStream(in);
+            int version = dataInputStream.readInt();
             if (version != VERSION) {
                 throw new IOException("Unsupported version: " + version);
             }
-            int numFiles = readInt(in);
+            int numFiles = dataInputStream.readInt();
             byte[] buffer = new byte[32768];
             for (int i = 0; i < numFiles; i++) {
-                int nameLength = readInt(in);
+                int nameLength = dataInputStream.readInt();
                 byte[] nameBytes = new byte[nameLength];
-                readFully(in, nameBytes);
+                dataInputStream.readFully(nameBytes);
                 String fileName = new String(nameBytes, StandardCharsets.UTF_8);
-                long fileLength = readLong(in);
+                long fileLength = dataInputStream.readLong();
                 try (IndexOutput output =
                         indexMMapDirectory.directory().createOutput(fileName, IOContext.READONCE)) {
                     long remaining = fileLength;
                     while (remaining > 0) {
                         int toRead = (int) Math.min(buffer.length, remaining);
-                        readFully(in, buffer, 0, toRead);
+                        dataInputStream.readFully(buffer, 0, toRead);
                         output.writeBytes(buffer, 0, toRead);
                         remaining -= toRead;
                     }
@@ -129,37 +132,5 @@ public class IndexMMapDirectory implements AutoCloseable {
                 throw new IOException("Failed to deserialize directory", e);
             }
         }
-    }
-
-    private static int readInt(SeekableInputStream in) throws IOException {
-        byte[] bytes = new byte[4];
-        readFully(in, bytes);
-        return ByteBuffer.wrap(bytes).getInt();
-    }
-
-    private static long readLong(SeekableInputStream in) throws IOException {
-        byte[] bytes = new byte[8];
-        readFully(in, bytes);
-        return ByteBuffer.wrap(bytes).getLong();
-    }
-
-    private static void readFully(SeekableInputStream in, byte[] buffer) throws IOException {
-        readFully(in, buffer, 0, buffer.length);
-    }
-
-    private static void readFully(SeekableInputStream in, byte[] buffer, int offset, int length)
-            throws IOException {
-        int totalRead = 0;
-        while (totalRead < length) {
-            int read = in.read(buffer, offset + totalRead, length - totalRead);
-            if (read == -1) {
-                throw new IOException("Unexpected end of stream");
-            }
-            totalRead += read;
-        }
-    }
-
-    private byte[] intToBytes(int value) {
-        return ByteBuffer.allocate(4).putInt(value).array();
     }
 }
