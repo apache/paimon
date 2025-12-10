@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.StatsTestUtils;
 
 import java.util.Collections;
@@ -97,8 +98,8 @@ public class DataFileTestUtils {
                 maxKey - minKey + 1,
                 row(minKey),
                 row(maxKey),
-                null,
-                null,
+                EMPTY_STATS,
+                EMPTY_STATS,
                 0,
                 maxSequence,
                 0,
