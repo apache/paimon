@@ -116,8 +116,6 @@ public class HiveCatalogLock implements CatalogLock {
 
         // final state check
         if (lockResponse.getState() != LockState.ACQUIRED) {
-            // clean up all non-acquired status
-            safeUnlock(lockId);
             throw new RuntimeException(
                     "Acquire lock failed after "
                             + (System.currentTimeMillis() - startMs)
