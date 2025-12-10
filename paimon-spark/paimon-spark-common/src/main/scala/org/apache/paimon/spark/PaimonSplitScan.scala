@@ -42,8 +42,6 @@ case class PaimonSplitScan(
   extends ColumnPruningAndPushDown
   with ScanHelper {
 
-  override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
-
   override def toBatch: Batch = {
     PaimonBatch(
       getInputPartitions(dataSplits.asInstanceOf[Array[Split]]),

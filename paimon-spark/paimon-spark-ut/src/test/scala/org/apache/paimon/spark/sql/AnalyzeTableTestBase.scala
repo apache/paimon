@@ -484,7 +484,6 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     spark.sql("""
                 |CREATE TABLE T (c1 INT, c2 INT, c3 LONG, c4 STRING)
                 |USING PAIMON
-                |TBLPROPERTIES ('primary-key'='c1')
                 |""".stripMargin)
     spark.sql("ANALYZE TABLE T COMPUTE STATISTICS")
 
@@ -495,9 +494,9 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     assert(metadataSize1.rowCount.get.toLong == 0)
     assert(metadataSize1.sizeInBytes.toLong == 0)
 
-    spark.sql(s"INSERT INTO T VALUES (1, 1, 100, '${UUID.randomUUID().toString()}')")
-    spark.sql(s"INSERT INTO T VALUES (2, 2, 200, '${UUID.randomUUID().toString()}')")
-    spark.sql(s"INSERT INTO T VALUES (3, 3, 300, '${UUID.randomUUID().toString()}')")
+    spark.sql(s"INSERT INTO T VALUES (1, 1, 100, '${UUID.randomUUID().toString}')")
+    spark.sql(s"INSERT INTO T VALUES (2, 2, 200, '${UUID.randomUUID().toString}')")
+    spark.sql(s"INSERT INTO T VALUES (3, 3, 300, '${UUID.randomUUID().toString}')")
 
     def checkStatistics(): Long = {
       val wholeSize2 = getScanStatistic("SELECT * FROM T")
