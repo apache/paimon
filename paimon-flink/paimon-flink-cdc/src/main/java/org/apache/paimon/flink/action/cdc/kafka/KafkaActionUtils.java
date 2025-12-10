@@ -37,6 +37,7 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
@@ -318,6 +319,18 @@ public class KafkaActionUtils {
 
             throw new RuntimeException("Cannot find topics match the topic-pattern " + pattern);
         }
+    }
+
+    protected static Map<String, Object> extractKafkaMetadata(
+            ConsumerRecord<byte[], byte[]> message) {
+        // Add the Kafka message metadata that can be used with --metadata_column
+        Map<String, Object> kafkaMetadata = new HashMap<>();
+        kafkaMetadata.put("topic", message.topic());
+        kafkaMetadata.put("partition", message.partition());
+        kafkaMetadata.put("offset", message.offset());
+        kafkaMetadata.put("timestamp", message.timestamp());
+        kafkaMetadata.put("timestamp_type", message.timestampType().name);
+        return kafkaMetadata;
     }
 
     private static class KafkaConsumerWrapper implements MessageQueueSchemaUtils.ConsumerWrapper {

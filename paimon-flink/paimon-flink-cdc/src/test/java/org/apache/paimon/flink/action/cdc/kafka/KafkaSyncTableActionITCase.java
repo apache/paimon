@@ -535,6 +535,59 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                 Arrays.asList("_id", "_year"));
     }
 
+    public void testMetadataColumn(String format) throws Exception {
+        String topic = "metadata_column";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, "kafka/%s/table/metadatacolumn/%s-data-1.txt", format, format);
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("_year")
+                        .withPrimaryKeys("_id", "_year")
+                        .withMetadataColumns("topic,offset,partition,timestamp,timestamp_type")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        Configuration kafkaConfigObject = Configuration.fromMap(kafkaConfig);
+
+        Schema kafkaSchema =
+                MessageQueueSchemaUtils.getSchema(
+                        getKafkaEarliestConsumer(
+                                kafkaConfigObject, new KafkaDebeziumJsonDeserializationSchema()),
+                        getDataFormat(kafkaConfigObject),
+                        TypeMapping.defaultMapping());
+        List<DataField> fields = new ArrayList<>();
+        // {"id": 101, "name": "scooter", "description": "Small 2-wheel scooter", "weight": 3.14}
+        fields.add(new DataField(0, "_id", DataTypes.STRING()));
+        fields.add(new DataField(1, "_date", DataTypes.STRING()));
+        fields.add(new DataField(2, "_year", DataTypes.STRING()));
+        fields.add(new DataField(3, "__kafka_topic", DataTypes.STRING()));
+        fields.add(new DataField(4, "__kafka_partition", DataTypes.INT()));
+        fields.add(new DataField(5, "__kafka_offset", DataTypes.BIGINT()));
+        fields.add(
+                new DataField(6, "__kafka_timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3)));
+        fields.add(new DataField(6, "__kafka_timestamp_type", DataTypes.STRING()));
+        assertThat(kafkaSchema.fields()).isEqualTo(fields);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.INT().notNull()
+                        },
+                        new String[] {"_id", "_date", "_year"});
+        waitForResult(
+                Collections.singletonList("+I[101, 2023-03-23, 2023, metadata_column]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Arrays.asList("_id", "_year"));
+    }
+
     protected void testCDCOperations(String format) throws Exception {
         String topic = "event";
         createTestTopic(topic, 1, 1);
