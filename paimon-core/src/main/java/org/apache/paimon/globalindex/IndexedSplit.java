@@ -116,7 +116,10 @@ public class IndexedSplit implements Split {
             out.writeBoolean(true);
             out.writeInt(scores.length);
             for (Float score : scores) {
-                out.writeFloat(score);
+                out.writeByte(score == null ? 0 : 1);
+                if (score != null) {
+                    out.writeFloat(score);
+                }
             }
         } else {
             out.writeBoolean(false);
@@ -146,7 +149,9 @@ public class IndexedSplit implements Split {
             int scoresLength = in.readInt();
             scores = new Float[scoresLength];
             for (int i = 0; i < scoresLength; i++) {
-                scores[i] = in.readFloat();
+                if (in.readByte() == 1) {
+                    scores[i] = in.readFloat();
+                }
             }
         }
         return new IndexedSplit(split, rowRanges, scores);
