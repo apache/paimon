@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Map;
 
+/** Return value with score. */
 public class ReaderWithScore implements RecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> reader;

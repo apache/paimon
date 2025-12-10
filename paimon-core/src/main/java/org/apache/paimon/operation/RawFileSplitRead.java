@@ -90,7 +90,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
     @Nullable private Integer limit;
-    @Nullable private List<Range> rowRanges;
     @Nullable private VariantAccessInfo[] variantAccess;
 
     public RawFileSplitRead(
@@ -158,7 +157,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Override
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
         if (s instanceof DataSplit) {
-            return createReader((DataSplit) s);
+            return createReader((DataSplit) s, null);
         } else {
             return createReader((IndexedSplit) s);
         }
@@ -166,21 +165,22 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     private RecordReader<InternalRow> createReader(IndexedSplit indexedSplit) throws IOException {
         DataSplit dataSplit = indexedSplit.dataSplit();
-        this.rowRanges = indexedSplit.rowRanges();
-        RowType expectedReturnedType = readRowType;
+        List<Range> rowRanges = indexedSplit.rowRanges();
+        RowType originReadRowType = readRowType;
         IndexedSplitReadUtil.Info info = IndexedSplitReadUtil.readInfo(readRowType, indexedSplit);
         this.readRowType = info.actualReadType;
         ReaderWithScore scoreReader =
                 new ReaderWithScore(
-                        createReader(dataSplit),
+                        createReader(dataSplit, rowRanges),
                         info.rowIdToScore,
                         info.rowIdIndex,
                         info.projectedRow);
-        this.readRowType = expectedReturnedType;
+        this.readRowType = originReadRowType;
         return scoreReader;
     }
 
-    private RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
+    private RecordReader<InternalRow> createReader(DataSplit split, @Nullable List<Range> rowRanges)
+            throws IOException {
         if (!split.beforeFiles().isEmpty()) {
             LOG.info("Ignore split before files: {}", split.beforeFiles());
         }
@@ -192,14 +192,16 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         for (DataFileMeta file : files) {
             dvFactories.put(file.fileName(), () -> dvFactory.create(file.fileName()).orElse(null));
         }
-        return createReader(split.partition(), split.bucket(), split.dataFiles(), dvFactories);
+        return createReader(
+                split.partition(), split.bucket(), split.dataFiles(), dvFactories, rowRanges);
     }
 
     public RecordReader<InternalRow> createReader(
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
-            @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories)
+            @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories,
+            @Nullable List<Range> rowRanges)
             throws IOException {
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(partition, bucket);
@@ -228,7 +230,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             dataFilePathFactory,
                             file,
                             formatReaderMappingBuilder,
-                            dvFactories));
+                            dvFactories,
+                            rowRanges));
         }
 
         return ConcatRecordReader.create(suppliers);
@@ -239,7 +242,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             DataFileMeta file,
             Builder formatBuilder,
-            @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories) {
+            @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories,
+            @Nullable List<Range> rowRanges) {
         String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
         long schemaId = file.schemaId();
 
@@ -258,7 +262,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 dvFactories == null ? null : dvFactories.get(file.fileName());
         return () ->
                 createFileReader(
-                        partition, file, dataFilePathFactory, formatReaderMapping, dvFactory);
+                        partition,
+                        file,
+                        dataFilePathFactory,
+                        formatReaderMapping,
+                        dvFactory,
+                        rowRanges);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
@@ -266,7 +275,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             DataFileMeta file,
             DataFilePathFactory dataFilePathFactory,
             FormatReaderMapping formatReaderMapping,
-            IOExceptionSupplier<DeletionVector> dvFactory)
+            IOExceptionSupplier<DeletionVector> dvFactory,
+            @Nullable List<Range> rowRanges)
             throws IOException {
         FileIndexResult fileIndexResult = null;
         DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();

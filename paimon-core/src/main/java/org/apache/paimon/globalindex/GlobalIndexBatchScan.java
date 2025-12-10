@@ -45,6 +45,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.globalindex.GlobalIndexScanBuilder.parallelScan;
 
+/** Scan with global index. */
 public class GlobalIndexBatchScan implements DataTableScan {
     private final FileStoreTable wrapped;
     private final DataTableScan batchScan;
