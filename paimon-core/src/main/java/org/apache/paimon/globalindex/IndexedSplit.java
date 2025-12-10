@@ -162,10 +162,8 @@ public class IndexedSplit implements Split {
     }
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
-        assign(deserialize(new DataInputViewStreamWrapper(in)));
-    }
+        IndexedSplit other = deserialize(new DataInputViewStreamWrapper(in));
 
-    private void assign(IndexedSplit other) {
         this.split = other.split;
         this.rowRanges = other.rowRanges;
         this.scores = other.scores;
