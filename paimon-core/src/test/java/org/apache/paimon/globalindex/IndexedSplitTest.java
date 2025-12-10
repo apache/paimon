@@ -91,7 +91,7 @@ public class IndexedSplitTest {
 
         // Create test ranges and scores
         List<Range> rowRanges = Arrays.asList(new Range(0, 50), new Range(100, 150));
-        Float[] scores = new Float[] {0.8f, 0.9f};
+        float[] scores = new float[] {0.8f, 0.9f};
 
         // Create IndexedSplit with scores
         IndexedSplit split = new IndexedSplit(dataSplit, rowRanges, scores);
@@ -152,38 +152,7 @@ public class IndexedSplitTest {
 
         List<Range> rowRanges =
                 Arrays.asList(new Range(5, 10), new Range(20, 30), new Range(100, 200));
-        Float[] scores = new Float[] {0.5f, 0.7f, 0.9f};
-
-        IndexedSplit split = new IndexedSplit(dataSplit, rowRanges, scores);
-
-        // Test Java serialization
-        byte[] serialized = InstantiationUtil.serializeObject(split);
-        IndexedSplit deserialized =
-                InstantiationUtil.deserializeObject(serialized, getClass().getClassLoader());
-
-        // Verify
-        assertThat(deserialized).isEqualTo(split);
-    }
-
-    @Test
-    public void testJavaSerializationWithScoresPartialNull()
-            throws IOException, ClassNotFoundException {
-        // Create test DataSplit
-        DataFileMeta file1 = DataFileTestUtils.newFile("file1", 0, 1, 100, 1000L);
-        DataFileMeta file2 = DataFileTestUtils.newFile("file2", 0, 101, 200, 2000L);
-
-        DataSplit dataSplit =
-                DataSplit.builder()
-                        .withSnapshot(4L)
-                        .withPartition(BinaryRow.EMPTY_ROW)
-                        .withBucket(3)
-                        .withBucketPath("bucket-3")
-                        .withDataFiles(Arrays.asList(file1, file2))
-                        .build();
-
-        List<Range> rowRanges =
-                Arrays.asList(new Range(5, 10), new Range(20, 30), new Range(100, 200));
-        Float[] scores = new Float[] {0.5f, null, 0.9f};
+        float[] scores = new float[] {0.5f, 0.7f, 0.9f};
 
         IndexedSplit split = new IndexedSplit(dataSplit, rowRanges, scores);
 
@@ -308,7 +277,7 @@ public class IndexedSplitTest {
                         new Range(0, 1000000),
                         new Range(2000000, 3000000),
                         new Range(5000000, 10000000));
-        Float[] scores = new Float[] {0.1f, 0.5f, 0.9f};
+        float[] scores = new float[] {0.1f, 0.5f, 0.9f};
 
         IndexedSplit split = new IndexedSplit(dataSplit, rowRanges, scores);
 
