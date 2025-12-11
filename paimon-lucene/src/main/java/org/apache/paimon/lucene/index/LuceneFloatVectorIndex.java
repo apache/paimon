@@ -18,18 +18,23 @@
 
 package org.apache.paimon.lucene.index;
 
-import org.apache.lucene.document.KnnByteVectorField;
+import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.VectorSimilarityFunction;
 
-/** Vector index for byte vector. */
-public class ByteVectorIndex extends VectorIndex<byte[]> {
+/** Lucene vector index for float vector. */
+public class LuceneFloatVectorIndex extends LuceneVectorIndex<float[]> {
     private final long rowId;
-    private final byte[] vector;
+    private final float[] vector;
 
-    public ByteVectorIndex(long rowId, byte[] vector) {
+    public LuceneFloatVectorIndex(long rowId, float[] vector) {
         this.rowId = rowId;
         this.vector = vector;
+    }
+
+    @Override
+    public float[] vector() {
+        return vector;
     }
 
     @Override
@@ -44,11 +49,6 @@ public class ByteVectorIndex extends VectorIndex<byte[]> {
 
     @Override
     public IndexableField indexableField(VectorSimilarityFunction similarityFunction) {
-        return new KnnByteVectorField(VECTOR_FIELD, this.vector, similarityFunction);
-    }
-
-    @Override
-    public byte[] vector() {
-        return vector;
+        return new KnnFloatVectorField(VECTOR_FIELD, this.vector(), similarityFunction);
     }
 }

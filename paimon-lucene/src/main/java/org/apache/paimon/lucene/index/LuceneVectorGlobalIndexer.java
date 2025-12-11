@@ -30,25 +30,25 @@ import org.apache.paimon.types.DataType;
 import java.io.IOException;
 import java.util.List;
 
-/** Vector global indexer. */
-public class VectorGlobalIndexer implements GlobalIndexer {
+/** Lucene vector global indexer. */
+public class LuceneVectorGlobalIndexer implements GlobalIndexer {
 
     private final DataType fieldType;
     private final Options options;
 
-    public VectorGlobalIndexer(DataType fieldType, Options options) {
+    public LuceneVectorGlobalIndexer(DataType fieldType, Options options) {
         this.fieldType = fieldType;
         this.options = options;
     }
 
     @Override
     public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException {
-        return new VectorGlobalIndexWriter(fileWriter, fieldType, options);
+        return new LuceneVectorGlobalIndexWriter(fileWriter, fieldType, options);
     }
 
     @Override
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
-        return new VectorGlobalIndexReader(fileReader, files);
+        return new LuceneVectorGlobalIndexReader(fileReader, files);
     }
 }

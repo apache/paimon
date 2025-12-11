@@ -23,36 +23,36 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.TinyIntType;
 
-/** Factory for creating vector index instances based on data type. */
-public abstract class VectorIndexFactory {
+/** Factory for creating Lucene vector index instances based on data type. */
+public abstract class LuceneVectorIndexFactory {
 
-    public static VectorIndexFactory init(DataType dataType) {
+    public static LuceneVectorIndexFactory init(DataType dataType) {
         if (dataType instanceof ArrayType
                 && ((ArrayType) dataType).getElementType() instanceof FloatType) {
-            return new FloatVectorIndexFactory();
+            return new LuceneFloatVectorIndexFactory();
         } else if (dataType instanceof ArrayType
                 && ((ArrayType) dataType).getElementType() instanceof TinyIntType) {
-            return new ByteVectorIndexFactory();
+            return new LuceneByteVectorIndexFactory();
         } else {
             throw new IllegalArgumentException("Unsupported data type: " + dataType);
         }
     }
 
-    public abstract VectorIndex create(long rowId, Object vector);
+    public abstract LuceneVectorIndex create(long rowId, Object vector);
 
-    /** Factory for creating FloatVectorIndex instances. */
-    public static class FloatVectorIndexFactory extends VectorIndexFactory {
+    /** Factory for creating LuceneFloatVectorIndex instances. */
+    public static class LuceneFloatVectorIndexFactory extends LuceneVectorIndexFactory {
         @Override
-        public VectorIndex create(long rowId, Object vector) {
-            return new FloatVectorIndex(rowId, (float[]) vector);
+        public LuceneVectorIndex create(long rowId, Object vector) {
+            return new LuceneFloatVectorIndex(rowId, (float[]) vector);
         }
     }
 
-    /** Factory for creating FloatVectorIndex instances. */
-    public static class ByteVectorIndexFactory extends VectorIndexFactory {
+    /** Factory for creating LuceneByteVectorIndex instances. */
+    public static class LuceneByteVectorIndexFactory extends LuceneVectorIndexFactory {
         @Override
-        public VectorIndex create(long rowId, Object vector) {
-            return new ByteVectorIndex(rowId, (byte[]) vector);
+        public LuceneVectorIndex create(long rowId, Object vector) {
+            return new LuceneByteVectorIndex(rowId, (byte[]) vector);
         }
     }
 }

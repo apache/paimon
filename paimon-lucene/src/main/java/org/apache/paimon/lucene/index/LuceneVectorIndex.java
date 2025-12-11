@@ -22,8 +22,8 @@ import org.apache.lucene.document.StoredField;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.VectorSimilarityFunction;
 
-/** Vector index interface. */
-public abstract class VectorIndex<T> {
+/** Lucene vector index interface. */
+public abstract class LuceneVectorIndex<T> {
 
     public static final String VECTOR_FIELD = "vector";
     public static final String ROW_ID_FIELD = "id";

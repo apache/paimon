@@ -22,8 +22,8 @@ import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 
-/** Options for vector index. */
-public class VectorIndexOptions {
+/** Options for Lucene knn vector index. */
+public class LuceneVectorIndexOptions {
 
     public static final ConfigOption<Integer> VECTOR_DIM =
             ConfigOptions.key("vector.dim")
@@ -31,10 +31,10 @@ public class VectorIndexOptions {
                     .defaultValue(128)
                     .withDescription("The dimension of the vector");
 
-    public static final ConfigOption<VectorMetric> VECTOR_METRIC =
+    public static final ConfigOption<LuceneVectorMetric> VECTOR_METRIC =
             ConfigOptions.key("vector.metric")
-                    .enumType(VectorMetric.class)
-                    .defaultValue(VectorMetric.EUCLIDEAN)
+                    .enumType(LuceneVectorMetric.class)
+                    .defaultValue(LuceneVectorMetric.EUCLIDEAN)
                     .withDescription(
                             "The similarity metric for vector search (COSINE, DOT_PRODUCT, EUCLIDEAN, MAX_INNER_PRODUCT), and EUCLIDEAN is the default");
 
@@ -65,13 +65,13 @@ public class VectorIndexOptions {
                     .withDescription("Write buffer size in MB for vector index");
 
     private final int dimension;
-    private final VectorMetric metric;
+    private final LuceneVectorMetric metric;
     private final int m;
     private final int efConstruction;
     private final int sizePerIndex;
     private final int writeBufferSize;
 
-    public VectorIndexOptions(Options options) {
+    public LuceneVectorIndexOptions(Options options) {
         this.dimension = options.get(VECTOR_DIM);
         this.metric = options.get(VECTOR_METRIC);
         this.m = options.get(VECTOR_M);
@@ -87,7 +87,7 @@ public class VectorIndexOptions {
         return dimension;
     }
 
-    public VectorMetric metric() {
+    public LuceneVectorMetric metric() {
         return metric;
     }
 

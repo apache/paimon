@@ -34,15 +34,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 
-/** A wrapper of MMapDirectory for vector index. */
-public class IndexMMapDirectory implements AutoCloseable {
+/** A wrapper of Lucene MMapDirectory for vector index. */
+public class LuceneIndexMMapDirectory implements AutoCloseable {
 
     private static final int VERSION = 1;
 
     private final Path path;
     private final MMapDirectory mmapDirectory;
 
-    public IndexMMapDirectory() throws IOException {
+    public LuceneIndexMMapDirectory() throws IOException {
         this.path = Files.createTempDirectory("paimon-lucene-" + UUID.randomUUID());
         this.mmapDirectory = new MMapDirectory(path);
     }
@@ -93,8 +93,8 @@ public class IndexMMapDirectory implements AutoCloseable {
         }
     }
 
-    public static IndexMMapDirectory deserialize(SeekableInputStream in) throws IOException {
-        IndexMMapDirectory indexMMapDirectory = new IndexMMapDirectory();
+    public static LuceneIndexMMapDirectory deserialize(SeekableInputStream in) throws IOException {
+        LuceneIndexMMapDirectory luceneIndexMMapDirectory = new LuceneIndexMMapDirectory();
         try {
             DataInputStream dataInputStream = new DataInputStream(in);
             int version = dataInputStream.readInt();
@@ -110,7 +110,9 @@ public class IndexMMapDirectory implements AutoCloseable {
                 String fileName = new String(nameBytes, StandardCharsets.UTF_8);
                 long fileLength = dataInputStream.readLong();
                 try (IndexOutput output =
-                        indexMMapDirectory.directory().createOutput(fileName, IOContext.READONCE)) {
+                        luceneIndexMMapDirectory
+                                .directory()
+                                .createOutput(fileName, IOContext.READONCE)) {
                     long remaining = fileLength;
                     while (remaining > 0) {
                         int toRead = (int) Math.min(buffer.length, remaining);
@@ -120,10 +122,10 @@ public class IndexMMapDirectory implements AutoCloseable {
                     }
                 }
             }
-            return indexMMapDirectory;
+            return luceneIndexMMapDirectory;
         } catch (Exception e) {
             try {
-                indexMMapDirectory.close();
+                luceneIndexMMapDirectory.close();
             } catch (Exception ignored) {
             }
             if (e instanceof IOException) {

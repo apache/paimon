@@ -20,8 +20,8 @@ package org.apache.paimon.lucene.index;
 
 import org.apache.lucene.index.VectorSimilarityFunction;
 
-/** Enumeration of supported vector similarity metrics. */
-public enum VectorMetric {
+/** Enumeration of supported Lucene vector similarity metrics. */
+public enum LuceneVectorMetric {
     /** Cosine similarity metric. */
     COSINE(VectorSimilarityFunction.COSINE),
 
@@ -36,7 +36,7 @@ public enum VectorMetric {
 
     private final VectorSimilarityFunction vectorSimilarityFunction;
 
-    VectorMetric(VectorSimilarityFunction vectorSimilarityFunction) {
+    LuceneVectorMetric(VectorSimilarityFunction vectorSimilarityFunction) {
         this.vectorSimilarityFunction = vectorSimilarityFunction;
     }
 

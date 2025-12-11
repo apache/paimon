@@ -50,13 +50,13 @@ import java.util.Set;
  * <p>This implementation uses Lucene's native KnnFloatVectorQuery with HNSW graph for efficient
  * approximate nearest neighbor search.
  */
-public class VectorGlobalIndexReader implements GlobalIndexReader {
+public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
 
     private final List<IndexSearcher> searchers;
-    private final List<IndexMMapDirectory> directories;
+    private final List<LuceneIndexMMapDirectory> directories;
     private final List<GlobalIndexIOMeta> ioMetas;
 
-    public VectorGlobalIndexReader(
+    public LuceneVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> ioMetas) throws IOException {
         this.ioMetas = ioMetas;
         this.searchers = new ArrayList<>();
@@ -72,12 +72,14 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
      * @return global index result containing row IDs
      */
     public GlobalIndexResult search(float[] query, int k) {
-        KnnFloatVectorQuery knnQuery = new KnnFloatVectorQuery(VectorIndex.VECTOR_FIELD, query, k);
+        KnnFloatVectorQuery knnQuery =
+                new KnnFloatVectorQuery(LuceneVectorIndex.VECTOR_FIELD, query, k);
         return search(knnQuery, k);
     }
 
     public GlobalIndexResult search(byte[] query, int k) {
-        KnnByteVectorQuery knnQuery = new KnnByteVectorQuery(VectorIndex.VECTOR_FIELD, query, k);
+        KnnByteVectorQuery knnQuery =
+                new KnnByteVectorQuery(LuceneVectorIndex.VECTOR_FIELD, query, k);
         return search(knnQuery, k);
     }
 
@@ -100,7 +102,7 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
         searchers.clear();
 
         // Close directories
-        for (IndexMMapDirectory directory : directories) {
+        for (LuceneIndexMMapDirectory directory : directories) {
             try {
                 directory.close();
             } catch (Throwable t) {
@@ -132,10 +134,11 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
             try {
                 TopDocs topDocs = searcher.search(query, k);
                 StoredFields storedFields = searcher.storedFields();
-                Set<String> fieldsToLoad = Set.of(VectorIndex.ROW_ID_FIELD);
+                Set<String> fieldsToLoad = Set.of(LuceneVectorIndex.ROW_ID_FIELD);
                 for (org.apache.lucene.search.ScoreDoc scoreDoc : topDocs.scoreDocs) {
                     Document doc = storedFields.document(scoreDoc.doc, fieldsToLoad);
-                    long rowId = doc.getField(VectorIndex.ROW_ID_FIELD).numericValue().longValue();
+                    long rowId =
+                            doc.getField(LuceneVectorIndex.ROW_ID_FIELD).numericValue().longValue();
                     if (topK.size() < k) {
                         topK.offer(new ScoredRow(rowId, scoreDoc.score));
                     } else {
@@ -171,11 +174,11 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
             throws IOException {
         for (GlobalIndexIOMeta meta : files) {
             try (SeekableInputStream in = fileReader.getInputStream(meta.fileName())) {
-                IndexMMapDirectory directory = null;
+                LuceneIndexMMapDirectory directory = null;
                 IndexReader reader = null;
                 boolean success = false;
                 try {
-                    directory = IndexMMapDirectory.deserialize(in);
+                    directory = LuceneIndexMMapDirectory.deserialize(in);
                     reader = DirectoryReader.open(directory.directory());
                     IndexSearcher searcher = new IndexSearcher(reader);
                     directories.add(directory);

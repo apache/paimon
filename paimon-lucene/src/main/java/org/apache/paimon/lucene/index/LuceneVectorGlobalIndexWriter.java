@@ -44,25 +44,25 @@ import java.util.List;
  * <p>This implementation uses Lucene's native KnnFloatVectorField with HNSW algorithm for efficient
  * approximate nearest neighbor search.
  */
-public class VectorGlobalIndexWriter implements GlobalIndexWriter {
+public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
 
     private final GlobalIndexFileWriter fileWriter;
-    private final VectorIndexOptions vectorOptions;
+    private final LuceneVectorIndexOptions vectorOptions;
     private final VectorSimilarityFunction similarityFunction;
     private final int sizePerIndex;
-    private final VectorIndexFactory vectorIndexFactory;
+    private final LuceneVectorIndexFactory vectorIndexFactory;
 
     private long count = 0;
-    private final List<VectorIndex> vectorIndices;
+    private final List<LuceneVectorIndex> vectorIndices;
     private final List<ResultEntry> results;
 
-    public VectorGlobalIndexWriter(
+    public LuceneVectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter, DataType fieldType, Options options) {
-        this.vectorIndexFactory = VectorIndexFactory.init(fieldType);
+        this.vectorIndexFactory = LuceneVectorIndexFactory.init(fieldType);
         this.fileWriter = fileWriter;
         this.vectorIndices = new ArrayList<>();
         this.results = new ArrayList<>();
-        this.vectorOptions = new VectorIndexOptions(options);
+        this.vectorOptions = new LuceneVectorIndexOptions(options);
         this.similarityFunction = vectorOptions.metric().vectorSimilarityFunction();
         this.sizePerIndex = vectorOptions.sizePerIndex();
     }
@@ -70,7 +70,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
     @Override
     public void write(Object key) {
         count++;
-        VectorIndex index = vectorIndexFactory.create(count, key);
+        LuceneVectorIndex index = vectorIndexFactory.create(count, key);
         index.checkDimension(vectorOptions.dimension());
         vectorIndices.add(index);
         if (vectorIndices.size() >= sizePerIndex) {
@@ -96,7 +96,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
     }
 
     private void flush() throws IOException {
-        String fileName = fileWriter.newFileName(VectorGlobalIndexerFactory.IDENTIFIER);
+        String fileName = fileWriter.newFileName(LuceneVectorGlobalIndexerFactory.IDENTIFIER);
         try (OutputStream out = new BufferedOutputStream(fileWriter.newOutputStream(fileName))) {
             buildIndex(
                     vectorIndices,
@@ -112,24 +112,25 @@ public class VectorGlobalIndexWriter implements GlobalIndexWriter {
     }
 
     private void buildIndex(
-            List<VectorIndex> batchVectors,
+            List<LuceneVectorIndex> batchVectors,
             int m,
             int efConstruction,
             int writeBufferSize,
             OutputStream out) {
 
         IndexWriterConfig config = getIndexWriterConfig(m, efConstruction, writeBufferSize);
-        try (IndexMMapDirectory indexMMapDirectory = new IndexMMapDirectory()) {
-            try (IndexWriter writer = new IndexWriter(indexMMapDirectory.directory(), config)) {
-                for (VectorIndex vectorIndex : batchVectors) {
+        try (LuceneIndexMMapDirectory luceneIndexMMapDirectory = new LuceneIndexMMapDirectory()) {
+            try (IndexWriter writer =
+                    new IndexWriter(luceneIndexMMapDirectory.directory(), config)) {
+                for (LuceneVectorIndex luceneVectorIndex : batchVectors) {
                     Document doc = new Document();
-                    doc.add(vectorIndex.indexableField(similarityFunction));
-                    doc.add(vectorIndex.rowIdStoredField());
+                    doc.add(luceneVectorIndex.indexableField(similarityFunction));
+                    doc.add(luceneVectorIndex.rowIdStoredField());
                     writer.addDocument(doc);
                 }
                 writer.commit();
             }
-            indexMMapDirectory.serialize(out);
+            luceneIndexMMapDirectory.serialize(out);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
