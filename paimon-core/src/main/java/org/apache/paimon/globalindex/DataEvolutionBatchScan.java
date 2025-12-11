@@ -28,6 +28,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DataTableBatchScan;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
@@ -40,20 +42,29 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.globalindex.GlobalIndexScanBuilder.parallelScan;
 
-/** Scan with global index. */
-public class GlobalIndexBatchScan implements InnerTableScan {
-    private final FileStoreTable wrapped;
-    private final InnerTableScan batchScan;
-    private GlobalIndexResult globalIndexResult;
-    private Predicate filter;
+/** Scan for data evolution table. */
+public class DataEvolutionBatchScan implements DataTableScan {
 
-    public GlobalIndexBatchScan(FileStoreTable wrapped, InnerTableScan batchScan) {
-        this.wrapped = wrapped;
+    private final FileStoreTable table;
+    private final DataTableBatchScan batchScan;
+
+    private Predicate filter;
+    private List<Range> rowRanges;
+    private ScoreGetter scoreGetter;
+
+    public DataEvolutionBatchScan(FileStoreTable wrapped, DataTableBatchScan batchScan) {
+        this.table = wrapped;
         this.batchScan = batchScan;
+    }
+
+    @Override
+    public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+        return batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
     }
 
     @Override
@@ -67,12 +78,6 @@ public class GlobalIndexBatchScan implements InnerTableScan {
     public InnerTableScan withReadType(@Nullable RowType readType) {
         batchScan.withReadType(readType);
         return this;
-    }
-
-    @Nullable
-    @Override
-    public PartitionPredicate partitionFilter() {
-        return batchScan.partitionFilter();
     }
 
     @Override
@@ -143,64 +148,72 @@ public class GlobalIndexBatchScan implements InnerTableScan {
 
     @Override
     public InnerTableScan withRowRanges(List<Range> rowRanges) {
-        if (rowRanges != null) {
-            this.globalIndexResult = GlobalIndexResult.fromRanges(rowRanges);
-        }
+        this.rowRanges = rowRanges;
         return this;
     }
 
-    public InnerTableScan withGlobalIndexResult(GlobalIndexResult globalIndexResult) {
-        this.globalIndexResult = globalIndexResult;
-        return this;
-    }
-
-    private void configureGlobalIndex(InnerTableScan scan) {
-        if (globalIndexResult == null && filter != null) {
-            PartitionPredicate partitionPredicate = scan.partitionFilter();
-            GlobalIndexScanBuilder globalIndexScanBuilder = wrapped.newIndexScanBuilder();
-            Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(wrapped);
-            globalIndexScanBuilder
-                    .withPartitionPredicate(partitionPredicate)
-                    .withSnapshot(snapshot);
-            List<Range> indexedRowRanges = globalIndexScanBuilder.shardList();
-            if (!indexedRowRanges.isEmpty()) {
-                List<Range> nonIndexedRowRanges =
-                        new Range(0, snapshot.nextRowId() - 1).exclude(indexedRowRanges);
-                Optional<GlobalIndexResult> combined =
-                        parallelScan(
-                                indexedRowRanges,
-                                globalIndexScanBuilder,
-                                filter,
-                                wrapped.coreOptions().globalIndexThreadNum());
-                if (combined.isPresent()) {
-                    GlobalIndexResult globalIndexResultTemp = combined.get();
-                    if (!nonIndexedRowRanges.isEmpty()) {
-                        for (Range range : nonIndexedRowRanges) {
-                            globalIndexResultTemp.or(GlobalIndexResult.fromRange(range));
-                        }
-                    }
-
-                    this.globalIndexResult = globalIndexResultTemp;
-                }
-            }
-        }
-
-        if (this.globalIndexResult != null) {
-            scan.withRowRanges(this.globalIndexResult.results().toRangeList());
-        }
+    @Override
+    public List<PartitionEntry> listPartitionEntries() {
+        return batchScan.listPartitionEntries();
     }
 
     @Override
     public Plan plan() {
-        configureGlobalIndex(batchScan);
+        generateRowRanges();
+        if (rowRanges != null) {
+            batchScan.withRowRanges(rowRanges);
+        }
         List<Split> splits = batchScan.plan().splits();
-        return wrap(splits);
+        return tryWrapToIndexSplits(splits);
     }
 
-    private Plan wrap(List<Split> splits) {
-        if (globalIndexResult == null) {
+    private void generateRowRanges() {
+        if (rowRanges != null) {
+            return;
+        }
+        if (filter == null) {
+            return;
+        }
+        if (!table.coreOptions().globalIndexEnabled()) {
+            return;
+        }
+
+        PartitionPredicate partitionPredicate =
+                batchScan.snapshotReader().manifestsReader().partitionFilter();
+        GlobalIndexScanBuilder indexScanBuilder = table.store().newGlobalIndexScanBuilder();
+        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(table);
+        indexScanBuilder.withPartitionPredicate(partitionPredicate).withSnapshot(snapshot);
+        List<Range> indexedRowRanges = indexScanBuilder.shardList();
+        if (!indexedRowRanges.isEmpty()) {
+            Long nextRowId = Objects.requireNonNull(snapshot.nextRowId());
+            List<Range> nonIndexedRowRanges = new Range(0, nextRowId - 1).exclude(indexedRowRanges);
+            Optional<GlobalIndexResult> combined =
+                    parallelScan(
+                            indexedRowRanges,
+                            indexScanBuilder,
+                            filter,
+                            table.coreOptions().globalIndexThreadNum());
+            if (combined.isPresent()) {
+                GlobalIndexResult result = combined.get();
+                if (!nonIndexedRowRanges.isEmpty()) {
+                    for (Range range : nonIndexedRowRanges) {
+                        result.or(GlobalIndexResult.fromRange(range));
+                    }
+                }
+
+                rowRanges = result.results().toRangeList();
+                if (result instanceof TopkGlobalIndexResult) {
+                    scoreGetter = ((TopkGlobalIndexResult) result).scoreGetter();
+                }
+            }
+        }
+    }
+
+    private Plan tryWrapToIndexSplits(List<Split> splits) {
+        if (rowRanges == null) {
             return () -> splits;
         }
+
         List<Split> indexedSplits = new ArrayList<>();
         for (Split split : splits) {
             DataSplit dataSplit = (DataSplit) split;
@@ -212,22 +225,17 @@ public class GlobalIndexBatchScan implements InnerTableScan {
 
             fromDataFile = Range.mergeSortedAsPossible(fromDataFile);
 
-            List<Range> expected =
-                    Range.and(fromDataFile, globalIndexResult.results().toRangeList());
+            List<Range> expected = Range.and(fromDataFile, rowRanges);
 
             float[] scores = null;
-            if (globalIndexResult instanceof TopkGlobalIndexResult) {
-                ScoreGetter scoreFunction =
-                        ((TopkGlobalIndexResult) globalIndexResult).scoreGetter();
-                if (scoreFunction != null) {
-                    int size = expected.stream().mapToInt(r -> (int) (r.to - r.from + 1)).sum();
-                    scores = new float[size];
+            if (scoreGetter != null) {
+                int size = expected.stream().mapToInt(r -> (int) (r.to - r.from + 1)).sum();
+                scores = new float[size];
 
-                    int index = 0;
-                    for (Range range : expected) {
-                        for (long i = range.from; i <= range.to; i++) {
-                            scores[index++] = scoreFunction.score(i);
-                        }
+                int index = 0;
+                for (Range range : expected) {
+                    for (long i = range.from; i <= range.to; i++) {
+                        scores[index++] = scoreGetter.score(i);
                     }
                 }
             }
@@ -235,10 +243,5 @@ public class GlobalIndexBatchScan implements InnerTableScan {
             indexedSplits.add(new IndexedSplit(dataSplit, expected, scores));
         }
         return () -> indexedSplits;
-    }
-
-    @Override
-    public List<PartitionEntry> listPartitionEntries() {
-        return batchScan.listPartitionEntries();
     }
 }

@@ -977,7 +977,7 @@ public class DataEvolutionTableTest extends TableTestBase {
 
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)
             throws Exception {
-        GlobalIndexScanBuilder indexScanBuilder = table.newIndexScanBuilder();
+        GlobalIndexScanBuilder indexScanBuilder = table.store().newGlobalIndexScanBuilder();
         List<Range> ranges = indexScanBuilder.shardList();
         GlobalIndexResult globalFileIndexResult = GlobalIndexResult.createEmpty();
         for (Range range : ranges) {

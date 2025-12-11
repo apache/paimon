@@ -21,14 +21,11 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.data.variant.VariantAccessInfoUtils;
-import org.apache.paimon.globalindex.GlobalIndexBatchScan;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
-import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
@@ -186,11 +183,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public TableScan newScan() {
-        InnerTableScan tableScan = table.newScan();
-        if (searchGlobalIndex(table)) {
-            tableScan = new GlobalIndexBatchScan((FileStoreTable) table, tableScan);
-        }
-        tableScan = configureScan(tableScan);
+        InnerTableScan tableScan = configureScan(table.newScan());
         if (limit != null) {
             tableScan.withLimit(limit);
         }
@@ -237,13 +230,6 @@ public class ReadBuilderImpl implements ReadBuilder {
             scan.dropStats();
         }
         return scan;
-    }
-
-    private boolean searchGlobalIndex(Table table) {
-        return table instanceof FileStoreTable
-                && ((FileStoreTable) table).coreOptions().dataEvolutionEnabled()
-                && (((FileStoreTable) table).coreOptions().globalIndexEnabled()
-                        || this.rowRanges != null);
     }
 
     @Override

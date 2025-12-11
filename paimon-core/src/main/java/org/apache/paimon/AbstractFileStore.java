@@ -498,7 +498,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public GlobalIndexScanBuilder newIndexScanBuilder() {
+    public GlobalIndexScanBuilder newGlobalIndexScanBuilder() {
         return new GlobalIndexScanBuilderImpl(
                 options.toConfiguration(),
                 schema.logicalRowType(),
