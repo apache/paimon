@@ -227,7 +227,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             List<BinaryRow> partitions = partitionLoader.partitions();
             if (!partitions.isEmpty()) {
                 lookupTable.specifyPartitions(
-                        partitions, partitionLoader.createSpecificPartFilter(partitions));
+                        partitions, partitionLoader.createSpecificPartFilter());
             }
         }
 
@@ -329,7 +329,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             if (partitionChanged) {
                 // reopen with latest partition
                 lookupTable.specifyPartitions(
-                        partitions, partitionLoader.createSpecificPartFilter(partitions));
+                        partitionLoader.partitions(), partitionLoader.createSpecificPartFilter());
                 lookupTable.close();
                 lookupTable.open();
                 // no need to refresh the lookup table because it is reopened

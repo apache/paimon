@@ -23,9 +23,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
@@ -35,9 +33,7 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /** Specify partitions for lookup tables. */
 public abstract class PartitionLoader implements Serializable {
@@ -76,29 +72,10 @@ public abstract class PartitionLoader implements Serializable {
         partitionKeys.stream().filter(k -> !projectFields.contains(k)).forEach(projectFields::add);
     }
 
-    public Predicate createSpecificPartFilter(List<BinaryRow> partitions) {
-        Predicate partFilter = null;
-        for (BinaryRow partition : partitions) {
-            if (partFilter == null) {
-                partFilter = createSinglePartFilter(partition);
-            } else {
-                partFilter = PredicateBuilder.or(partFilter, createSinglePartFilter(partition));
-            }
-        }
-        return partFilter;
-    }
-
-    private Predicate createSinglePartFilter(BinaryRow partition) {
-        RowType rowType = table.rowType();
-        List<String> partitionKeys = table.partitionKeys();
-        Object[] partitionSpec = partitionConverter.convert(partition);
-        Map<String, Object> partitionMap = new HashMap<>(partitionSpec.length);
-        for (int i = 0; i < partitionSpec.length; i++) {
-            partitionMap.put(partitionKeys.get(i), partitionSpec[i]);
-        }
-
+    public Predicate createSpecificPartFilter() {
         // create partition predicate base on rowType instead of partitionType
-        return PartitionPredicate.createPartitionPredicate(rowType, partitionMap);
+        return PartitionPredicate.createPartitionPredicate(
+                table.rowType(), partitionConverter, partitions);
     }
 
     /** @return true if partition changed. */

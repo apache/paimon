@@ -36,6 +36,7 @@ import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -57,7 +58,6 @@ import java.util.Optional;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARTITIONS;
 import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
-import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** A Flink {@link ScanTableSource} for paimon. */
 public abstract class FlinkTableSource
@@ -98,7 +98,7 @@ public abstract class FlinkTableSource
             @Nullable Long limit) {
         this.table = table;
         this.options = Options.fromMap(table.options());
-        this.partitionPredicate = getPartitionPredicate();
+        this.partitionPredicate = getPartitionPredicateWithOptions();
 
         this.predicate = predicate;
         this.projectFields = projectFields;
@@ -139,18 +139,6 @@ public abstract class FlinkTableSource
         return Result.of(filters, unConsumedFilters);
     }
 
-    private PartitionPredicate getPartitionPredicate() {
-        try {
-            return getPartitionPredicateWithOptions();
-        } catch (IllegalArgumentException e) {
-            // In older versions of Flink, however, lookup sources will first be treated as normal
-            // sources. So this method will also be visited by lookup tables, and the options might
-            // cause IllegalArgumentException. In this case we ignore the filters.
-            LOG.info("Failed to get filter with table options {} ", table.options(), e);
-            return null;
-        }
-    }
-
     /**
      * This method is only used for normal source (not lookup source). Specified partitions in
      * lookup sources are handled in {@link org.apache.paimon.flink.lookup.PartitionLoader}. But
@@ -158,40 +146,43 @@ public abstract class FlinkTableSource
      * create partition predicate.
      */
     private PartitionPredicate getPartitionPredicateWithOptions() {
-        PartitionLoader partitionLoader = PartitionLoader.of(table);
-        if (partitionLoader == null) {
+        try {
+            PartitionLoader partitionLoader = PartitionLoader.of(table);
+            if (partitionLoader == null) {
+                return null;
+            }
+
+            partitionLoader.open();
+            List<BinaryRow> partitions;
+            if (partitionLoader instanceof StaticPartitionLoader) {
+                partitions = partitionLoader.partitions();
+            } else if (partitionLoader instanceof DynamicPartitionLoader) {
+                partitions = ((DynamicPartitionLoader) partitionLoader).getMaxPartitions();
+            } else {
+                throw new RuntimeException(
+                        "Failed to handle scan.partitions = " + options.get(SCAN_PARTITIONS));
+            }
+            if (partitions.isEmpty()) {
+                return null;
+            }
+
+            // Partition filter will be used to filter Manifest stats, the stats schema is
+            // partition type. See SnapshotReaderImpl#withFilter
+            org.apache.paimon.types.RowType partitionType =
+                    table.rowType().project(table.partitionKeys());
+            Predicate predicate =
+                    PartitionPredicate.createPartitionPredicate(
+                            partitionType,
+                            new RowDataToObjectArrayConverter(partitionType),
+                            partitions);
+            return PartitionPredicate.fromPredicate(partitionType, predicate);
+        } catch (IllegalArgumentException e) {
+            // In older versions of Flink, however, lookup sources will first be treated as normal
+            // sources. So this method will also be visited by lookup tables, and the options might
+            // cause IllegalArgumentException. In this case we ignore the filters.
+            LOG.info("Failed to get filter with table options {} ", table.options(), e);
             return null;
         }
-
-        partitionLoader.open();
-        List<BinaryRow> partitions;
-        if (partitionLoader instanceof StaticPartitionLoader) {
-            partitions = partitionLoader.partitions();
-        } else if (partitionLoader instanceof DynamicPartitionLoader) {
-            partitions = ((DynamicPartitionLoader) partitionLoader).getMaxPartitions();
-        } else {
-            throw new RuntimeException(
-                    "Failed to handle scan.partitions = " + options.get(SCAN_PARTITIONS));
-        }
-        if (partitions.isEmpty()) {
-            return null;
-        }
-
-        // Partition filter will be used to filter Manifest stats, the stats schema is
-        // partition type. See SnapshotReaderImpl#withFilter
-        Predicate predicate = partitionLoader.createSpecificPartFilter(partitions);
-        Predicate transformed =
-                transformFieldMapping(
-                                predicate,
-                                PredicateBuilder.fieldIdxToPartitionIdx(
-                                        table.rowType(), table.partitionKeys()))
-                        .orElseThrow(
-                                () ->
-                                        new RuntimeException(
-                                                "Failed to transform the partition predicate "
-                                                        + predicate));
-        return PartitionPredicate.fromPredicate(
-                table.rowType().project(table.partitionKeys()), transformed);
     }
 
     @Override
