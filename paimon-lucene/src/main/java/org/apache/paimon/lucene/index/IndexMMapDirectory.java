@@ -30,6 +30,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 
@@ -42,7 +43,7 @@ public class IndexMMapDirectory implements AutoCloseable {
     private final MMapDirectory mmapDirectory;
 
     public IndexMMapDirectory() throws IOException {
-        this.path = java.nio.file.Files.createTempDirectory("paimon-lucene-" + UUID.randomUUID());
+        this.path = Files.createTempDirectory("paimon-lucene-" + UUID.randomUUID());
         this.mmapDirectory = new MMapDirectory(path);
     }
 
@@ -52,13 +53,12 @@ public class IndexMMapDirectory implements AutoCloseable {
 
     public void close() throws Exception {
         mmapDirectory.close();
-        if (java.nio.file.Files.exists(path)) {
-            java.nio.file.Files.walk(path)
-                    .sorted(java.util.Comparator.reverseOrder())
+        if (Files.exists(path)) {
+            Files.walk(path)
                     .forEach(
                             p -> {
                                 try {
-                                    java.nio.file.Files.delete(p);
+                                    Files.delete(p);
                                 } catch (IOException e) {
                                     // Ignore cleanup errors
                                 }

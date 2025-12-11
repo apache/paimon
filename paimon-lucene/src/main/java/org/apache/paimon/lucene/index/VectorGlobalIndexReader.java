@@ -24,6 +24,7 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.lucene.document.Document;
@@ -53,12 +54,14 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
 
     private final List<IndexSearcher> searchers;
     private final List<IndexMMapDirectory> directories;
+    private final List<GlobalIndexIOMeta> ioMetas;
 
-    public VectorGlobalIndexReader(GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files)
-            throws IOException {
+    public VectorGlobalIndexReader(
+            GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> ioMetas) throws IOException {
+        this.ioMetas = ioMetas;
         this.searchers = new ArrayList<>();
         this.directories = new ArrayList<>();
-        loadIndices(fileReader, files);
+        loadIndices(fileReader, ioMetas);
     }
 
     /**
@@ -202,8 +205,12 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
     // Implementation of FunctionVisitor methods
     @Override
     public GlobalIndexResult visitIsNotNull(FieldRef fieldRef) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support isNotNull predicate");
+        Range range =
+                ioMetas.stream()
+                        .map(GlobalIndexIOMeta::rowIdRange)
+                        .reduce(Range::union)
+                        .orElse(null);
+        return GlobalIndexResult.fromRange(range);
     }
 
     @Override

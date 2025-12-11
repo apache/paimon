@@ -23,10 +23,10 @@ import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
-/** Factory for creating vector global indexers. */
+/** Factory for creating lucene hnsw vector global indexers. */
 public class VectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
-    public static final String IDENTIFIER = "vector";
+    public static final String IDENTIFIER = "lucene-hnsw";
 
     @Override
     public String identifier() {
