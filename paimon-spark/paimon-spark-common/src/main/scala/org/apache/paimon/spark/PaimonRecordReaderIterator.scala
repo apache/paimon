@@ -29,6 +29,7 @@ import org.apache.paimon.utils.CloseableIterator
 import org.apache.spark.sql.PaimonUtils
 
 import java.io.IOException
+import java.util.concurrent.TimeUnit.NANOSECONDS
 
 case class PaimonRecordReaderIterator(
     reader: RecordReader[PaimonInternalRow],
@@ -56,6 +57,7 @@ case class PaimonRecordReaderIterator(
   private var currentIterator: RecordReader.RecordIterator[PaimonInternalRow] = readBatch()
   private var advanced = false
   private var currentResult: PaimonInternalRow = _
+  private var readBatchTimeNs: Long = 0L
 
   override def hasNext: Boolean = {
     if (currentIterator == null) {
@@ -88,6 +90,8 @@ case class PaimonRecordReaderIterator(
   }
 
   private def readBatch(): RecordReader.RecordIterator[PaimonInternalRow] = {
+    val startTimeNs = System.nanoTime()
+
     val iter = reader.readBatch()
     iter match {
       case fileRecordIterator: FileRecordIterator[_] =>
@@ -102,7 +106,12 @@ case class PaimonRecordReaderIterator(
               "Only append table or deletion vector table support querying metadata columns.")
         }
     }
+    readBatchTimeNs += System.nanoTime() - startTimeNs
     iter
+  }
+
+  def readBatchTimeMs: Long = {
+    NANOSECONDS.toMillis(readBatchTimeNs)
   }
 
   private def advanceIfNeeded(): Unit = {

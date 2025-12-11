@@ -93,6 +93,7 @@ abstract class PaimonBaseScan(table: InnerTable)
     Array(
       PaimonNumSplitMetric(),
       PaimonPartitionSizeMetric(),
+      PaimonReadBatchTimeMetric(),
       PaimonPlanningDurationMetric(),
       PaimonScannedSnapshotIdMetric(),
       PaimonScannedManifestsMetric(),
