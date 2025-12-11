@@ -72,7 +72,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
 
-    private KeyValueFileReaderFactory(
+    protected KeyValueFileReaderFactory(
             FileIO fileIO,
             SchemaManager schemaManager,
             TableSchema schema,
@@ -104,6 +104,15 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         return pathFactory;
     }
 
+    protected TableSchema getDataSchema(DataFileMeta fileMeta) {
+        long schemaId = fileMeta.schemaId();
+        return schemaId == schema.id() ? schema : schemaManager.schema(schemaId);
+    }
+
+    protected BinaryRow getLogicalPartition() {
+        return partition;
+    }
+
     @Override
     public RecordReader<KeyValue> createRecordReader(DataFileMeta file) throws IOException {
         if (file.fileSize() >= asyncThreshold && file.fileName().endsWith(".orc")) {
@@ -121,9 +130,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         Supplier<FormatReaderMapping> formatSupplier =
                 () ->
                         formatReaderMappingBuilder.build(
-                                formatIdentifier,
-                                schema,
-                                schemaId == schema.id() ? schema : schemaManager.schema(schemaId));
+                                formatIdentifier, schema, getDataSchema(file));
 
         FormatReaderMapping formatReaderMapping =
                 reuseFormat
@@ -144,7 +151,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                                         fileIO, filePath, fileSize, orcPoolSize),
                         formatReaderMapping.getIndexMapping(),
                         formatReaderMapping.getCastMapping(),
-                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
+                        PartitionUtils.create(
+                                formatReaderMapping.getPartitionPair(), getLogicalPartition()),
                         false,
                         null,
                         -1,
@@ -157,6 +165,12 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         }
 
         return new KeyValueDataFileRecordReader(fileRecordReader, keyType, valueType, file.level());
+    }
+
+    /** Type of {@link KeyValueFileReaderFactory} to create. */
+    public enum KeyValueFileReaderFactoryType {
+        DEFAULT,
+        CHAIN
     }
 
     public static Builder builder(
@@ -264,6 +278,19 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 boolean projectKeys,
                 @Nullable List<Predicate> filters,
                 @Nullable VariantAccessInfo[] variantAccess) {
+            return build(
+                    partition, bucket, dvFactory, projectKeys, filters, variantAccess, null, null);
+        }
+
+        public KeyValueFileReaderFactory build(
+                BinaryRow partition,
+                int bucket,
+                DeletionVector.Factory dvFactory,
+                boolean projectKeys,
+                @Nullable List<Predicate> filters,
+                @Nullable VariantAccessInfo[] variantAccess,
+                @Nullable KeyValueFileReaderFactoryType factoryType,
+                @Nullable ChainReadContext chainReadContext) {
             RowType finalReadKeyType = projectKeys ? this.readKeyType : keyType;
             Function<TableSchema, List<DataField>> fieldsExtractor =
                     schema -> {
@@ -274,13 +301,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             List<DataField> readTableFields =
                     KeyValue.createKeyValueFields(
                             finalReadKeyType.getFields(), readValueType.getFields());
-
-            return new KeyValueFileReaderFactory(
-                    fileIO,
-                    schemaManager,
-                    schema,
-                    finalReadKeyType,
-                    readValueType,
+            FormatReaderMapping.Builder builder =
                     new FormatReaderMapping.Builder(
                             formatDiscover,
                             readTableFields,
@@ -288,11 +309,36 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                             filters,
                             null,
                             null,
-                            variantAccess),
-                    pathFactory.createDataFilePathFactory(partition, bucket),
-                    options.fileReaderAsyncThreshold().getBytes(),
-                    partition,
-                    dvFactory);
+                            variantAccess);
+
+            if (factoryType == null || factoryType == KeyValueFileReaderFactoryType.DEFAULT) {
+                return new KeyValueFileReaderFactory(
+                        fileIO,
+                        schemaManager,
+                        schema,
+                        finalReadKeyType,
+                        readValueType,
+                        builder,
+                        pathFactory.createDataFilePathFactory(partition, bucket),
+                        options.fileReaderAsyncThreshold().getBytes(),
+                        partition,
+                        dvFactory);
+            } else if (factoryType == KeyValueFileReaderFactoryType.CHAIN) {
+                return new ChainKeyValueFileReaderFactory(
+                        fileIO,
+                        schemaManager,
+                        schema,
+                        finalReadKeyType,
+                        readValueType,
+                        builder,
+                        pathFactory.createChainReadDataFilePathFactory(chainReadContext),
+                        options.fileReaderAsyncThreshold().getBytes(),
+                        partition,
+                        dvFactory,
+                        chainReadContext);
+            } else {
+                throw new IllegalArgumentException("Unsupported factory type: " + factoryType);
+            }
         }
 
         public FileIO fileIO() {
