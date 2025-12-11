@@ -18,7 +18,6 @@
 
 package org.apache.paimon.sst;
 
-import org.apache.paimon.compression.BlockCompressionType;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.memory.MemorySliceOutput;
@@ -27,24 +26,30 @@ import static java.util.Objects.requireNonNull;
 
 /** Trailer of a block. */
 public class BlockTrailer {
-    public static final int ENCODED_LENGTH = 5;
+    public static final int ENCODED_LENGTH = 6;
 
-    private final BlockCompressionType compressionType;
+    private final BlockType blockType;
     private final int crc32c;
+    private final boolean compressed;
 
-    public BlockTrailer(BlockCompressionType compressionType, int crc32c) {
-        requireNonNull(compressionType, "compressionType is null");
+    public BlockTrailer(BlockType blockType, int crc32c, boolean compressed) {
+        requireNonNull(blockType, "blockType is null");
 
-        this.compressionType = compressionType;
+        this.blockType = blockType;
         this.crc32c = crc32c;
+        this.compressed = compressed;
     }
 
-    public BlockCompressionType getCompressionType() {
-        return compressionType;
+    public BlockType getBlockType() {
+        return blockType;
     }
 
     public int getCrc32c() {
         return crc32c;
+    }
+
+    public boolean isCompressed() {
+        return compressed;
     }
 
     @Override
@@ -57,34 +62,36 @@ public class BlockTrailer {
         }
 
         BlockTrailer that = (BlockTrailer) o;
-        if (crc32c != that.crc32c) {
-            return false;
-        }
-        return compressionType == that.compressionType;
+        return crc32c == that.crc32c
+                && compressed == that.compressed
+                && blockType == that.blockType;
     }
 
     @Override
     public int hashCode() {
-        int result = compressionType.hashCode();
+        int result = blockType.hashCode();
         result = 31 * result + crc32c;
+        result = 31 * result + (compressed ? 1 : 0);
         return result;
     }
 
     @Override
     public String toString() {
         return "BlockTrailer"
-                + "{compressionType="
-                + compressionType
+                + "{blockType="
+                + blockType
                 + ", crc32c=0x"
                 + Integer.toHexString(crc32c)
+                + ", compressed="
+                + compressed
                 + '}';
     }
 
     public static BlockTrailer readBlockTrailer(MemorySliceInput input) {
-        BlockCompressionType compressionType =
-                BlockCompressionType.getCompressionTypeByPersistentId(input.readUnsignedByte());
+        BlockType blockType = BlockType.fromByte(input.readByte());
         int crc32c = input.readInt();
-        return new BlockTrailer(compressionType, crc32c);
+        boolean compressed = input.readByte() == 1;
+        return new BlockTrailer(blockType, crc32c, compressed);
     }
 
     public static MemorySlice writeBlockTrailer(BlockTrailer blockTrailer) {
@@ -94,7 +101,8 @@ public class BlockTrailer {
     }
 
     public static void writeBlockTrailer(BlockTrailer blockTrailer, MemorySliceOutput sliceOutput) {
-        sliceOutput.writeByte(blockTrailer.getCompressionType().persistentId());
+        sliceOutput.writeByte(blockTrailer.blockType.toByte());
         sliceOutput.writeInt(blockTrailer.getCrc32c());
+        sliceOutput.writeByte(blockTrailer.isCompressed() ? 1 : 0);
     }
 }

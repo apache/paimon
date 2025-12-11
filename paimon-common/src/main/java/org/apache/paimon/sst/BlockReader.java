@@ -28,14 +28,20 @@ import static org.apache.paimon.sst.BlockAlignedType.ALIGNED;
 public class BlockReader {
     private final MemorySlice block;
     private final Comparator<MemorySlice> comparator;
+    private final BlockType blockType;
 
-    public BlockReader(MemorySlice block, Comparator<MemorySlice> comparator) {
+    public BlockReader(MemorySlice block, Comparator<MemorySlice> comparator, BlockType blockType) {
         this.block = block;
         this.comparator = comparator;
+        this.blockType = blockType;
     }
 
     public long size() {
         return block.length();
+    }
+
+    public BlockType getBlockType() {
+        return blockType;
     }
 
     public BlockIterator iterator() {

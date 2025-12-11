@@ -27,6 +27,7 @@ import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +36,7 @@ import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.Arrays;
 
 import static org.apache.paimon.memory.MemorySegmentUtils.allocateReuseBytes;
 import static org.apache.paimon.sst.BlockHandle.writeBlockHandle;
@@ -48,15 +50,27 @@ import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
  *
  * <pre>
  *     +-----------------------------------+------+
- *     |             Footer                |      |
+ *     |              Footer               |      |
  *     +-----------------------------------+      |
- *     |           Index Block             |      +--> Loaded on open
+ *     |         Root Index Block          |      +--> Loaded on open
  *     +-----------------------------------+      |
  *     |        Bloom Filter Block         |      |
  *     +-----------------------------------+------+
+ *     |     Intermediate Index Block      |      |
+ *     +-----------------------------------+      |
+ *     |              ......               |      |
+ *     +-----------------------------------+      |
+ *     |     Intermediate Index Block      |      |
+ *     +-----------------------------------+      |
+ *     |          File Info Block          |      |
+ *     +-----------------------------------+      +--> Loaded on requested
  *     |            Data Block             |      |
  *     +-----------------------------------+      |
- *     |              ......               |      +--> Loaded on requested
+ *     |              ......               |      |
+ *     +-----------------------------------+      |
+ *     |         Leaf Index Block          |      |
+ *     +-----------------------------------+      |
+ *     |              ......               |      |
  *     +-----------------------------------+      |
  *     |            Data Block             |      |
  *     +-----------------------------------+------+
@@ -67,14 +81,16 @@ public class SstFileWriter implements Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(SstFileWriter.class.getName());
 
     public static final int MAGIC_NUMBER = 1481571681;
+    public static final int VERSION = 1;
 
     private final PositionOutputStream out;
     private final int blockSize;
     private final BlockWriter dataBlockWriter;
-    private final BlockWriter indexBlockWriter;
+    private final IndexWriter indexWriter;
+    private final FileInfo.Builder infoBuilder;
     @Nullable private final BloomFilter.Builder bloomFilter;
-    private final BlockCompressionType compressionType;
     @Nullable private final BlockCompressor blockCompressor;
+    private final BlockCompressionType compressionType;
 
     private byte[] lastKey;
     private long position;
@@ -88,19 +104,35 @@ public class SstFileWriter implements Closeable {
             int blockSize,
             @Nullable BloomFilter.Builder bloomFilter,
             @Nullable BlockCompressionFactory compressionFactory) {
+        this(
+                out,
+                blockSize,
+                bloomFilter,
+                compressionFactory,
+                (int) MemorySize.ofMebiBytes(8).getBytes(),
+                16);
+    }
+
+    public SstFileWriter(
+            PositionOutputStream out,
+            int blockSize,
+            @Nullable BloomFilter.Builder bloomFilter,
+            @Nullable BlockCompressionFactory compressionFactory,
+            int maxIndexBlockSize,
+            int minIndexBlockEntryNum) {
         this.out = out;
         this.blockSize = blockSize;
         this.dataBlockWriter = new BlockWriter((int) (blockSize * 1.1));
-        int expectedNumberOfBlocks = 1024;
-        this.indexBlockWriter =
-                new BlockWriter(BlockHandle.MAX_ENCODED_LENGTH * expectedNumberOfBlocks);
+        this.indexWriter =
+                new IndexWriter(this::writeBlock, maxIndexBlockSize, minIndexBlockEntryNum);
         this.bloomFilter = bloomFilter;
+        this.infoBuilder = new FileInfo.Builder();
         if (compressionFactory == null) {
-            this.compressionType = BlockCompressionType.NONE;
             this.blockCompressor = null;
+            this.compressionType = BlockCompressionType.NONE;
         } else {
-            this.compressionType = compressionFactory.getCompressionType();
             this.blockCompressor = compressionFactory.getCompressor();
+            this.compressionType = compressionFactory.getCompressionType();
         }
     }
 
@@ -114,6 +146,7 @@ public class SstFileWriter implements Closeable {
      */
     public void put(byte[] key, byte[] value) throws IOException {
         dataBlockWriter.add(key, value);
+        infoBuilder.update(key, value);
         if (bloomFilter != null) {
             bloomFilter.addHash(MurmurHashUtils.hashBytes(key));
         }
@@ -127,24 +160,32 @@ public class SstFileWriter implements Closeable {
         recordCount++;
     }
 
+    public void addExtraFileInfo(byte[] key, byte[] value) throws IOException {
+        Preconditions.checkNotNull(key);
+        Preconditions.checkNotNull(value);
+        infoBuilder.addExtraValue(
+                Arrays.copyOf(key, key.length), Arrays.copyOf(value, value.length));
+    }
+
     private void flush() throws IOException {
         if (dataBlockWriter.size() == 0) {
             return;
         }
 
-        BlockHandle blockHandle = writeBlock(dataBlockWriter);
+        BlockHandle blockHandle = writeBlock(dataBlockWriter, BlockType.DATA);
         MemorySlice handleEncoding = writeBlockHandle(blockHandle);
-        indexBlockWriter.add(lastKey, handleEncoding.copyBytes());
+        indexWriter.addEntry(lastKey, handleEncoding.copyBytes());
     }
 
-    private BlockHandle writeBlock(BlockWriter blockWriter) throws IOException {
+    private BlockHandle writeBlock(BlockWriter blockWriter, BlockType blockType)
+            throws IOException {
         // close the block
         MemorySlice block = blockWriter.finish();
 
         totalUncompressedSize += block.length();
 
         // attempt to compress the block
-        BlockCompressionType blockCompressionType = BlockCompressionType.NONE;
+        boolean dataCompressed = false;
         if (blockCompressor != null) {
             int maxCompressedSize = blockCompressor.getMaxCompressedSize(block.length());
             byte[] compressed = allocateReuseBytes(maxCompressedSize + 5);
@@ -161,7 +202,7 @@ public class SstFileWriter implements Closeable {
             // Don't use the compressed data if compressed less than 12.5%,
             if (compressedSize < block.length() - (block.length() / 8)) {
                 block = new MemorySlice(MemorySegment.wrap(compressed), 0, compressedSize);
-                blockCompressionType = this.compressionType;
+                dataCompressed = true;
             }
         }
 
@@ -169,7 +210,8 @@ public class SstFileWriter implements Closeable {
 
         // create block trailer
         BlockTrailer blockTrailer =
-                new BlockTrailer(blockCompressionType, crc32c(block, blockCompressionType));
+                new BlockTrailer(
+                        blockType, crc32c(block, blockType, dataCompressed), dataCompressed);
         MemorySlice trailer = BlockTrailer.writeBlockTrailer(blockTrailer);
 
         // create a handle to this block
@@ -178,7 +220,7 @@ public class SstFileWriter implements Closeable {
         // write data
         writeSlice(block);
 
-        // write trailer: 5 bytes
+        // write trailer: 6 bytes
         writeSlice(trailer);
 
         // clean up state
@@ -194,6 +236,15 @@ public class SstFileWriter implements Closeable {
 
         LOG.info("Number of record: {}", recordCount);
 
+        // write fileInfo
+        FileInfo fileInfo = infoBuilder.build();
+        BlockWriter fileInfoWriter = new BlockWriter(fileInfo.memory());
+        FileInfo.writeFileInfo(fileInfo, fileInfoWriter);
+        BlockHandle fileInfoHandle = writeBlock(fileInfoWriter, BlockType.FILE_INFO);
+
+        // write index block
+        BlockHandle indexBlockHandle = indexWriter.finish();
+
         // write bloom filter
         @Nullable BloomFilterHandle bloomFilterHandle = null;
         if (bloomFilter != null) {
@@ -204,11 +255,19 @@ public class SstFileWriter implements Closeable {
             LOG.info("Bloom filter size: {} bytes", bloomFilter.getBuffer().size());
         }
 
-        // write index block
-        BlockHandle indexBlockHandle = writeBlock(indexBlockWriter);
-
         // write footer
-        Footer footer = new Footer(bloomFilterHandle, indexBlockHandle);
+        Footer footer =
+                new Footer(
+                        fileInfoHandle,
+                        bloomFilterHandle,
+                        indexBlockHandle,
+                        indexWriter.getEntryNum(),
+                        indexWriter.getLevelNum(),
+                        indexWriter.getUncompressedSize(),
+                        (int) recordCount,
+                        totalUncompressedSize,
+                        compressionType);
+
         MemorySlice footerEncoding = Footer.writeFooter(footer);
         writeSlice(footerEncoding);
 

@@ -48,7 +48,9 @@ public class SstFileReader implements Closeable {
     private final Comparator<MemorySlice> comparator;
     private final Path filePath;
     private final BlockCache blockCache;
-    private final BlockIterator indexBlockIterator;
+    private final Footer footer;
+    private final IndexIterator indexBlockIterator;
+    @Nullable private final BlockDecompressor decompressor;
     @Nullable private final FileBasedBloomFilter bloomFilter;
 
     public SstFileReader(
@@ -64,8 +66,22 @@ public class SstFileReader implements Closeable {
         MemorySegment footerData =
                 blockCache.getBlock(
                         fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH, b -> b, true);
-        Footer footer = Footer.readFooter(MemorySlice.wrap(footerData).toInput());
-        this.indexBlockIterator = readBlock(footer.getIndexBlockHandle(), true).iterator();
+        this.footer = Footer.readFooter(MemorySlice.wrap(footerData).toInput());
+
+        BlockCompressionFactory compressionFactory =
+                BlockCompressionFactory.create(footer.getCompressionType());
+        if (compressionFactory == null) {
+            decompressor = null;
+        } else {
+            decompressor = compressionFactory.getDecompressor();
+        }
+
+        BlockReader rootIndexReader = readBlock(footer.getIndexBlockHandle(), true);
+        this.indexBlockIterator =
+                new IndexIterator(
+                        rootIndexReader,
+                        handle -> this.readBlock(handle, true),
+                        footer.getIndexLevel());
         BloomFilterHandle handle = footer.getBloomFilterHandle();
         if (handle == null) {
             this.bloomFilter = null;
@@ -108,6 +124,13 @@ public class SstFileReader implements Closeable {
         return null;
     }
 
+    /** Read the file info, including some statistics and user-added k-v pairs. */
+    public FileInfo readFileInfo() throws IOException {
+        BlockHandle fileInfoHandle = footer.getFileInfoHandle();
+        BlockReader blockReader = readBlock(fileInfoHandle, false);
+        return FileInfo.readFileInfo(blockReader);
+    }
+
     private BlockIterator getNextBlock() {
         // index block handle, point to the key, value position.
         MemorySlice blockHandle = indexBlockIterator.next().getValue();
@@ -138,12 +161,14 @@ public class SstFileReader implements Closeable {
                         blockHandle.size(),
                         bytes -> decompressBlock(bytes, blockTrailer),
                         index);
-        return new BlockReader(MemorySlice.wrap(unCompressedBlock), comparator);
+        return new BlockReader(
+                MemorySlice.wrap(unCompressedBlock), comparator, blockTrailer.getBlockType());
     }
 
     private byte[] decompressBlock(byte[] compressedBytes, BlockTrailer blockTrailer) {
         MemorySegment compressed = MemorySegment.wrap(compressedBytes);
-        int crc32cCode = crc32c(compressed, blockTrailer.getCompressionType());
+        int crc32cCode =
+                crc32c(compressed, blockTrailer.getBlockType(), blockTrailer.isCompressed());
         checkArgument(
                 blockTrailer.getCrc32c() == crc32cCode,
                 String.format(
@@ -151,14 +176,11 @@ public class SstFileReader implements Closeable {
                         blockTrailer.getCrc32c(), crc32cCode, filePath));
 
         // decompress data
-        BlockCompressionFactory compressionFactory =
-                BlockCompressionFactory.create(blockTrailer.getCompressionType());
-        if (compressionFactory == null) {
+        if (decompressor == null || !blockTrailer.isCompressed()) {
             return compressedBytes;
         } else {
             MemorySliceInput compressedInput = MemorySlice.wrap(compressed).toInput();
             byte[] uncompressed = new byte[compressedInput.readVarLenInt()];
-            BlockDecompressor decompressor = compressionFactory.getDecompressor();
             int uncompressedLength =
                     decompressor.decompress(
                             compressed.getHeapMemory(),
