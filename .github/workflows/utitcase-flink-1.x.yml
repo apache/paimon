@@ -26,7 +26,6 @@ on:
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
       - 'paimon-lucene/**'
-      - '.github/workflows/utitcase-paimon-lucene.yml'
 
 env:
   JDK_VERSION: 8

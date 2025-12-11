@@ -27,7 +27,6 @@ on:
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
       - 'paimon-lucene/**'
-      - '.github/workflows/utitcase-paimon-lucene.yml'
 
 env:
   JDK_VERSION: 11
@@ -53,11 +52,11 @@ jobs:
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          test_modules="!paimon-e2e-tests,!org.apache.paimon:paimon-hive-connector-3.1,"
+          test_modules="!paimon-e2e-tests,!org.apache.paimon:paimon-hive-connector-3.1,org.apache.paimon:paimon-lucene"
           for suffix in ut 3.5 3.4 3.3 3.2; do
           test_modules+="!org.apache.paimon:paimon-spark-${suffix}_2.12,"
           done
           test_modules="${test_modules%,}"
-          mvn -T 1C -B clean install -pl "${test_modules}" -Pflink1,spark3 -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
+          mvn -T 1C -B clean install -pl "${test_modules}" -Pflink1,spark3,paimon-lucene -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m
