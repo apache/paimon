@@ -1566,6 +1566,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to create tag automatically. And how to generate tags.");
 
+    public static final ConfigOption<Boolean> TAG_AUTOMATIC_CREATION_WITHOUT_DELAY =
+            key("tag.automatic-creation-without-delay")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to ignore delay when creating tag automatically");
+
     public static final ConfigOption<Boolean> TAG_CREATE_SUCCESS_FILE =
             key("tag.create-success-file")
                     .booleanType()
@@ -2981,6 +2987,10 @@ public class CoreOptions implements Serializable {
 
     public TagCreationMode tagCreationMode() {
         return options.get(TAG_AUTOMATIC_CREATION);
+    }
+
+    public Boolean tagAutoCreateWithoutDelay() {
+        return options.get(TAG_AUTOMATIC_CREATION_WITHOUT_DELAY);
     }
 
     public TagCreationPeriod tagCreationPeriod() {
