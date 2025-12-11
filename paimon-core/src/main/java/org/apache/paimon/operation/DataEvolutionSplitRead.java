@@ -123,12 +123,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withRowRanges(@Nullable List<Range> rowRanges) {
-        this.rowRanges = rowRanges;
-        return this;
-    }
-
-    @Override
     public SplitRead<InternalRow> withReadType(RowType readRowType) {
         this.readRowType = readRowType;
         return this;
@@ -144,6 +138,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     public SplitRead<InternalRow> withFilter(@Nullable Predicate predicate) {
         // TODO: Support File index push down (all conditions) and Predicate push down (only if no
         // column merge)
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withRowRanges(@Nullable List<Range> rowRanges) {
+        this.rowRanges = rowRanges;
         return this;
     }
 
