@@ -44,14 +44,14 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
       - name: Build
-        run:  mvn -T 1C -B clean install -DskipTests -Pflink1,spark3
+        run:  mvn -T 1C -B clean install -DskipTests -Pflink1,spark3,paimon-lucene
       - name: Test
         run: |
           # run tests with random timezone to find out timezone related bugs
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          test_modules="!paimon-e2e-tests,!org.apache.paimon:paimon-hive-connector-3.1,org.apache.paimon:paimon-lucene,"
+          test_modules="!paimon-e2e-tests,!org.apache.paimon:paimon-hive-connector-3.1,"
           for suffix in ut 3.5 3.4 3.3 3.2; do
           test_modules+="!org.apache.paimon:paimon-spark-${suffix}_2.12,"
           done
