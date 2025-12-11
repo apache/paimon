@@ -845,6 +845,27 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
             CommitChanges changes = changesProvider.provide(latestSnapshot);
+            // If overwrite an empty partition, it can be considered as append
+            if (commitKind == CommitKind.OVERWRITE) {
+                boolean noDelete = true;
+                for (ManifestEntry entry : changes.tableFiles) {
+                    if (entry.kind() == FileKind.DELETE) {
+                        noDelete = false;
+                        break;
+                    }
+                }
+                if (noDelete) {
+                    for (IndexManifestEntry entry : changes.indexFiles) {
+                        if (entry.kind() == FileKind.DELETE) {
+                            noDelete = false;
+                            break;
+                        }
+                    }
+                }
+                if (noDelete) {
+                    commitKind = CommitKind.APPEND;
+                }
+            }
             CommitResult result =
                     tryCommitOnce(
                             retryResult,
