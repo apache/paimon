@@ -16,33 +16,32 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.write
 
 import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.disk.IOManager
+import org.apache.paimon.spark.SparkUtils
 import org.apache.paimon.spark.util.SparkRowUtils
-import org.apache.paimon.spark.write.DataWriteHelper
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageImpl, CommitMessageSerializer, TableWriteImpl}
+import org.apache.paimon.table.sink._
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.Row
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable.ListBuffer
 
-case class SparkTableWrite(
+case class PaimonDataWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
     rowKindColIdx: Int = -1,
     writeRowTracking: Boolean = false,
     fullCompactionDeltaCommits: Option[Int],
-    batchId: Long,
+    batchId: Option[Long],
     blobAsDescriptor: Boolean,
     catalogContext: CatalogContext,
     postponePartitionBucketComputer: Option[BinaryRow => Integer])
-  extends SparkTableWriteTrait
-  with DataWriteHelper {
+  extends abstractInnerTableDataWrite[Row]
+  with InnerTableV1DataWrite {
 
   private val ioManager: IOManager = SparkUtils.createIOManager
 
@@ -70,20 +69,12 @@ case class SparkTableWrite(
     postWrite(write.writeAndReturn(toPaimonRow(row), bucket))
   }
 
-  def finish(): Iterator[Array[Byte]] = {
-    preFinish()
-    var bytesWritten = 0L
-    var recordsWritten = 0L
-    val commitMessages = new ListBuffer[Array[Byte]]()
-    val serializer = new CommitMessageSerializer()
-    write.prepareCommit().asScala.foreach {
-      case message: CommitMessageImpl =>
-        message.newFilesIncrement().newFiles().asScala.foreach {
-          dataFileMeta =>
-            bytesWritten += dataFileMeta.fileSize()
-            recordsWritten += dataFileMeta.rowCount()
-        }
-        val finalMessage = if (postponePartitionBucketComputer.isDefined) {
+  override def commitImpl(): Seq[CommitMessage] = {
+    val commitMessages = write.prepareCommit().asScala.toSeq
+
+    if (postponePartitionBucketComputer.isDefined) {
+      commitMessages.map {
+        case message: CommitMessageImpl =>
           new CommitMessageImpl(
             message.partition(),
             message.bucket(),
@@ -91,13 +82,11 @@ case class SparkTableWrite(
             message.newFilesIncrement(),
             message.compactIncrement()
           )
-        } else {
-          message
-        }
-        commitMessages += serializer.serialize(finalMessage)
+        case _ => throw new RuntimeException()
+      }
+    } else {
+      commitMessages
     }
-    reportOutputMetrics(bytesWritten, recordsWritten)
-    commitMessages.iterator
   }
 
   override def close(): Unit = {
