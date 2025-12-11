@@ -59,6 +59,8 @@ This documentation is a guide for downloading Paimon Jars.
 
 | Version          | Jar                                                                                                                                                                                                                     |
 |------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 2.2        | [paimon-flink-2.2-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-2.2/{{< version >}}/paimon-flink-2.2-{{< version >}}.jar)                                                    |
+| Flink 2.1        | [paimon-flink-2.1-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-2.1/{{< version >}}/paimon-flink-2.1-{{< version >}}.jar)                                                    |
 | Flink 2.0        | [paimon-flink-2.0-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-2.0/{{< version >}}/paimon-flink-2.0-{{< version >}}.jar)                                                    |
 | Flink 1.20       | [paimon-flink-1.20-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.20/{{< version >}}/paimon-flink-1.20-{{< version >}}.jar)                                                 |
 | Flink 1.19       | [paimon-flink-1.19-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.19/{{< version >}}/paimon-flink-1.19-{{< version >}}.jar)                                                 |

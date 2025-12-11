@@ -45,7 +45,6 @@ import org.apache.flink.table.catalog.CatalogDatabaseImpl;
 import org.apache.flink.table.catalog.CatalogMaterializedTable;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.Column;
-import org.apache.flink.table.catalog.IntervalFreshness;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogMaterializedTable;
@@ -109,7 +108,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Test for {@link FlinkCatalog}. */
-public class FlinkCatalogTest {
+public class FlinkCatalogTest extends FlinkCatalogTestBase {
 
     private static final String TESTING_LOG_STORE = "testing";
 
@@ -121,10 +120,6 @@ public class FlinkCatalogTest {
     private final ObjectPath tableInDefaultDb1 = new ObjectPath("default-db", "t1");
     private final ObjectPath nonExistDbPath = ObjectPath.fromString("non.exist");
     private final ObjectPath nonExistObjectPath = ObjectPath.fromString("db1.nonexist");
-
-    private static final String DEFINITION_QUERY = "SELECT id, region, county FROM T";
-
-    private static final IntervalFreshness FRESHNESS = IntervalFreshness.ofMinute("3");
 
     private String warehouse;
     private Catalog catalog;
@@ -217,29 +212,13 @@ public class FlinkCatalogTest {
         return new ResolvedCatalogTable(origin, resolvedSchema);
     }
 
-    private CatalogMaterializedTable createMaterializedTable(Map<String, String> options) {
-        ResolvedSchema resolvedSchema = this.createSchema();
-        return new ResolvedCatalogMaterializedTable(
-                CatalogMaterializedTable.newBuilder()
-                        .schema(Schema.newBuilder().fromResolvedSchema(resolvedSchema).build())
-                        .comment("test materialized table comment")
-                        .partitionKeys(Collections.emptyList())
-                        .options(options)
-                        .definitionQuery(DEFINITION_QUERY)
-                        .freshness(FRESHNESS)
-                        .logicalRefreshMode(CatalogMaterializedTable.LogicalRefreshMode.AUTOMATIC)
-                        .refreshMode(CatalogMaterializedTable.RefreshMode.CONTINUOUS)
-                        .refreshStatus(CatalogMaterializedTable.RefreshStatus.INITIALIZING)
-                        .build(),
-                resolvedSchema);
-    }
-
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
     public void testCreateAndGetCatalogMaterializedTable(Map<String, String> options)
             throws Exception {
         ObjectPath tablePath = path1;
-        CatalogMaterializedTable materializedTable = createMaterializedTable(options);
+        CatalogMaterializedTable materializedTable =
+                createMaterializedTable(this.createSchema(), options);
         catalog.createDatabase(tablePath.getDatabaseName(), null, false);
         // test create materialized table
         catalog.createTable(tablePath, materializedTable, true);
@@ -276,7 +255,8 @@ public class FlinkCatalogTest {
     @MethodSource("batchOptionProvider")
     public void testAlterMaterializedTable(Map<String, String> options) throws Exception {
         ObjectPath tablePath = path1;
-        CatalogMaterializedTable materializedTable = createMaterializedTable(options);
+        CatalogMaterializedTable materializedTable =
+                createMaterializedTable(this.createSchema(), options);
         catalog.createDatabase(tablePath.getDatabaseName(), null, false);
         catalog.createTable(tablePath, materializedTable, true);
         TestRefreshHandler refreshHandler = new TestRefreshHandler("jobID: xxx, clusterId: yyy");

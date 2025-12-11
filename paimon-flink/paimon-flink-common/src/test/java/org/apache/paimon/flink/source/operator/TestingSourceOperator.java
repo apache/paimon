@@ -40,13 +40,11 @@ import org.apache.flink.runtime.state.StateInitializationContextImpl;
 import org.apache.flink.runtime.state.hashmap.HashMapStateBackend;
 import org.apache.flink.streaming.api.operators.SourceOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
-import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.runtime.tasks.SourceOperatorStreamTask;
 import org.apache.flink.streaming.runtime.tasks.TestProcessingTimeService;
 import org.apache.flink.streaming.util.MockOutput;
 import org.apache.flink.streaming.util.MockStreamConfig;
-import org.apache.flink.streaming.util.MockStreamingRuntimeContext;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -64,9 +62,6 @@ import java.util.Collections;
 public class TestingSourceOperator<T> extends AbstractTestingSourceOperator<T, SimpleSourceSplit> {
 
     private static final long serialVersionUID = 1L;
-
-    private final int subtaskIndex;
-    private final int parallelism;
 
     public TestingSourceOperator(
             StreamOperatorParameters<T> parameters,
@@ -104,11 +99,11 @@ public class TestingSourceOperator<T> extends AbstractTestingSourceOperator<T, S
                 timeService,
                 new Configuration(),
                 "localhost",
+                subtaskIndex,
+                parallelism,
                 emitProgressiveWatermarks,
                 () -> false);
 
-        this.subtaskIndex = subtaskIndex;
-        this.parallelism = parallelism;
         this.metrics = UnregisteredMetricGroups.createUnregisteredOperatorMetricGroup();
         initSourceMetricGroup();
 
@@ -120,11 +115,6 @@ public class TestingSourceOperator<T> extends AbstractTestingSourceOperator<T, S
         }
 
         setup(parameters.getContainingTask(), parameters.getStreamConfig(), parameters.getOutput());
-    }
-
-    @Override
-    public StreamingRuntimeContext getRuntimeContext() {
-        return new MockStreamingRuntimeContext(false, parallelism, subtaskIndex);
     }
 
     // this is overridden to avoid complex mock injection through the "containingTask"
