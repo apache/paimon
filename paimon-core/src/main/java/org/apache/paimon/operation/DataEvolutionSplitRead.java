@@ -143,10 +143,14 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         if (split instanceof DataSplit) {
-            return createReader((DataSplit) split, null, this.readRowType);
+            return createReader((DataSplit) split);
         } else {
             return createReader((IndexedSplit) split);
         }
+    }
+
+    private RecordReader<InternalRow> createReader(DataSplit dataSplit) throws IOException {
+        return createReader(dataSplit, null, this.readRowType);
     }
 
     private RecordReader<InternalRow> createReader(
