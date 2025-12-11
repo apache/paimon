@@ -241,7 +241,7 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public GlobalIndexScanBuilder newIndexScanBuilder() {
-        return wrapped.newIndexScanBuilder();
+    public GlobalIndexScanBuilder newGlobalIndexScanBuilder() {
+        return wrapped.newGlobalIndexScanBuilder();
     }
 }

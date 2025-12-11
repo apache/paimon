@@ -91,9 +91,4 @@ public interface InnerTableScan extends TableScan {
         // do nothing, should implement this if need
         return this;
     }
-
-    @Nullable
-    default PartitionPredicate partitionFilter() {
-        return null;
-    }
 }

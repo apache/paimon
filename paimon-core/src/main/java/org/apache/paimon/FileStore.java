@@ -126,5 +126,5 @@ public interface FileStore<T> {
 
     void setSnapshotCache(Cache<Path, Snapshot> cache);
 
-    GlobalIndexScanBuilder newIndexScanBuilder();
+    GlobalIndexScanBuilder newGlobalIndexScanBuilder();
 }

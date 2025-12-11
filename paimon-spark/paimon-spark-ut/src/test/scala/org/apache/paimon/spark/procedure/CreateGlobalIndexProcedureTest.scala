@@ -56,7 +56,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
         .scanEntries()
         .asScala
         .filter(_.indexFile().indexType() == "bitmap")
-      table.newIndexScanBuilder().shardList()
+      table.store().newGlobalIndexScanBuilder().shardList()
       assert(bitmapEntries.nonEmpty)
       val totalRowCount = bitmapEntries.map(_.indexFile().rowCount()).sum
       assert(totalRowCount == 100000L)

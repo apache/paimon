@@ -23,7 +23,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
 import org.apache.paimon.operation.LocalOrphanFilesClean;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.TableSchema;
@@ -130,11 +129,6 @@ public interface FileStoreTable extends DataTable {
     boolean supportStreamingReadOverwrite();
 
     RowKeyExtractor createRowKeyExtractor();
-
-    /** Returns a new global index scan builder. */
-    default GlobalIndexScanBuilder newIndexScanBuilder() {
-        return store().newIndexScanBuilder();
-    }
 
     /**
      * Get {@link DataTable} with branch identified by {@code branchName}. Note that this method
