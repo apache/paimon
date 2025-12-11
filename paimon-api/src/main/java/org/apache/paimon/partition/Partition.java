@@ -27,7 +27,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -101,7 +100,7 @@ public class Partition extends PartitionStatistics {
                 null,
                 null,
                 null,
-                new HashMap<>());
+                null);
     }
 
     @JsonGetter(FIELD_DONE)

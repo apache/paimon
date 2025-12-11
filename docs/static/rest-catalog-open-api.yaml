@@ -2990,7 +2990,7 @@ components:
           format: int64
         done:
           type: boolean
-        created_at:
+        createdAt:
           type: integer
           format: int64
         createdBy:
