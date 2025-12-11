@@ -400,7 +400,7 @@ public class RESTCatalogServer {
                         boolean isTags =
                                 resources.length >= 4
                                         && ResourcePaths.TABLES.equals(resources[1])
-                                        && ResourcePaths.TAGS.equals(resources[3]);
+                                        && resources[3].startsWith(ResourcePaths.TAGS);
                         boolean isTag =
                                 resources.length >= 5
                                         && ResourcePaths.TABLES.equals(resources[1])

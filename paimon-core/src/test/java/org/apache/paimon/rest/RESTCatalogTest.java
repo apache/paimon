@@ -1958,7 +1958,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 () -> restCatalog.createTag(identifier, "my_tag_v3", 99999L, null, false));
 
         // Test listTags
-        PagedList<String> tags = restCatalog.listTagsPaged(identifier, null, null);
+        PagedList<String> tags = restCatalog.listTagsPaged(identifier, null, "my_tag");
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
+        tags = restCatalog.listTagsPaged(identifier, null, null);
         assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag", "my_tag_v2");
 
         // Test deleteTag
