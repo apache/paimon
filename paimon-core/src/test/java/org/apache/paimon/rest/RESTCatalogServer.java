@@ -2176,11 +2176,10 @@ public class RESTCatalogServer {
                                                             stats.fileCount(),
                                                             stats.lastFileCreationTime(),
                                                             false,
+                                                            System.currentTimeMillis(),
                                                             "created",
-                                                            System.currentTimeMillis(),
                                                             "updated",
-                                                            System.currentTimeMillis(),
-                                                            new HashMap<>()))
+                                                            new HashMap<String, String>()))
                                     .collect(Collectors.toList());
                     tablePartitionsStore.put(identifier.getFullName(), newPartitions);
                 }
@@ -2198,7 +2197,6 @@ public class RESTCatalogServer {
                                                             PartitionStatistics::spec,
                                                             y -> y,
                                                             (a, b) -> a));
-                            // Update existing partitions
                             List<Partition> updatedPartitions =
                                     oldPartitions.stream()
                                             .map(
@@ -2207,7 +2205,6 @@ public class RESTCatalogServer {
                                                                 partitionStatisticsMap.get(
                                                                         oldPartition.spec());
                                                         if (stats == null) {
-                                                            // 如果没有新的统计信息，保持原样，但确保字段不为null
                                                             if (oldPartition.createdBy() == null
                                                                     || oldPartition.updatedBy()
                                                                             == null) {
@@ -2220,34 +2217,29 @@ public class RESTCatalogServer {
                                                                         oldPartition
                                                                                 .lastFileCreationTime(),
                                                                         oldPartition.done(),
-                                                                        oldPartition.createdBy()
-                                                                                        != null
-                                                                                ? oldPartition
-                                                                                        .createdBy()
-                                                                                : "created",
                                                                         oldPartition.createdAt()
                                                                                         != null
                                                                                 ? oldPartition
                                                                                         .createdAt()
                                                                                 : System
                                                                                         .currentTimeMillis(),
+                                                                        oldPartition.createdBy()
+                                                                                        != null
+                                                                                ? oldPartition
+                                                                                        .createdBy()
+                                                                                : "created",
                                                                         oldPartition.updatedBy()
                                                                                         != null
                                                                                 ? oldPartition
                                                                                         .updatedBy()
                                                                                 : "updated",
-                                                                        oldPartition
-                                                                                                .lastAccessTime()
-                                                                                        != null
-                                                                                ? oldPartition
-                                                                                        .lastAccessTime()
-                                                                                : System
-                                                                                        .currentTimeMillis(),
                                                                         oldPartition.options()
                                                                                         != null
                                                                                 ? oldPartition
                                                                                         .options()
-                                                                                : new HashMap<>());
+                                                                                : new HashMap<
+                                                                                        String,
+                                                                                        String>());
                                                             }
                                                             return oldPartition;
                                                         }
@@ -2265,15 +2257,14 @@ public class RESTCatalogServer {
                                                                         stats
                                                                                 .lastFileCreationTime()),
                                                                 oldPartition.done(),
-                                                                oldPartition.createdBy() != null
-                                                                        ? oldPartition.createdBy()
-                                                                        : "created",
                                                                 oldPartition.createdAt() != null
                                                                         ? oldPartition.createdAt()
                                                                         : System
                                                                                 .currentTimeMillis(),
+                                                                oldPartition.createdBy() != null
+                                                                        ? oldPartition.createdBy()
+                                                                        : "created",
                                                                 "updated",
-                                                                System.currentTimeMillis(),
                                                                 oldPartition.options() != null
                                                                         ? oldPartition.options()
                                                                         : new HashMap<>());
@@ -2296,11 +2287,10 @@ public class RESTCatalogServer {
                                                                     stats.fileCount(),
                                                                     stats.lastFileCreationTime(),
                                                                     false,
+                                                                    System.currentTimeMillis(),
                                                                     "created",
-                                                                    System.currentTimeMillis(),
                                                                     "updated",
-                                                                    System.currentTimeMillis(),
-                                                                    new HashMap<>()))
+                                                                    new HashMap<String, String>()))
                                             .collect(Collectors.toList());
                             updatedPartitions.addAll(newPartitions);
                             return updatedPartitions;

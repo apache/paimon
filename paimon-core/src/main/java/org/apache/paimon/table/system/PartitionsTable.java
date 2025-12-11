@@ -92,11 +92,10 @@ public class PartitionsTable implements ReadonlyTable {
                             new DataField(2, "file_size_in_bytes", new BigIntType(false)),
                             new DataField(3, "file_count", new BigIntType(false)),
                             new DataField(4, "last_update_time", DataTypes.TIMESTAMP_MILLIS()),
-                            new DataField(5, "created_by", DataTypes.STRING()),
-                            new DataField(6, "updated_by", DataTypes.STRING()),
-                            new DataField(7, "options", DataTypes.STRING()),
-                            new DataField(8, "created_at", DataTypes.TIMESTAMP_MILLIS()),
-                            new DataField(9, "last_access_time", DataTypes.TIMESTAMP_MILLIS())));
+                            new DataField(5, "created_at", DataTypes.TIMESTAMP_MILLIS()),
+                            new DataField(6, "created_by", DataTypes.STRING()),
+                            new DataField(7, "updated_by", DataTypes.STRING()),
+                            new DataField(8, "options", DataTypes.STRING())));
 
     private final FileStoreTable storeTable;
 
@@ -272,7 +271,6 @@ public class PartitionsTable implements ReadonlyTable {
             BinaryString createdByString = BinaryString.fromString(partition.createdBy());
             Timestamp createdAtTimestamp = toTimestamp(partition.createdAt());
             BinaryString updatedByString = BinaryString.fromString(partition.updatedBy());
-            Timestamp lastAccessTimeTimestamp = toTimestamp(partition.lastAccessTime());
             BinaryString optionsString = null;
             if (!MapUtils.isEmpty(partition.options())) {
                 optionsString =
@@ -285,10 +283,9 @@ public class PartitionsTable implements ReadonlyTable {
                     partition.fileSizeInBytes(),
                     partition.fileCount(),
                     toTimestamp(partition.lastFileCreationTime()),
-                    createdByString,
                     createdAtTimestamp,
+                    createdByString,
                     updatedByString,
-                    lastAccessTimeTimestamp,
                     optionsString);
         }
 

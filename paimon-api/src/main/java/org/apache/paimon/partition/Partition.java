@@ -31,6 +31,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
+import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_CREATED_AT;
 import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_CREATED_BY;
 import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_UPDATED_BY;
 
@@ -43,27 +44,21 @@ public class Partition extends PartitionStatistics {
 
     public static final String FIELD_DONE = "done";
     public static final String FIELD_OPTIONS = "options";
-    public static final String FIELD_CREATED_AT = "created_at";
-    public static final String FIELD_LAST_ACCESS_TIME = "last_access_time";
 
     @JsonProperty(FIELD_DONE)
     private final boolean done;
-
-    @Nullable
-    @JsonProperty(FIELD_CREATED_BY)
-    private final String createdBy;
 
     @Nullable
     @JsonProperty(FIELD_CREATED_AT)
     private final Long createdAt;
 
     @Nullable
-    @JsonProperty(FIELD_UPDATED_BY)
-    private final String updatedBy;
+    @JsonProperty(FIELD_CREATED_BY)
+    private final String createdBy;
 
     @Nullable
-    @JsonProperty(FIELD_LAST_ACCESS_TIME)
-    private final Long lastAccessTime;
+    @JsonProperty(FIELD_UPDATED_BY)
+    private final String updatedBy;
 
     @Nullable
     @JsonProperty(FIELD_OPTIONS)
@@ -77,17 +72,15 @@ public class Partition extends PartitionStatistics {
             @JsonProperty(FIELD_FILE_COUNT) long fileCount,
             @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) long lastFileCreationTime,
             @JsonProperty(FIELD_DONE) boolean done,
-            @JsonProperty(FIELD_CREATED_BY) @Nullable String createdBy,
             @JsonProperty(FIELD_CREATED_AT) @Nullable Long createdAt,
+            @JsonProperty(FIELD_CREATED_BY) @Nullable String createdBy,
             @JsonProperty(FIELD_UPDATED_BY) @Nullable String updatedBy,
-            @JsonProperty(FIELD_LAST_ACCESS_TIME) @Nullable Long lastAccessTime,
             @JsonProperty(FIELD_OPTIONS) @Nullable Map<String, String> options) {
         super(spec, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
         this.done = done;
-        this.createdBy = createdBy;
         this.createdAt = createdAt;
+        this.createdBy = createdBy;
         this.updatedBy = updatedBy;
-        this.lastAccessTime = lastAccessTime;
         this.options = options;
     }
 
@@ -108,13 +101,18 @@ public class Partition extends PartitionStatistics {
                 null,
                 null,
                 null,
-                null,
                 new HashMap<>());
     }
 
     @JsonGetter(FIELD_DONE)
     public boolean done() {
         return done;
+    }
+
+    @Nullable
+    @JsonGetter(FIELD_CREATED_AT)
+    public Long createdAt() {
+        return createdAt;
     }
 
     @Nullable
@@ -135,18 +133,6 @@ public class Partition extends PartitionStatistics {
         return options;
     }
 
-    @Nullable
-    @JsonGetter(FIELD_CREATED_AT)
-    public Long createdAt() {
-        return createdAt;
-    }
-
-    @Nullable
-    @JsonGetter(FIELD_LAST_ACCESS_TIME)
-    public Long lastAccessTime() {
-        return lastAccessTime;
-    }
-
     @Override
     public boolean equals(Object o) {
         if (o == null || getClass() != o.getClass()) {
@@ -157,17 +143,15 @@ public class Partition extends PartitionStatistics {
         }
         Partition partition = (Partition) o;
         return done == partition.done
+                && Objects.equals(createdAt, partition.createdAt)
                 && Objects.equals(createdBy, partition.createdBy)
                 && Objects.equals(updatedBy, partition.updatedBy)
-                && Objects.equals(options, partition.options)
-                && Objects.equals(createdAt, partition.createdAt)
-                && Objects.equals(lastAccessTime, partition.lastAccessTime);
+                && Objects.equals(options, partition.options);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(
-                super.hashCode(), done, createdBy, updatedBy, options, createdAt, lastAccessTime);
+        return Objects.hash(super.hashCode(), done, createdAt, createdBy, updatedBy, options);
     }
 
     @Override
@@ -185,16 +169,14 @@ public class Partition extends PartitionStatistics {
                 + lastFileCreationTime
                 + ", done="
                 + done
+                + ", createdAt="
+                + createdAt
                 + ", createdBy="
                 + createdBy
                 + ", updatedBy="
                 + updatedBy
                 + ", options="
                 + options
-                + ", createdAt="
-                + createdAt
-                + ", lastAccessTime="
-                + lastAccessTime
                 + '}';
     }
 }

@@ -2542,6 +2542,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         .primaryKey("pk")
                         .partitionKeys("f1")
                         .option("bucket", "1")
+                        .option("metastore.partitioned-table", "true")
                         .build(),
                 true);
 
@@ -2568,20 +2569,17 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         assertThat(result).isNotEmpty();
         for (InternalRow row : result) {
-            assertThat(row.isNullAt(5)).isFalse(); // created_by
-            assertThat(row.getString(5).toString()).isEqualTo("created");
-            if (!row.isNullAt(6)) {
-                assertThat(row.getTimestamp(6, 3)).isNotNull();
+            if (!row.isNullAt(5)) { // created_at
+                assertThat(row.getTimestamp(5, 3)).isNotNull();
             }
+            assertThat(row.isNullAt(6)).isFalse(); // created_by
+            assertThat(row.getString(6).toString()).isEqualTo("created");
 
             assertThat(row.isNullAt(7)).isFalse(); // updated_by
             assertThat(row.getString(7).toString()).isEqualTo("updated");
-            if (!row.isNullAt(8)) {
-                assertThat(row.getTimestamp(8, 3)).isNotNull();
-            }
 
-            if (!row.isNullAt(9)) {
-                String optionsJson = row.getString(9).toString();
+            if (!row.isNullAt(8)) {
+                String optionsJson = row.getString(8).toString();
                 assertThat(optionsJson).isNotEmpty();
             }
         }

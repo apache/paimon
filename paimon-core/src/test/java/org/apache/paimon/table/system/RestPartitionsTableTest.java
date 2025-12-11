@@ -100,6 +100,7 @@ class RestPartitionsTableTest extends PartitionsTableTest {
                         .primaryKey("pk", "pt")
                         .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
                         .option("bucket", "1")
+                        .option("metastore.partitioned-table", "true")
                         .build();
 
         Identifier tableId = identifier(TABLE_NAME);
@@ -123,29 +124,37 @@ class RestPartitionsTableTest extends PartitionsTableTest {
     }
 
     @Test
-    void testPartitionAuditFieldsWithRestCatalog() throws Exception {
-        // Read fields: partition(0), created_by(5), updated_by(6), options(7), created_at(8),
-        // last_access_time(9)
-        // After projection, indices are: 0=partition, 1=created_by, 2=updated_by, 3=options,
-        // 4=created_at, 5=last_access_time
-        List<InternalRow> result = read(partitionsTable, new int[] {0, 5, 6, 7, 8, 9});
+    @Override
+    void testPartitionAuditFieldsNull() throws Exception {
+        List<InternalRow> result = read(partitionsTable, new int[] {0, 5, 6, 7, 8});
         assertThat(result).isNotEmpty();
 
         for (InternalRow row : result) {
-            // Index 1: created_by (from original index 5)
-            assertThat(row.isNullAt(1)).isFalse();
-            assertThat(row.getString(1).toString()).isEqualTo("created");
-            // Index 2: updated_by (from original index 6)
-            assertThat(row.isNullAt(2)).isFalse();
-            assertThat(row.getString(2).toString()).isEqualTo("updated");
-            // Index 3: options (from original index 7) - may be null
-            // Index 4: created_at (from original index 8)
-            assertThat(row.isNullAt(4)).isFalse();
-            // Index 5: last_access_time (from original index 9)
-            assertThat(row.isNullAt(5)).isFalse();
-            // Check options if not null
-            if (!row.isNullAt(3)) {
-                String optionsJson = row.getString(3).toString();
+            assertThat(row.isNullAt(1)).isFalse(); // created_at
+            assertThat(row.isNullAt(2)).isFalse(); // created_by
+            assertThat(row.getString(2).toString()).isEqualTo("created");
+            assertThat(row.isNullAt(3)).isFalse(); // updated_by
+            assertThat(row.getString(3).toString()).isEqualTo("updated");
+            if (!row.isNullAt(4)) { // options
+                String optionsJson = row.getString(4).toString();
+                assertThat(optionsJson).isNotEmpty();
+            }
+        }
+    }
+
+    @Test
+    void testPartitionAuditFieldsWithRestCatalog() throws Exception {
+        List<InternalRow> result = read(partitionsTable, new int[] {0, 5, 6, 7, 8});
+        assertThat(result).isNotEmpty();
+
+        for (InternalRow row : result) {
+            assertThat(row.isNullAt(1)).isFalse(); // created_at
+            assertThat(row.isNullAt(2)).isFalse(); // created_by
+            assertThat(row.getString(2).toString()).isEqualTo("created");
+            assertThat(row.isNullAt(3)).isFalse(); // updated_by
+            assertThat(row.getString(3).toString()).isEqualTo("updated");
+            if (!row.isNullAt(4)) { // options
+                String optionsJson = row.getString(4).toString();
                 assertThat(optionsJson).isNotEmpty();
             }
         }

@@ -123,15 +123,14 @@ public class PartitionsTableTest extends TableTestBase {
 
     @Test
     void testPartitionAuditFieldsNull() throws Exception {
-        List<InternalRow> result = read(partitionsTable, new int[] {0, 5, 6, 7, 8, 9});
+        List<InternalRow> result = read(partitionsTable, new int[] {0, 5, 6, 7, 8});
         assertThat(result).hasSize(3);
 
         for (InternalRow row : result) {
-            assertThat(row.isNullAt(1)).isTrue(); // created_by
-            assertThat(row.isNullAt(2)).isTrue(); // created_at
+            assertThat(row.isNullAt(1)).isTrue(); // created_at
+            assertThat(row.isNullAt(2)).isTrue(); //  created_by
             assertThat(row.isNullAt(3)).isTrue(); // updated_by
-            assertThat(row.isNullAt(4)).isTrue(); // last_access_time
-            assertThat(row.isNullAt(5)).isTrue(); // options
+            assertThat(row.isNullAt(4)).isTrue(); // options
         }
     }
 }
