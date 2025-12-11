@@ -383,7 +383,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.watermark(),
                                 committable.logOffsets(),
                                 committable.properties(),
-                                commitKind,
+                                provider(commitKind),
                                 conflictCheck,
                                 null);
                 generatedSnapshot += 1;
@@ -418,7 +418,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.watermark(),
                                 committable.logOffsets(),
                                 committable.properties(),
-                                CommitKind.COMPACT,
+                                provider(CommitKind.COMPACT),
                                 hasConflictChecked(safeLatestSnapshotId),
                                 null);
                 generatedSnapshot += 1;
@@ -463,10 +463,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         commitMetrics.reportCommit(commitStats);
     }
 
-    private boolean containsFileDeletionOrDeletionVectors(
-            List<SimpleFileEntry> appendSimpleEntries, List<IndexManifestEntry> appendIndexFiles) {
-        for (SimpleFileEntry appendSimpleEntry : appendSimpleEntries) {
-            if (appendSimpleEntry.kind().equals(FileKind.DELETE)) {
+    private <T extends FileEntry> boolean containsFileDeletionOrDeletionVectors(
+            List<T> appendFileEntries, List<IndexManifestEntry> appendIndexFiles) {
+        for (T appendFileEntry : appendFileEntries) {
+            if (appendFileEntry.kind().equals(FileKind.DELETE)) {
                 return true;
             }
         }
@@ -587,7 +587,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.watermark(),
                                 committable.logOffsets(),
                                 committable.properties(),
-                                CommitKind.COMPACT,
+                                provider(CommitKind.COMPACT),
                                 mustConflictCheck(),
                                 null);
                 generatedSnapshot += 1;
@@ -695,7 +695,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 null,
                 Collections.emptyMap(),
                 Collections.emptyMap(),
-                CommitKind.ANALYZE,
+                provider(CommitKind.ANALYZE),
                 noConflictCheck(),
                 statsFileName);
     }
@@ -836,7 +836,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
             Map<String, String> properties,
-            CommitKind commitKind,
+            CommitKindProvider commitKindProvider,
             ConflictCheck conflictCheck,
             @Nullable String statsFileName) {
         int retryCount = 0;
@@ -845,27 +845,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
             CommitChanges changes = changesProvider.provide(latestSnapshot);
-            // If overwrite an empty partition, it can be considered as append
-            if (commitKind == CommitKind.OVERWRITE) {
-                boolean noDelete = true;
-                for (ManifestEntry entry : changes.tableFiles) {
-                    if (entry.kind() == FileKind.DELETE) {
-                        noDelete = false;
-                        break;
-                    }
-                }
-                if (noDelete) {
-                    for (IndexManifestEntry entry : changes.indexFiles) {
-                        if (entry.kind() == FileKind.DELETE) {
-                            noDelete = false;
-                            break;
-                        }
-                    }
-                }
-                if (noDelete) {
-                    commitKind = CommitKind.APPEND;
-                }
-            }
+            CommitKind commitKind = commitKindProvider.provide(changes);
             CommitResult result =
                     tryCommitOnce(
                             retryResult,
@@ -916,6 +896,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
             Map<String, String> properties) {
+        CommitKindProvider commitKindProvider =
+                commitChanges ->
+                        containsFileDeletionOrDeletionVectors(
+                                        commitChanges.tableFiles, commitChanges.indexFiles)
+                                ? CommitKind.OVERWRITE
+                                : CommitKind.APPEND;
         return tryCommit(
                 latestSnapshot ->
                         overwriteChanges(changes, indexFiles, latestSnapshot, partitionFilter),
@@ -923,7 +909,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 watermark,
                 logOffsets,
                 properties,
-                CommitKind.OVERWRITE,
+                commitKindProvider,
                 mustConflictCheck(),
                 null);
     }
@@ -1580,6 +1566,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return s -> new CommitChanges(tableFiles, changelogFiles, indexFiles);
     }
 
+    @FunctionalInterface
     private interface ChangesProvider {
         CommitChanges provide(@Nullable Snapshot latestSnapshot);
     }
@@ -1598,5 +1585,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             this.changelogFiles = changelogFiles;
             this.indexFiles = indexFiles;
         }
+    }
+
+    @FunctionalInterface
+    private interface CommitKindProvider {
+        CommitKind provide(CommitChanges changes);
+    }
+
+    private static CommitKindProvider provider(CommitKind kind) {
+        return changes -> kind;
     }
 }
