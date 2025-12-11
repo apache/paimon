@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -30,13 +31,11 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /** This is a class who truly build index file and generate index metas. */
@@ -48,11 +47,10 @@ public abstract class GlobalIndexBuilder {
         this.context = context;
     }
 
-    public CommitMessage build(DataSplit dataSplit) throws IOException {
+    public CommitMessage build(IndexedSplit indexedSplit) throws IOException {
         ReadBuilder builder = context.table().newReadBuilder();
-        builder.withRowRanges(Collections.singletonList(context.range()))
-                .withReadType(context.readType());
-        RecordReader<InternalRow> rows = builder.newRead().createReader(dataSplit);
+        builder.withReadType(context.readType());
+        RecordReader<InternalRow> rows = builder.newRead().createReader(indexedSplit);
         List<GlobalIndexWriter.ResultEntry> resultEntries = writePaimonRows(context, rows);
         List<IndexFileMeta> indexFileMetas = convertToIndexMeta(context, resultEntries);
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
@@ -66,7 +64,7 @@ public abstract class GlobalIndexBuilder {
         List<IndexFileMeta> results = new ArrayList<>();
         for (GlobalIndexWriter.ResultEntry entry : entries) {
             String fileName = entry.fileName();
-            Range range = entry.rowRange().addOffset(context.range().from);
+            Range range = entry.rowRange().addOffset(context.startOffset());
             GlobalIndexFileReadWrite readWrite = context.globalIndexFileReadWrite();
             long fileSize = readWrite.fileSize(fileName);
             GlobalIndexMeta globalIndexMeta =
@@ -87,8 +85,7 @@ public abstract class GlobalIndexBuilder {
     private static List<GlobalIndexWriter.ResultEntry> writePaimonRows(
             GlobalIndexBuilderContext context, RecordReader<InternalRow> rows) throws IOException {
         GlobalIndexer globalIndexer =
-                GlobalIndexer.create(
-                        context.indexType(), context.indexField().type(), context.options());
+                GlobalIndexer.create(context.indexType(), context.indexField(), context.options());
         GlobalIndexWriter globalIndexWriter =
                 globalIndexer.createWriter(context.globalIndexFileReadWrite());
         InternalRow.FieldGetter getter =

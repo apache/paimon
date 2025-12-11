@@ -24,6 +24,7 @@ import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.utils.FloatUtils;
 import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
@@ -83,7 +84,7 @@ public class IndexedSplit implements Split {
 
         return split.equals(that.split)
                 && rowRanges.equals(that.rowRanges)
-                && Arrays.equals(scores, that.scores);
+                && FloatUtils.equals(scores, that.scores, 0.00001f);
     }
 
     @Override

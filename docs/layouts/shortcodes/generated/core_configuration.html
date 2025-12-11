@@ -591,10 +591,22 @@ under the License.
             <td>For streaming write, full compaction will be constantly triggered after delta commits. For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.</td>
         </tr>
         <tr>
+            <td><h5>global-index.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable global index for scan.</td>
+        </tr>
+        <tr>
             <td><h5>global-index.row-count-per-shard</h5></td>
             <td style="word-wrap: break-word;">100000</td>
             <td>Long</td>
             <td>Row count per shard for global index.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.thread-num</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent scanner for global index.By default is the number of processors available to the Java virtual machine.</td>
         </tr>
         <tr>
             <td><h5>ignore-delete</h5></td>

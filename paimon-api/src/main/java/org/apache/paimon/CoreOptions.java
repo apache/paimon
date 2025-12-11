@@ -2098,6 +2098,20 @@ public class CoreOptions implements Serializable {
                     .defaultValue(100000L)
                     .withDescription("Row count per shard for global index.");
 
+    public static final ConfigOption<Boolean> GLOBAL_INDEX_ENABLED =
+            key("global-index.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Whether to enable global index for scan.");
+
+    public static final ConfigOption<Integer> GLOBAL_INDEX_THREAD_NUM =
+            key("global-index.thread-num")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The maximum number of concurrent scanner for global index."
+                                    + "By default is the number of processors available to the Java virtual machine.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3249,6 +3263,14 @@ public class CoreOptions implements Serializable {
 
     public long globalIndexRowCountPerShard() {
         return options.get(GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
+    }
+
+    public boolean globalIndexEnabled() {
+        return options.get(GLOBAL_INDEX_ENABLED);
+    }
+
+    public Integer globalIndexThreadNum() {
+        return options.get(GLOBAL_INDEX_THREAD_NUM);
     }
 
     /** Specifies the merge engine for table with primary key. */

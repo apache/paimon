@@ -16,27 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex.bitmap;
+package org.apache.paimon.globalindex;
 
-import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
-import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.GlobalIndexerFactory;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataField;
+/** Generate score (may null) for row id in global index top-k situation. */
+public interface ScoreGetter {
 
-/** Factory for creating bitmap global indexers. */
-public class BitmapGlobalIndexerFactory implements GlobalIndexerFactory {
-
-    public static final String IDENTIFIER = "bitmap";
-
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
-    }
-
-    @Override
-    public GlobalIndexer create(DataField dataField, Options options) {
-        BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(dataField.type(), options);
-        return new BitmapGlobalIndex(bitmapFileIndex);
-    }
+    float score(long rowId);
 }

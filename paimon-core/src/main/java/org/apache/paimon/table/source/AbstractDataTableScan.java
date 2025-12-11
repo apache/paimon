@@ -179,6 +179,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
+    @Nullable
+    @Override
+    public PartitionPredicate partitionFilter() {
+        return snapshotReader.manifestsReader().partitionFilter();
+    }
+
     public CoreOptions options() {
         return options;
     }

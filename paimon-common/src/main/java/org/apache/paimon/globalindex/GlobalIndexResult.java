@@ -22,6 +22,7 @@ import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import java.util.List;
 import java.util.function.Supplier;
 
 /** Global index result represents row ids as a compressed bitmap. */
@@ -65,6 +66,17 @@ public interface GlobalIndexResult {
                 () -> {
                     RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
                     result64.addRange(range);
+                    return result64;
+                });
+    }
+
+    static GlobalIndexResult fromRanges(List<Range> ranges) {
+        return create(
+                () -> {
+                    RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
+                    for (Range range : ranges) {
+                        result64.addRange(range);
+                    }
                     return result64;
                 });
     }
