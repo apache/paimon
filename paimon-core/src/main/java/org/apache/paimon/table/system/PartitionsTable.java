@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.catalog.Catalog;
@@ -36,7 +37,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
@@ -314,22 +314,26 @@ public class PartitionsTable implements ReadonlyTable {
         }
 
         private List<Partition> listPartitions() {
-            if (TimeTravelUtil.hasTimeTravelOptions(new Options(fileStoreTable.options()))) {
-                return listPartitionEntries();
-            }
-
             CatalogLoader catalogLoader = fileStoreTable.catalogEnvironment().catalogLoader();
-            if (catalogLoader == null) {
+            if (TimeTravelUtil.hasTimeTravelOptions(new Options(fileStoreTable.options()))
+                    || catalogLoader == null) {
                 return listPartitionEntries();
             }
 
             try (Catalog catalog = catalogLoader.load()) {
-                Identifier identifier = fileStoreTable.catalogEnvironment().identifier();
-                try {
-                    return catalog.listPartitions(identifier);
-                } catch (NotImplementedException e) {
-                    return listPartitionEntries();
+                Identifier baseIdentifier = fileStoreTable.catalogEnvironment().identifier();
+                String branch = fileStoreTable.coreOptions().branch();
+                Identifier identifier;
+                if (branch != null && !branch.equals(CoreOptions.BRANCH.defaultValue())) {
+                    identifier =
+                            new Identifier(
+                                    baseIdentifier.getDatabaseName(),
+                                    baseIdentifier.getTableName(),
+                                    branch);
+                } else {
+                    identifier = baseIdentifier;
                 }
+                return catalog.listPartitions(identifier);
             } catch (Exception e) {
                 return listPartitionEntries();
             }
