@@ -89,7 +89,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final Function<Long, TableSchema> schemaFetcher;
-    @Nullable private List<Range> rowRanges;
     @Nullable private VariantAccessInfo[] variantAccess;
 
     protected RowType readRowType;
@@ -142,12 +141,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withRowRanges(@Nullable List<Range> rowRanges) {
-        this.rowRanges = rowRanges;
-        return this;
-    }
-
-    @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         if (split instanceof DataSplit) {
             return createReader((DataSplit) split);
@@ -157,7 +150,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     private RecordReader<InternalRow> createReader(DataSplit dataSplit) throws IOException {
-        return createReader(dataSplit, this.rowRanges, this.readRowType);
+        return createReader(dataSplit, null, this.readRowType);
     }
 
     private RecordReader<InternalRow> createReader(
