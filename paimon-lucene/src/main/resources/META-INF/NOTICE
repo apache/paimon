@@ -1,0 +1,9 @@
+paimon-lucene
+Copyright 2023-2025 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+This project bundles the following dependencies under the Apache Software License 2.0 (http://www.apache.org/licenses/LICENSE-2.0.txt)
+- org.apache.lucene:lucene-core:9.12.3
+- org.apache.lucene:lucene-codecs:9.12.3

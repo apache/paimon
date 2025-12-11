@@ -22,6 +22,7 @@ on:
       - 'docs/**'
       - '**/*.md'
       - 'paimon-python/**'
+      - 'paimon-lucene/**'
 
 env:
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true

@@ -511,6 +511,16 @@ under the License.
                 <jdk>11</jdk>
             </activation>
         </profile>
+
+        <profile>
+            <id>paimon-lucene</id>
+            <modules>
+                <module>paimon-lucene</module>
+            </modules>
+            <activation>
+                <jdk>11</jdk>
+            </activation>
+        </profile>
     </profiles>
 
     <build>
