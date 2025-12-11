@@ -61,7 +61,6 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import org.apache.commons.collections.MapUtils;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -272,7 +271,7 @@ public class PartitionsTable implements ReadonlyTable {
             Timestamp createdAtTimestamp = toTimestamp(partition.createdAt());
             BinaryString updatedByString = BinaryString.fromString(partition.updatedBy());
             BinaryString optionsString = null;
-            if (!MapUtils.isEmpty(partition.options())) {
+            if (partition.options() != null) {
                 optionsString =
                         BinaryString.fromString(JsonSerdeUtil.toFlatJson(partition.options()));
             }

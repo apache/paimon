@@ -2990,6 +2990,9 @@ components:
           format: int64
         done:
           type: boolean
+        created_at:
+          type: integer
+          format: int64
         createdBy:
           type: string
         updatedBy:
@@ -2998,12 +3001,6 @@ components:
           type: object
           additionalProperties:
             type: string
-        created_at:
-          type: integer
-          format: int64
-        last_access_time:
-          type: integer
-          format: int64
     PartitionStatistics:
       type: object
       properties:
