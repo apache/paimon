@@ -115,9 +115,12 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                     config ->
                             new DataEvolutionSplitReadProvider(
                                     () -> store().newDataEvolutionRead(), config));
+        } else {
+            providerFactories.add(
+                    config ->
+                            new AppendTableRawFileSplitReadProvider(
+                                    () -> store().newRead(), config));
         }
-        providerFactories.add(
-                config -> new AppendTableRawFileSplitReadProvider(() -> store().newRead(), config));
         return new AppendTableRead(providerFactories, schema());
     }
 
