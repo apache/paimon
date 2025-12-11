@@ -21,7 +21,7 @@ package org.apache.paimon.lucene.index;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 
 /** Factory for creating Lucene vector index. */
 public class LuceneVectorGlobalIndexerFactory implements GlobalIndexerFactory {
@@ -34,7 +34,7 @@ public class LuceneVectorGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public GlobalIndexer create(DataType type, Options options) {
-        return new LuceneVectorGlobalIndexer(type, options);
+    public GlobalIndexer create(DataField field, Options options) {
+        return new LuceneVectorGlobalIndexer(field.type(), options);
     }
 }
