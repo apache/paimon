@@ -60,11 +60,8 @@ object MergePaimonScalarSubqueries extends MergePaimonScalarSubqueriesBase {
                   val cachedOutputNameMap = cachedRelation.output.map(a => a.name -> a).toMap
                   val mergedOutput =
                     mergedAttributes.map(a => cachedOutputNameMap.getOrElse(a.name, a))
-                  val newV2ScanRelation = DataSourceV2ScanRelation(
-                    cachedRelation,
-                    mergedScan,
-                    mergedOutput,
-                    cachedPartitioning)
+                  val newV2ScanRelation =
+                    cachedV2ScanRelation.copy(scan = mergedScan, output = mergedOutput)
 
                   val mergedOutputNameMap = mergedOutput.map(a => a.name -> a).toMap
                   val newOutputMap =
@@ -87,7 +84,6 @@ object MergePaimonScalarSubqueries extends MergePaimonScalarSubqueriesBase {
       outputAttrMap: AttributeMap[Attribute]): Boolean = {
     val mappedNewOrdering = newOrdering.map(_.map(mapAttributes(_, outputAttrMap)))
     mappedNewOrdering.map(_.map(_.canonicalized)) == cachedOrdering.map(_.map(_.canonicalized))
-
   }
 
   override protected def createScalarSubquery(plan: LogicalPlan, exprId: ExprId): ScalarSubquery = {
