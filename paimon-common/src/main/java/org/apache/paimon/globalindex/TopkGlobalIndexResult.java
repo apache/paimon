@@ -21,5 +21,5 @@ package org.apache.paimon.globalindex;
 /** Top-k global index result for vector index. */
 public interface TopkGlobalIndexResult extends GlobalIndexResult {
 
-    ScoreGetter scoreFunction();
+    ScoreGetter scoreGetter();
 }

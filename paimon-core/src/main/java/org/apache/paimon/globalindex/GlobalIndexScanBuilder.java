@@ -52,7 +52,8 @@ public interface GlobalIndexScanBuilder {
     static Optional<GlobalIndexResult> parallelScan(
             final List<Range> ranges,
             final GlobalIndexScanBuilder globalIndexScanBuilder,
-            final Predicate filter) {
+            final Predicate filter,
+            final Integer threadNum) {
         List<RowRangeGlobalIndexScanner> scanners =
                 ranges.stream()
                         .map(globalIndexScanBuilder::withRowRange)
@@ -68,7 +69,7 @@ public interface GlobalIndexScanBuilder {
                                 return Collections.singletonList(result);
                             },
                             scanners,
-                            null);
+                            threadNum);
             while (resultIterators.hasNext()) {
                 rowsResults.add(resultIterators.next());
             }

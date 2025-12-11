@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -40,7 +41,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.globalindex.GlobalIndexScanBuilder.parallelScan;
 
@@ -167,7 +167,11 @@ public class GlobalIndexBatchScan implements InnerTableScan {
                 List<Range> nonIndexedRowRanges =
                         new Range(0, snapshot.nextRowId() - 1).exclude(indexedRowRanges);
                 Optional<GlobalIndexResult> combined =
-                        parallelScan(indexedRowRanges, globalIndexScanBuilder, filter);
+                        parallelScan(
+                                indexedRowRanges,
+                                globalIndexScanBuilder,
+                                filter,
+                                wrapped.coreOptions().globalIndexThreadNum());
                 if (combined.isPresent()) {
                     GlobalIndexResult globalIndexResultTemp = combined.get();
                     if (!nonIndexedRowRanges.isEmpty()) {
@@ -200,17 +204,13 @@ public class GlobalIndexBatchScan implements InnerTableScan {
         List<Split> indexedSplits = new ArrayList<>();
         for (Split split : splits) {
             DataSplit dataSplit = (DataSplit) split;
-            List<Range> fromDataFile =
-                    Range.mergeSortedAsPossible(
-                            dataSplit.dataFiles().stream()
-                                    .map(
-                                            d ->
-                                                    new Range(
-                                                            d.nonNullFirstRowId(),
-                                                            d.nonNullFirstRowId()
-                                                                    + d.rowCount()
-                                                                    - 1))
-                                    .collect(Collectors.toList()));
+            List<Range> fromDataFile = new ArrayList<>();
+            for (DataFileMeta d : dataSplit.dataFiles()) {
+                fromDataFile.add(
+                        new Range(d.nonNullFirstRowId(), d.nonNullFirstRowId() + d.rowCount() - 1));
+            }
+
+            fromDataFile = Range.mergeSortedAsPossible(fromDataFile);
 
             List<Range> expected =
                     Range.and(fromDataFile, globalIndexResult.results().toRangeList());
@@ -218,7 +218,7 @@ public class GlobalIndexBatchScan implements InnerTableScan {
             float[] scores = null;
             if (globalIndexResult instanceof TopkGlobalIndexResult) {
                 ScoreGetter scoreFunction =
-                        ((TopkGlobalIndexResult) globalIndexResult).scoreFunction();
+                        ((TopkGlobalIndexResult) globalIndexResult).scoreGetter();
                 if (scoreFunction != null) {
                     int size = expected.stream().mapToInt(r -> (int) (r.to - r.from + 1)).sum();
                     scores = new float[size];

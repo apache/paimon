@@ -28,11 +28,12 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -101,29 +102,26 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
 
     @Override
     public List<Range> shardList() {
-        Map<String, List<Range>> indexRanges =
-                scan().stream()
-                        .map(
-                                entry -> {
-                                    GlobalIndexMeta globalIndexMeta =
-                                            entry.indexFile().globalIndexMeta();
-                                    if (globalIndexMeta == null) {
-                                        return null;
-                                    }
-                                    long start = globalIndexMeta.rowRangeStart();
-                                    long end = globalIndexMeta.rowRangeEnd();
-                                    return Pair.of(
-                                            entry.indexFile().indexType(), new Range(start, end));
-                                })
-                        .filter(Objects::nonNull)
-                        .collect(
-                                Collectors.groupingBy(
-                                        Pair::getLeft,
-                                        Collectors.mapping(Pair::getRight, Collectors.toList())));
+
+        Map<String, List<Range>> indexRanges = new HashMap<>();
+        for (IndexManifestEntry entry : scan()) {
+            GlobalIndexMeta globalIndexMeta = entry.indexFile().globalIndexMeta();
+
+            if (globalIndexMeta == null) {
+                continue;
+            }
+            long start = globalIndexMeta.rowRangeStart();
+            long end = globalIndexMeta.rowRangeEnd();
+            indexRanges
+                    .computeIfAbsent(entry.indexFile().indexType(), k -> new ArrayList<>())
+                    .add(new Range(start, end));
+        }
 
         String checkIndexType = null;
         List<Range> checkRanges = null;
-
+        // check all type index have same shard ranges
+        // If index a has [1,10],[20,30] and index b has [1,10],[20,25], it's inconsistent, because
+        // it is hard to handle the [26,30] range.
         for (Map.Entry<String, List<Range>> rangeEntry : indexRanges.entrySet()) {
             String indexType = rangeEntry.getKey();
             List<Range> ranges = rangeEntry.getValue();
