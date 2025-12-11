@@ -54,8 +54,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private final DataTableBatchScan batchScan;
 
     private Predicate filter;
-    private List<Range> rowRanges;
-    private ScoreGetter scoreGetter;
+    private List<Range> pushedRowRanges;
 
     public DataEvolutionBatchScan(FileStoreTable wrapped, DataTableBatchScan batchScan) {
         this.table = wrapped;
@@ -148,7 +147,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public InnerTableScan withRowRanges(List<Range> rowRanges) {
-        this.rowRanges = rowRanges;
+        this.pushedRowRanges = rowRanges;
         return this;
     }
 
@@ -159,73 +158,82 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public Plan plan() {
-        generateRowRanges();
-        if (rowRanges != null) {
-            batchScan.withRowRanges(rowRanges);
-        }
-        List<Split> splits = batchScan.plan().splits();
-        return tryWrapToIndexSplits(splits);
-    }
-
-    private void generateRowRanges() {
-        if (rowRanges != null) {
-            return;
-        }
-        if (filter == null) {
-            return;
-        }
-        if (!table.coreOptions().globalIndexEnabled()) {
-            return;
-        }
-
-        PartitionPredicate partitionPredicate =
-                batchScan.snapshotReader().manifestsReader().partitionFilter();
-        GlobalIndexScanBuilder indexScanBuilder = table.store().newGlobalIndexScanBuilder();
-        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(table);
-        indexScanBuilder.withPartitionPredicate(partitionPredicate).withSnapshot(snapshot);
-        List<Range> indexedRowRanges = indexScanBuilder.shardList();
-        if (!indexedRowRanges.isEmpty()) {
-            Long nextRowId = Objects.requireNonNull(snapshot.nextRowId());
-            List<Range> nonIndexedRowRanges = new Range(0, nextRowId - 1).exclude(indexedRowRanges);
-            Optional<GlobalIndexResult> combined =
-                    parallelScan(
-                            indexedRowRanges,
-                            indexScanBuilder,
-                            filter,
-                            table.coreOptions().globalIndexThreadNum());
-            if (combined.isPresent()) {
-                GlobalIndexResult result = combined.get();
-                if (!nonIndexedRowRanges.isEmpty()) {
-                    for (Range range : nonIndexedRowRanges) {
-                        result.or(GlobalIndexResult.fromRange(range));
-                    }
-                }
-
+        List<Range> rowRanges = this.pushedRowRanges;
+        ScoreGetter scoreGetter = null;
+        if (rowRanges == null) {
+            Optional<GlobalIndexResult> indexResult = evalGlobalIndex();
+            if (indexResult.isPresent()) {
+                GlobalIndexResult result = indexResult.get();
                 rowRanges = result.results().toRangeList();
                 if (result instanceof TopkGlobalIndexResult) {
                     scoreGetter = ((TopkGlobalIndexResult) result).scoreGetter();
                 }
             }
         }
-    }
 
-    private Plan tryWrapToIndexSplits(List<Split> splits) {
         if (rowRanges == null) {
-            return () -> splits;
+            return batchScan.plan();
         }
 
+        List<Split> splits = batchScan.withRowRanges(rowRanges).plan().splits();
+        return wrapToIndexSplits(splits, rowRanges, scoreGetter);
+    }
+
+    private Optional<GlobalIndexResult> evalGlobalIndex() {
+        if (filter == null) {
+            return Optional.empty();
+        }
+        if (!table.coreOptions().globalIndexEnabled()) {
+            return Optional.empty();
+        }
+        PartitionPredicate partitionPredicate =
+                batchScan.snapshotReader().manifestsReader().partitionFilter();
+        GlobalIndexScanBuilder indexScanBuilder = table.store().newGlobalIndexScanBuilder();
+        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(table);
+        indexScanBuilder.withPartitionPredicate(partitionPredicate).withSnapshot(snapshot);
+        List<Range> indexedRowRanges = indexScanBuilder.shardList();
+        if (indexedRowRanges.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Long nextRowId = Objects.requireNonNull(snapshot.nextRowId());
+        List<Range> nonIndexedRowRanges = new Range(0, nextRowId - 1).exclude(indexedRowRanges);
+        Optional<GlobalIndexResult> resultOptional =
+                parallelScan(
+                        indexedRowRanges,
+                        indexScanBuilder,
+                        filter,
+                        table.coreOptions().globalIndexThreadNum());
+        if (!resultOptional.isPresent()) {
+            return Optional.empty();
+        }
+
+        GlobalIndexResult result = resultOptional.get();
+        if (!nonIndexedRowRanges.isEmpty()) {
+            for (Range range : nonIndexedRowRanges) {
+                result.or(GlobalIndexResult.fromRange(range));
+            }
+        }
+
+        return Optional.of(result);
+    }
+
+    private static Plan wrapToIndexSplits(
+            List<Split> splits, List<Range> rowRanges, ScoreGetter scoreGetter) {
         List<Split> indexedSplits = new ArrayList<>();
         for (Split split : splits) {
             DataSplit dataSplit = (DataSplit) split;
-            List<Range> fromDataFile = new ArrayList<>();
-            for (DataFileMeta d : dataSplit.dataFiles()) {
-                fromDataFile.add(
-                        new Range(d.nonNullFirstRowId(), d.nonNullFirstRowId() + d.rowCount() - 1));
+            List<Range> fileRanges = new ArrayList<>();
+            for (DataFileMeta file : dataSplit.dataFiles()) {
+                fileRanges.add(
+                        new Range(
+                                file.nonNullFirstRowId(),
+                                file.nonNullFirstRowId() + file.rowCount() - 1));
             }
 
-            fromDataFile = Range.mergeSortedAsPossible(fromDataFile);
+            fileRanges = Range.mergeSortedAsPossible(fileRanges);
 
-            List<Range> expected = Range.and(fromDataFile, rowRanges);
+            List<Range> expected = Range.and(fileRanges, rowRanges);
 
             float[] scores = null;
             if (scoreGetter != null) {
