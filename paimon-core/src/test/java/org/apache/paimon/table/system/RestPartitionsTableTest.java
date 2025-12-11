@@ -61,9 +61,7 @@ class RestPartitionsTableTest extends PartitionsTableTest {
     @BeforeEach
     @Override
     public void before() throws Exception {
-        super.beforeEach();
-
-        String dataPath = warehouse.toString();
+        String dataPath = warehouse.toString() + "/RestPartitionsTableTest";
         String restWarehouse = UUID.randomUUID().toString();
         String initToken = "init_token";
         BearTokenAuthProvider authProvider = new BearTokenAuthProvider(initToken);

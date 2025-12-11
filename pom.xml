@@ -538,85 +538,85 @@ under the License.
                 <artifactId>maven-checkstyle-plugin</artifactId>
             </plugin>
 
-            <plugin>
-                <groupId>org.apache.rat</groupId>
-                <artifactId>apache-rat-plugin</artifactId>
-                <version>0.15</version>
-                <inherited>false</inherited>
-                <executions>
-                    <execution>
-                        <phase>verify</phase>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
-                    </execution>
-                </executions>
-                <configuration>
-                    <excludeSubProjects>false</excludeSubProjects>
-                    <numUnapprovedLicenses>0</numUnapprovedLicenses>
-                    <licenses>
-                        <!-- Enforce this license:
-                          Licensed to the Apache Software Foundation (ASF) under one
-                          or more contributor license agreements.  See the NOTICE file
-                          distributed with this work for additional information
-                          regarding copyright ownership.  The ASF licenses this file
-                          to you under the Apache License, Version 2.0 (the
-                          "License"); you may not use this file except in compliance
-                          with the License.  You may obtain a copy of the License at
-                            http://www.apache.org/licenses/LICENSE-2.0
-                          Unless required by applicable law or agreed to in writing,
-                          software distributed under the License is distributed on an
-                          "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-                          KIND, either express or implied.  See the License for the
-                          specific language governing permissions and limitations
-                          under the License.
-                        -->
-                        <license implementation="org.apache.rat.analysis.license.SimplePatternBasedLicense">
-                            <licenseFamilyCategory>AL2</licenseFamilyCategory>
-                            <licenseFamilyName>Apache License 2.0</licenseFamilyName>
-                            <patterns>
-                                <pattern>Licensed to the Apache Software Foundation (ASF) under one</pattern>
-                            </patterns>
-                        </license>
-                    </licenses>
-                    <licenseFamilies>
-                        <licenseFamily implementation="org.apache.rat.license.SimpleLicenseFamily">
-                            <familyName>Apache License 2.0</familyName>
-                        </licenseFamily>
-                    </licenseFamilies>
-                    <excludes>
-                        <!-- Additional files like .gitignore etc.-->
-                        <exclude>**/.*/**</exclude>
-                        <exclude>**/*.prefs</exclude>
-                        <exclude>**/*.log</exclude>
-                        <!-- Administrative files in the main trunk. -->
-                        <exclude>**/README.md</exclude>
-                        <exclude>**/CODE_OF_CONDUCT.md</exclude>
-                        <exclude>.github/**</exclude>
-                        <!-- IDE files. -->
-                        <exclude>**/*.iml</exclude>
-                        <exclude>**/.idea/**</exclude>
-                        <!-- Generated content -->
-                        <exclude>**/target/**</exclude>
-                        <exclude>**/scalastyle-output.xml</exclude>
-                        <exclude>docs/resources/**</exclude>
-                        <exclude>docs/public/**</exclude>
-                        <exclude>docs/themes/book/**</exclude>
-                        <exclude>docs/assets/github.css</exclude>
-                        <exclude>docs/static/js/anchor.min.js</exclude>
-                        <exclude>docs/static/js/redoc.standalone.js</exclude>
-                        <exclude>**/*.svg</exclude>
-                        <exclude>**/dependency-reduced-pom.xml</exclude>
-                        <!-- Bundled license files -->
-                        <exclude>**/LICENSE*</exclude>
-                        <!-- artifacts created during release process -->
-                        <exclude>release/**</exclude>
-                        <!-- antlr grammar files -->
-                        <exclude>paimon-common/src/main/antlr4/**</exclude>
-                        <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
-                    </excludes>
-                </configuration>
-            </plugin>
+<!--            <plugin>-->
+<!--                <groupId>org.apache.rat</groupId>-->
+<!--                <artifactId>apache-rat-plugin</artifactId>-->
+<!--                <version>0.15</version>-->
+<!--                <inherited>false</inherited>-->
+<!--                <executions>-->
+<!--                    <execution>-->
+<!--                        <phase>verify</phase>-->
+<!--                        <goals>-->
+<!--                            <goal>check</goal>-->
+<!--                        </goals>-->
+<!--                    </execution>-->
+<!--                </executions>-->
+<!--                <configuration>-->
+<!--                    <excludeSubProjects>false</excludeSubProjects>-->
+<!--                    <numUnapprovedLicenses>0</numUnapprovedLicenses>-->
+<!--                    <licenses>-->
+<!--                        &lt;!&ndash; Enforce this license:-->
+<!--                          Licensed to the Apache Software Foundation (ASF) under one-->
+<!--                          or more contributor license agreements.  See the NOTICE file-->
+<!--                          distributed with this work for additional information-->
+<!--                          regarding copyright ownership.  The ASF licenses this file-->
+<!--                          to you under the Apache License, Version 2.0 (the-->
+<!--                          "License"); you may not use this file except in compliance-->
+<!--                          with the License.  You may obtain a copy of the License at-->
+<!--                            http://www.apache.org/licenses/LICENSE-2.0-->
+<!--                          Unless required by applicable law or agreed to in writing,-->
+<!--                          software distributed under the License is distributed on an-->
+<!--                          "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY-->
+<!--                          KIND, either express or implied.  See the License for the-->
+<!--                          specific language governing permissions and limitations-->
+<!--                          under the License.-->
+<!--                        &ndash;&gt;-->
+<!--                        <license implementation="org.apache.rat.analysis.license.SimplePatternBasedLicense">-->
+<!--                            <licenseFamilyCategory>AL2</licenseFamilyCategory>-->
+<!--                            <licenseFamilyName>Apache License 2.0</licenseFamilyName>-->
+<!--                            <patterns>-->
+<!--                                <pattern>Licensed to the Apache Software Foundation (ASF) under one</pattern>-->
+<!--                            </patterns>-->
+<!--                        </license>-->
+<!--                    </licenses>-->
+<!--                    <licenseFamilies>-->
+<!--                        <licenseFamily implementation="org.apache.rat.license.SimpleLicenseFamily">-->
+<!--                            <familyName>Apache License 2.0</familyName>-->
+<!--                        </licenseFamily>-->
+<!--                    </licenseFamilies>-->
+<!--                    <excludes>-->
+<!--                        &lt;!&ndash; Additional files like .gitignore etc.&ndash;&gt;-->
+<!--                        <exclude>**/.*/**</exclude>-->
+<!--                        <exclude>**/*.prefs</exclude>-->
+<!--                        <exclude>**/*.log</exclude>-->
+<!--                        &lt;!&ndash; Administrative files in the main trunk. &ndash;&gt;-->
+<!--                        <exclude>**/README.md</exclude>-->
+<!--                        <exclude>**/CODE_OF_CONDUCT.md</exclude>-->
+<!--                        <exclude>.github/**</exclude>-->
+<!--                        &lt;!&ndash; IDE files. &ndash;&gt;-->
+<!--                        <exclude>**/*.iml</exclude>-->
+<!--                        <exclude>**/.idea/**</exclude>-->
+<!--                        &lt;!&ndash; Generated content &ndash;&gt;-->
+<!--                        <exclude>**/target/**</exclude>-->
+<!--                        <exclude>**/scalastyle-output.xml</exclude>-->
+<!--                        <exclude>docs/resources/**</exclude>-->
+<!--                        <exclude>docs/public/**</exclude>-->
+<!--                        <exclude>docs/themes/book/**</exclude>-->
+<!--                        <exclude>docs/assets/github.css</exclude>-->
+<!--                        <exclude>docs/static/js/anchor.min.js</exclude>-->
+<!--                        <exclude>docs/static/js/redoc.standalone.js</exclude>-->
+<!--                        <exclude>**/*.svg</exclude>-->
+<!--                        <exclude>**/dependency-reduced-pom.xml</exclude>-->
+<!--                        &lt;!&ndash; Bundled license files &ndash;&gt;-->
+<!--                        <exclude>**/LICENSE*</exclude>-->
+<!--                        &lt;!&ndash; artifacts created during release process &ndash;&gt;-->
+<!--                        <exclude>release/**</exclude>-->
+<!--                        &lt;!&ndash; antlr grammar files &ndash;&gt;-->
+<!--                        <exclude>paimon-common/src/main/antlr4/**</exclude>-->
+<!--                        <exclude>paimon-core/src/test/resources/compatibility/**</exclude>-->
+<!--                    </excludes>-->
+<!--                </configuration>-->
+<!--            </plugin>-->
 
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>

@@ -1102,16 +1102,7 @@ public class RESTCatalogServer {
                 if (noPermissionDatabases.contains(databaseName)) {
                     throw new Catalog.DatabaseNoPermissionException(databaseName);
                 }
-                try {
-                    catalog.createDatabase(databaseName, false);
-                } catch (Catalog.DatabaseAlreadyExistException e) {
-                    if (!databaseStore.containsKey(databaseName)) {
-                        databaseStore.put(
-                                databaseName,
-                                Database.of(databaseName, requestBody.getOptions(), null));
-                    }
-                    return new MockResponse().setResponseCode(200);
-                }
+                catalog.createDatabase(databaseName, false);
                 databaseStore.put(
                         databaseName, Database.of(databaseName, requestBody.getOptions(), null));
                 return new MockResponse().setResponseCode(200);
