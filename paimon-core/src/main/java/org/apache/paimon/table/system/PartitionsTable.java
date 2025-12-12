@@ -322,6 +322,9 @@ public class PartitionsTable implements ReadonlyTable {
 
             try (Catalog catalog = catalogLoader.load()) {
                 Identifier baseIdentifier = fileStoreTable.catalogEnvironment().identifier();
+                if (baseIdentifier == null) {
+                    return listPartitionEntries();
+                }
                 String branch = fileStoreTable.coreOptions().branch();
                 Identifier identifier;
                 if (branch != null && !branch.equals(CoreOptions.BRANCH.defaultValue())) {
@@ -347,7 +350,10 @@ public class PartitionsTable implements ReadonlyTable {
             String[] partitionColumns = fileStoreTable.partitionKeys().toArray(new String[0]);
             InternalRowPartitionComputer computer =
                     new InternalRowPartitionComputer(
-                            defaultPartitionName, partitionType, partitionColumns, false);
+                            defaultPartitionName,
+                            partitionType,
+                            partitionColumns,
+                            fileStoreTable.coreOptions().legacyPartitionName());
             return partitionEntries.stream()
                     .map(entry -> entry.toPartition(computer))
                     .collect(Collectors.toList());

@@ -133,4 +133,38 @@ public class PartitionsTableTest extends TableTestBase {
             assertThat(row.isNullAt(4)).isTrue(); // options
         }
     }
+
+    @Test
+    void testPartitionWithLegacyPartitionName() throws Exception {
+        String testTableName = "TestLegacyTable";
+        Schema testSchema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("pt", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
+                        .option("bucket", "1")
+                        .option(CoreOptions.PARTITION_GENERATE_LEGACY_NAME.key(), "false")
+                        .build();
+
+        Identifier testTableId = identifier(testTableName);
+        catalog.createTable(testTableId, testSchema, true);
+        FileStoreTable testTable = (FileStoreTable) catalog.getTable(testTableId);
+
+        write(testTable, GenericRow.of(1, 10, 1), GenericRow.of(2, 20, 2));
+
+        Identifier testPartitionsTableId =
+                identifier(testTableName + SYSTEM_TABLE_SPLITTER + PartitionsTable.PARTITIONS);
+        PartitionsTable testPartitionsTable =
+                (PartitionsTable) catalog.getTable(testPartitionsTableId);
+
+        List<InternalRow> expectedRow = new ArrayList<>();
+        expectedRow.add(GenericRow.of(BinaryString.fromString("pt=10"), 1L));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("pt=20"), 1L));
+
+        List<InternalRow> result = read(testPartitionsTable, new int[] {0, 1});
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
+    }
 }
