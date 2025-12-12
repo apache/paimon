@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
+/** Utils to serialize and deserialize GlobalIndexResult. */
 public class GlobalIndexSerDeUtils {
 
     static long MAGIC = 30458034380294134L;
