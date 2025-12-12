@@ -55,6 +55,45 @@ class PaimonOptionTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Option: create table with Iceberg compatibility options via DataFrame writer") {
+    Seq((1L, "x1"), (2L, "x2"))
+      .toDF("a", "b")
+      .write
+      .format("paimon")
+      .option("primary-key", "a")
+      .option("bucket", "-1")
+      .option("metadata.iceberg.database", "db_t")
+      .option("metadata.iceberg.table", "t_ib")
+      .option("metadata.iceberg.storage", "hadoop-catalog")
+      .option("metadata.iceberg.storage-location", "table-location")
+      .option("metadata.iceberg.manifest-legacy-version", "true")
+      .option("metadata.iceberg.manifest-compression", "snappy")
+      .option("metadata.iceberg.previous-versions-max", "5")
+      .option("metadata.iceberg.uri", "")
+      .saveAsTable("T_IB")
+
+    val table = loadTable("T_IB")
+
+    // Verify primary key is also stored (existing functionality still works)
+    Assertions.assertEquals(1, table.primaryKeys().size())
+    Assertions.assertEquals("a", table.primaryKeys().get(0))
+
+    // Verify bucket configuration
+    Assertions.assertEquals("-1", table.options().get("bucket"))
+
+    // Verify Iceberg compatibility options are stored permanently
+    Assertions.assertEquals("db_t", table.options().get("metadata.iceberg.database"))
+    Assertions.assertEquals("t_ib", table.options().get("metadata.iceberg.table"))
+    Assertions.assertEquals("hadoop-catalog", table.options().get("metadata.iceberg.storage"))
+    Assertions.assertEquals(
+      "table-location",
+      table.options().get("metadata.iceberg.storage-location"))
+    Assertions.assertEquals("true", table.options().get("metadata.iceberg.manifest-legacy-version"))
+    Assertions.assertEquals("snappy", table.options().get("metadata.iceberg.manifest-compression"))
+    Assertions.assertEquals("5", table.options().get("metadata.iceberg.previous-versions-max"))
+    Assertions.assertEquals("", table.options().get("metadata.iceberg.uri"))
+  }
+
   test("Paimon Option: query table with sql conf") {
     sql("CREATE TABLE T (id INT)")
     sql("INSERT INTO T VALUES 1")
