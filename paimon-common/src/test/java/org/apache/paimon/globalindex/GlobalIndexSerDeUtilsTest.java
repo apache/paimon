@@ -18,14 +18,12 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
@@ -109,16 +107,15 @@ public class GlobalIndexSerDeUtilsTest {
     }
 
     private byte[] serialize(GlobalIndexResult result) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (DataOutputStream dos = new DataOutputStream(baos)) {
-            GlobalIndexResultSerializer.serialize(dos, result);
-        }
-        return baos.toByteArray();
+        GlobalIndexResultSerializer globalIndexResultSerializer = new GlobalIndexResultSerializer();
+        DataOutputSerializer dataOutputSerializer = new DataOutputSerializer(1024);
+        globalIndexResultSerializer.serialize(result, dataOutputSerializer);
+        return dataOutputSerializer.getCopyOfBuffer();
     }
 
     private GlobalIndexResult deserialize(byte[] data) throws IOException {
-        try (DataInputStream dis = new DataInputStream(new ByteArrayInputStream(data))) {
-            return GlobalIndexResultSerializer.deserialize(dis);
-        }
+        GlobalIndexResultSerializer globalIndexResultSerializer = new GlobalIndexResultSerializer();
+        DataInputDeserializer dataInputDeserializer = new DataInputDeserializer(data);
+        return globalIndexResultSerializer.deserialize(dataInputDeserializer);
     }
 }
