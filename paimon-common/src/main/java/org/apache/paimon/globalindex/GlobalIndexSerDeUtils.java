@@ -29,11 +29,13 @@ import java.util.Map;
 /** Utils to serialize and deserialize GlobalIndexResult. */
 public class GlobalIndexSerDeUtils {
 
-    static long MAGIC = 30458034380294134L;
+    private static final long MAGIC = 30458034380294134L;
+    private static final int VERSION = 1;
 
     static void serialize(DataOutput dataOutput, GlobalIndexResult globalIndexResult)
             throws IOException {
         dataOutput.writeLong(MAGIC);
+        dataOutput.writeInt(VERSION);
 
         int type;
         if (globalIndexResult instanceof TopkGlobalIndexResult) {
@@ -61,7 +63,12 @@ public class GlobalIndexSerDeUtils {
     static GlobalIndexResult deserialize(DataInput dataInput) throws IOException {
         long magic = dataInput.readLong();
         if (magic != MAGIC) {
-            throw new IOException("Invalid magic number: " + magic);
+            throw new IllegalStateException("Invalid magic number: " + magic);
+        }
+
+        int version = dataInput.readInt();
+        if (version != VERSION) {
+            throw new IllegalStateException("Invalid version: " + version);
         }
 
         int type = dataInput.readInt();
