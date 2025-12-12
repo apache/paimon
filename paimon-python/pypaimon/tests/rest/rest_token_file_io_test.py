@@ -131,7 +131,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
             self.assertEqual(deserialized_file_io.identifier, original_file_io.identifier)
             self.assertEqual(deserialized_file_io.path, original_file_io.path)
-            self.assertEqual(deserialized_file_io.properties, original_file_io.properties)
+            self.assertEqual(deserialized_file_io.properties.data, original_file_io.properties.data)
 
             self.assertTrue(hasattr(deserialized_file_io, 'lock'))
             self.assertIsNotNone(deserialized_file_io.lock)
