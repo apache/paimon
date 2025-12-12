@@ -31,6 +31,9 @@ import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 import org.apache.paimon.types.DataType;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -39,6 +42,8 @@ import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 
 /** {@link TableScan} implementation for batch planning. */
 public class DataTableBatchScan extends AbstractDataTableScan {
+
+    private static final Logger LOG = LoggerFactory.getLogger(DataTableBatchScan.class);
 
     private StartingScanner startingScanner;
     private boolean hasNext;
@@ -100,10 +105,12 @@ public class DataTableBatchScan extends AbstractDataTableScan {
             hasNext = false;
             Optional<StartingScanner.Result> pushed = applyPushDownLimit();
             if (pushed.isPresent()) {
+                LOG.debug("Finish plan because of limit push down.");
                 return DataFilePlan.fromResult(pushed.get());
             }
             pushed = applyPushDownTopN();
             if (pushed.isPresent()) {
+                LOG.debug("Finish plan because of TopN push down.");
                 return DataFilePlan.fromResult(pushed.get());
             }
             return DataFilePlan.fromResult(startingScanner.scan(snapshotReader));
@@ -138,16 +145,40 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         }
 
         List<Split> limitedSplits = new ArrayList<>();
+        int rawConvertibleCount = 0;
+        int nonRawConvertibleCount = 0;
+        long totalRawConvertibleRowCount = 0;
+
         for (DataSplit dataSplit : splits) {
             if (dataSplit.rawConvertible()) {
+                rawConvertibleCount++;
                 long partialMergedRowCount = dataSplit.partialMergedRowCount();
+                totalRawConvertibleRowCount += partialMergedRowCount;
                 limitedSplits.add(dataSplit);
                 scannedRowCount += partialMergedRowCount;
                 if (scannedRowCount >= pushDownLimit) {
                     SnapshotReader.Plan newPlan =
                             new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug(
+                                "Limit push down applied: pushDownLimit={}, scannedRowCount={}, "
+                                        + "limitedSplits={}, totalSplits={}, rawConvertibleSplits={}, "
+                                        + "nonRawConvertibleSplits={}, totalRawConvertibleRowCount={}, "
+                                        + "snapshotId={}, watermark={}",
+                                pushDownLimit,
+                                scannedRowCount,
+                                limitedSplits.size(),
+                                splits.size(),
+                                rawConvertibleCount,
+                                nonRawConvertibleCount,
+                                totalRawConvertibleRowCount,
+                                plan.snapshotId(),
+                                plan.watermark());
+                    }
                     return Optional.of(new ScannedResult(newPlan));
                 }
+            } else {
+                nonRawConvertibleCount++;
             }
         }
         return Optional.of(result);
