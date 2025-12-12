@@ -70,7 +70,6 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
 
     @Override
     public void write(Object key) {
-        count++;
         LuceneVectorIndex index = vectorIndexFactory.create(count, key);
         index.checkDimension(vectorIndexOptions.dimension());
         vectorIndices.add(index);
@@ -81,6 +80,7 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
                 throw new RuntimeException(e);
             }
         }
+        count++;
     }
 
     @Override

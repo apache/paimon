@@ -213,29 +213,37 @@ public class LuceneVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         List<GlobalIndexIOMeta> metas = new ArrayList<>();
+        long offset = 10;
         for (int i = 0; i < results.size(); i++) {
             GlobalIndexWriter.ResultEntry result = results.get(i);
             metas.add(
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
-                            result.rowRange(),
+                            result.rowRange().addOffset(offset),
                             result.meta()));
         }
 
         try (LuceneVectorGlobalIndexReader reader =
                 new LuceneVectorGlobalIndexReader(fileReader, metas, indexOptions, vectorType)) {
             TopK topK = new TopK(vectors[0], defaultMetric, 1);
-            GlobalIndexResult result = reader.visitTopK(topK);
+            LuceneTopkGlobalIndexResult result =
+                    (LuceneTopkGlobalIndexResult) reader.visitTopK(topK);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
-            assertThat(containsRowId(result, 1)).isTrue();
+            long expectedRowId = offset;
+            assertThat(containsRowId(result, expectedRowId)).isTrue();
+            assertThat(result.scoreGetter().score(expectedRowId)).isEqualTo(1.0f);
 
             float[] queryVector = new float[] {0.85f, 0.15f};
             topK = new TopK(queryVector, defaultMetric, 2);
-            result = reader.visitTopK(topK);
+            result = (LuceneTopkGlobalIndexResult) reader.visitTopK(topK);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
-            assertThat(containsRowId(result, 2)).isTrue();
-            assertThat(containsRowId(result, 4)).isTrue();
+            long rowId1 = offset + 1;
+            long rowId2 = offset + 3;
+            assertThat(containsRowId(result, rowId1)).isTrue();
+            assertThat(containsRowId(result, rowId2)).isTrue();
+            assertThat(result.scoreGetter().score(rowId1)).isEqualTo(0.98765427f);
+            assertThat(result.scoreGetter().score(rowId2)).isEqualTo(0.9738046f);
         }
     }
 
@@ -280,14 +288,14 @@ public class LuceneVectorGlobalIndexTest {
             TopK topK = new TopK(vectors[0], defaultMetric, 1);
             GlobalIndexResult result = reader.visitTopK(topK);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
-            assertThat(containsRowId(result, 1)).isTrue();
+            assertThat(containsRowId(result, 0)).isTrue();
 
             byte[] queryVector = new byte[] {85, 15};
             topK = new TopK(queryVector, defaultMetric, 2);
             result = reader.visitTopK(topK);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
-            assertThat(containsRowId(result, 2)).isTrue();
-            assertThat(containsRowId(result, 4)).isTrue();
+            assertThat(containsRowId(result, 1)).isTrue();
+            assertThat(containsRowId(result, 3)).isTrue();
         }
     }
 

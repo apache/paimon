@@ -188,7 +188,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
         HashMap<Long, Float> id2scores = new HashMap<>(topK.size());
         for (ScoredRow scoredRow : topK) {
-            long rowId = scoredRow.rowId + offset - 1;
+            long rowId = scoredRow.rowId + offset;
             id2scores.put(rowId, scoredRow.score);
             roaringBitmap64.add(rowId);
         }
