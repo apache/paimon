@@ -126,6 +126,11 @@ class FileStoreTable(Table):
     def new_stream_write_builder(self) -> StreamWriteBuilder:
         return StreamWriteBuilder(self)
 
+    def new_compact_builder(self):
+        """Returns a builder for building table compaction operations."""
+        from pypaimon.compact.compact_builder import CompactBuilder
+        return CompactBuilder(self)
+
     def create_row_key_extractor(self) -> RowKeyExtractor:
         bucket_mode = self.bucket_mode()
         if bucket_mode == BucketMode.HASH_FIXED:
