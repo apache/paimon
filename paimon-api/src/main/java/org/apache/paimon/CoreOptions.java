@@ -2110,6 +2110,14 @@ public class CoreOptions implements Serializable {
                             "The maximum number of concurrent scanner for global index."
                                     + "By default is the number of processors available to the Java virtual machine.");
 
+    public static final ConfigOption<Boolean> ROW_ID_PUSH_DOWN_ENABLED =
+            key("row-id-push-down.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable row id push down for scan."
+                                    + " Currently, only the data evolution table supports row id push down.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3269,6 +3277,10 @@ public class CoreOptions implements Serializable {
 
     public Integer globalIndexThreadNum() {
         return options.get(GLOBAL_INDEX_THREAD_NUM);
+    }
+
+    public boolean rowIdPushDownEnabled() {
+        return options.get(ROW_ID_PUSH_DOWN_ENABLED);
     }
 
     /** Specifies the merge engine for table with primary key. */

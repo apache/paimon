@@ -24,7 +24,7 @@ import org.apache.paimon.types.RowType
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.sources.Filter
 
-import java.util.{List => JList}
+import java.util.{List => JList, Map => JMap}
 
 class PaimonScanBuilder(table: InnerTable)
   extends PaimonBaseScanBuilder(table)
@@ -32,8 +32,16 @@ class PaimonScanBuilder(table: InnerTable)
 
   override protected var partitionKeys: JList[String] = table.partitionKeys()
   override protected var rowType: RowType = table.rowType()
+  override protected val options: JMap[String, String] = table.options()
 
   override def build(): Scan = {
-    PaimonScan(table, requiredSchema, pushedPaimonPredicates, reservedFilters, None, pushDownTopN)
+    PaimonScan(
+      table,
+      requiredSchema,
+      pushedPaimonPredicates,
+      pushedRowIds,
+      reservedFilters,
+      None,
+      pushDownTopN)
   }
 }

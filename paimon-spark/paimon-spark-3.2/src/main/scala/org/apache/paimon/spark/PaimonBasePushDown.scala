@@ -18,14 +18,17 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate}
-import org.apache.paimon.types.RowType
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, RowIdPredicateVisitor}
+import org.apache.paimon.types.{DataField, DataTypes, RowType}
 
 import org.apache.spark.sql.connector.read.SupportsPushDownFilters
 import org.apache.spark.sql.sources.Filter
 
-import java.util.{List => JList}
+import java.lang.{Long => JLong}
+import java.util.{ArrayList, Collections, List => JList, Map => JMap}
 
+import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 /** Base trait for Paimon scan filter push down. */
@@ -33,8 +36,10 @@ trait PaimonBasePushDown extends SupportsPushDownFilters {
 
   protected var partitionKeys: JList[String]
   protected var rowType: RowType
+  protected val options: JMap[String, String] = Collections.emptyMap()
 
   private var pushedSparkFilters = Array.empty[Filter]
+  protected var pushedRowIds: Array[JLong] = null
   protected var pushedPaimonPredicates: Array[Predicate] = Array.empty
   protected var reservedFilters: Array[Filter] = Array.empty
   protected var hasPostScanPredicates = false
@@ -45,20 +50,45 @@ trait PaimonBasePushDown extends SupportsPushDownFilters {
    * must be interpreted as ANDed together.
    */
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
-    val pushable = mutable.ArrayBuffer.empty[(Filter, Predicate)]
+    val pushableSparkFilters = mutable.ArrayBuffer.empty[Filter]
+    val pushablePaimonPredicates = mutable.ArrayBuffer.empty[Predicate]
+    var pushableRowIds: mutable.Set[JLong] = null
     val postScan = mutable.ArrayBuffer.empty[Filter]
     val reserved = mutable.ArrayBuffer.empty[Filter]
 
     val converter = new SparkFilterConverter(rowType)
-    val visitor = new PartitionPredicateVisitor(partitionKeys)
+    val partitionVisitor = new PartitionPredicateVisitor(partitionKeys)
+
     filters.foreach {
       filter =>
         val predicate = converter.convertIgnoreFailure(filter)
         if (predicate == null) {
-          postScan.append(filter)
+          val rowTypeWithRowId = new RowType(
+            false,
+            Collections.singletonList(new DataField(-1, "_ROW_ID", DataTypes.BIGINT())))
+          val converterWithRowId = new SparkFilterConverter(rowTypeWithRowId)
+          val newPredicate = converterWithRowId.convertIgnoreFailure(filter)
+          val rowIdVisitor = new RowIdPredicateVisitor
+
+          if (
+            newPredicate != null && newPredicate.visit(rowIdVisitor) != null
+            && options.getOrDefault(
+              CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.key(),
+              CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.defaultValue().toString) == "true"
+          ) {
+            pushableSparkFilters.append(filter)
+            if (pushableRowIds == null) {
+              pushableRowIds = newPredicate.visit(rowIdVisitor).asScala
+            } else {
+              pushableRowIds.retain(newPredicate.visit(rowIdVisitor).asScala)
+            }
+          } else {
+            postScan.append(filter)
+          }
         } else {
-          pushable.append((filter, predicate))
-          if (predicate.visit(visitor)) {
+          pushableSparkFilters.append(filter)
+          pushablePaimonPredicates.append(predicate)
+          if (predicate.visit(partitionVisitor)) {
             reserved.append(filter)
           } else {
             postScan.append(filter)
@@ -66,9 +96,14 @@ trait PaimonBasePushDown extends SupportsPushDownFilters {
         }
     }
 
-    if (pushable.nonEmpty) {
-      this.pushedSparkFilters = pushable.map(_._1).toArray
-      this.pushedPaimonPredicates = pushable.map(_._2).toArray
+    if (pushableSparkFilters.nonEmpty) {
+      this.pushedSparkFilters = pushableSparkFilters.toArray
+    }
+    if (pushablePaimonPredicates.nonEmpty) {
+      this.pushedPaimonPredicates = pushablePaimonPredicates.toArray
+    }
+    if (pushableRowIds != null) {
+      this.pushedRowIds = pushableRowIds.toArray
     }
     if (reserved.nonEmpty) {
       this.reservedFilters = reserved.toArray

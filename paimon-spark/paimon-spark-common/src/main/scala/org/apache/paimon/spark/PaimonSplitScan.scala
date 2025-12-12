@@ -27,9 +27,11 @@ import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Scan}
 import org.apache.spark.sql.types.StructType
 
+import java.lang.{Long => JLong}
+
 class PaimonSplitScanBuilder(table: KnownSplitsTable) extends PaimonScanBuilder(table) {
   override def build(): Scan = {
-    PaimonSplitScan(table, table.splits(), requiredSchema, pushedPaimonPredicates)
+    PaimonSplitScan(table, table.splits(), requiredSchema, pushedPaimonPredicates, pushedRowIds)
   }
 }
 
@@ -38,7 +40,8 @@ case class PaimonSplitScan(
     table: InnerTable,
     dataSplits: Array[DataSplit],
     requiredSchema: StructType,
-    filters: Seq[Predicate])
+    filters: Seq[Predicate],
+    override val rowIds: Seq[JLong])
   extends ColumnPruningAndPushDown
   with ScanHelper {
 

@@ -16,14 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.sql
 
-import org.apache.paimon.table.KnownSplitsTable
-
-import org.apache.spark.sql.connector.read.Scan
-
-class PaimonSplitScanBuilder(table: KnownSplitsTable) extends PaimonScanBuilder(table) {
-  override def build(): Scan = {
-    PaimonSplitScan(table, table.splits(), requiredSchema, pushedPaimonPredicates, pushedRowIds)
-  }
-}
+class RowIdPushDownTest extends RowIdPushDownTestBase {}

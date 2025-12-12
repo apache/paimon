@@ -30,7 +30,7 @@ import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
 import org.apache.spark.sql.connector.read._
 
-import java.util.{List => JList}
+import java.util.{List => JList, Map => JMap}
 
 import scala.collection.JavaConverters._
 
@@ -44,6 +44,7 @@ class PaimonScanBuilder(table: InnerTable)
 
   override protected var partitionKeys: JList[String] = table.partitionKeys()
   override protected var rowType: RowType = table.rowType()
+  override protected val options: JMap[String, String] = table.options()
 
   override def pushTopN(orders: Array[SortOrder], limit: Int): Boolean = {
     if (hasPostScanPredicates) {
@@ -138,6 +139,7 @@ class PaimonScanBuilder(table: InnerTable)
         table,
         requiredSchema,
         pushedPaimonPredicates,
+        pushedRowIds,
         reservedFilters,
         pushDownLimit,
         pushDownTopN)
