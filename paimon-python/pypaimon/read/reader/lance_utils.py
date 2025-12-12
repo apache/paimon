@@ -19,8 +19,8 @@
 import os
 from typing import Dict, Optional, Tuple
 
-from pypaimon.common.config import OssOptions
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.options.config import OssOptions
 
 
 def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[Dict[str, str]]]:

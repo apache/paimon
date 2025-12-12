@@ -18,14 +18,15 @@
 
 import io
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from urllib.parse import urlparse, ParseResult
 
 import requests
 from cachetools import LRUCache
 from readerwriterlock import rwlock
 
-from pypaimon.common.config import CatalogOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
 
 
 class UriReader(ABC):
@@ -107,8 +108,8 @@ class UriKey:
 
 class UriReaderFactory:
 
-    def __init__(self, catalog_options: dict) -> None:
-        self.catalog_options = catalog_options
+    def __init__(self, catalog_options: Union[Options, dict]) -> None:
+        self.catalog_options = catalog_options if isinstance(catalog_options, Options) else Options(catalog_options)
         self._readers = LRUCache(CatalogOptions.BLOB_FILE_IO_DEFAULT_CACHE_SIZE)
         self._readers_lock = rwlock.RWLockFair()
 

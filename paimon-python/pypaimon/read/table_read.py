@@ -20,7 +20,6 @@ from typing import Iterator, List, Optional
 import pandas
 import pyarrow
 
-from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
@@ -161,7 +160,7 @@ class TableRead:
                 read_type=self.read_type,
                 split=split
             )
-        elif self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true':
+        elif self.table.options.data_evolution_enabled():
             return DataEvolutionSplitRead(
                 table=self.table,
                 predicate=self.predicate,

@@ -23,7 +23,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from pypaimon.api.api_response import CommitTableResponse
-from pypaimon.api.options import Options
+from pypaimon.common.options import Options
 from pypaimon.api.rest_exception import NoSuchResourceException
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_exception import TableNotExistException

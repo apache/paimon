@@ -24,15 +24,16 @@ from pyarrow._fs import FileSystem
 
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.catalog.rest.rest_token import RESTToken
-from pypaimon.common.config import CatalogOptions, OssOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions, OssOptions
 
 
 class RESTTokenFileIO(FileIO):
 
     def __init__(self, identifier: Identifier, path: str,
-                 catalog_options: Optional[dict] = None):
+                 catalog_options: Optional[Options] = None):
         self.identifier = identifier
         self.path = path
         self.token: Optional[RESTToken] = None
@@ -59,7 +60,7 @@ class RESTTokenFileIO(FileIO):
     def _initialize_oss_fs(self, path) -> FileSystem:
         self.try_to_refresh_token()
         merged_token = self._merge_token_with_catalog_options(self.token.token)
-        self.properties.update(merged_token)
+        self.properties.data.update(merged_token)
         return super()._initialize_oss_fs(path)
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:

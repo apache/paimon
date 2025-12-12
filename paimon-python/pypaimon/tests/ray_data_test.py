@@ -25,6 +25,7 @@ import pyarrow as pa
 import ray
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.common.options.core_options import CoreOptions
 
 
 class RayDataTest(unittest.TestCase):
@@ -536,7 +537,6 @@ class RayDataTest(unittest.TestCase):
 
     def test_ray_data_primary_key_multiple_splits_same_bucket(self):
         """Test Ray Data read from PrimaryKey table with small target_split_size."""
-        from pypaimon.common.core_options import CoreOptions
 
         pa_schema = pa.schema([
             ('id', pa.int32()),
@@ -549,7 +549,7 @@ class RayDataTest(unittest.TestCase):
             primary_keys=['id'],
             options={
                 'bucket': '2',
-                CoreOptions.SOURCE_SPLIT_TARGET_SIZE: '1b'
+                CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): '1b'
             }
         )
         self.catalog.create_table('default.test_ray_pk_multi_split', schema, False)

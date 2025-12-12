@@ -18,7 +18,7 @@
 
 from typing import Optional
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 
 from pypaimon.read.plan import Plan
@@ -45,13 +45,13 @@ class TableScan:
         return self.starting_scanner.scan()
 
     def _create_starting_scanner(self) -> Optional[StartingScanner]:
-        options = self.table.options
-        if CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP in options:
-            ts = options[CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP].split(",")
+        options = self.table.options.options
+        if options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
+            ts = options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP).split(",")
             if len(ts) != 2:
                 raise ValueError(
                     "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: " +
-                    options[CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP])
+                    options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP))
             earliest_snapshot = SnapshotManager(self.table).try_get_earliest_snapshot()
             latest_snapshot = SnapshotManager(self.table).get_latest_snapshot()
             if earliest_snapshot is None or latest_snapshot is None:

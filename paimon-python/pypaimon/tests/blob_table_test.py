@@ -975,7 +975,7 @@ class DataBlobWriterTest(unittest.TestCase):
         from pypaimon import Schema
         from pypaimon.table.row.blob import BlobDescriptor, Blob
         from pypaimon.common.uri_reader import UriReaderFactory
-        from pypaimon.common.config import CatalogOptions
+        from pypaimon.common.options.config import CatalogOptions
 
         # Create schema with blob column
         pa_schema = pa.schema([
@@ -1054,7 +1054,7 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(new_blob_descriptor.length, len(blob_data), "Length should match")
 
         # Create URI reader factory and read the blob data
-        catalog_options = {CatalogOptions.WAREHOUSE: self.warehouse}
+        catalog_options = {CatalogOptions.WAREHOUSE.key(): self.warehouse}
         uri_reader_factory = UriReaderFactory(catalog_options)
         uri_reader = uri_reader_factory.create(new_blob_descriptor.uri)
         blob = Blob.from_descriptor(uri_reader, new_blob_descriptor)

@@ -16,20 +16,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+from .config_option import ConfigOption, Description
+from .config_options import ConfigOptions
+from .options import Options
 
-class Options:
-    def __init__(self, data):
-        self.data = data
-
-    @classmethod
-    def from_none(cls):
-        return cls({})
-
-    def to_map(self) -> dict:
-        return self.data
-
-    def get(self, key: str, default=None):
-        return self.data.get(key, default)
-
-    def set(self, key: str, value):
-        self.data[key] = value
+__all__ = [
+    'ConfigOption',
+    'Description',
+    'ConfigOptions',
+    'Options',
+]

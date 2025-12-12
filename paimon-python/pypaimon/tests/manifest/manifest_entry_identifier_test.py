@@ -20,6 +20,8 @@ import unittest
 
 from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
@@ -35,7 +37,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tempdir = tempfile.mkdtemp()
-        cls.catalog = FileSystemCatalog({'warehouse': cls.tempdir})
+        cls.catalog = FileSystemCatalog(Options({CatalogOptions.WAREHOUSE.key(): cls.tempdir}))
         cls.catalog.create_database('default', False)
 
     def setUp(self):

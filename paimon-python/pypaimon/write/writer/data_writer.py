@@ -21,7 +21,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -34,7 +34,7 @@ from pypaimon.table.row.generic_row import GenericRow
 class DataWriter(ABC):
     """Base class for data writers that handle PyArrow tables directly."""
 
-    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: Dict[str, str] = None,
+    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None,
                  write_cols: Optional[List[str]] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -47,21 +47,21 @@ class DataWriter(ABC):
         self.trimmed_primary_keys = self.table.trimmed_primary_keys
 
         self.options = options
-        self.target_file_size = CoreOptions.target_file_size(options, self.table.is_primary_key_table)
+        self.target_file_size = self.options.target_file_size(self.table.is_primary_key_table)
         # POSTPONE_BUCKET uses AVRO format, otherwise default to PARQUET
         default_format = (
             CoreOptions.FILE_FORMAT_AVRO
             if self.bucket == BucketMode.POSTPONE_BUCKET.value
             else CoreOptions.FILE_FORMAT_PARQUET
         )
-        self.file_format = CoreOptions.file_format(options, default=default_format)
-        self.compression = CoreOptions.file_compression(options)
+        self.file_format = self.options.file_format(default_format)
+        self.compression = self.options.file_compression()
         self.sequence_generator = SequenceGenerator(max_seq_number)
 
         self.pending_data: Optional[pa.Table] = None
         self.committed_files: List[DataFileMeta] = []
         self.write_cols = write_cols
-        self.blob_as_descriptor = CoreOptions.blob_as_descriptor(options)
+        self.blob_as_descriptor = self.options.blob_as_descriptor()
 
         self.path_factory = self.table.path_factory()
         self.external_path_provider: Optional[ExternalPathProvider] = self.path_factory.create_external_path_provider(

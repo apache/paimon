@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Dict, Generic, List, Optional
 
 from pypaimon.common.json_util import T, json_field
+from pypaimon.common.options import Options
 from pypaimon.schema.schema import Schema
 
 
@@ -243,9 +244,9 @@ class ConfigResponse(RESTResponse):
 
     defaults: Dict[str, str] = json_field(FILED_DEFAULTS)
 
-    def merge(self, options: Dict[str, str]) -> Dict[str, str]:
+    def merge(self, options: Options) -> Options:
         merged = options.copy()
-        merged.update(self.defaults)
+        merged.data.update(self.defaults)
         return merged
 
 

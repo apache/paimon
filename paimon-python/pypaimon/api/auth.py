@@ -28,7 +28,8 @@ from typing import Dict, Optional
 from pypaimon.api.token_loader import (DLFToken, DLFTokenLoader,
                                        DLFTokenLoaderFactory)
 from pypaimon.api.typedef import RESTAuthParameter
-from pypaimon.common.config import CatalogOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
 
 
 class AuthProvider(ABC):
@@ -61,7 +62,7 @@ class RESTAuthFunction:
 class AuthProviderFactory:
 
     @staticmethod
-    def create_auth_provider(options: Dict[str, str]) -> AuthProvider:
+    def create_auth_provider(options: Options) -> AuthProvider:
         provider = options.get(CatalogOptions.TOKEN_PROVIDER)
         if provider == 'bear':
             token = options.get(CatalogOptions.TOKEN)

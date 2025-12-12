@@ -16,7 +16,7 @@
 #  under the License.
 
 import logging
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Union
 
 from pypaimon.api.api_request import (AlterDatabaseRequest, CommitTableRequest,
                                       CreateDatabaseRequest,
@@ -32,7 +32,8 @@ from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.api.typedef import T
-from pypaimon.common.config import CatalogOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
 from pypaimon.snapshot.snapshot import Snapshot
@@ -47,7 +48,9 @@ class RESTApi:
     TABLE_NAME_PATTERN = "tableNamePattern"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
 
-    def __init__(self, options: Dict[str, str], config_required: bool = True):
+    def __init__(self, options: Union[Options, Dict[str, str]], config_required: bool = True):
+        if isinstance(options, dict):
+            options = Options(options)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.client = HttpClient(options.get(CatalogOptions.URI))
         auth_provider = AuthProviderFactory.create_auth_provider(options)
@@ -57,7 +60,7 @@ class RESTApi:
             warehouse = options.get(CatalogOptions.WAREHOUSE)
             query_params = {}
             if warehouse:
-                query_params[CatalogOptions.WAREHOUSE] = RESTUtil.encode_string(
+                query_params[CatalogOptions.WAREHOUSE.key()] = RESTUtil.encode_string(
                     warehouse)
 
             config_response = self.client.get_with_params(
@@ -118,7 +121,7 @@ class RESTApi:
 
         return results
 
-    def get_options(self) -> Dict[str, str]:
+    def get_options(self) -> Options:
         return self.options
 
     def list_databases(self) -> List[str]:
@@ -152,8 +155,8 @@ class RESTApi:
         databases = response.data() or []
         return PagedList(databases, response.get_next_page_token())
 
-    def create_database(self, name: str, options: Dict[str, str]) -> None:
-        request = CreateDatabaseRequest(name, options)
+    def create_database(self, name: str, properties: Dict[str, str]) -> None:
+        request = CreateDatabaseRequest(name, properties)
         self.client.post(
             self.resource_paths.databases(), request, self.rest_auth_function
         )

@@ -18,12 +18,13 @@
 
 import logging
 import uuid
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple
+
 
 import pyarrow as pa
 
-from pypaimon.common.core_options import CoreOptions
 from pypaimon.data.timestamp import Timestamp
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.generic_row import GenericRow
@@ -75,7 +76,7 @@ class DataBlobWriter(DataWriter):
     # Constant for checking rolling condition periodically
     CHECK_ROLLING_RECORD_CNT = 1000
 
-    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: Dict[str, str] = None):
+    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None):
         super().__init__(table, partition, bucket, max_seq_number, options)
 
         # Determine blob column from table schema
