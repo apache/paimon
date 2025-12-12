@@ -20,7 +20,6 @@ package org.apache.paimon.lucene.index;
 
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Range;
 
@@ -47,7 +46,7 @@ import java.util.List;
 public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
 
     private final GlobalIndexFileWriter fileWriter;
-    private final LuceneVectorIndexOptions vectorOptions;
+    private final LuceneVectorIndexOptions vectorIndexOptions;
     private final VectorSimilarityFunction similarityFunction;
     private final int sizePerIndex;
     private final LuceneVectorIndexFactory vectorIndexFactory;
@@ -57,21 +56,23 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
     private final List<ResultEntry> results;
 
     public LuceneVectorGlobalIndexWriter(
-            GlobalIndexFileWriter fileWriter, DataType fieldType, Options options) {
+            GlobalIndexFileWriter fileWriter,
+            DataType fieldType,
+            LuceneVectorIndexOptions options) {
         this.vectorIndexFactory = LuceneVectorIndexFactory.init(fieldType);
         this.fileWriter = fileWriter;
         this.vectorIndices = new ArrayList<>();
         this.results = new ArrayList<>();
-        this.vectorOptions = new LuceneVectorIndexOptions(options);
-        this.similarityFunction = vectorOptions.metric().vectorSimilarityFunction();
-        this.sizePerIndex = vectorOptions.sizePerIndex();
+        this.vectorIndexOptions = options;
+        this.similarityFunction = vectorIndexOptions.metric().vectorSimilarityFunction();
+        this.sizePerIndex = vectorIndexOptions.sizePerIndex();
     }
 
     @Override
     public void write(Object key) {
         count++;
         LuceneVectorIndex index = vectorIndexFactory.create(count, key);
-        index.checkDimension(vectorOptions.dimension());
+        index.checkDimension(vectorIndexOptions.dimension());
         vectorIndices.add(index);
         if (vectorIndices.size() >= sizePerIndex) {
             try {
@@ -100,9 +101,9 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
         try (OutputStream out = new BufferedOutputStream(fileWriter.newOutputStream(fileName))) {
             buildIndex(
                     vectorIndices,
-                    this.vectorOptions.m(),
-                    this.vectorOptions.efConstruction(),
-                    this.vectorOptions.writeBufferSize(),
+                    this.vectorIndexOptions.m(),
+                    this.vectorIndexOptions.efConstruction(),
+                    this.vectorIndexOptions.writeBufferSize(),
                     out);
         }
         long minRowIdInBatch = vectorIndices.get(0).id();
