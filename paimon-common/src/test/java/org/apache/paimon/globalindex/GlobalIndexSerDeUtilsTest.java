@@ -32,7 +32,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link GlobalIndexSerDeUtils}. */
+/** Tests for {@link GlobalIndexResultSerializer}. */
 public class GlobalIndexSerDeUtilsTest {
 
     @Test
@@ -111,14 +111,14 @@ public class GlobalIndexSerDeUtilsTest {
     private byte[] serialize(GlobalIndexResult result) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (DataOutputStream dos = new DataOutputStream(baos)) {
-            GlobalIndexSerDeUtils.serialize(dos, result);
+            GlobalIndexResultSerializer.serialize(dos, result);
         }
         return baos.toByteArray();
     }
 
     private GlobalIndexResult deserialize(byte[] data) throws IOException {
         try (DataInputStream dis = new DataInputStream(new ByteArrayInputStream(data))) {
-            return GlobalIndexSerDeUtils.deserialize(dis);
+            return GlobalIndexResultSerializer.deserialize(dis);
         }
     }
 }
