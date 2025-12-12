@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 from enum import Enum
+from typing import Dict
 
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
@@ -115,7 +116,7 @@ class CoreOptions:
         .with_description("Default file compression format.")
     )
 
-    FILE_COMPRESSION_PER_LEVEL: ConfigOption[dict[str, str]] = (
+    FILE_COMPRESSION_PER_LEVEL: ConfigOption[Dict[str, str]] = (
         ConfigOptions.key("file.compression.per.level")
         .map_type()
         .default_value({})
@@ -125,7 +126,7 @@ class CoreOptions:
         )
     )
 
-    FILE_FORMAT_PER_LEVEL: ConfigOption[dict[str, str]] = (
+    FILE_FORMAT_PER_LEVEL: ConfigOption[Dict[str, str]] = (
         ConfigOptions.key("file.format.per.level")
         .map_type()
         .default_value({})

@@ -132,7 +132,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
 
     protocol = PROTOCOL_NAME
 
-    def __init__(self, options: Union[Options, dict[str, str]] = None, **kwargs):
+    def __init__(self, options: Union[Options, Dict[str, str]] = None, **kwargs):
         if isinstance(options, dict):
             options = Options(options)
         options.set(CatalogOptions.HTTP_USER_AGENT_HEADER, 'PythonPVFS')

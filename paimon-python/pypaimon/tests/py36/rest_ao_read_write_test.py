@@ -760,17 +760,17 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
         t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
         # test 1
-        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: str(timestamp - 1) + ',' + str(timestamp)})
+        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): str(timestamp - 1) + ',' + str(timestamp)})
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder)
         self.assertEqual(len(actual), 0)
         # test 2
-        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: str(timestamp) + ',' + str(t2)})
+        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): str(timestamp) + ',' + str(t2)})
         read_builder = table.new_read_builder()
         actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         self.assertEqual(self.expected, actual)
         # test 3
-        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: str(t1) + ',' + str(t2)})
+        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): str(t1) + ',' + str(t2)})
         read_builder = table.new_read_builder()
         actual = table_sort_by(self._read_test_table(read_builder), 'user_id')
         expected = self.expected.slice(4, 4)
