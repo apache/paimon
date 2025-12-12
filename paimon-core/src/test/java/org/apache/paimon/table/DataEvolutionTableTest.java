@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
@@ -852,12 +853,13 @@ public class DataEvolutionTableTest extends TableTestBase {
                 .containsExactlyInAnyOrder(
                         new Range(200L, 200L), new Range(300L, 300L), new Range(400L, 400L));
 
-        ReadBuilder readBuilder = table.newReadBuilder().withRowRanges(rowIds.toRangeList());
+        DataEvolutionBatchScan scan = (DataEvolutionBatchScan) table.newScan();
+        RoaringNavigableMap64 finalRowIds = rowIds;
+        scan.withGlobalIndexResult(GlobalIndexResult.create(() -> finalRowIds));
 
         List<String> readF1 = new ArrayList<>();
-        readBuilder
-                .newRead()
-                .createReader(readBuilder.newScan().plan())
+        table.newRead()
+                .createReader(scan.plan())
                 .forEachRemaining(
                         row -> {
                             readF1.add(row.getString(1).toString());
