@@ -54,6 +54,7 @@ case class PaimonPartitionReader(
     val rowType = new RowType(dataFields)
     SparkInternalRow.create(rowType, blobAsDescriptor)
   }
+  private var totalReadBatchTimeMs: Long = 0L
 
   private lazy val read = readBuilder.newRead().withIOManager(ioManager)
 
@@ -89,6 +90,7 @@ case class PaimonPartitionReader(
         if (currentRow != null) {
           stop = true
         } else {
+          totalReadBatchTimeMs += currentRecordReader.readBatchTimeMs
           currentRecordReader.close()
           currentRecordReader = readSplit()
           if (currentRecordReader == null) {
@@ -101,7 +103,7 @@ case class PaimonPartitionReader(
 
   private def readSplit(): PaimonRecordReaderIterator = {
     if (splits.hasNext) {
-      val split = splits.next();
+      val split = splits.next()
       PaimonRecordReaderIterator(read.createReader(split), metadataColumns, split)
     } else {
       null
@@ -124,12 +126,13 @@ case class PaimonPartitionReader(
   }
 
   override def currentMetricsValues(): Array[CustomTaskMetric] = {
-    partitionMetrics
+    partitionMetrics ++ Array(PaimonReadBatchTimeTaskMetric(totalReadBatchTimeMs))
   }
 
   override def close(): Unit = {
     try {
       if (currentRecordReader != null) {
+        totalReadBatchTimeMs += currentRecordReader.readBatchTimeMs
         currentRecordReader.close()
       }
     } finally {

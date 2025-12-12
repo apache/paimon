@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.{InnerTable, KnownSplitsTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
@@ -54,6 +53,7 @@ case class PaimonSplitScan(
     Array(
       PaimonNumSplitMetric(),
       PaimonPartitionSizeMetric(),
+      PaimonReadBatchTimeMetric(),
       PaimonResultedTableFilesMetric()
     )
   }

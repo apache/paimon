@@ -72,6 +72,7 @@ abstract class PaimonFormatTableBaseScan(
     Array(
       PaimonNumSplitMetric(),
       PaimonPartitionSizeMetric(),
+      PaimonReadBatchTimeMetric(),
       PaimonResultedTableFilesMetric()
     )
   }

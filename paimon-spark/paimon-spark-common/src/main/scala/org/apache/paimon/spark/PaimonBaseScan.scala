@@ -109,6 +109,7 @@ abstract class PaimonBaseScan(
     Array(
       PaimonNumSplitMetric(),
       PaimonPartitionSizeMetric(),
+      PaimonReadBatchTimeMetric(),
       PaimonPlanningDurationMetric(),
       PaimonScannedSnapshotIdMetric(),
       PaimonScannedManifestsMetric(),
