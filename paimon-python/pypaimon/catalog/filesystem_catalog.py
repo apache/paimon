@@ -25,8 +25,9 @@ from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 TableAlreadyExistException,
                                                 TableNotExistException)
 from pypaimon.catalog.database import Database
-from pypaimon.common.config import CatalogOptions
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema_manager import SchemaManager
@@ -37,9 +38,9 @@ from pypaimon.table.table import Table
 
 
 class FileSystemCatalog(Catalog):
-    def __init__(self, catalog_options: dict):
-        if CatalogOptions.WAREHOUSE not in catalog_options:
-            raise ValueError(f"Paimon '{CatalogOptions.WAREHOUSE}' path must be set")
+    def __init__(self, catalog_options: Options):
+        if not catalog_options.contains(CatalogOptions.WAREHOUSE):
+            raise ValueError(f"Paimon '{CatalogOptions.WAREHOUSE.key()}' path must be set")
         self.warehouse = catalog_options.get(CatalogOptions.WAREHOUSE)
         self.catalog_options = catalog_options
         self.file_io = FileIO(self.warehouse, self.catalog_options)
@@ -64,7 +65,7 @@ class FileSystemCatalog(Catalog):
     def get_table(self, identifier: Union[str, Identifier]) -> Table:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
-        if CoreOptions.SCAN_FALLBACK_BRANCH in self.catalog_options:
+        if self.catalog_options.contains(CoreOptions.SCAN_FALLBACK_BRANCH):
             raise ValueError(f"Unsupported CoreOption {CoreOptions.SCAN_FALLBACK_BRANCH}")
         table_path = self.get_table_path(identifier)
         table_schema = self.get_table_schema(identifier)

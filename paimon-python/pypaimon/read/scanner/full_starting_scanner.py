@@ -19,7 +19,6 @@ import os
 from collections import defaultdict
 from typing import Callable, List, Optional, Dict, Set
 
-from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.table.source.deletion_file import DeletionFile
 from pypaimon.table.row.generic_row import GenericRow
@@ -56,18 +55,17 @@ class FullStartingScanner(StartingScanner):
 
         self.partition_key_predicate = trim_and_transform_predicate(
             self.predicate, self.table.field_names, self.table.partition_keys)
-
+        options = self.table.options
         # Get split target size and open file cost from table options
-        self.target_split_size = CoreOptions.split_target_size(self.table.options)
-        self.open_file_cost = CoreOptions.split_open_file_cost(self.table.options)
+        self.target_split_size = options.source_split_target_size()
+        self.open_file_cost = options.source_split_open_file_cost()
 
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
 
-        self.only_read_real_buckets = True if int(
-            self.table.options.get('bucket', -1)) == BucketMode.POSTPONE_BUCKET.value else False
-        self.data_evolution = self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true'
-        self.deletion_vectors_enabled = self.table.options.get('deletion-vectors.enabled', 'false').lower() == 'true'
+        self.only_read_real_buckets = True if options.bucket() == BucketMode.POSTPONE_BUCKET.value else False
+        self.data_evolution = options.data_evolution_enabled()
+        self.deletion_vectors_enabled = options.deletion_vectors_enabled()
 
         def schema_fields_func(schema_id: int):
             return self.table.schema_manager.get_schema(schema_id).fields
@@ -111,7 +109,7 @@ class FullStartingScanner(StartingScanner):
         return self.read_manifest_entries(manifest_files)
 
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
-        max_workers = int(self.table.options.get(CoreOptions.SCAN_MANIFEST_PARALLELISM, os.cpu_count() or 8))
+        max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)
         if max_workers < 8:
             max_workers = 8
         manifest_files = [entry for entry in manifest_files if self._filter_manifest_file(entry)]

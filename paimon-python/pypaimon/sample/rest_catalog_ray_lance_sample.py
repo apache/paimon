@@ -32,8 +32,10 @@ import pandas as pd
 import pyarrow as pa
 import ray
 
+
 from pypaimon import CatalogFactory, Schema
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
+
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
 from pypaimon.api.api_response import ConfigResponse
 from pypaimon.api.auth import BearTokenAuthProvider

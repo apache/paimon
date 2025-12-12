@@ -21,7 +21,7 @@ import uuid
 import pyarrow as pa
 from typing import Optional, Tuple, Dict
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.blob_file_writer import BlobFileWriter

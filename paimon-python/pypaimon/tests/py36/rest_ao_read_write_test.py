@@ -26,10 +26,10 @@ import pandas as pd
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.api.options import Options
+from pypaimon.common.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta

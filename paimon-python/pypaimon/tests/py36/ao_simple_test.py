@@ -24,7 +24,8 @@ from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 DatabaseNotExistException,
                                                 TableAlreadyExistException,
                                                 TableNotExistException)
-from pypaimon.common.config import OssOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import OssOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
@@ -394,33 +395,33 @@ class AOSimpleTest(RESTBaseTest):
 
     def test_initialize_oss_fs_pyarrow_lt_7(self):
         props = {
-            OssOptions.OSS_ACCESS_KEY_ID: "AKID",
-            OssOptions.OSS_ACCESS_KEY_SECRET: "SECRET",
-            OssOptions.OSS_SECURITY_TOKEN: "TOKEN",
-            OssOptions.OSS_REGION: "cn-hangzhou",
-            OssOptions.OSS_ENDPOINT: "oss-cn-hangzhou.aliyuncs.com",
+            OssOptions.OSS_ACCESS_KEY_ID.key(): "AKID",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "SECRET",
+            OssOptions.OSS_SECURITY_TOKEN.key(): "TOKEN",
+            OssOptions.OSS_REGION.key(): "cn-hangzhou",
+            OssOptions.OSS_ENDPOINT.key(): "oss-cn-hangzhou.aliyuncs.com",
         }
 
         with patch("pypaimon.common.file_io.pyarrow.__version__", "6.0.0"), \
                 patch("pyarrow.fs.S3FileSystem") as mock_s3fs:
-            FileIO("oss://oss-bucket/paimon-database/paimon-table", props)
+            FileIO("oss://oss-bucket/paimon-database/paimon-table", Options(props))
             mock_s3fs.assert_called_once_with(access_key="AKID",
                                               secret_key="SECRET",
                                               session_token="TOKEN",
                                               region="cn-hangzhou",
-                                              endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])
-            FileIO("oss://oss-bucket.endpoint/paimon-database/paimon-table", props)
+                                              endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT.key()])
+            FileIO("oss://oss-bucket.endpoint/paimon-database/paimon-table", Options(props))
             mock_s3fs.assert_called_with(access_key="AKID",
                                          secret_key="SECRET",
                                          session_token="TOKEN",
                                          region="cn-hangzhou",
-                                         endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])
-            FileIO("oss://access_id:secret_key@Endpoint/oss-bucket/paimon-database/paimon-table", props)
+                                         endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT.key()])
+            FileIO("oss://access_id:secret_key@Endpoint/oss-bucket/paimon-database/paimon-table", Options(props))
             mock_s3fs.assert_called_with(access_key="AKID",
                                          secret_key="SECRET",
                                          session_token="TOKEN",
                                          region="cn-hangzhou",
-                                         endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])
+                                         endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT.key()])
 
     def test_multi_prepare_commit_ao(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])

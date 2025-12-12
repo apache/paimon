@@ -18,6 +18,8 @@
 from typing import Dict
 from urllib.parse import unquote
 
+from pypaimon.common.options import Options
+
 
 class RESTUtil:
     @staticmethod
@@ -33,9 +35,9 @@ class RESTUtil:
 
     @staticmethod
     def extract_prefix_map(
-            options: Dict[str, str], prefix: str) -> Dict[str, str]:
+            options: Options, prefix: str) -> Dict[str, str]:
         result = {}
-        config = options
+        config = options.to_map()
         for key, value in config.items():
             if key.startswith(prefix):
                 new_key = key[len(prefix):]
