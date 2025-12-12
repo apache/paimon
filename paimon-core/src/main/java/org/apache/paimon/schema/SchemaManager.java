@@ -82,7 +82,9 @@ import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
 import static org.apache.paimon.CoreOptions.DISTINCT;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
+import static org.apache.paimon.CoreOptions.IGNORE_DELETE;
 import static org.apache.paimon.CoreOptions.IGNORE_RETRACT;
+import static org.apache.paimon.CoreOptions.IGNORE_UPDATE_BEFORE;
 import static org.apache.paimon.CoreOptions.LIST_AGG_DELIMITER;
 import static org.apache.paimon.CoreOptions.NESTED_KEY;
 import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
@@ -1118,6 +1120,32 @@ public class SchemaManager implements Serializable {
                                             + "If you are confident, you can set table option '%s' = 'true' to allow deletion vectors modification.",
                                     oldDv, newDv, DELETION_VECTORS_MODIFIABLE.key()));
                 }
+            }
+        }
+
+        if (IGNORE_DELETE.key().equals(key)) {
+            boolean oldIgnoreDelete =
+                    oldValue == null
+                            ? IGNORE_DELETE.defaultValue()
+                            : Boolean.parseBoolean(oldValue);
+            boolean newIgnoreDelete = Boolean.parseBoolean(newValue);
+            if (oldIgnoreDelete && !newIgnoreDelete) {
+                throw new UnsupportedOperationException(
+                        String.format("Cannot change %s from true to false.", IGNORE_DELETE.key()));
+            }
+        }
+
+        if (IGNORE_UPDATE_BEFORE.key().equals(key)) {
+            boolean oldIgnoreUpdateBefore =
+                    oldValue == null
+                            ? IGNORE_UPDATE_BEFORE.defaultValue()
+                            : Boolean.parseBoolean(oldValue);
+            boolean newIgnoreUpdateBefore = Boolean.parseBoolean(newValue);
+            if (oldIgnoreUpdateBefore && !newIgnoreUpdateBefore) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Cannot change %s from true to false.",
+                                IGNORE_UPDATE_BEFORE.key()));
             }
         }
     }
