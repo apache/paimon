@@ -21,11 +21,13 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, RowIdPredicateVisitor}
 import org.apache.paimon.types.{DataField, DataTypes, RowType}
+
 import org.apache.spark.sql.connector.read.SupportsPushDownFilters
 import org.apache.spark.sql.sources.Filter
 
 import java.lang.{Long => JLong}
 import java.util.{ArrayList, Collections, List => JList, Map => JMap}
+
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
@@ -62,14 +64,18 @@ trait PaimonBasePushDown extends SupportsPushDownFilters {
         val predicate = converter.convertIgnoreFailure(filter)
         if (predicate == null) {
           val rowTypeWithRowId = new RowType(
-            false, Collections.singletonList(new DataField(-1, "_ROW_ID", DataTypes.BIGINT())))
+            false,
+            Collections.singletonList(new DataField(-1, "_ROW_ID", DataTypes.BIGINT())))
           val converterWithRowId = new SparkFilterConverter(rowTypeWithRowId)
           val newPredicate = converterWithRowId.convertIgnoreFailure(filter)
           val rowIdVisitor = new RowIdPredicateVisitor
 
-          if (newPredicate != null && newPredicate.visit(rowIdVisitor) != null
-            && options.getOrDefault(CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.key(),
-            CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.defaultValue().toString) == "true") {
+          if (
+            newPredicate != null && newPredicate.visit(rowIdVisitor) != null
+            && options.getOrDefault(
+              CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.key(),
+              CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.defaultValue().toString) == "true"
+          ) {
             pushableSparkFilters.append(filter)
             if (pushableRowIds == null) {
               pushableRowIds = newPredicate.visit(rowIdVisitor).asScala

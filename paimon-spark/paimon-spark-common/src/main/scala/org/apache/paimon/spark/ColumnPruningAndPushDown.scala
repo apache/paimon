@@ -26,12 +26,14 @@ import org.apache.paimon.table.{SpecialFields, Table}
 import org.apache.paimon.table.source.ReadBuilder
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.Range
+
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.types.StructType
 
 import java.lang.{Long => JLong}
 import java.util.ArrayList
+
 import scala.collection.JavaConverters._
 
 trait ColumnPruningAndPushDown extends Scan with Logging {

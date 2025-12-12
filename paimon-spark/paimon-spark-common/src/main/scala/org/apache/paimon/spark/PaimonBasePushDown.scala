@@ -21,6 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, RowIdPredicateVisitor}
 import org.apache.paimon.types.{DataField, DataTypes, RowType}
+
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
 import org.apache.spark.sql.connector.read.{SupportsPushDownLimit, SupportsPushDownV2Filters}
@@ -28,6 +29,7 @@ import org.apache.spark.sql.sources.Filter
 
 import java.lang.{Long => JLong}
 import java.util.{Collections, List => JList, Map => JMap}
+
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
@@ -69,14 +71,18 @@ trait PaimonBasePushDown extends SupportsPushDownV2Filters with SupportsPushDown
             }
           case None =>
             val rowTypeWithRowId = new RowType(
-              false, Collections.singletonList(new DataField(-1, "_ROW_ID", DataTypes.BIGINT())))
+              false,
+              Collections.singletonList(new DataField(-1, "_ROW_ID", DataTypes.BIGINT())))
             val converterWithRowId = SparkV2FilterConverter(rowTypeWithRowId)
             val newPaimonPredicate = converterWithRowId.convert(predicate).orNull
             val rowIdVisitor = new RowIdPredicateVisitor
 
-            if (newPaimonPredicate != null && newPaimonPredicate.visit(rowIdVisitor) != null
-              && options.getOrDefault(CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.key(),
-              CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.defaultValue().toString) == "true") {
+            if (
+              newPaimonPredicate != null && newPaimonPredicate.visit(rowIdVisitor) != null
+              && options.getOrDefault(
+                CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.key(),
+                CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.defaultValue().toString) == "true"
+            ) {
               pushableSparkPredicates.append(predicate)
               if (pushableRowIds == null) {
                 pushableRowIds = newPaimonPredicate.visit(rowIdVisitor).asScala
