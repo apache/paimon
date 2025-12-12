@@ -44,6 +44,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 
@@ -78,7 +79,9 @@ public class SstFileTest {
                 Arrays.asList(false, "lz4"),
                 Arrays.asList(true, "lz4"),
                 Arrays.asList(false, "zstd"),
-                Arrays.asList(true, "zstd"));
+                Arrays.asList(true, "zstd"),
+                Arrays.asList(false, "lzo"),
+                Arrays.asList(true, "lzo"));
     }
 
     @BeforeEach
@@ -92,6 +95,36 @@ public class SstFileTest {
     public void testLookup() throws Exception {
         writeData(5000, bloomFilterEnabled);
         innerTestLookup();
+    }
+
+    @TestTemplate
+    public void testEmptyFile() throws Exception {
+        writeData(0, false);
+
+        long fileSize = fileIO.getFileSize(file);
+        try (SeekableInputStream inputStream = fileIO.newInputStream(file);
+                SstFileReader reader =
+                        new SstFileReader(
+                                Comparator.comparingInt(slice -> slice.readInt(0)),
+                                fileSize,
+                                file,
+                                inputStream,
+                                CACHE_MANAGER); ) {
+            MemorySliceOutput keyOut = new MemorySliceOutput(4);
+            for (int i = -10; i < 10; i++) {
+                keyOut.reset();
+                keyOut.writeInt(i);
+                Assertions.assertNull(reader.lookup(keyOut.toSlice().copyBytes()));
+            }
+
+            FileInfo fileInfo = reader.readFileInfo();
+            Assertions.assertEquals(0, fileInfo.getAvgKeyLength());
+            Assertions.assertEquals(0, fileInfo.getAvgValueLength());
+            Assertions.assertEquals(0, fileInfo.getMaxKeyLength());
+            Assertions.assertEquals(0, fileInfo.getMinKeyLength());
+            Assertions.assertEquals(0, fileInfo.getMaxValueLength());
+            Assertions.assertEquals(0, fileInfo.getMinValueLength());
+        }
     }
 
     private void innerTestLookup() throws Exception {
@@ -173,6 +206,36 @@ public class SstFileTest {
                 writer.put(keyOut.toSlice().getHeapMemory(), valueOut.toSlice().getHeapMemory());
             }
             LOG.info("Write {} data cost {} ms", recordCount, System.currentTimeMillis() - start);
+        }
+    }
+
+    @TestTemplate
+    public void testAddExtraFileInfo() throws Exception {
+        BlockCompressionFactory compressionFactory = BlockCompressionFactory.create(compress);
+        try (PositionOutputStream outputStream = fileIO.newOutputStream(file, true);
+                SstFileWriter writer =
+                        new SstFileWriter(outputStream, BLOCK_SIZE, null, compressionFactory); ) {
+            writer.addExtraFileInfo("testKey".getBytes(), "testValue".getBytes());
+        }
+
+        long fileSize = fileIO.getFileSize(file);
+        try (SeekableInputStream inputStream = fileIO.newInputStream(file);
+                SstFileReader reader =
+                        new SstFileReader(
+                                Comparator.comparingInt(slice -> slice.readInt(0)),
+                                fileSize,
+                                file,
+                                inputStream,
+                                CACHE_MANAGER); ) {
+            FileInfo fileInfo = reader.readFileInfo();
+            // it's an empty file
+            Assertions.assertEquals(0, fileInfo.getAvgKeyLength());
+            Assertions.assertEquals(0, fileInfo.getAvgValueLength());
+            Map<byte[], byte[]> extraValues = fileInfo.getExtras();
+            Assertions.assertEquals(1, extraValues.size());
+            Assertions.assertTrue(extraValues.containsKey("testKey".getBytes()));
+            Assertions.assertArrayEquals(
+                    extraValues.get("testKey".getBytes()), "testValue".getBytes());
         }
     }
 }

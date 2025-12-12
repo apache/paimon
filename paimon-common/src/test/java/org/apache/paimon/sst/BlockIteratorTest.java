@@ -46,7 +46,7 @@ public class BlockIteratorTest {
 
     public void innerTest(boolean aligned) throws IOException {
         MemorySlice data = writeBlock(aligned);
-        BlockIterator iterator = new BlockReader(data, COMPARATOR).iterator();
+        BlockIterator iterator = new BlockReader(data, COMPARATOR, BlockType.DATA).iterator();
 
         // 1. test for normal cases:
         final int step = 3;

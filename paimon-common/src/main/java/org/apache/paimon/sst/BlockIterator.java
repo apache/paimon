@@ -111,4 +111,27 @@ public abstract class BlockIterator implements Iterator<Map.Entry<MemorySlice, M
 
         return new BlockEntry(key, value);
     }
+
+    /** A block iterator which only provides sequential-scan functionality. */
+    public static class SequentialBlockIterator implements Iterator<BlockEntry> {
+        private final BlockIterator wrapped;
+
+        private SequentialBlockIterator(BlockIterator wrapped) {
+            this.wrapped = wrapped;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return wrapped.hasNext();
+        }
+
+        @Override
+        public BlockEntry next() {
+            return wrapped.next();
+        }
+
+        public static Iterator<BlockEntry> wrap(BlockIterator iterator) {
+            return new SequentialBlockIterator(iterator);
+        }
+    }
 }
