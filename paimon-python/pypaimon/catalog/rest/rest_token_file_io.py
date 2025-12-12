@@ -60,7 +60,7 @@ class RESTTokenFileIO(FileIO):
     def _initialize_oss_fs(self, path) -> FileSystem:
         self.try_to_refresh_token()
         merged_token = self._merge_token_with_catalog_options(self.token.token)
-        self.properties.update(merged_token)
+        self.properties.data.update(merged_token)
         return super()._initialize_oss_fs(path)
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
