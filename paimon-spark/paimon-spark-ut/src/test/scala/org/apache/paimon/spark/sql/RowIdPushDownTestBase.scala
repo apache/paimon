@@ -26,7 +26,8 @@ class RowIdPushDownTestBase extends PaimonSparkTestBase {
 
   test("test paimon-spark row id push down") {
     withTable("t") {
-      sql("CREATE TABLE t (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled'='true')")
+      sql("CREATE TABLE t (a INT, b INT, c STRING) TBLPROPERTIES " +
+        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'row-id-push-down.enabled'='true')")
       sql("INSERT INTO t VALUES (1, 1, '1'), (2, 2, '2'), (3, 3, '3'), (4, 4, '4')")
 
       // 1.LeafPredicate

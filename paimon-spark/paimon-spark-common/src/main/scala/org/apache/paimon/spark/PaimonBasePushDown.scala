@@ -18,17 +18,16 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, RowIdPredicateVisitor}
 import org.apache.paimon.types.{DataField, DataTypes, RowType}
-
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
 import org.apache.spark.sql.connector.read.{SupportsPushDownLimit, SupportsPushDownV2Filters}
 import org.apache.spark.sql.sources.Filter
 
 import java.lang.{Long => JLong}
-import java.util.{ArrayList, List => JList}
-
+import java.util.{Collections, List => JList, Map => JMap}
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
@@ -37,6 +36,7 @@ trait PaimonBasePushDown extends SupportsPushDownV2Filters with SupportsPushDown
 
   protected var partitionKeys: JList[String]
   protected var rowType: RowType
+  protected val options: JMap[String, String] = Collections.emptyMap()
 
   private var pushedSparkPredicates = Array.empty[SparkPredicate]
   protected var pushedRowIds: Array[JLong] = null
@@ -46,45 +46,51 @@ trait PaimonBasePushDown extends SupportsPushDownV2Filters with SupportsPushDown
   protected var pushDownLimit: Option[Int] = None
 
   override def pushPredicates(predicates: Array[SparkPredicate]): Array[SparkPredicate] = {
-    val pushableSparkFilters = mutable.ArrayBuffer.empty[SparkPredicate]
+    val pushableSparkPredicates = mutable.ArrayBuffer.empty[SparkPredicate]
     val pushablePaimonPredicates = mutable.ArrayBuffer.empty[Predicate]
     var pushableRowIds: mutable.Set[JLong] = null
     val postScan = mutable.ArrayBuffer.empty[SparkPredicate]
     val reserved = mutable.ArrayBuffer.empty[Filter]
 
-    val dataFieldWithRowId = new ArrayList[DataField](rowType.getFields)
-    dataFieldWithRowId.add(new DataField(rowType.getFieldCount, "_ROW_ID", DataTypes.BIGINT()))
-    val rowTypeWithRowId = rowType.copy(dataFieldWithRowId)
-    val converter = SparkV2FilterConverter(rowTypeWithRowId)
+    val converter = SparkV2FilterConverter(rowType)
     val partitionVisitor = new PartitionPredicateVisitor(partitionKeys)
-    val rowIdVisitor = new RowIdPredicateVisitor
 
     predicates.foreach {
       predicate =>
         converter.convert(predicate) match {
           case Some(paimonPredicate) =>
+            pushableSparkPredicates.append(predicate)
+            pushablePaimonPredicates.append(paimonPredicate)
             if (paimonPredicate.visit(partitionVisitor)) {
-              pushableSparkFilters.append(predicate)
-              pushablePaimonPredicates.append(paimonPredicate)
               // We need to filter the stats using filter instead of predicate.
               PaimonUtils.filterV2ToV1(predicate).map(reserved.append(_))
-            } else if (paimonPredicate.visit(rowIdVisitor) != null) {
-              pushableSparkFilters.append(predicate)
-              if (pushableRowIds == null) {
-                pushableRowIds = paimonPredicate.visit(rowIdVisitor).asScala
-              } else {
-                pushableRowIds.retain(paimonPredicate.visit(rowIdVisitor).asScala)
-              }
             } else {
               postScan.append(predicate)
             }
           case None =>
-            postScan.append(predicate)
+            val rowTypeWithRowId = new RowType(
+              false, Collections.singletonList(new DataField(-1, "_ROW_ID", DataTypes.BIGINT())))
+            val converterWithRowId = SparkV2FilterConverter(rowTypeWithRowId)
+            val newPaimonPredicate = converterWithRowId.convert(predicate).orNull
+            val rowIdVisitor = new RowIdPredicateVisitor
+
+            if (newPaimonPredicate != null && newPaimonPredicate.visit(rowIdVisitor) != null
+              && options.getOrDefault(CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.key(),
+              CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.defaultValue().toString) == "true") {
+              pushableSparkPredicates.append(predicate)
+              if (pushableRowIds == null) {
+                pushableRowIds = newPaimonPredicate.visit(rowIdVisitor).asScala
+              } else {
+                pushableRowIds.retain(newPaimonPredicate.visit(rowIdVisitor).asScala)
+              }
+            } else {
+              postScan.append(predicate)
+            }
         }
     }
 
-    if (pushableSparkFilters.nonEmpty) {
-      this.pushedSparkPredicates = pushableSparkFilters.toArray
+    if (pushableSparkPredicates.nonEmpty) {
+      this.pushedSparkPredicates = pushableSparkPredicates.toArray
     }
     if (pushablePaimonPredicates.nonEmpty) {
       this.pushedPaimonPredicates = pushablePaimonPredicates.toArray

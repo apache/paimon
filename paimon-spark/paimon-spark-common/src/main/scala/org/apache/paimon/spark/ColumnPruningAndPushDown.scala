@@ -25,13 +25,13 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.table.{SpecialFields, Table}
 import org.apache.paimon.table.source.ReadBuilder
 import org.apache.paimon.types.RowType
-
+import org.apache.paimon.utils.Range
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.types.StructType
 
 import java.lang.{Long => JLong}
-
+import java.util.ArrayList
 import scala.collection.JavaConverters._
 
 trait ColumnPruningAndPushDown extends Scan with Logging {
@@ -93,7 +93,27 @@ trait ColumnPruningAndPushDown extends Scan with Logging {
     }
     // Filter data by rowIds. If rowIds is empty, it means no data will be read.
     if (rowIds != null) {
-      _readBuilder.withRowIds(rowIds.toList.asJava)
+      val rowIdRanges = new ArrayList[Range]()
+      var rangeStart: Long = -1L
+      var rangeEnd: Long = -1L
+
+      for (curRowId <- rowIds.sorted) {
+        if (rangeStart == -1L) {
+          rangeStart = curRowId
+          rangeEnd = curRowId
+        } else if (rangeEnd == curRowId - 1) {
+          rangeEnd = curRowId
+        } else {
+          rowIdRanges.add(new Range(rangeStart, rangeEnd))
+          rangeStart = curRowId
+          rangeEnd = curRowId
+        }
+      }
+      if (rangeStart != -1L) {
+        rowIdRanges.add(new Range(rangeStart, rangeEnd))
+      }
+
+      _readBuilder.withRowRanges(rowIdRanges)
     }
     pushDownLimit.foreach(_readBuilder.withLimit)
     pushDownTopN.foreach(_readBuilder.withTopN)

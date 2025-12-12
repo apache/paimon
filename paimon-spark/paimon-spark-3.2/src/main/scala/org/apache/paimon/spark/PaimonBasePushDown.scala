@@ -18,15 +18,14 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, RowIdPredicateVisitor}
 import org.apache.paimon.types.{DataField, DataTypes, RowType}
-
 import org.apache.spark.sql.connector.read.SupportsPushDownFilters
 import org.apache.spark.sql.sources.Filter
 
 import java.lang.{Long => JLong}
-import java.util.{ArrayList, List => JList}
-
+import java.util.{ArrayList, Collections, List => JList, Map => JMap}
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
@@ -35,6 +34,7 @@ trait PaimonBasePushDown extends SupportsPushDownFilters {
 
   protected var partitionKeys: JList[String]
   protected var rowType: RowType
+  protected val options: JMap[String, String] = Collections.emptyMap()
 
   private var pushedSparkFilters = Array.empty[Filter]
   protected var pushedRowIds: Array[JLong] = null
@@ -54,30 +54,36 @@ trait PaimonBasePushDown extends SupportsPushDownFilters {
     val postScan = mutable.ArrayBuffer.empty[Filter]
     val reserved = mutable.ArrayBuffer.empty[Filter]
 
-    val dataFieldWithRowId = new ArrayList[DataField](rowType.getFields)
-    dataFieldWithRowId.add(new DataField(rowType.getFieldCount, "_ROW_ID", DataTypes.BIGINT()))
-    val rowTypeWithRowId = rowType.copy(dataFieldWithRowId)
-    val converter = new SparkFilterConverter(rowTypeWithRowId)
+    val converter = new SparkFilterConverter(rowType)
     val partitionVisitor = new PartitionPredicateVisitor(partitionKeys)
-    val rowIdVisitor = new RowIdPredicateVisitor
 
     filters.foreach {
       filter =>
         val predicate = converter.convertIgnoreFailure(filter)
         if (predicate == null) {
-          postScan.append(filter)
-        } else {
-          if (predicate.visit(partitionVisitor)) {
-            pushableSparkFilters.append(filter)
-            pushablePaimonPredicates.append(predicate)
-            reserved.append(filter)
-          } else if (predicate.visit(rowIdVisitor) != null) {
+          val rowTypeWithRowId = new RowType(
+            false, Collections.singletonList(new DataField(-1, "_ROW_ID", DataTypes.BIGINT())))
+          val converterWithRowId = new SparkFilterConverter(rowTypeWithRowId)
+          val newPredicate = converterWithRowId.convertIgnoreFailure(filter)
+          val rowIdVisitor = new RowIdPredicateVisitor
+
+          if (newPredicate != null && newPredicate.visit(rowIdVisitor) != null
+            && options.getOrDefault(CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.key(),
+            CoreOptions.ROW_ID_PUSH_DOWN_ENABLED.defaultValue().toString) == "true") {
             pushableSparkFilters.append(filter)
             if (pushableRowIds == null) {
-              pushableRowIds = predicate.visit(rowIdVisitor).asScala
+              pushableRowIds = newPredicate.visit(rowIdVisitor).asScala
             } else {
-              pushableRowIds.retain(predicate.visit(rowIdVisitor).asScala)
+              pushableRowIds.retain(newPredicate.visit(rowIdVisitor).asScala)
             }
+          } else {
+            postScan.append(filter)
+          }
+        } else {
+          pushableSparkFilters.append(filter)
+          pushablePaimonPredicates.append(predicate)
+          if (predicate.visit(partitionVisitor)) {
+            reserved.append(filter)
           } else {
             postScan.append(filter)
           }
