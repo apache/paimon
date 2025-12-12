@@ -33,7 +33,7 @@ import java.util.List;
 import java.util.Objects;
 
 /** A compressed bitmap for 64-bit integer aggregated by tree. */
-public class RoaringNavigableMap64 {
+public class RoaringNavigableMap64 implements Iterable<Long> {
 
     private final Roaring64NavigableMap roaring64NavigableMap;
 
@@ -51,6 +51,10 @@ public class RoaringNavigableMap64 {
         } else {
             roaring64NavigableMap.addRange(range.from, range.to);
         }
+    }
+
+    public boolean contains(long x) {
+        return roaring64NavigableMap.contains(x);
     }
 
     public void add(long x) {
@@ -75,6 +79,10 @@ public class RoaringNavigableMap64 {
 
     public long getLongCardinality() {
         return roaring64NavigableMap.getLongCardinality();
+    }
+
+    public int getIntCardinality() {
+        return roaring64NavigableMap.getIntCardinality();
     }
 
     public Iterator<Long> iterator() {
