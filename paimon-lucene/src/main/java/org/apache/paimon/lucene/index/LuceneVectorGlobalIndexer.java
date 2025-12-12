@@ -34,21 +34,21 @@ import java.util.List;
 public class LuceneVectorGlobalIndexer implements GlobalIndexer {
 
     private final DataType fieldType;
-    private final Options options;
+    private final LuceneVectorIndexOptions options;
 
     public LuceneVectorGlobalIndexer(DataType fieldType, Options options) {
         this.fieldType = fieldType;
-        this.options = options;
+        this.options = new LuceneVectorIndexOptions(options);
     }
 
     @Override
-    public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException {
+    public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
         return new LuceneVectorGlobalIndexWriter(fileWriter, fieldType, options);
     }
 
     @Override
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
-        return new LuceneVectorGlobalIndexReader(fileReader, files);
+        return new LuceneVectorGlobalIndexReader(fileReader, files, options, fieldType);
     }
 }

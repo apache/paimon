@@ -23,6 +23,7 @@ import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.TopK;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -118,5 +119,10 @@ public class FileIndexReaderWrapper implements GlobalIndexReader {
     @Override
     public void close() throws IOException {
         closeable.close();
+    }
+
+    @Override
+    public GlobalIndexResult visitTopK(TopK topK, GlobalIndexResult globalIndexResult) {
+        return transform.apply(reader.visitTopK(topK, globalIndexResult));
     }
 }

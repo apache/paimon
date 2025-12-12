@@ -24,10 +24,16 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.TopK;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.lucene.document.Document;
+import org.apache.lucene.document.LongPoint;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.StoredFields;
@@ -37,12 +43,17 @@ import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TopDocs;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
+
+import static org.apache.paimon.lucene.index.LuceneVectorIndex.ROW_ID_FIELD;
 
 /**
  * Vector global index reader using Apache Lucene.
@@ -55,32 +66,50 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     private final List<IndexSearcher> searchers;
     private final List<LuceneIndexMMapDirectory> directories;
     private final List<GlobalIndexIOMeta> ioMetas;
+    private final GlobalIndexFileReader fileReader;
+    private final GlobalIndexResult defaultResult;
+    private volatile boolean indicesLoaded = false;
+    private final LuceneVectorIndexOptions vectorIndexOptions;
+    private final DataType fieldType;
+    private final long offset;
 
     public LuceneVectorGlobalIndexReader(
-            GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> ioMetas) throws IOException {
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> ioMetas,
+            LuceneVectorIndexOptions options,
+            DataType fieldType) {
+        this.fileReader = fileReader;
         this.ioMetas = ioMetas;
+        this.vectorIndexOptions = options;
+        this.fieldType = fieldType;
         this.searchers = new ArrayList<>();
         this.directories = new ArrayList<>();
-        loadIndices(fileReader, ioMetas);
+        Range range =
+                ioMetas.stream()
+                        .map(GlobalIndexIOMeta::rowIdRange)
+                        .reduce(Range::union)
+                        .orElse(null);
+        this.offset = ioMetas.get(0).rowIdRange().from;
+        this.defaultResult = GlobalIndexResult.fromRange(range);
     }
 
-    /**
-     * Search for similar vectors using Lucene KNN search.
-     *
-     * @param query query vector
-     * @param k number of results
-     * @return global index result containing row IDs
-     */
-    public GlobalIndexResult search(float[] query, int k) {
-        KnnFloatVectorQuery knnQuery =
-                new KnnFloatVectorQuery(LuceneVectorIndex.VECTOR_FIELD, query, k);
-        return search(knnQuery, k);
-    }
-
-    public GlobalIndexResult search(byte[] query, int k) {
-        KnnByteVectorQuery knnQuery =
-                new KnnByteVectorQuery(LuceneVectorIndex.VECTOR_FIELD, query, k);
-        return search(knnQuery, k);
+    @Override
+    public GlobalIndexResult visitTopK(TopK topK, @Nullable GlobalIndexResult globalIndexResult) {
+        try {
+            if (LuceneVectorMetric.fromString(topK.similarityFunction())
+                    == vectorIndexOptions.metric()) {
+                ensureLoadIndices(fileReader, ioMetas);
+                Query query = query(topK, fieldType, globalIndexResult);
+                return search(query, topK.limit());
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to search vector index for TopK with similarity=%s, k=%d",
+                            topK.similarityFunction(), topK.limit()),
+                    e);
+        }
+        return defaultResult;
     }
 
     @Override
@@ -127,18 +156,54 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private GlobalIndexResult search(Query query, int k) {
+    private Query query(TopK topK, DataType dataType, GlobalIndexResult globalIndexResult) {
+        Query idFilterQuery = null;
+        if (globalIndexResult != null) {
+            ArrayList<Long> targetIds = new ArrayList<>();
+            globalIndexResult
+                    .results()
+                    .iterator()
+                    .forEachRemaining(id -> targetIds.add(id - offset));
+            idFilterQuery = LongPoint.newSetQuery(ROW_ID_FIELD, targetIds);
+        }
+        if (dataType instanceof ArrayType
+                && ((ArrayType) dataType).getElementType() instanceof FloatType) {
+            if (!(topK.vector() instanceof float[])) {
+                throw new IllegalArgumentException(
+                        "Expected float[] vector but got: " + topK.vector().getClass());
+            }
+            return new KnnFloatVectorQuery(
+                    LuceneVectorIndex.VECTOR_FIELD,
+                    (float[]) topK.vector(),
+                    topK.limit(),
+                    idFilterQuery);
+        } else if (dataType instanceof ArrayType
+                && ((ArrayType) dataType).getElementType() instanceof TinyIntType) {
+            if (!(topK.vector() instanceof byte[])) {
+                throw new IllegalArgumentException(
+                        "Expected byte[] vector but got: " + topK.vector().getClass());
+            }
+            return new KnnByteVectorQuery(
+                    LuceneVectorIndex.VECTOR_FIELD,
+                    (byte[]) topK.vector(),
+                    topK.limit(),
+                    idFilterQuery);
+        } else {
+            throw new IllegalArgumentException("Unsupported data type: " + dataType);
+        }
+    }
+
+    private GlobalIndexResult search(Query query, int k) throws IOException {
         PriorityQueue<ScoredRow> topK =
                 new PriorityQueue<>(Comparator.comparingDouble(sr -> sr.score));
         for (IndexSearcher searcher : searchers) {
             try {
                 TopDocs topDocs = searcher.search(query, k);
                 StoredFields storedFields = searcher.storedFields();
-                Set<String> fieldsToLoad = Set.of(LuceneVectorIndex.ROW_ID_FIELD);
+                Set<String> fieldsToLoad = Set.of(ROW_ID_FIELD);
                 for (org.apache.lucene.search.ScoreDoc scoreDoc : topDocs.scoreDocs) {
                     Document doc = storedFields.document(scoreDoc.doc, fieldsToLoad);
-                    long rowId =
-                            doc.getField(LuceneVectorIndex.ROW_ID_FIELD).numericValue().longValue();
+                    long rowId = doc.getField(ROW_ID_FIELD).numericValue().longValue();
                     if (topK.size() < k) {
                         topK.offer(new ScoredRow(rowId, scoreDoc.score));
                     } else {
@@ -153,10 +218,13 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
             }
         }
         RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
+        HashMap<Long, Float> id2scores = new HashMap<>(topK.size());
         for (ScoredRow scoredRow : topK) {
-            roaringBitmap64.add(scoredRow.rowId);
+            long rowId = scoredRow.rowId + offset;
+            id2scores.put(rowId, scoredRow.score);
+            roaringBitmap64.add(rowId);
         }
-        return GlobalIndexResult.create(() -> roaringBitmap64);
+        return new LuceneTopkGlobalIndexResult(roaringBitmap64, id2scores);
     }
 
     /** Helper class to store row ID with its score. */
@@ -170,33 +238,38 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private void loadIndices(GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files)
+    private void ensureLoadIndices(GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files)
             throws IOException {
-        for (GlobalIndexIOMeta meta : files) {
-            try (SeekableInputStream in = fileReader.getInputStream(meta.fileName())) {
-                LuceneIndexMMapDirectory directory = null;
-                IndexReader reader = null;
-                boolean success = false;
-                try {
-                    directory = LuceneIndexMMapDirectory.deserialize(in);
-                    reader = DirectoryReader.open(directory.directory());
-                    IndexSearcher searcher = new IndexSearcher(reader);
-                    directories.add(directory);
-                    searchers.add(searcher);
-                    success = true;
-                } finally {
-                    if (!success) {
-                        if (reader != null) {
+        if (!indicesLoaded) {
+            synchronized (this) {
+                if (!indicesLoaded) {
+                    for (GlobalIndexIOMeta meta : files) {
+                        try (SeekableInputStream in = fileReader.getInputStream(meta.fileName())) {
+                            LuceneIndexMMapDirectory directory = null;
+                            IndexReader reader = null;
                             try {
-                                reader.close();
-                            } catch (IOException e) {
-                            }
-                        }
-                        if (directory != null) {
-                            try {
-                                directory.close();
-                            } catch (Exception e) {
-                                throw new IOException("Failed to close directory", e);
+                                directory = LuceneIndexMMapDirectory.deserialize(in);
+                                reader = DirectoryReader.open(directory.directory());
+                                IndexSearcher searcher = new IndexSearcher(reader);
+                                directories.add(directory);
+                                searchers.add(searcher);
+                                indicesLoaded = true;
+                            } finally {
+                                if (!indicesLoaded) {
+                                    if (reader != null) {
+                                        try {
+                                            reader.close();
+                                        } catch (IOException e) {
+                                        }
+                                    }
+                                    if (directory != null) {
+                                        try {
+                                            directory.close();
+                                        } catch (Exception e) {
+                                            throw new IOException("Failed to close directory", e);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -208,80 +281,71 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     // Implementation of FunctionVisitor methods
     @Override
     public GlobalIndexResult visitIsNotNull(FieldRef fieldRef) {
-        Range range =
-                ioMetas.stream()
-                        .map(GlobalIndexIOMeta::rowIdRange)
-                        .reduce(Range::union)
-                        .orElse(null);
-        return GlobalIndexResult.fromRange(range);
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitIsNull(FieldRef fieldRef) {
-        throw new UnsupportedOperationException("Vector index does not support isNull predicate");
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support startsWith predicate");
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitEndsWith(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support endsWith predicate");
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitContains(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support contains predicate");
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitLike(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support like predicate");
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support lessThan predicate");
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support greaterOrEqual predicate");
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitNotEqual(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support notEqual predicate");
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support lessOrEqual predicate");
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitEqual(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support equal predicate");
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support greaterThan predicate");
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
-        throw new UnsupportedOperationException("Vector index does not support in predicate");
+        return defaultResult;
     }
 
     @Override
     public GlobalIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        throw new UnsupportedOperationException("Vector index does not support notIn predicate");
+        return defaultResult;
     }
 }

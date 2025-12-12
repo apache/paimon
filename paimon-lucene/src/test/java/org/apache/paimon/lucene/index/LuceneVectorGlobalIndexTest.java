@@ -27,10 +27,12 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.TopK;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,6 +58,7 @@ public class LuceneVectorGlobalIndexTest {
     private FileIO fileIO;
     private Path indexPath;
     private DataType vectorType;
+    private String defaultMetric = "EUCLIDEAN";
 
     @BeforeEach
     public void setup() {
@@ -99,11 +102,11 @@ public class LuceneVectorGlobalIndexTest {
         for (String metric : metrics) {
             Options options = createDefaultOptions(dimension);
             options.setString("vector.metric", metric);
-
+            LuceneVectorIndexOptions indexOptions = new LuceneVectorIndexOptions(options);
             Path metricIndexPath = new Path(indexPath, metric.toLowerCase());
             GlobalIndexFileWriter fileWriter = createFileWriter(metricIndexPath);
             LuceneVectorGlobalIndexWriter writer =
-                    new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, options);
+                    new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
             List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
             testVectors.forEach(writer::write);
@@ -122,8 +125,10 @@ public class LuceneVectorGlobalIndexTest {
                             result.meta()));
 
             try (LuceneVectorGlobalIndexReader reader =
-                    new LuceneVectorGlobalIndexReader(fileReader, metas)) {
-                GlobalIndexResult searchResult = reader.search(testVectors.get(0), 3);
+                    new LuceneVectorGlobalIndexReader(
+                            fileReader, metas, indexOptions, vectorType)) {
+                TopK topK = new TopK(testVectors.get(0), metric, 3);
+                GlobalIndexResult searchResult = reader.visitTopK(topK, null);
                 assertThat(searchResult).isNotNull();
             }
         }
@@ -135,11 +140,11 @@ public class LuceneVectorGlobalIndexTest {
 
         for (int dimension : dimensions) {
             Options options = createDefaultOptions(dimension);
-
+            LuceneVectorIndexOptions indexOptions = new LuceneVectorIndexOptions(options);
             Path dimIndexPath = new Path(indexPath, "dim_" + dimension);
             GlobalIndexFileWriter fileWriter = createFileWriter(dimIndexPath);
             LuceneVectorGlobalIndexWriter writer =
-                    new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, options);
+                    new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
             int numVectors = 10;
             List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
@@ -159,9 +164,11 @@ public class LuceneVectorGlobalIndexTest {
                             result.meta()));
 
             try (LuceneVectorGlobalIndexReader reader =
-                    new LuceneVectorGlobalIndexReader(fileReader, metas)) {
+                    new LuceneVectorGlobalIndexReader(
+                            fileReader, metas, indexOptions, vectorType)) {
                 // Verify search works with this dimension
-                GlobalIndexResult searchResult = reader.search(testVectors.get(0), 5);
+                TopK topK = new TopK(testVectors.get(0), defaultMetric, 5);
+                GlobalIndexResult searchResult = reader.visitTopK(topK, null);
                 assertThat(searchResult).isNotNull();
             }
         }
@@ -172,8 +179,9 @@ public class LuceneVectorGlobalIndexTest {
         Options options = createDefaultOptions(64);
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuceneVectorIndexOptions indexOptions = new LuceneVectorIndexOptions(options);
         LuceneVectorGlobalIndexWriter writer =
-                new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, options);
+                new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
         // Try to write vector with wrong dimension
         float[] wrongDimVector = new float[32]; // Wrong dimension
@@ -196,8 +204,9 @@ public class LuceneVectorGlobalIndexTest {
                 };
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuceneVectorIndexOptions indexOptions = new LuceneVectorIndexOptions(options);
         LuceneVectorGlobalIndexWriter writer =
-                new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, options);
+                new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
         Arrays.stream(vectors).forEach(writer::write);
 
         List<GlobalIndexWriter.ResultEntry> results = writer.finish();
@@ -205,27 +214,50 @@ public class LuceneVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         List<GlobalIndexIOMeta> metas = new ArrayList<>();
+        long offset = 10;
         for (int i = 0; i < results.size(); i++) {
             GlobalIndexWriter.ResultEntry result = results.get(i);
             metas.add(
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
-                            result.rowRange(),
+                            result.rowRange().addOffset(offset),
                             result.meta()));
         }
 
         try (LuceneVectorGlobalIndexReader reader =
-                new LuceneVectorGlobalIndexReader(fileReader, metas)) {
-            GlobalIndexResult result = reader.search(vectors[0], 1);
+                new LuceneVectorGlobalIndexReader(fileReader, metas, indexOptions, vectorType)) {
+            TopK topK = new TopK(vectors[0], defaultMetric, 1);
+            LuceneTopkGlobalIndexResult result =
+                    (LuceneTopkGlobalIndexResult) reader.visitTopK(topK, null);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
-            assertThat(containsRowId(result, 1)).isTrue();
+            long expectedRowId = offset;
+            assertThat(containsRowId(result, expectedRowId)).isTrue();
+            assertThat(result.scoreGetter().score(expectedRowId)).isEqualTo(1.0f);
+
+            GlobalIndexResult globalIndexResult =
+                    new GlobalIndexResult() {
+                        @Override
+                        public RoaringNavigableMap64 results() {
+                            RoaringNavigableMap64 results = new RoaringNavigableMap64();
+                            results.add(offset);
+                            return results;
+                        }
+                    };
+
+            result = (LuceneTopkGlobalIndexResult) reader.visitTopK(topK, globalIndexResult);
+            assertThat(result.results().isEmpty()).isEqualTo(true);
 
             float[] queryVector = new float[] {0.85f, 0.15f};
-            result = reader.search(queryVector, 2);
+            topK = new TopK(queryVector, defaultMetric, 2);
+            result = (LuceneTopkGlobalIndexResult) reader.visitTopK(topK, null);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
-            assertThat(containsRowId(result, 2)).isTrue();
-            assertThat(containsRowId(result, 4)).isTrue();
+            long rowId1 = offset + 1;
+            long rowId2 = offset + 3;
+            assertThat(containsRowId(result, rowId1)).isTrue();
+            assertThat(containsRowId(result, rowId2)).isTrue();
+            assertThat(result.scoreGetter().score(rowId1)).isEqualTo(0.98765427f);
+            assertThat(result.scoreGetter().score(rowId2)).isEqualTo(0.9738046f);
         }
     }
 
@@ -244,8 +276,9 @@ public class LuceneVectorGlobalIndexTest {
 
         DataType byteVectorType = new ArrayType(new TinyIntType());
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuceneVectorIndexOptions indexOptions = new LuceneVectorIndexOptions(options);
         LuceneVectorGlobalIndexWriter writer =
-                new LuceneVectorGlobalIndexWriter(fileWriter, byteVectorType, options);
+                new LuceneVectorGlobalIndexWriter(fileWriter, byteVectorType, indexOptions);
         Arrays.stream(vectors).forEach(writer::write);
 
         List<GlobalIndexWriter.ResultEntry> results = writer.finish();
@@ -264,23 +297,37 @@ public class LuceneVectorGlobalIndexTest {
         }
 
         try (LuceneVectorGlobalIndexReader reader =
-                new LuceneVectorGlobalIndexReader(fileReader, metas)) {
-            GlobalIndexResult result = reader.search(vectors[0], 1);
+                new LuceneVectorGlobalIndexReader(
+                        fileReader, metas, indexOptions, byteVectorType)) {
+            TopK topK = new TopK(vectors[0], defaultMetric, 1);
+            GlobalIndexResult result = reader.visitTopK(topK, null);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
-            assertThat(containsRowId(result, 1)).isTrue();
+            assertThat(containsRowId(result, 0)).isTrue();
 
             byte[] queryVector = new byte[] {85, 15};
-            result = reader.search(queryVector, 2);
+            topK = new TopK(queryVector, defaultMetric, 2);
+            result = reader.visitTopK(topK, null);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
-            assertThat(containsRowId(result, 2)).isTrue();
-            assertThat(containsRowId(result, 4)).isTrue();
+            assertThat(containsRowId(result, 1)).isTrue();
+            assertThat(containsRowId(result, 3)).isTrue();
         }
+    }
+
+    @Test
+    public void testInvalidTopK() {
+        assertThatThrownBy(() -> new TopK(null, defaultMetric, 10))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Vector cannot be null");
+
+        assertThatThrownBy(() -> new TopK(new float[] {0.1f}, defaultMetric, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Limit must be positive");
     }
 
     private Options createDefaultOptions(int dimension) {
         Options options = new Options();
         options.setInteger("vector.dim", dimension);
-        options.setString("vector.metric", "EUCLIDEAN");
+        options.setString("vector.metric", defaultMetric);
         options.setInteger("vector.m", 16);
         options.setInteger("vector.ef-construction", 100);
         return options;

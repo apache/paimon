@@ -20,8 +20,10 @@ package org.apache.paimon.format.orc.filter;
 
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
+import org.apache.paimon.predicate.TopK;
 import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.types.DataType;
 
@@ -150,6 +152,12 @@ public class OrcPredicateFunctionVisitor
     public Optional<OrcFilters.Predicate> visitNotIn(FieldRef fieldRef, List<Object> literals) {
         Optional<OrcFilters.Predicate> inPredicate = visitIn(fieldRef, literals);
         return inPredicate.map(OrcFilters.Not::new);
+    }
+
+    @Override
+    public Optional<OrcFilters.Predicate> visitTopK(
+            TopK topK, GlobalIndexResult globalIndexResult) {
+        return Optional.empty();
     }
 
     @Override
