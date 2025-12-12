@@ -36,6 +36,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.parquet.ParquetReadOptions;
+import org.apache.parquet.conf.PlainParquetConfiguration;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetInputFormat;
@@ -101,7 +102,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
         ParquetReadOptions.Builder builder =
-                ParquetReadOptions.builder().withRange(0, context.fileSize());
+                ParquetReadOptions.builder(new PlainParquetConfiguration())
+                        .withRange(0, context.fileSize());
         setReadOptions(builder);
 
         ParquetFileReader reader =
