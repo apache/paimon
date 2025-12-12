@@ -20,6 +20,7 @@ package org.apache.paimon.fileindex;
 
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
+import org.apache.paimon.predicate.TopK;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.TransformPredicate;
 
@@ -115,6 +116,11 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
                             : fileIndexResult.or(visitNotEqual(fieldRef, key));
         }
         return fileIndexResult;
+    }
+
+    @Override
+    public FileIndexResult visitTopK(TopK topK) {
+        throw new UnsupportedOperationException("Should not invoke this");
     }
 
     @Override

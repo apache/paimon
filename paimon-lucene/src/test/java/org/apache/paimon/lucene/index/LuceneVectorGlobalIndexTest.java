@@ -27,6 +27,7 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.TopK;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
@@ -56,6 +57,7 @@ public class LuceneVectorGlobalIndexTest {
     private FileIO fileIO;
     private Path indexPath;
     private DataType vectorType;
+    private String defaultMetric = "EUCLIDEAN";
 
     @BeforeEach
     public void setup() {
@@ -123,7 +125,8 @@ public class LuceneVectorGlobalIndexTest {
 
             try (LuceneVectorGlobalIndexReader reader =
                     new LuceneVectorGlobalIndexReader(fileReader, metas)) {
-                GlobalIndexResult searchResult = reader.search(testVectors.get(0), 3);
+                TopK topK = new TopK(testVectors.get(0), metric, 3);
+                GlobalIndexResult searchResult = reader.visitTopK(topK);
                 assertThat(searchResult).isNotNull();
             }
         }
@@ -161,7 +164,8 @@ public class LuceneVectorGlobalIndexTest {
             try (LuceneVectorGlobalIndexReader reader =
                     new LuceneVectorGlobalIndexReader(fileReader, metas)) {
                 // Verify search works with this dimension
-                GlobalIndexResult searchResult = reader.search(testVectors.get(0), 5);
+                TopK topK = new TopK(testVectors.get(0), defaultMetric, 5);
+                GlobalIndexResult searchResult = reader.visitTopK(topK);
                 assertThat(searchResult).isNotNull();
             }
         }
@@ -217,12 +221,14 @@ public class LuceneVectorGlobalIndexTest {
 
         try (LuceneVectorGlobalIndexReader reader =
                 new LuceneVectorGlobalIndexReader(fileReader, metas)) {
-            GlobalIndexResult result = reader.search(vectors[0], 1);
+            TopK topK = new TopK(vectors[0], defaultMetric, 1);
+            GlobalIndexResult result = reader.visitTopK(topK);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
             assertThat(containsRowId(result, 1)).isTrue();
 
             float[] queryVector = new float[] {0.85f, 0.15f};
-            result = reader.search(queryVector, 2);
+            topK = new TopK(queryVector, defaultMetric, 2);
+            result = reader.visitTopK(topK);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
             assertThat(containsRowId(result, 2)).isTrue();
             assertThat(containsRowId(result, 4)).isTrue();
@@ -265,12 +271,14 @@ public class LuceneVectorGlobalIndexTest {
 
         try (LuceneVectorGlobalIndexReader reader =
                 new LuceneVectorGlobalIndexReader(fileReader, metas)) {
-            GlobalIndexResult result = reader.search(vectors[0], 1);
+            TopK topK = new TopK(vectors[0], defaultMetric, 1);
+            GlobalIndexResult result = reader.visitTopK(topK);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
             assertThat(containsRowId(result, 1)).isTrue();
 
             byte[] queryVector = new byte[] {85, 15};
-            result = reader.search(queryVector, 2);
+            topK = new TopK(queryVector, defaultMetric, 2);
+            result = reader.visitTopK(topK);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
             assertThat(containsRowId(result, 2)).isTrue();
             assertThat(containsRowId(result, 4)).isTrue();
@@ -280,7 +288,7 @@ public class LuceneVectorGlobalIndexTest {
     private Options createDefaultOptions(int dimension) {
         Options options = new Options();
         options.setInteger("vector.dim", dimension);
-        options.setString("vector.metric", "EUCLIDEAN");
+        options.setString("vector.metric", defaultMetric);
         options.setInteger("vector.m", 16);
         options.setInteger("vector.ef-construction", 100);
         return options;

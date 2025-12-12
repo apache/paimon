@@ -74,6 +74,8 @@ public interface FunctionVisitor<T> extends PredicateVisitor<T> {
 
     T visitNotIn(FieldRef fieldRef, List<Object> literals);
 
+    T visitTopK(TopK topK);
+
     // ----------------- Compound functions ------------------------
 
     T visitAnd(List<T> children);

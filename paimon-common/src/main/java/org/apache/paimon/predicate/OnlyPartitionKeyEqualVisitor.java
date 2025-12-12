@@ -118,6 +118,11 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
     }
 
     @Override
+    public Boolean visitTopK(TopK topK) {
+        return false;
+    }
+
+    @Override
     public Boolean visitAnd(List<Boolean> children) {
         return children.stream().reduce((first, second) -> first && second).get();
     }

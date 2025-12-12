@@ -23,6 +23,7 @@ import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.TopK;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -113,6 +114,11 @@ public class FileIndexReaderWrapper implements GlobalIndexReader {
     @Override
     public GlobalIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
         return transform.apply(reader.visitNotIn(fieldRef, literals));
+    }
+
+    @Override
+    public GlobalIndexResult visitTopK(TopK topK) {
+        return transform.apply(reader.visitTopK(topK));
     }
 
     @Override
