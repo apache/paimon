@@ -46,11 +46,7 @@ public class RoaringNavigableMap64 implements Iterable<Long> {
     }
 
     public void addRange(Range range) {
-        if (range.from == range.to) {
-            roaring64NavigableMap.add(range.from);
-        } else {
-            roaring64NavigableMap.addRange(range.from, range.to);
-        }
+        roaring64NavigableMap.addRange(range.from, range.to + 1);
     }
 
     public boolean contains(long x) {
