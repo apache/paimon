@@ -72,14 +72,12 @@ public class GlobalIndexSerDeUtils {
         }
 
         int type = dataInput.readInt();
-
         int size = dataInput.readInt();
         byte[] bytes = new byte[size];
         dataInput.readFully(bytes);
 
         RoaringNavigableMap64 roaringNavigableMap64 = new RoaringNavigableMap64();
         roaringNavigableMap64.deserialize(bytes);
-
         if (type == 0) {
             return GlobalIndexResult.create(() -> roaringNavigableMap64);
         }
