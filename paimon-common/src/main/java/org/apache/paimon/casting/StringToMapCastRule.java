@@ -176,7 +176,7 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
                 : castExecutor.cast(BinaryString.fromString(valueStr));
     }
 
-    private List<String> splitMapEntries(String content) {
+    public List<String> splitMapEntries(String content) {
         List<String> entries = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         Stack<Character> bracketStack = new Stack<>();
@@ -186,10 +186,13 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
         for (char c : content.toCharArray()) {
             if (escaped) {
                 escaped = false;
+                continue;
             } else if (c == '\\') {
                 escaped = true;
+                continue;
             } else if (c == '"') {
                 inQuotes = !inQuotes;
+                continue;
             } else if (!inQuotes) {
                 if (StringUtils.isOpenBracket(c)) {
                     bracketStack.push(c);
@@ -209,7 +212,7 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
 
     private void addCurrentEntry(List<String> entries, StringBuilder current) {
         if (current.length() > 0) {
-            entries.add(current.toString());
+            entries.add(current.toString().trim());
             current.setLength(0);
         }
     }
