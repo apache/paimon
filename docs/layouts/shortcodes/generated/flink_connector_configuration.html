@@ -180,7 +180,7 @@ under the License.
             <td><h5>scan.partitions</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Specify the partitions to scan. Partitions should be given in the form of key1=value1,key2=value2. Partition keys not specified will be filled with the value of partition.default-name. Multiple partitions should be separated by semicolon (;). This option can support normal source tables and lookup join tables. For lookup joins, two special values max_pt() and max_two_pt() are also supported, specifying the (two) partition(s) with the largest partition value.</td>
+            <td>Specify the partitions to scan. Partitions should be given in the form of key1=value1,key2=value2. Partition keys not specified will be filled with the value of partition.default-name. Multiple partitions should be separated by semicolon (;). This option can support normal source tables and lookup join tables. There are two special values max_pt() and max_two_pt() are also supported to specify the (two) partition(s) with the largest partition value. For lookup source, the max partition(s) will be periodically refreshed; for normal source, the max partition(s) will be determined before job running without refreshing even for streaming jobs.</td>
         </tr>
         <tr>
             <td><h5>scan.remove-normalize</h5></td>

@@ -273,25 +273,34 @@ public interface PartitionPredicate extends Serializable {
         return predicate;
     }
 
-    static Predicate createPartitionPredicate(RowType partitionType, Object[] partition) {
-        Preconditions.checkArgument(
-                partition.length == partitionType.getFieldCount(),
-                "Partition's field count should be equal to partitionType's field count.");
-
-        Map<String, Object> partitionMap = new HashMap<>(partition.length);
-        for (int i = 0; i < partition.length; i++) {
-            partitionMap.put(partitionType.getFields().get(i).name(), partition[i]);
+    static Predicate createPartitionPredicate(
+            RowType rowType, RowDataToObjectArrayConverter converter, List<BinaryRow> partitions) {
+        Predicate partFilter = null;
+        for (BinaryRow partition : partitions) {
+            if (partFilter == null) {
+                partFilter = createSinglePartitionPredicate(rowType, converter, partition);
+            } else {
+                partFilter =
+                        PredicateBuilder.or(
+                                partFilter,
+                                createSinglePartitionPredicate(rowType, converter, partition));
+            }
         }
-
-        return createPartitionPredicate(partitionType, partitionMap);
+        return partFilter;
     }
 
-    static Predicate createPartitionPredicate(RowType partitionType, BinaryRow partition) {
+    static Predicate createSinglePartitionPredicate(
+            RowType rowType, RowDataToObjectArrayConverter converter, BinaryRow partition) {
+        RowType partitionType = converter.rowType();
         Preconditions.checkArgument(
                 partition.getFieldCount() == partitionType.getFieldCount(),
                 "Partition's field count should be equal to partitionType's field count.");
-        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(partitionType);
-        return createPartitionPredicate(partitionType, converter.convert(partition));
+        Object[] partitionSpec = converter.convert(partition);
+        Map<String, Object> partitionMap = new HashMap<>(partitionSpec.length);
+        for (int i = 0; i < partitionSpec.length; i++) {
+            partitionMap.put(partitionType.getFields().get(i).name(), partitionSpec[i]);
+        }
+        return createPartitionPredicate(rowType, partitionMap);
     }
 
     @Nullable

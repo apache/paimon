@@ -302,8 +302,11 @@ public class FlinkConnectorOptions {
                                     + CoreOptions.PARTITION_DEFAULT_NAME.key()
                                     + ". Multiple partitions should be separated by semicolon (;). "
                                     + "This option can support normal source tables and lookup join tables. "
-                                    + "For lookup joins, two special values max_pt() and max_two_pt() are also supported, "
-                                    + "specifying the (two) partition(s) with the largest partition value.");
+                                    + "There are two special values max_pt() and max_two_pt() are also supported "
+                                    + "to specify the (two) partition(s) with the largest partition value. For "
+                                    + "lookup source, the max partition(s) will be periodically refreshed; for "
+                                    + "normal source, the max partition(s) will be determined before job running "
+                                    + "without refreshing even for streaming jobs.");
 
     public static final ConfigOption<Duration> LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL =
             ConfigOptions.key("lookup.dynamic-partition.refresh-interval")
