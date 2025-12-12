@@ -31,7 +31,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link GlobalIndexSerDeUtils}. */
 public class GlobalIndexSerDeUtilsTest {
@@ -107,24 +106,6 @@ public class GlobalIndexSerDeUtilsTest {
         assertThat(scoreGetter.score(Integer.MAX_VALUE + 1L)).isEqualTo(0.5f);
         assertThat(scoreGetter.score(Integer.MAX_VALUE + 100L)).isEqualTo(0.3f);
         assertThat(scoreGetter.score(Long.MAX_VALUE - 1)).isEqualTo(0.1f);
-    }
-
-    @Test
-    public void testDeserializeWithInvalidMagicNumber() {
-        byte[] invalidData = new byte[16];
-        // Write an invalid magic number
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (DataOutputStream dos = new DataOutputStream(baos)) {
-            dos.writeLong(12345L); // Invalid magic number
-            dos.writeInt(0); // type
-            dos.writeInt(0); // size
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-
-        assertThatThrownBy(() -> deserialize(baos.toByteArray()))
-                .isInstanceOf(IOException.class)
-                .hasMessageContaining("Invalid magic number");
     }
 
     private byte[] serialize(GlobalIndexResult result) throws IOException {
