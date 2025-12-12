@@ -42,6 +42,8 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import javax.annotation.Nullable;
+
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -61,6 +63,12 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     @Override
     protected List<String> ddl() {
         return singletonList("CREATE TABLE IF NOT EXISTS T (a INT, b INT, c INT)");
+    }
+
+    @Nullable
+    @Override
+    protected Boolean sqlSyncMode() {
+        return true;
     }
 
     @Test
@@ -605,16 +613,23 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testIgnoreDelete() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
-                        + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1')");
-
-        sql("INSERT INTO ignore_delete VALUES (1, 'A')");
+                        + "WITH ('merge-engine' = 'deduplicate', 'bucket' = '1')");
+        sql("INSERT INTO ignore_delete VALUES (1, 'A'), (2, 'B')");
+        sql("DELETE FROM ignore_delete WHERE pk = 2");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
+
+        // compact to merge the -D record
+        sql("CALL sys.compact(`table` => 'default.ignore_delete')");
+        sql("ALTER TABLE ignore_delete SET ('ignore-delete' = 'true')");
 
         sql("DELETE FROM ignore_delete WHERE pk = 1");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
 
         sql("INSERT INTO ignore_delete VALUES (1, 'B')");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B"));
+
+        assertThatThrownBy(() -> sql("ALTER TABLE ignore_delete SET ('ignore-delete' = 'false')"))
+                .hasRootCauseMessage("Cannot change ignore-delete from true to false.");
     }
 
     @Test
@@ -637,16 +652,27 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testIgnoreUpdateBeforeWithRowKindField() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING, kind STRING) "
-                        + "WITH ('ignore-update-before' = 'true', 'bucket' = '1', 'rowkind.field' = 'kind')");
+                        + "WITH ('bucket' = '1', 'rowkind.field' = 'kind')");
 
-        sql("INSERT INTO ignore_delete VALUES (1, 'A', '+I')");
+        sql("INSERT INTO ignore_delete VALUES (1, 'A', '+I'), (2, 'B', '+I')");
+        sql("INSERT INTO ignore_delete VALUES (2, 'B', '-U')");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A", "+I"));
+
+        // compact to merge the -U record
+        sql("CALL sys.compact(`table` => 'default.ignore_delete')");
+        sql("ALTER TABLE ignore_delete SET ('ignore-update-before' = 'true')");
 
         sql("INSERT INTO ignore_delete VALUES (1, 'A', '-U')");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A", "+I"));
 
         sql("INSERT INTO ignore_delete VALUES (1, 'A', '-D')");
         assertThat(sql("SELECT * FROM ignore_delete")).isEmpty();
+
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "ALTER TABLE ignore_delete SET ('ignore-update-before' = 'false')"))
+                .hasRootCauseMessage("Cannot change ignore-update-before from true to false.");
     }
 
     @Test
