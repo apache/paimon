@@ -33,6 +33,7 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.lucene.document.Document;
+import org.apache.lucene.document.LongPoint;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.StoredFields;
@@ -42,6 +43,8 @@ import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TopDocs;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -49,6 +52,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
+
+import static org.apache.paimon.lucene.index.LuceneVectorIndex.ROW_ID_FIELD;
 
 /**
  * Vector global index reader using Apache Lucene.
@@ -89,15 +94,20 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitTopK(TopK topK) {
+    public GlobalIndexResult visitTopK(TopK topK, @Nullable GlobalIndexResult globalIndexResult) {
         try {
-            if (topK.similarityFunction().equalsIgnoreCase(vectorIndexOptions.metric().name())) {
+            if (LuceneVectorMetric.fromString(topK.similarityFunction())
+                    == vectorIndexOptions.metric()) {
                 ensureLoadIndices(fileReader, ioMetas);
-                Query query = query(topK, fieldType);
+                Query query = query(topK, fieldType, globalIndexResult);
                 return search(query, topK.limit());
             }
         } catch (IOException e) {
-            throw new RuntimeException("Failed to search vector index", e);
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to search vector index for TopK with similarity=%s, k=%d",
+                            topK.similarityFunction(), topK.limit()),
+                    e);
         }
         return defaultResult;
     }
@@ -146,15 +156,38 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private Query query(TopK topK, DataType dataType) {
+    private Query query(TopK topK, DataType dataType, GlobalIndexResult globalIndexResult) {
+        Query idFilterQuery = null;
+        if (globalIndexResult != null) {
+            ArrayList<Long> targetIds = new ArrayList<>();
+            globalIndexResult
+                    .results()
+                    .iterator()
+                    .forEachRemaining(id -> targetIds.add(id - offset));
+            idFilterQuery = LongPoint.newSetQuery(ROW_ID_FIELD, targetIds);
+        }
         if (dataType instanceof ArrayType
                 && ((ArrayType) dataType).getElementType() instanceof FloatType) {
+            if (!(topK.vector() instanceof float[])) {
+                throw new IllegalArgumentException(
+                        "Expected float[] vector but got: " + topK.vector().getClass());
+            }
             return new KnnFloatVectorQuery(
-                    LuceneVectorIndex.VECTOR_FIELD, (float[]) topK.vector(), topK.limit());
+                    LuceneVectorIndex.VECTOR_FIELD,
+                    (float[]) topK.vector(),
+                    topK.limit(),
+                    idFilterQuery);
         } else if (dataType instanceof ArrayType
                 && ((ArrayType) dataType).getElementType() instanceof TinyIntType) {
+            if (!(topK.vector() instanceof byte[])) {
+                throw new IllegalArgumentException(
+                        "Expected byte[] vector but got: " + topK.vector().getClass());
+            }
             return new KnnByteVectorQuery(
-                    LuceneVectorIndex.VECTOR_FIELD, (byte[]) topK.vector(), topK.limit());
+                    LuceneVectorIndex.VECTOR_FIELD,
+                    (byte[]) topK.vector(),
+                    topK.limit(),
+                    idFilterQuery);
         } else {
             throw new IllegalArgumentException("Unsupported data type: " + dataType);
         }
@@ -167,11 +200,10 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
             try {
                 TopDocs topDocs = searcher.search(query, k);
                 StoredFields storedFields = searcher.storedFields();
-                Set<String> fieldsToLoad = Set.of(LuceneVectorIndex.ROW_ID_FIELD);
+                Set<String> fieldsToLoad = Set.of(ROW_ID_FIELD);
                 for (org.apache.lucene.search.ScoreDoc scoreDoc : topDocs.scoreDocs) {
                     Document doc = storedFields.document(scoreDoc.doc, fieldsToLoad);
-                    long rowId =
-                            doc.getField(LuceneVectorIndex.ROW_ID_FIELD).numericValue().longValue();
+                    long rowId = doc.getField(ROW_ID_FIELD).numericValue().longValue();
                     if (topK.size() < k) {
                         topK.offer(new ScoredRow(rowId, scoreDoc.score));
                     } else {

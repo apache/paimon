@@ -18,6 +18,8 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.globalindex.GlobalIndexResult;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -118,7 +120,7 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
     }
 
     @Override
-    public Boolean visitTopK(TopK topK) {
+    public Boolean visitTopK(TopK topK, GlobalIndexResult globalIndexResult) {
         return false;
     }
 

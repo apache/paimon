@@ -117,12 +117,12 @@ public class FileIndexReaderWrapper implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitTopK(TopK topK) {
-        return transform.apply(reader.visitTopK(topK));
+    public void close() throws IOException {
+        closeable.close();
     }
 
     @Override
-    public void close() throws IOException {
-        closeable.close();
+    public GlobalIndexResult visitTopK(TopK topK, GlobalIndexResult globalIndexResult) {
+        return transform.apply(reader.visitTopK(topK, globalIndexResult));
     }
 }

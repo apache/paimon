@@ -32,6 +32,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -127,7 +128,7 @@ public class LuceneVectorGlobalIndexTest {
                     new LuceneVectorGlobalIndexReader(
                             fileReader, metas, indexOptions, vectorType)) {
                 TopK topK = new TopK(testVectors.get(0), metric, 3);
-                GlobalIndexResult searchResult = reader.visitTopK(topK);
+                GlobalIndexResult searchResult = reader.visitTopK(topK, null);
                 assertThat(searchResult).isNotNull();
             }
         }
@@ -167,7 +168,7 @@ public class LuceneVectorGlobalIndexTest {
                             fileReader, metas, indexOptions, vectorType)) {
                 // Verify search works with this dimension
                 TopK topK = new TopK(testVectors.get(0), defaultMetric, 5);
-                GlobalIndexResult searchResult = reader.visitTopK(topK);
+                GlobalIndexResult searchResult = reader.visitTopK(topK, null);
                 assertThat(searchResult).isNotNull();
             }
         }
@@ -228,15 +229,28 @@ public class LuceneVectorGlobalIndexTest {
                 new LuceneVectorGlobalIndexReader(fileReader, metas, indexOptions, vectorType)) {
             TopK topK = new TopK(vectors[0], defaultMetric, 1);
             LuceneTopkGlobalIndexResult result =
-                    (LuceneTopkGlobalIndexResult) reader.visitTopK(topK);
+                    (LuceneTopkGlobalIndexResult) reader.visitTopK(topK, null);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
             long expectedRowId = offset;
             assertThat(containsRowId(result, expectedRowId)).isTrue();
             assertThat(result.scoreGetter().score(expectedRowId)).isEqualTo(1.0f);
 
+            GlobalIndexResult globalIndexResult =
+                    new GlobalIndexResult() {
+                        @Override
+                        public RoaringNavigableMap64 results() {
+                            RoaringNavigableMap64 results = new RoaringNavigableMap64();
+                            results.add(offset);
+                            return results;
+                        }
+                    };
+
+            result = (LuceneTopkGlobalIndexResult) reader.visitTopK(topK, globalIndexResult);
+            assertThat(result.results().isEmpty()).isEqualTo(true);
+
             float[] queryVector = new float[] {0.85f, 0.15f};
             topK = new TopK(queryVector, defaultMetric, 2);
-            result = (LuceneTopkGlobalIndexResult) reader.visitTopK(topK);
+            result = (LuceneTopkGlobalIndexResult) reader.visitTopK(topK, null);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
             long rowId1 = offset + 1;
             long rowId2 = offset + 3;
@@ -286,17 +300,28 @@ public class LuceneVectorGlobalIndexTest {
                 new LuceneVectorGlobalIndexReader(
                         fileReader, metas, indexOptions, byteVectorType)) {
             TopK topK = new TopK(vectors[0], defaultMetric, 1);
-            GlobalIndexResult result = reader.visitTopK(topK);
+            GlobalIndexResult result = reader.visitTopK(topK, null);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
             assertThat(containsRowId(result, 0)).isTrue();
 
             byte[] queryVector = new byte[] {85, 15};
             topK = new TopK(queryVector, defaultMetric, 2);
-            result = reader.visitTopK(topK);
+            result = reader.visitTopK(topK, null);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
             assertThat(containsRowId(result, 1)).isTrue();
             assertThat(containsRowId(result, 3)).isTrue();
         }
+    }
+
+    @Test
+    public void testInvalidTopK() {
+        assertThatThrownBy(() -> new TopK(null, defaultMetric, 10))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Vector cannot be null");
+
+        assertThatThrownBy(() -> new TopK(new float[] {0.1f}, defaultMetric, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Limit must be positive");
     }
 
     private Options createDefaultOptions(int dimension) {

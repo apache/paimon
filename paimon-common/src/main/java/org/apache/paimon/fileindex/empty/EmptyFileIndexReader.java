@@ -20,6 +20,7 @@ package org.apache.paimon.fileindex.empty;
 
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
+import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopK;
 
@@ -84,7 +85,7 @@ public class EmptyFileIndexReader extends FileIndexReader {
     }
 
     @Override
-    public FileIndexResult visitTopK(TopK topK) {
+    public FileIndexResult visitTopK(TopK topK, GlobalIndexResult globalIndexResult) {
         return SKIP;
     }
 }

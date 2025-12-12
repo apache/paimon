@@ -18,8 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.predicate.SortValue.SortDirection;
-
 import java.io.Serializable;
 
 /** Represents the TopK predicate. */
@@ -29,17 +27,20 @@ public class TopK implements Serializable {
 
     private Object vector;
     private final String similarityFunction;
-    private final SortDirection direction;
     private final int limit;
 
     public TopK(Object vector, String similarityFunction, int limit) {
-        this(vector, similarityFunction, SortDirection.DESCENDING, limit);
-    }
-
-    public TopK(Object vector, String similarityFunction, SortDirection direction, int limit) {
+        if (vector == null) {
+            throw new IllegalArgumentException("Vector cannot be null");
+        }
+        if (limit <= 0) {
+            throw new IllegalArgumentException("Limit must be positive, got: " + limit);
+        }
+        if (similarityFunction == null || similarityFunction.isEmpty()) {
+            throw new IllegalArgumentException("Similarity function cannot be null or empty");
+        }
         this.vector = vector;
         this.similarityFunction = similarityFunction;
-        this.direction = direction;
         this.limit = limit;
     }
 
@@ -51,17 +52,12 @@ public class TopK implements Serializable {
         return similarityFunction;
     }
 
-    public SortDirection direction() {
-        return direction;
-    }
-
     public int limit() {
         return limit;
     }
 
     @Override
     public String toString() {
-        return String.format(
-                "SimilarityFunction(%s) Sort(%s), Limit(%s)", similarityFunction, direction, limit);
+        return String.format("SimilarityFunction(%s), Limit(%s)", similarityFunction, limit);
     }
 }
