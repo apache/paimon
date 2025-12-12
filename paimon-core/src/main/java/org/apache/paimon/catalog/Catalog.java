@@ -629,6 +629,10 @@ public interface Catalog extends AutoCloseable {
      *   <li>{@link #createBranch(Identifier, String, String)}.
      *   <li>{@link #dropBranch(Identifier, String)}.
      *   <li>{@link #listBranches(Identifier)}.
+     *   <li>{@link #getTag(Identifier, String)}.
+     *   <li>{@link #createTag(Identifier, String, Long, String, boolean)}.
+     *   <li>{@link #listTagsPaged(Identifier, Integer, String)}.
+     *   <li>{@link #deleteTag(Identifier, String)}.
      * </ul>
      */
     boolean supportsVersionManagement();
