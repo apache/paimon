@@ -25,6 +25,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.plugin.PluginLoader;
 
+import java.io.IOException;
+
 /** Azure Blob Storage {@link FileIOLoader}. */
 public class AzureLoader implements FileIOLoader {
 
@@ -60,6 +62,11 @@ public class AzureLoader implements FileIOLoader {
         @Override
         public boolean isObjectStore() {
             return true;
+        }
+
+        @Override
+        public boolean moveToTrash(Path path) throws IOException {
+            throw new UnsupportedOperationException();
         }
 
         @Override

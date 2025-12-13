@@ -25,6 +25,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.plugin.PluginLoader;
 
+import java.io.IOException;
+
 /** A {@link PluginLoader} to load gcs. */
 public class GSLoader implements FileIOLoader {
 
@@ -61,6 +63,11 @@ public class GSLoader implements FileIOLoader {
         @Override
         public boolean isObjectStore() {
             return true;
+        }
+
+        @Override
+        public boolean moveToTrash(Path path) throws IOException {
+            throw new UnsupportedOperationException();
         }
 
         @Override
