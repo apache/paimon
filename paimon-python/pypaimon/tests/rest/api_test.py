@@ -18,6 +18,7 @@
 import logging
 import unittest
 import uuid
+from unittest.mock import Mock
 
 from pypaimon.api.api_response import ConfigResponse
 from pypaimon.api.auth import BearTokenAuthProvider
@@ -31,6 +32,7 @@ from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType,
                                         DataField, DataTypeParser, MapType,
                                         RowType)
 from pypaimon.schema.table_schema import TableSchema
+from pypaimon.schema.schema import Schema
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
 
@@ -227,3 +229,105 @@ class ApiTest(unittest.TestCase):
             # Shutdown server
             server.shutdown()
             print("Server stopped")
+
+    def test_rest_api_parameter_validation(self):
+        rest_api = RESTApi.__new__(RESTApi)
+        # Test __init__ with missing URI
+        with self.assertRaises(ValueError) as context:
+            RESTApi({"warehouse": "test"}, config_required=False)
+        self.assertIn("URI cannot be empty", str(context.exception))
+
+        # Test __init__ with empty URI
+        with self.assertRaises(ValueError) as context:
+            RESTApi({CatalogOptions.URI: "   "}, config_required=False)
+        self.assertIn("URI cannot be empty", str(context.exception))
+
+        # Test create_database with empty name
+        with self.assertRaises(ValueError) as context:
+            rest_api.create_database("", {})
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test create_database with whitespace name
+        with self.assertRaises(ValueError) as context:
+            rest_api.create_database("   ", {})
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test get_database with empty name
+        with self.assertRaises(ValueError) as context:
+            rest_api.get_database("")
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test get_database with whitespace name
+        with self.assertRaises(ValueError) as context:
+            rest_api.get_database("   ")
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test drop_database with empty name
+        with self.assertRaises(ValueError) as context:
+            rest_api.drop_database("")
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test alter_database with empty name
+        with self.assertRaises(ValueError) as context:
+            rest_api.alter_database("", [], {})
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test list_tables with empty database_name
+        with self.assertRaises(ValueError) as context:
+            rest_api.list_tables("")
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test list_tables_paged with empty database_name
+        with self.assertRaises(ValueError) as context:
+            rest_api.list_tables_paged("")
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test create_table with None identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.create_table(None, Mock())
+        self.assertIn("Identifier cannot be None", str(context.exception))
+
+        # Test create_table with None schema
+        with self.assertRaises(ValueError) as context:
+            rest_api.create_table(Mock(), None)
+        self.assertIn("Schema cannot be None", str(context.exception))
+
+        # Test get_table with None identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.get_table(None)
+        self.assertIn("Identifier cannot be None", str(context.exception))
+
+        # Test drop_table with None identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.drop_table(None)
+        self.assertIn("Identifier cannot be None", str(context.exception))
+
+        # Test rename_table with None source_identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.rename_table(None, Mock())
+        self.assertIn("Source identifier cannot be None", str(context.exception))
+
+        # Test rename_table with None target_identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.rename_table(Mock(), None)
+        self.assertIn("Target identifier cannot be None", str(context.exception))
+
+        # Test load_table_token with None identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.load_table_token(None)
+        self.assertIn("Identifier cannot be None", str(context.exception))
+
+        # Test commit_snapshot with None identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.commit_snapshot(None, "uuid", Mock(), [])
+        self.assertIn("Identifier cannot be None", str(context.exception))
+
+        # Test commit_snapshot with None snapshot
+        with self.assertRaises(ValueError) as context:
+            rest_api.commit_snapshot(Mock(), "uuid", None, [])
+        self.assertIn("Snapshot cannot be None", str(context.exception))
+
+        # Test commit_snapshot with None statistics
+        with self.assertRaises(ValueError) as context:
+            rest_api.commit_snapshot(Mock(), "uuid", Mock(), None)
+        self.assertIn("Statistics cannot be None", str(context.exception))
