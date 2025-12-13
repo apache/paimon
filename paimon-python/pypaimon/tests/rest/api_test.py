@@ -32,7 +32,6 @@ from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType,
                                         DataField, DataTypeParser, MapType,
                                         RowType)
 from pypaimon.schema.table_schema import TableSchema
-from pypaimon.schema.schema import Schema
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
 
