@@ -85,7 +85,7 @@ def main():
             primary_keys=['id'],
             options={
                 'bucket': '2',
-                CoreOptions.FILE_FORMAT: CoreOptions.FILE_FORMAT_LANCE,
+                CoreOptions.FILE_FORMAT.key(): CoreOptions.FILE_FORMAT_LANCE,
             }
         )
 

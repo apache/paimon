@@ -102,7 +102,7 @@ class UnawareBucketRowKeyExtractor(RowKeyExtractor):
 
     def __init__(self, table_schema: TableSchema):
         super().__init__(table_schema)
-        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -1))
+        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET.key(), -1))
 
         if num_buckets != -1:
             raise ValueError(f"Unaware bucket mode requires bucket = -1, got {num_buckets}")
@@ -119,7 +119,7 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
 
     def __init__(self, table_schema: 'TableSchema'):
         super().__init__(table_schema)
-        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -1))
+        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET.key(), -1))
 
         if num_buckets != -1:
             raise ValueError(
@@ -135,7 +135,7 @@ class PostponeBucketRowKeyExtractor(RowKeyExtractor):
 
     def __init__(self, table_schema: TableSchema):
         super().__init__(table_schema)
-        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -2))
+        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET.key(), -2))
         if num_buckets != BucketMode.POSTPONE_BUCKET.value:
             raise ValueError(f"Postpone bucket mode requires bucket = -2, got {num_buckets}")
 
