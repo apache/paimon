@@ -39,7 +39,9 @@ jobs:
   build_test:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-
+    strategy:
+      matrix:
+        hadoop_profile: ['', 'hadoop3']
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -52,18 +54,26 @@ jobs:
 
       - name: Build Flink
         run: |
+          profile="flink1,spark3"
+          if ! [ "${{ matrix.hadoop_profile }}" = "" ]; then
+            profile="$profile,${{ matrix.hadoop_profile }}"
+          fi
           COMPILE_MODULE="org.apache.paimon:paimon-flink-common"
           echo "Start compiling modules: $COMPILE_MODULE"
-          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3 -pl "${COMPILE_MODULE}" -am
+          mvn -T 2C -B clean install -DskipTests -P$profile -pl "${COMPILE_MODULE}" -am
 
       - name: Test Flink
         run: |
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
+          profile="flink1,spark3"
+          if ! [ "${{ matrix.hadoop_profile }}" = "" ]; then
+            profile="$profile,${{ matrix.hadoop_profile }}"
+          fi
           TEST_MODULE="org.apache.paimon:paimon-flink-common" 
           echo "Start testing module: $TEST_MODULE"
-          mvn -T 2C -B test verify -Pflink1,spark3 -pl "${TEST_MODULE}" -Duser.timezone=$jvm_timezone
+          mvn -T 2C -B test verify -P$profile -pl "${TEST_MODULE}" -Duser.timezone=$jvm_timezone
           echo "All modules tested"
         env:
           MAVEN_OPTS: -Xmx4096m -XX:+UseG1GC -XX:CICompilerCount=2

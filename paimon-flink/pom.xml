@@ -173,5 +173,11 @@ under the License.
                 </plugins>
             </build>
         </profile>
+        <profile>
+            <id>hadoop3</id>
+            <properties>
+                <hadoop.version>3.4.2</hadoop.version>
+            </properties>
+        </profile>
     </profiles>
 </project>

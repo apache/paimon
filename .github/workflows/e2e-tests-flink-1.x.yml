@@ -45,6 +45,7 @@ jobs:
       matrix:
         # Only Test Latest Version
         flink_version: [ '1.20' ]
+        hadoop_profile: ['', 'hadoop3']
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -56,7 +57,12 @@ jobs:
           distribution: 'temurin'
 
       - name: Build Flink
-        run: mvn -T 2C -B clean install -DskipTests -Pflink1,spark3 -pl paimon-e2e-tests -am -Pflink-${{ matrix.flink_version }}
+        run: |
+          profile="flink1,spark3,flink-${{ matrix.flink_version }}"
+          if ! [ "${{ matrix.hadoop_profile }}" = "" ]; then
+            profile="$profile,${{ matrix.hadoop_profile }}"
+          fi
+          mvn -T 2C -B clean install -DskipTests -P$profile -pl paimon-e2e-tests -am
 
       - name: Test Flink
         run: |
@@ -64,11 +70,14 @@ jobs:
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          profile="flink-${{ matrix.flink_version }}"
-          if [ "${{ matrix.flink_version }}" = "${{ matrix.flink_version[-1] }}" ]; then
-            mvn -T 1C -B test -Pflink1,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone
-          else
-            mvn -T 1C -B test -Pflink1,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -P${profile}
+          profile="flink1,spark3"
+          if ! [ "${{ matrix.flink_version }}" = "${{ matrix.flink_version[-1] }}" ]; then
+            profile="$profile,flink-${{ matrix.flink_version }}"
           fi
+          if ! [ "${{ matrix.hadoop_profile }}" = "" ]; then
+            profile="$profile,${{ matrix.hadoop_profile }}"
+          fi
+          profile="flink-${{ matrix.flink_version }}"
+          mvn -T 1C -B test -P$profile -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m

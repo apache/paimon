@@ -70,7 +70,17 @@ You can also manually build bundled jar from the source code.
 To build from source code, [clone the git repository]({{< github_repo >}}).
 
 Build bundled jar with the following command.
-- `mvn clean install -DskipTests`
+
+```bash
+# build paimon flink 1.x
+mvn clean install -DskipTests
+
+# build paimon flink 1.x with hadoop 3.x
+mvn clean package -DskipTests -Pflink1,hadoop3
+
+# build paimon flink 2.x (Java 11 required)
+mvn clean package -DskipTests -Pflink2
+```
 
 You can find the bundled jar in `./paimon-flink/paimon-flink-<flink-version>/target/paimon-flink-<flink-version>-{{< version >}}.jar`, and the action jar in `./paimon-flink/paimon-flink-action/target/paimon-flink-action-{{< version >}}.jar`.
 

@@ -39,6 +39,9 @@ jobs:
   build_test:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      matrix:
+        hadoop_profile: ['', 'hadoop3']
 
     steps:
       - name: Checkout code
@@ -52,18 +55,26 @@ jobs:
 
       - name: Build Flink
         run: |
-          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3
+          profile="flink1,spark3"
+          if ! [ "${{ matrix.hadoop_profile }}" = "" ]; then
+            profile="$profile,${{ matrix.hadoop_profile }}"
+          fi
+          mvn -T 2C -B clean install -DskipTests -P$profile
 
       - name: Test Flink
         run: |
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
+          profile="flink1,spark3"
+          if ! [ "${{ matrix.hadoop_profile }}" = "" ]; then
+            profile="$profile,${{ matrix.hadoop_profile }}"
+          fi
           test_modules=""
           for suffix in cdc 1.16 1.17 1.18 1.19 1.20; do
           test_modules+="org.apache.paimon:paimon-flink-${suffix},"
           done
           test_modules="${test_modules%,}"
-          mvn -T 2C -B test verify -Pflink1,spark3 -pl "${test_modules}" -Duser.timezone=$jvm_timezone
+          mvn -T 2C -B test verify -P$profile -pl "${test_modules}" -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m -XX:+UseG1GC -XX:CICompilerCount=2
