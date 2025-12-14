@@ -68,7 +68,7 @@ class RESTTokenFileIO(FileIO):
         merged_token = dict(token)
         dlf_oss_endpoint = self.properties.get(CatalogOptions.DLF_OSS_ENDPOINT)
         if dlf_oss_endpoint and dlf_oss_endpoint.strip():
-            merged_token[OssOptions.OSS_ENDPOINT] = dlf_oss_endpoint
+            merged_token[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
         return merged_token
 
     def new_output_stream(self, path: str):

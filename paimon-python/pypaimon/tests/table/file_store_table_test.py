@@ -79,3 +79,18 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertEqual(self.table.table_schema.options["test.new.option"], "new_value")
         self.assertEqual(self.table.table_schema.options["another.option"], "another_value")
 
+    def test_copy_raises_error_when_changing_bucket(self):
+        """Test copy method raises ValueError when trying to change bucket number."""
+        # Get current bucket value
+        current_bucket = self.table.options.bucket()
+
+        # Try to change bucket number to a different value
+        new_bucket_value = current_bucket + 1
+        new_options = {CoreOptions.BUCKET.key(): new_bucket_value}
+
+        # Verify ValueError is raised
+        with self.assertRaises(ValueError) as context:
+            self.table.copy(new_options)
+
+        self.assertIn("Cannot change bucket number", str(context.exception))
+

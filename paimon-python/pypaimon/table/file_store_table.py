@@ -141,7 +141,7 @@ class FileStoreTable(Table):
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
 
     def copy(self, options: dict) -> 'FileStoreTable':
-        if CoreOptions.BUCKET in options and options.get(CoreOptions.BUCKET.key()) != self.options.bucket():
+        if CoreOptions.BUCKET.key() in options and options.get(CoreOptions.BUCKET.key()) != self.options.bucket():
             raise ValueError("Cannot change bucket number")
         new_options = CoreOptions.copy(self.options).options.to_map()
         for k, v in options.items():
