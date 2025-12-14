@@ -574,3 +574,57 @@ Key points about shard read:
 Table options supported by the python API.
 
 {{< generated/python_configuration >}}
+
+## About pypaimon
+
+The following shows the supported and unsupported features of Python Paimon compared to Java Paimon:
+
+### Supported Features
+
+#### 1. Catalog Level
+   - FileSystemCatalog
+   - RestCatalog
+
+#### 2. Table Level
+   - Append Tables
+     - `bucket = -1` (unaware)
+     - `bucket > 0` (fixed)
+   - Primary Key Tables
+     - `bucket = -2` (postpone)
+     - `bucket > 0` (fixed)
+   - Read/Write Operations
+     - Batch read and write for append tables and primary key tables
+     - Predicate filtering
+     - Overwrite semantics
+     - Incremental reading of Delta data
+     - Reading and writing blob data
+     - `with_shard` feature
+
+#### 3. PaimonVirtualFileSystem Features
+
+### Main Unsupported Features
+
+#### 1. Catalog Level
+   - HiveCatalog
+   - JdbcCatalog
+
+#### 2. Table Level
+   - Primary key tables do not support `bucket=-1`
+   - Merge-engine
+   - Deletion-vectors
+   - LanceTable
+   - ObjectTable
+   - FormatTable
+   - All system tables
+   - Branch feature
+
+#### 3. File Level
+   - File-index (file indexing)
+   - Changelog
+   - Snapshot-related features
+     - Snapshot expiration
+     - Snapshot rollback
+     - Time travel
+     - Tag functionality
+
+#### 4. Compaction Features
