@@ -141,7 +141,7 @@ class FileStoreTable(Table):
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
 
     def copy(self, options: dict) -> 'FileStoreTable':
-        if CoreOptions.BUCKET in options and options.get(CoreOptions.BUCKET) != self.options.get(CoreOptions.BUCKET):
+        if CoreOptions.BUCKET in options and options.get(CoreOptions.BUCKET.key()) != self.options.bucket():
             raise ValueError("Cannot change bucket number")
         new_options = CoreOptions.copy(self.options).options.to_map()
         for k, v in options.items():
@@ -155,7 +155,7 @@ class FileStoreTable(Table):
 
     def add_options(self, options: dict):
         for key, value in options.items():
-            self.options[key] = value
+            self.options.set(key, value)
 
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse
