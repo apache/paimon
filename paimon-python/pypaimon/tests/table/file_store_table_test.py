@@ -93,4 +93,3 @@ class FileStoreTableTest(unittest.TestCase):
             self.table.copy(new_options)
 
         self.assertIn("Cannot change bucket number", str(context.exception))
-
