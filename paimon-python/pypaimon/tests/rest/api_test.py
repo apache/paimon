@@ -239,7 +239,7 @@ class ApiTest(unittest.TestCase):
 
         # Test __init__ with empty URI
         with self.assertRaises(ValueError) as context:
-            RESTApi({CatalogOptions.URI: "   "}, config_required=False)
+            RESTApi({CatalogOptions.URI.key(): "   "}, config_required=False)
         self.assertIn("URI cannot be empty", str(context.exception))
 
         # Test create_database with empty name
