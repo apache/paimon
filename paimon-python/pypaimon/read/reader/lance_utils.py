@@ -46,11 +46,11 @@ def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[D
                     storage_options['endpoint'] = endpoint
 
             if file_io.properties.contains(OssOptions.OSS_ACCESS_KEY_ID):
-                storage_options['access_key_id'] = file_io.properties.get(OssOptions.OSS_ACCESS_KEY_ID.key())
+                storage_options['access_key_id'] = file_io.properties.get(OssOptions.OSS_ACCESS_KEY_ID)
             if file_io.properties.contains(OssOptions.OSS_ACCESS_KEY_SECRET):
-                storage_options['secret_access_key'] = file_io.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET.key())
+                storage_options['secret_access_key'] = file_io.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET)
             if file_io.properties.contains(OssOptions.OSS_SECURITY_TOKEN):
-                storage_options['session_token'] = file_io.properties.get(OssOptions.OSS_SECURITY_TOKEN.key())
+                storage_options['session_token'] = file_io.properties.get(OssOptions.OSS_SECURITY_TOKEN)
             storage_options['virtual_hosted_style_request'] = 'true'
 
         file_path_for_lance = file_path.replace('oss://', 's3://')
