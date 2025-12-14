@@ -69,7 +69,7 @@ class RESTApi:
                 raise ValueError("Warehouse name cannot be empty")
 
             query_params = {
-                CatalogOptions.WAREHOUSE: RESTUtil.encode_string(warehouse)
+                CatalogOptions.WAREHOUSE.key(): RESTUtil.encode_string(warehouse)
             }
 
             config_response = self.client.get_with_params(
