@@ -166,7 +166,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
             # Create a token with a standard OSS endpoint
             token = {
-                OssOptions.OSS_ENDPOINT: "https://standard-endpoint.oss-cn-beijing.aliyuncs.com",
+                OssOptions.OSS_ENDPOINT.key(): "https://standard-endpoint.oss-cn-beijing.aliyuncs.com",
                 "fs.oss.accessKeyId": "test-access-key",
                 "fs.oss.accessKeySecret": "test-secret-key"
             }
@@ -176,7 +176,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
             # Verify DLF OSS endpoint overrides the standard endpoint
             self.assertEqual(
-                merged_token[OssOptions.OSS_ENDPOINT],
+                merged_token[OssOptions.OSS_ENDPOINT.key()],
                 dlf_oss_endpoint,
                 "DLF OSS endpoint should override the standard OSS endpoint in token"
             )
