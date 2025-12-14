@@ -155,7 +155,7 @@ class FileStoreTable(Table):
 
     def add_options(self, options: dict):
         for key, value in options.items():
-            self.options.set(key, value)
+            self.options.options.data[key] = value
 
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse
