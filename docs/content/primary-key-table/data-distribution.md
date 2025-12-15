@@ -55,8 +55,6 @@ Dynamic Bucket only support single write job. Please do not start multiple jobs 
 (this can lead to duplicate data). Even if you enable `'write-only'` and start a dedicated compaction job, it won't work.
 {{< /hint >}}
 
-### Normal Dynamic Bucket Mode
-
 When your updates do not cross partitions (no partitions, or primary keys contain all partition fields), Dynamic
 Bucket mode uses HASH index to maintain mapping from key to bucket, it requires more memory than fixed bucket mode.
 
@@ -65,27 +63,6 @@ Performance:
 1. Generally speaking, there is no performance loss, but there will be some additional memory consumption, **100 million**
    entries in a partition takes up **1 GB** more memory, partitions that are no longer active do not take up memory.
 2. For tables with low update rates, this mode is recommended to significantly improve performance.
-
-`Normal Dynamic Bucket Mode` supports sort-compact to speed up queries. See [Sort Compact]({{< ref "maintenance/dedicated-compaction#sort-compact" >}}).
-
-### Cross Partitions Upsert Dynamic Bucket Mode
-
-When you need cross partition upsert (primary keys not contain all partition fields), Dynamic Bucket mode directly
-maintains the mapping of keys to partition and bucket, uses local disks, and initializes indexes by reading all
-existing keys in the table when starting stream write job. Different merge engines have different behaviors:
-
-1. Deduplicate: Delete data from the old partition and insert new data into the new partition.
-2. PartialUpdate & Aggregation: Insert new data into the old partition.
-3. FirstRow: Ignore new data if there is old value.
-
-Performance: For tables with a large amount of data, there will be a significant loss in performance. Moreover,
-initialization takes a long time.
-
-If your upsert does not rely on too old data, you can consider configuring index TTL to reduce Index and initialization time:
-- `'cross-partition-upsert.index-ttl'`: The TTL in rocksdb index and initialization, this can avoid maintaining too many
-  indexes and lead to worse and worse performance.
-
-But please note that this may also cause data duplication.
 
 ## Postpone Bucket
 
@@ -101,11 +78,32 @@ To move the records into the correct bucket and make them readable,
 you need to run a compaction job.
 See `compact` [procedure]({{< ref "flink/procedures" >}}).
 The bucket number for the partitions compacted for the first time
-is configured by the option `postpone.default-bucket-num`, whose default value is `4`.
+is configured by the option `postpone.default-bucket-num`, whose default value is `1`.
 
 Finally, when you feel that the bucket number of some partition is too small,
 you can also run a rescale job.
 See `rescale` [procedure]({{< ref "flink/procedures" >}}).
+
+## Cross Partitions Upsert
+
+When you need cross partition upsert (primary keys not contain all partition fields), recommend using the '-1' bucket.
+Key Dynamic mode directly maintains the mapping of keys to partition and bucket, uses local disks, and initializes 
+indexes by reading all existing keys in the table when starting stream write job. Different merge engines have different behaviors:
+
+1. Deduplicate: Delete data from the old partition and insert new data into the new partition.
+2. PartialUpdate & Aggregation: Insert new data into the old partition.
+3. FirstRow: Ignore new data if there is old value.
+
+Performance: For tables with a large amount of data, there will be a significant loss in performance. Moreover,
+initialization takes a long time.
+
+If your upsert does not rely on too old data, you can consider configuring index TTL to reduce Index and initialization time:
+- `'cross-partition-upsert.index-ttl'`: The TTL in rocksdb index and initialization, this can avoid maintaining too many
+  indexes and lead to worse and worse performance.
+
+You can also use Cross Partitions Upsert with bucket (N > 0) or bucket (-2), in these modes, there is no global index to
+ensure that your data undergoes reasonable deduplication, so relying on your input to have a complete changelog can
+ensure the uniqueness of the data.
 
 ## Pick Partition Fields
 

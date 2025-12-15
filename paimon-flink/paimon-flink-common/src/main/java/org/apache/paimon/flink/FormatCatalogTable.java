@@ -22,9 +22,6 @@ import org.apache.paimon.table.FormatTable;
 
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.CatalogTable;
-import org.apache.flink.table.connector.sink.DynamicTableSink;
-import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.Collections;
@@ -98,7 +95,7 @@ public class FormatCatalogTable implements CatalogTable {
                         }
                     });
             if (options.containsKey("field-delimiter")) {
-                cachedOptions.put("csv.field-delimiter", "field-delimiter");
+                cachedOptions.put("csv.field-delimiter", options.get("field-delimiter"));
             }
             cachedOptions.put(CONNECTOR.key(), "filesystem");
             cachedOptions.put(PATH.key(), table.location());
@@ -125,16 +122,5 @@ public class FormatCatalogTable implements CatalogTable {
     @Override
     public Optional<String> getDetailedDescription() {
         return getDescription();
-    }
-
-    public DynamicTableSink createTableSink(DynamicTableFactory.Context context) {
-        return FactoryUtil.createDynamicTableSink(
-                null,
-                context.getObjectIdentifier(),
-                context.getCatalogTable(),
-                new HashMap<>(),
-                context.getConfiguration(),
-                context.getClassLoader(),
-                context.isTemporary());
     }
 }

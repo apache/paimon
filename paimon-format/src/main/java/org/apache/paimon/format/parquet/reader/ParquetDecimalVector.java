@@ -164,6 +164,13 @@ public class ParquetDecimalVector
     }
 
     @Override
+    public void appendByteArray(byte[] value, int offset, int length) {
+        if (vector instanceof WritableBytesVector) {
+            ((WritableBytesVector) vector).appendByteArray(value, offset, length);
+        }
+    }
+
+    @Override
     public void fill(byte[] value) {
         if (vector instanceof WritableBytesVector) {
             ((WritableBytesVector) vector).fill(value);
@@ -239,6 +246,13 @@ public class ParquetDecimalVector
     public void setLong(int rowId, long value) {
         if (vector instanceof WritableLongVector) {
             ((WritableLongVector) vector).setLong(rowId, value);
+        }
+    }
+
+    @Override
+    public void appendLong(long v) {
+        if (vector instanceof WritableLongVector) {
+            ((WritableLongVector) vector).appendLong(v);
         }
     }
 

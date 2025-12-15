@@ -18,11 +18,12 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
 
@@ -43,6 +44,8 @@ public interface SplitRead<T> {
 
     SplitRead<T> withReadType(RowType readType);
 
+    SplitRead<T> withVariantAccess(VariantAccessInfo[] variantAccess);
+
     SplitRead<T> withFilter(@Nullable Predicate predicate);
 
     default SplitRead<T> withTopN(@Nullable TopN topN) {
@@ -54,10 +57,10 @@ public interface SplitRead<T> {
     }
 
     /** Create a {@link RecordReader} from split. */
-    RecordReader<T> createReader(DataSplit split) throws IOException;
+    RecordReader<T> createReader(Split split) throws IOException;
 
     static <L, R> SplitRead<R> convert(
-            SplitRead<L> read, IOFunction<DataSplit, RecordReader<R>> convertedFactory) {
+            SplitRead<L> read, IOFunction<Split, RecordReader<R>> splitConvert) {
         return new SplitRead<R>() {
             @Override
             public SplitRead<R> forceKeepDelete() {
@@ -78,14 +81,20 @@ public interface SplitRead<T> {
             }
 
             @Override
+            public SplitRead<R> withVariantAccess(VariantAccessInfo[] variantAccess) {
+                read.withVariantAccess(variantAccess);
+                return this;
+            }
+
+            @Override
             public SplitRead<R> withFilter(@Nullable Predicate predicate) {
                 read.withFilter(predicate);
                 return this;
             }
 
             @Override
-            public RecordReader<R> createReader(DataSplit split) throws IOException {
-                return convertedFactory.apply(split);
+            public RecordReader<R> createReader(Split split) throws IOException {
+                return splitConvert.apply(split);
             }
         };
     }

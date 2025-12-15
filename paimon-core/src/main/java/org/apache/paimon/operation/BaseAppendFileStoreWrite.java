@@ -43,6 +43,7 @@ import org.apache.paimon.utils.IOExceptionSupplier;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,6 +59,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
+import static org.apache.paimon.types.DataTypeRoot.BLOB;
 import static org.apache.paimon.utils.StatsCollectorFactories.createStatsFactories;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
@@ -77,6 +79,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private RowType writeType;
     private @Nullable List<String> writeCols;
     private boolean forceBufferSpill = false;
+    private boolean withBlob;
 
     public BaseAppendFileStoreWrite(
             FileIO fileIO,
@@ -99,6 +102,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.writeCols = null;
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
+        this.withBlob = rowType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
 
         this.fileIndexOptions = options.indexColumnsOptions();
     }
@@ -118,6 +122,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 schemaId,
                 fileFormat,
                 options.targetFileSize(false),
+                options.blobTargetFileSize(),
                 writeType,
                 writeCols,
                 restoredMaxSeqNumber,
@@ -131,7 +136,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.writeBufferSpillable() || forceBufferSpill,
                 options.fileCompression(),
                 options.spillCompressOptions(),
-                statsCollectors(),
+                new StatsCollectorFactories(options),
                 options.writeBufferSpillDiskSize(),
                 fileIndexOptions,
                 options.asyncFileWrite(),
@@ -141,6 +146,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     @Override
     public void withWriteType(RowType writeType) {
         this.writeType = writeType;
+        this.withBlob = writeType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
         int fullCount = rowType.getFieldCount();
         List<String> fullNames = rowType.getFieldNames();
         this.writeCols = writeType.getFieldNames();
@@ -232,6 +238,9 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     @Override
     protected void forceBufferSpill() throws Exception {
         if (ioManager == null) {
+            return;
+        }
+        if (withBlob) {
             return;
         }
         if (forceBufferSpill) {

@@ -238,7 +238,7 @@ public class BucketFunctionTest {
         setupTable(bucketColumns);
         spark.sql(
                         String.format(
-                                "SELECT id_col, __paimon_bucket as expected_bucket, paimon.bucket(%s, %s) FROM %s",
+                                "SELECT id_col, __paimon_bucket as expected_bucket, paimon.sys.bucket(%s, %s) FROM %s",
                                 NUM_BUCKETS, String.join(",", bucketColumns), TABLE_NAME))
                 .collectAsList()
                 .forEach(row -> assertThat(row.getInt(2)).isEqualTo(row.get(1)));
@@ -329,7 +329,7 @@ public class BucketFunctionTest {
         setupTable(TIMESTAMP_COL_PRECISION_3);
         spark.sql(
                         String.format(
-                                "SELECT id_col, __paimon_bucket as expected_bucket, paimon.bucket(%s, %s) FROM %s",
+                                "SELECT id_col, __paimon_bucket as expected_bucket, paimon.sys.bucket(%s, %s) FROM %s",
                                 NUM_BUCKETS,
                                 String.join(",", TIMESTAMP_COL_PRECISION_3),
                                 TABLE_NAME))

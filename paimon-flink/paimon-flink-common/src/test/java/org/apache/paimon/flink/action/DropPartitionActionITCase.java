@@ -67,7 +67,9 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
                             "--table",
                             tableName,
                             "--partition",
-                            "partKey0=0")
+                            "partKey0=0",
+                            "--force_start_flink_job",
+                            Boolean.toString(ThreadLocalRandom.current().nextBoolean()))
                     .run();
         } else {
             executeSQL(
@@ -133,7 +135,9 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
                             "--partition",
                             "partKey0=0,partKey1=1",
                             "--partition",
-                            "partKey0=1,partKey1=0")
+                            "partKey0=1,partKey1=0",
+                            "--force_start_flink_job",
+                            Boolean.toString(ThreadLocalRandom.current().nextBoolean()))
                     .run();
         } else {
             executeSQL(

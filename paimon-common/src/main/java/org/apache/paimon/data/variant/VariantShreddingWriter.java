@@ -149,8 +149,6 @@ public class VariantShreddingWriter {
                 // Store the typed value.
                 result.addScalar(typedValue);
             } else {
-                GenericVariantBuilder variantBuilder = new GenericVariantBuilder(false);
-                variantBuilder.appendVariant(v);
                 result.addVariantValue(v.value());
             }
         } else {

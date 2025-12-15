@@ -34,7 +34,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashMap;
 import java.util.List;
@@ -214,8 +213,9 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testMigrateDatabaseAction(String format) throws Exception {
+    @MethodSource("testArguments")
+    public void testMigrateDatabaseAction(String format, boolean forceStartFlinkJob)
+            throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -255,6 +255,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
                 "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
         MigrateDatabaseAction migrateDatabaseAction =
                 new MigrateDatabaseAction("hive", "my_database", catalogConf, "", 6);
+        migrateDatabaseAction.forceStartFlinkJob(forceStartFlinkJob);
         migrateDatabaseAction.run();
 
         tEnv.executeSql(

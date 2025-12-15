@@ -339,13 +339,16 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 new IcebergSnapshot(
                         snapshotId,
                         snapshotId,
+                        null,
                         System.currentTimeMillis(),
                         IcebergSnapshotSummary.APPEND,
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
-                        schemaId);
+                        schemaId,
+                        null,
+                        null);
 
         // Tags can only be included in Iceberg if they point to an Iceberg snapshot that
-        // exists. Otherwise an Iceberg client fails to parse the metadata and all reads fail.
+        // exists. Otherwise, an Iceberg client fails to parse the metadata and all reads fail.
         // Only the latest snapshot ID is added to Iceberg in this code path. Since this snapshot
         // has just been committed to Paimon, it is not possible for any Paimon tag to reference it
         // yet.
@@ -599,10 +602,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 new IcebergSnapshot(
                         snapshotId,
                         snapshotId,
+                        snapshotId - 1,
                         System.currentTimeMillis(),
                         snapshotSummary,
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
-                        schemaId));
+                        schemaId,
+                        null,
+                        null));
 
         // all snapshots in this list, except the last one, need to expire
         List<IcebergSnapshot> toExpireExceptLast = new ArrayList<>();

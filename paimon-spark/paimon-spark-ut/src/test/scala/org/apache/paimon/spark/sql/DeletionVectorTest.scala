@@ -149,8 +149,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
   bucketModes.foreach {
     bucket =>
-      test(
-        s"Paimon DeletionVector: update for append non-partitioned table with bucket = $bucket") {
+      test(s"Paimon DeletionVector: update for append non-partitioned table with bucket = $bucket") {
         withTable("T") {
           val bucketKey = if (bucket > 1) {
             ", 'bucket-key' = 'id'"
@@ -309,8 +308,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
 
   bucketModes.foreach {
     bucket =>
-      test(
-        s"Paimon DeletionVector: delete for append non-partitioned table with bucket = $bucket") {
+      test(s"Paimon DeletionVector: delete for append non-partitioned table with bucket = $bucket") {
         withTable("T") {
           val bucketKey = if (bucket > 1) {
             ", 'bucket-key' = 'id'"
@@ -660,7 +658,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
     assert(dvMeta.cardinality() == 334)
   }
 
-  test("Paimon deletionVector: delete from non-pk table with data file path") {
+  test("Paimon deletionVector: delete from non-pk table with data file directory") {
     sql(s"""
            |CREATE TABLE T (id INT)
            |TBLPROPERTIES (
@@ -675,6 +673,37 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
     sql("INSERT INTO T SELECT /*+ REPARTITION(1) */ id FROM range (1, 50000)")
     sql("DELETE FROM T WHERE id >= 111 and id <= 444")
     checkAnswer(sql("SELECT count(*) FROM T"), Row(49665))
+  }
+
+  test("Paimon deletionVector: delete from non-pk table with data file external paths") {
+    withTempDir {
+      tmpDir =>
+        {
+          sql(s"""
+                 |CREATE TABLE T (id INT, v INT)
+                 |TBLPROPERTIES (
+                 | 'deletion-vectors.enabled' = 'true',
+                 | 'deletion-vectors.bitmap64' = '${Random.nextBoolean()}',
+                 | 'bucket-key' = 'id',
+                 | 'bucket' = '1',
+                 | 'data-file.external-paths' = 'file://${tmpDir.getCanonicalPath}',
+                 | 'data-file.external-paths.strategy' = 'round-robin'
+                 |)
+                 |""".stripMargin)
+          sql("INSERT INTO T SELECT /*+ REPARTITION(1) */ id, id FROM range (1, 50000)")
+          sql("DELETE FROM T WHERE id >= 111 and id <= 444")
+          checkAnswer(sql("SELECT count(*) FROM T"), Row(49665))
+          checkAnswer(sql("SELECT sum(v) FROM T"), Row(1249882315L))
+
+          sql("UPDATE T SET v = v + 1 WHERE id >= 555 and id <= 666")
+          checkAnswer(sql("SELECT count(*) FROM T"), Row(49665))
+          checkAnswer(sql("SELECT sum(v) FROM T"), Row(1249882427L))
+
+          sql("UPDATE T SET v = v + 1 WHERE id >= 600 and id <= 800")
+          checkAnswer(sql("SELECT count(*) FROM T"), Row(49665))
+          checkAnswer(sql("SELECT sum(v) FROM T"), Row(1249882628L))
+        }
+    }
   }
 
   test("Paimon deletionVector: work v1 with v2") {

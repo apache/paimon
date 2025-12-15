@@ -25,6 +25,7 @@ on:
       - '**/*.md'
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
+      - 'paimon-lucene/**'
 
 env:
   JDK_VERSION: 8
@@ -41,7 +42,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        flink_version: ['common', 'cdc', '1.15', '1.16', '1.17', '1.18', '1.19', '1.20']
+        flink_version: ['common', 'cdc', '1.16', '1.17', '1.18', '1.19', '1.20']
 
     steps:
       - name: Checkout code

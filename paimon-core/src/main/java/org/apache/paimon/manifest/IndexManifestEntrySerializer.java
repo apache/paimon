@@ -18,8 +18,10 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
@@ -44,6 +46,18 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
     @Override
     public InternalRow convertTo(IndexManifestEntry record) {
         IndexFileMeta indexFile = record.indexFile();
+        GlobalIndexMeta globalIndexMeta = indexFile.globalIndexMeta();
+        InternalRow globalIndexRow =
+                globalIndexMeta == null
+                        ? null
+                        : GenericRow.of(
+                                globalIndexMeta.rowRangeStart(),
+                                globalIndexMeta.rowRangeEnd(),
+                                globalIndexMeta.indexFieldId(),
+                                globalIndexMeta.indexMeta() == null
+                                        ? null
+                                        : new GenericArray(globalIndexMeta.extraFieldIds()),
+                                globalIndexMeta.indexMeta());
         return GenericRow.of(
                 record.kind().toByteValue(),
                 serializeBinaryRow(record.partition()),
@@ -53,13 +67,28 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                 indexFile.fileSize(),
                 indexFile.rowCount(),
                 dvMetasToRowArrayData(indexFile.dvRanges()),
-                fromString(indexFile.externalPath()));
+                fromString(indexFile.externalPath()),
+                globalIndexRow);
     }
 
     @Override
     public IndexManifestEntry convertFrom(int version, InternalRow row) {
         if (version != 1) {
             throw new UnsupportedOperationException("Unsupported version: " + version);
+        }
+
+        GlobalIndexMeta globalIndexMeta = null;
+        if (!row.isNullAt(9)) {
+            InternalRow globalIndexRow = row.getRow(9, 5);
+            long rowRangeStart = globalIndexRow.getLong(0);
+            long rowRangeEnd = globalIndexRow.getLong(1);
+            int indexFieldId = globalIndexRow.getInt(2);
+            int[] extralFields =
+                    globalIndexRow.isNullAt(3) ? null : globalIndexRow.getArray(3).toIntArray();
+            byte[] indexMeta = globalIndexRow.isNullAt(4) ? null : globalIndexRow.getBinary(4);
+            globalIndexMeta =
+                    new GlobalIndexMeta(
+                            rowRangeStart, rowRangeEnd, indexFieldId, extralFields, indexMeta);
         }
 
         return new IndexManifestEntry(
@@ -72,6 +101,7 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                         row.getLong(5),
                         row.getLong(6),
                         row.isNullAt(7) ? null : rowArrayDataToDvMetas(row.getArray(7)),
-                        row.isNullAt(8) ? null : row.getString(8).toString()));
+                        row.isNullAt(8) ? null : row.getString(8).toString(),
+                        globalIndexMeta));
     }
 }

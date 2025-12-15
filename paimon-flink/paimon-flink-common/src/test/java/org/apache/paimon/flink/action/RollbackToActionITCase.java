@@ -50,7 +50,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
+    @ValueSource(strings = {"action", "action_job", "procedure_named", "procedure_indexed"})
     public void rollbackToSnapshotTest(String invoker) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -70,6 +70,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(
                                 RollbackToAction.class,
                                 "rollback_to",
@@ -80,7 +81,9 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                                 "--table",
                                 tableName,
                                 "--version",
-                                "2")
+                                "2",
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -105,7 +108,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
+    @ValueSource(strings = {"action", "action_job", "procedure_named", "procedure_indexed"})
     public void rollbackToTagTest(String invoker) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -128,6 +131,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(
                                 RollbackToAction.class,
                                 "rollback_to",
@@ -138,7 +142,9 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                                 "--table",
                                 tableName,
                                 "--version",
-                                "tag2")
+                                "tag2",
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -162,7 +168,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"action", "procedure_named", "procedure_indexed"})
+    @ValueSource(strings = {"action", "action_job", "procedure_named", "procedure_indexed"})
     public void rollbackToTimestampTest(String invoker) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -182,6 +188,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(
                                 RollbackToTimestampAction.class,
                                 "rollback_to_timestamp",
@@ -192,7 +199,9 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                                 "--table",
                                 tableName,
                                 "--timestamp",
-                                timestamp + "")
+                                timestamp + "",
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":

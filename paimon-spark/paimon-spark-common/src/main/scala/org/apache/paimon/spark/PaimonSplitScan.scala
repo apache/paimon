@@ -42,20 +42,18 @@ case class PaimonSplitScan(
   extends ColumnPruningAndPushDown
   with ScanHelper {
 
-  override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
-
   override def toBatch: Batch = {
     PaimonBatch(
       getInputPartitions(dataSplits.asInstanceOf[Array[Split]]),
       readBuilder,
+      coreOptions.blobAsDescriptor(),
       metadataColumns)
   }
 
   override def supportedCustomMetrics: Array[CustomMetric] = {
     Array(
       PaimonNumSplitMetric(),
-      PaimonSplitSizeMetric(),
-      PaimonAvgSplitSizeMetric(),
+      PaimonPartitionSizeMetric(),
       PaimonResultedTableFilesMetric()
     )
   }

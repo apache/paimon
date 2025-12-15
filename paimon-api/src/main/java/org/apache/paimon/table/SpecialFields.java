@@ -168,4 +168,20 @@ public class SpecialFields {
                         : SpecialFields.SEQUENCE_NUMBER);
         return new RowType(fieldsWithRowTracking);
     }
+
+    public static RowType rowTypeWithRowId(RowType rowType) {
+        List<DataField> fieldsWithRowTracking = new ArrayList<>(rowType.getFields());
+
+        fieldsWithRowTracking.forEach(
+                f -> {
+                    if (ROW_ID.name().equals(f.name())) {
+                        throw new IllegalArgumentException(
+                                "Row tracking field name '"
+                                        + f.name()
+                                        + "' conflicts with existing field names.");
+                    }
+                });
+        fieldsWithRowTracking.add(SpecialFields.ROW_ID);
+        return new RowType(fieldsWithRowTracking);
+    }
 }

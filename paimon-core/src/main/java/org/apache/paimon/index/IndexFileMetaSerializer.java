@@ -39,24 +39,51 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
 
     @Override
     public InternalRow toRow(IndexFileMeta record) {
+        GlobalIndexMeta globalIndexMeta = record.globalIndexMeta();
+        InternalRow globalIndexRow =
+                globalIndexMeta == null
+                        ? null
+                        : GenericRow.of(
+                                globalIndexMeta.rowRangeStart(),
+                                globalIndexMeta.rowRangeEnd(),
+                                globalIndexMeta.indexFieldId(),
+                                globalIndexMeta.indexMeta() == null
+                                        ? null
+                                        : new GenericArray(globalIndexMeta.extraFieldIds()),
+                                globalIndexMeta.indexMeta());
         return GenericRow.of(
                 fromString(record.indexType()),
                 fromString(record.fileName()),
                 record.fileSize(),
                 record.rowCount(),
                 dvMetasToRowArrayData(record.dvRanges()),
-                fromString(record.externalPath()));
+                fromString(record.externalPath()),
+                globalIndexRow);
     }
 
     @Override
     public IndexFileMeta fromRow(InternalRow row) {
+        GlobalIndexMeta globalIndexMeta = null;
+        if (!row.isNullAt(6)) {
+            InternalRow globalIndexRow = row.getRow(6, 5);
+            Long rowRangeStart = globalIndexRow.getLong(0);
+            Long rowRangeEnd = globalIndexRow.getLong(1);
+            Integer indexFieldId = globalIndexRow.getInt(2);
+            int[] extralFields =
+                    globalIndexRow.isNullAt(3) ? null : globalIndexRow.getArray(3).toIntArray();
+            byte[] indexMeta = globalIndexRow.isNullAt(4) ? null : globalIndexRow.getBinary(4);
+            globalIndexMeta =
+                    new GlobalIndexMeta(
+                            rowRangeStart, rowRangeEnd, indexFieldId, extralFields, indexMeta);
+        }
         return new IndexFileMeta(
                 row.getString(0).toString(),
                 row.getString(1).toString(),
                 row.getLong(2),
                 row.getLong(3),
                 row.isNullAt(4) ? null : rowArrayDataToDvMetas(row.getArray(4)),
-                row.isNullAt(5) ? null : row.getString(5).toString());
+                row.isNullAt(5) ? null : row.getString(5).toString(),
+                globalIndexMeta);
     }
 
     public static InternalArray dvMetasToRowArrayData(
@@ -85,10 +112,11 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
         LinkedHashMap<String, DeletionVectorMeta> dvMetas = new LinkedHashMap<>(arrayData.size());
         for (int i = 0; i < arrayData.size(); i++) {
             InternalRow row = arrayData.getRow(i, DeletionVectorMeta.SCHEMA.getFieldCount());
+            String dataFileName = row.getString(0).toString();
             dvMetas.put(
-                    row.getString(0).toString(),
+                    dataFileName,
                     new DeletionVectorMeta(
-                            row.getString(0).toString(),
+                            dataFileName,
                             row.getInt(1),
                             row.getInt(2),
                             row.isNullAt(3) ? null : row.getLong(3)));

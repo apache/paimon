@@ -151,6 +151,7 @@ import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkCatalogOptions.REGISTER_TIMEOUT;
+import static org.apache.paimon.flink.LogicalTypeConversion.toBlobType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.log.LogStoreRegister.registerLogSystem;
@@ -1050,6 +1051,16 @@ public class FlinkCatalog extends AbstractCatalog {
         RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
+        String blobName = options.get(CoreOptions.BLOB_FIELD.key());
+        if (blobName != null) {
+            checkArgument(
+                    options.containsKey(CoreOptions.DATA_EVOLUTION_ENABLED.key()),
+                    "When setting '"
+                            + CoreOptions.BLOB_FIELD.key()
+                            + "', you must also set '"
+                            + CoreOptions.DATA_EVOLUTION_ENABLED.key()
+                            + "'");
+        }
         // Serialize virtual columns and watermark to the options
         // This is what Flink SQL needs, the storage itself does not need them
         options.putAll(columnOptions(schema));
@@ -1069,7 +1080,9 @@ public class FlinkCatalog extends AbstractCatalog {
                         field ->
                                 schemaBuilder.column(
                                         field.getName(),
-                                        toDataType(field.getType()),
+                                        field.getName().equals(blobName)
+                                                ? toBlobType(field.getType())
+                                                : toDataType(field.getType()),
                                         columnComments.get(field.getName())));
 
         return schemaBuilder.build();

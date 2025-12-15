@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.Snapshot.CommitKind._
+
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
@@ -277,6 +279,83 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                 3L,
                 date,
                 456) :: Nil)
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test("Paimon SinK: set full-compaction.delta-commits with batch write") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("t") {
+          sql("""
+                |CREATE TABLE t (
+                |  a INT,
+                |  b INT
+                |) TBLPROPERTIES (
+                |  'primary-key'='a',
+                |  'bucket'='1',
+                |  'full-compaction.delta-commits'='1'
+                |)
+                |""".stripMargin)
+
+          sql("INSERT INTO t VALUES (1, 1)")
+          sql("INSERT INTO t VALUES (2, 2)")
+          checkAnswer(sql("SELECT * FROM t ORDER BY a"), Seq(Row(1, 1), Row(2, 2)))
+          assert(loadTable("t").snapshotManager().latestSnapshot().commitKind == COMPACT)
+        }
+      }
+    }
+  }
+
+  test("Paimon SinK: set full-compaction.delta-commits with streaming write") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (a INT, b INT)
+                       |TBLPROPERTIES (
+                       |  'primary-key'='a',
+                       |  'bucket'='1',
+                       |  'full-compaction.delta-commits'='2'
+                       |)
+                       |""".stripMargin)
+          val table = loadTable("T")
+          val location = table.location().toString
+
+          val inputData = MemoryStream[(Int, Int)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .format("paimon")
+            .start(location)
+
+          val query = () => spark.sql("SELECT * FROM T ORDER BY a")
+
+          try {
+            inputData.addData((1, 1))
+            stream.processAllAvailable()
+            checkAnswer(query(), Seq(Row(1, 1)))
+            assert(table.snapshotManager().latestSnapshot().commitKind == APPEND)
+
+            inputData.addData((2, 1))
+            stream.processAllAvailable()
+            checkAnswer(query(), Seq(Row(1, 1), Row(2, 1)))
+            assert(table.snapshotManager().latestSnapshot().commitKind == COMPACT)
+
+            inputData.addData((2, 2))
+            stream.processAllAvailable()
+            checkAnswer(query(), Seq(Row(1, 1), Row(2, 2)))
+            assert(table.snapshotManager().latestSnapshot().commitKind == APPEND)
+
+            inputData.addData((3, 1))
+            stream.processAllAvailable()
+            checkAnswer(query(), Seq(Row(1, 1), Row(2, 2), Row(3, 1)))
+            assert(table.snapshotManager().latestSnapshot().commitKind == COMPACT)
           } finally {
             stream.stop()
           }

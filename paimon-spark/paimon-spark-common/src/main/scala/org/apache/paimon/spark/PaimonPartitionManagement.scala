@@ -19,9 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.operation.FileStoreCommit
-import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.BatchWriteBuilder
+import org.apache.paimon.table.{FileStoreTable, Table}
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.{InternalRowPartitionComputer, TypeUtils}
 
@@ -31,12 +29,13 @@ import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.SupportsAtomicPartitionManagement
 import org.apache.spark.sql.types.StructType
 
-import java.util.{Map => JMap, Objects, UUID}
+import java.util.{Map => JMap, Objects}
 
 import scala.collection.JavaConverters._
 
 trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
-  self: SparkTable =>
+
+  val table: Table
 
   lazy val partitionRowType: RowType = TypeUtils.project(table.rowType, table.partitionKeys)
 
@@ -51,7 +50,8 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
           fileStoreTable.coreOptions().partitionDefaultName(),
           partitionRowType,
           table.partitionKeys().asScala.toArray,
-          CoreOptions.fromMap(table.options()).legacyPartitionName)
+          CoreOptions.fromMap(table.options()).legacyPartitionName
+        )
 
         rows.map {
           r =>

@@ -85,7 +85,8 @@ public class FileStoreSourceMetricsTest {
                         table.newReadBuilder(),
                         null,
                         1,
-                        FlinkConnectorOptions.SplitAssignMode.FAIR);
+                        FlinkConnectorOptions.SplitAssignMode.FAIR,
+                        false);
         staticFileStoreSource.restoreEnumerator(context, null);
         assertThat(TestingMetricUtils.getGauge(scanMetricGroup, "lastScannedManifests").getValue())
                 .isEqualTo(1L);

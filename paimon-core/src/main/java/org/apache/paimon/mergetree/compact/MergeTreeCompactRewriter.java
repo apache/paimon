@@ -104,7 +104,9 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
 
         List<DataFileMeta> before = extractFilesFromSections(sections);
         notifyRewriteCompactBefore(before);
-        return new CompactResult(before, writer.result());
+        List<DataFileMeta> after = writer.result();
+        after = notifyRewriteCompactAfter(after);
+        return new CompactResult(before, after);
     }
 
     protected <T> RecordReader<T> readerForMergeTree(
@@ -120,4 +122,8 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     }
 
     protected void notifyRewriteCompactBefore(List<DataFileMeta> files) {}
+
+    protected List<DataFileMeta> notifyRewriteCompactAfter(List<DataFileMeta> files) {
+        return files;
+    }
 }

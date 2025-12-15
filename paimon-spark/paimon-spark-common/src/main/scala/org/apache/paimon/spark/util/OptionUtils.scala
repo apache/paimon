@@ -23,6 +23,7 @@ import org.apache.paimon.options.ConfigOption
 import org.apache.paimon.spark.{SparkCatalogOptions, SparkConnectorOptions}
 import org.apache.paimon.table.Table
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.internal.StaticSQLConf
 
@@ -31,7 +32,7 @@ import java.util.regex.Pattern
 
 import scala.collection.JavaConverters._
 
-object OptionUtils extends SQLConfHelper {
+object OptionUtils extends SQLConfHelper with Logging {
 
   private val PAIMON_OPTION_PREFIX = "spark.paimon."
   private val SPARK_CATALOG_PREFIX = "spark.sql.catalog."
@@ -47,6 +48,21 @@ object OptionUtils extends SQLConfHelper {
     conf.getConfString(s"$PAIMON_OPTION_PREFIX${option.key()}", option.defaultValue().toString)
   }
 
+  private def getSparkVersionSpecificDefault(option: ConfigOption[_]): String = {
+    val sparkVersion = org.apache.spark.SPARK_VERSION
+
+    option.key() match {
+      case key if key == SparkConnectorOptions.USE_V2_WRITE.key() =>
+        if (sparkVersion >= "3.4") {
+          "false"
+        } else {
+          option.defaultValue().toString
+        }
+      case _ =>
+        option.defaultValue().toString
+    }
+  }
+
   def checkRequiredConfigurations(): Unit = {
     if (getOptionString(SparkConnectorOptions.REQUIRED_SPARK_CONFS_CHECK_ENABLED).toBoolean) {
       if (!paimonExtensionEnabled) {
@@ -60,7 +76,23 @@ object OptionUtils extends SQLConfHelper {
   }
 
   def useV2Write(): Boolean = {
-    getOptionString(SparkConnectorOptions.USE_V2_WRITE).toBoolean
+    val defaultValue = getSparkVersionSpecificDefault(SparkConnectorOptions.USE_V2_WRITE)
+    val configuredValue = conf
+      .getConfString(
+        s"$PAIMON_OPTION_PREFIX${SparkConnectorOptions.USE_V2_WRITE.key()}",
+        defaultValue
+      )
+      .toBoolean
+
+    val sparkVersion = org.apache.spark.SPARK_VERSION
+    val isVersionSupported = sparkVersion >= "3.4"
+
+    if (configuredValue && !isVersionSupported) {
+      logWarning(
+        "DataSourceV2 write is not supported in Spark versions prior to 3.4. Falling back to DataSourceV1.")
+    }
+
+    configuredValue && isVersionSupported
   }
 
   def writeMergeSchemaEnabled(): Boolean = {
@@ -73,6 +105,10 @@ object OptionUtils extends SQLConfHelper {
 
   def v1FunctionEnabled(): Boolean = {
     getOptionString(SparkCatalogOptions.V1FUNCTION_ENABLED).toBoolean
+  }
+
+  def readAllowFullScan(): Boolean = {
+    getOptionString(SparkConnectorOptions.READ_ALLOW_FULL_SCAN).toBoolean
   }
 
   private def mergeSQLConf(extraOptions: JMap[String, String]): JMap[String, String] = {

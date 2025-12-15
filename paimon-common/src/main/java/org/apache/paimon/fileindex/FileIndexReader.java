@@ -21,6 +21,7 @@ package org.apache.paimon.fileindex;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.predicate.TransformPredicate;
 
 import java.util.List;
 
@@ -54,6 +55,11 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
 
     @Override
     public FileIndexResult visitContains(FieldRef fieldRef, Object literal) {
+        return REMAIN;
+    }
+
+    @Override
+    public FileIndexResult visitLike(FieldRef fieldRef, Object literal) {
         return REMAIN;
     }
 
@@ -122,6 +128,11 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
     }
 
     public FileIndexResult visitTopN(TopN topN, FileIndexResult result) {
+        return REMAIN;
+    }
+
+    @Override
+    public FileIndexResult visit(TransformPredicate predicate) {
         return REMAIN;
     }
 }

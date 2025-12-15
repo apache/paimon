@@ -28,12 +28,11 @@ under the License.
 
 This section introduce all available Paimon Spark functions.
 
-
 ## Built-in Function
 
 ### max_pt
 
-`max_pt($table_name)`
+`sys.max_pt($table_name)`
 
 It accepts a string type literal to specify the table name and return a max-valid-toplevel partition value.
 - **valid**: the partition which contains data files
@@ -47,14 +46,12 @@ It would throw exception when:
 **Example**
 
 ```sql
-SELECT max_pt('t');
+SELECT sys.max_pt('t');
 -- 20250101
  
-SELECT * FROM t where pt = max_pt('t');
+SELECT * FROM t where pt = sys.max_pt('t');
 -- a, 20250101
 ```
-
-**Since: 1.1.0**
 
 ## User-defined Function
 
@@ -103,8 +100,8 @@ CREATE [TEMPORARY] FUNCTION <mydb>.simple_udf
 AS 'com.example.SimpleUdf' 
 USING JAR '/tmp/SimpleUdf.jar' [, JAR '/tmp/SimpleUdfR.jar'];
 
--- Create or Replace Function
-CREATE OR REPLACE FUNCTION <mydb>.simple_udf 
+-- Create or Replace Temporary Function (Temporary function should not specify database name)
+CREATE OR REPLACE [TEMPORARY] FUNCTION <mydb>.simple_udf 
 AS 'com.example.SimpleUdf'
 USING JAR '/tmp/SimpleUdf.jar';
        

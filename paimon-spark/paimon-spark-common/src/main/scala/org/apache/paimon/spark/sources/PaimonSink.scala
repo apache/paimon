@@ -43,8 +43,8 @@ class PaimonSink(
     } else {
       InsertInto
     }
-    partitionColumns.foreach(println)
     val newData = PaimonUtils.createNewDataFrame(data)
-    WriteIntoPaimonTable(originTable, saveMode, newData, options).run(sqlContext.sparkSession)
+    WriteIntoPaimonTable(originTable, saveMode, newData, options, Some(batchId)).run(
+      sqlContext.sparkSession)
   }
 }

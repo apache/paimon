@@ -50,14 +50,14 @@ class PartitionExpireTableTest extends TableTestBase {
         catalog.createTable(identifier(), schemaBuilder.build(), true);
 
         Table table = catalog.getTable(identifier());
+        String path = table.options().get("path");
+        PartitionEntry expire = new PartitionEntry(BinaryRow.singleColumn(1), 1, 1, 1, 1);
+        TABLE_EXPIRE_PARTITIONS.put(path, Collections.singletonList(expire));
         write(table, GenericRow.of(1, 1));
         write(table, GenericRow.of(2, 2));
-        assertThat(read(table)).containsExactlyInAnyOrder(GenericRow.of(1, 1), GenericRow.of(2, 2));
+        assertThat(read(table)).containsExactlyInAnyOrder(GenericRow.of(2, 2));
 
-        String path = table.options().get("path");
         try {
-            PartitionEntry expire = new PartitionEntry(BinaryRow.singleColumn(1), 1, 1, 1, 1);
-            TABLE_EXPIRE_PARTITIONS.put(path, Collections.singletonList(expire));
             write(table, GenericRow.of(3, 3));
             assertThat(read(table))
                     .containsExactlyInAnyOrder(GenericRow.of(3, 3), GenericRow.of(2, 2));

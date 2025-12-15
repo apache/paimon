@@ -49,8 +49,8 @@ public class HashIndexFileTest {
                     }
 
                     @Override
-                    public Path toPath(IndexFileMeta file) {
-                        return new Path(dir, file.fileName());
+                    public Path toPath(String fileName) {
+                        return new Path(dir, fileName);
                     }
 
                     @Override

@@ -20,7 +20,40 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
 
+import org.apache.spark.sql.Row
+
 class DefaultValueTest extends PaimonSparkTestBase {
+
+  test("Default Value: MAP TYPE") {
+    withTable("t") {
+      spark.sql("""CREATE TABLE IF NOT EXISTS t (
+                  |  id BIGINT NOT NULL,
+                  |  col1 MAP<INT, DOUBLE> DEFAULT NULL,
+                  |  col2 MAP<INT, DOUBLE> DEFAULT map(),
+                  |  col3 MAP<INT, DOUBLE> DEFAULT map(99, 99.99D)
+                  |) using paimon;
+                  |""".stripMargin)
+
+      spark.sql("""
+                  |INSERT INTO t VALUES
+                  |  (1, map(1, 1.1), map(2, 2.2), map(3, 3.3)),
+                  |  (2, null, map(5, 5.5), map(6, 6.6)),
+                  |  (3, map(7, 7.7), null, map(9, 9.9)),
+                  |  (4, map(10, 10.1), map(11, 11.11), null),
+                  |  (5, null, null, null)
+                  |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM t ORDER BY id"),
+        Row(1, Map(1 -> 1.1), Map(2 -> 2.2), Map(3 -> 3.3))
+          :: Row(2, null, Map(5 -> 5.5), Map(6 -> 6.6))
+          :: Row(3, Map(7 -> 7.7), Map(), Map(9 -> 9.9))
+          :: Row(4, Map(10 -> 10.1), Map(11 -> 11.11), Map(99 -> 99.99))
+          :: Row(5, null, Map(), Map(99 -> 99.99))
+          :: Nil
+      )
+    }
+  }
 
   test("Default Value: unsupported default value") {
     withTimeZone("Asia/Shanghai") {

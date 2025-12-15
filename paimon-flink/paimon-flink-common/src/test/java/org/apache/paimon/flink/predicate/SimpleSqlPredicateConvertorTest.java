@@ -231,7 +231,16 @@ class SimpleSqlPredicateConvertorTest {
                         () ->
                                 simpleSqlPredicateConvertor.convertSqlToPredicate(
                                         "substring(f,0,1) =1"))
-                .hasMessage("SUBSTRING(`f` FROM 0 FOR 1) or 1 not been supported.");
+                .satisfiesAnyOf(
+                        // Legacy Calcite format: SUBSTRING(`f` FROM 0 FOR 1)
+                        e ->
+                                assertThat(e.getMessage())
+                                        .contains(
+                                                "SUBSTRING(`f` FROM 0 FOR 1) or 1 not been supported."),
+                        // Flink 2.2.0+ / newer Calcite format: SUBSTRING(`f`, 0, 1)
+                        e ->
+                                assertThat(e.getMessage())
+                                        .contains("SUBSTRING(`f`, 0, 1) or 1 not been supported."));
         // like not supported
         assertThatThrownBy(() -> simpleSqlPredicateConvertor.convertSqlToPredicate("b like 'x'"))
                 .hasMessage("LIKE not been supported.");

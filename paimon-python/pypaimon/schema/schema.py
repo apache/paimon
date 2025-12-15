@@ -20,6 +20,7 @@ from typing import Dict, List, Optional
 
 import pyarrow as pa
 
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.json_util import json_field
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
@@ -51,4 +52,37 @@ class Schema:
     def from_pyarrow_schema(pa_schema: pa.Schema, partition_keys: Optional[List[str]] = None,
                             primary_keys: Optional[List[str]] = None, options: Optional[Dict] = None,
                             comment: Optional[str] = None):
-        return Schema(PyarrowFieldParser.to_paimon_schema(pa_schema), partition_keys, primary_keys, options, comment)
+        # Convert PyArrow schema to Paimon fields
+        fields = PyarrowFieldParser.to_paimon_schema(pa_schema)
+
+        # Check if Blob type exists in the schema
+        has_blob_type = any(
+            'blob' in str(field.type).lower()
+            for field in fields
+        )
+
+        # If Blob type exists, validate required options
+        if has_blob_type:
+            if options is None:
+                options = {}
+
+            required_options = {
+                CoreOptions.ROW_TRACKING_ENABLED: 'true',
+                CoreOptions.DATA_EVOLUTION_ENABLED: 'true'
+            }
+
+            missing_options = []
+            for key, expected_value in required_options.items():
+                if key not in options or options[key] != expected_value:
+                    missing_options.append(f"{key}='{expected_value}'")
+
+            if missing_options:
+                raise ValueError(
+                    f"Schema contains Blob type but is missing required options: {', '.join(missing_options)}. "
+                    f"Please add these options to the schema."
+                )
+
+            if primary_keys is not None:
+                raise ValueError("Blob type is not supported with primary key.")
+
+        return Schema(fields, partition_keys, primary_keys, options, comment)

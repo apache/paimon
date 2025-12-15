@@ -25,6 +25,11 @@ import org.apache.paimon.spark.catalyst.analysis.Update
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 
+import scala.concurrent.{Await, Future}
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration.DurationInt
+import scala.util.Random
+
 abstract class UpdateTableTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
@@ -391,6 +396,40 @@ abstract class UpdateTableTestBase extends PaimonSparkTestBase {
       val latestSnapshot = table.latestSnapshot().get()
       assert(latestSnapshot.id == 4)
       assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.COMPACT))
+    }
+  }
+
+  test("Paimon update: random concurrent update and dv table") {
+    withTable("t") {
+      val recordCount = 10000
+      val maxCurrent = Random.nextInt(2) + 1
+
+      sql(s"CREATE TABLE t (a INT, b INT) TBLPROPERTIES ('deletion-vectors.enabled' = 'true')")
+      sql(s"INSERT INTO t SELECT id AS a, 0 AS b FROM range(0, $recordCount)")
+
+      def run(): Future[Unit] = Future {
+        for (_ <- 1 to 20) {
+          try {
+            val i = 20 + Random.nextInt(100)
+            Random.nextInt(2) match {
+              case 0 => sql(s"UPDATE t SET b = b + 1 WHERE (a % $i) = ${Random.nextInt(i)}")
+              case 1 =>
+                sql("CALL sys.compact(table => 't', options => 'compaction.min.file-num=1')")
+              case 2 =>
+                sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'a')")
+            }
+          } catch {
+            case a: Throwable => assert(a.getMessage.contains("Conflicts during commits"))
+          }
+          checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(recordCount)))
+        }
+      }
+
+      (1 to maxCurrent)
+        .map(_ => run())
+        .foreach(
+          Await.result(_, 600.seconds)
+        )
     }
   }
 }

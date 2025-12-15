@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.PropertyChange;
-import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.options.Options;
@@ -39,10 +38,13 @@ import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
 import org.apache.paimon.spark.catalog.functions.V1FunctionConverter;
 import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.iceberg.IcebergTable;
+import org.apache.paimon.table.lance.LanceTable;
+import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.ExceptionUtils;
-import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.spark.sql.PaimonSparkSession$;
 import org.apache.spark.sql.SparkSession;
@@ -67,15 +69,6 @@ import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
-import org.apache.spark.sql.execution.PartitionedCSVTable;
-import org.apache.spark.sql.execution.PartitionedJsonTable;
-import org.apache.spark.sql.execution.PartitionedOrcTable;
-import org.apache.spark.sql.execution.PartitionedParquetTable;
-import org.apache.spark.sql.execution.datasources.csv.CSVFileFormat;
-import org.apache.spark.sql.execution.datasources.json.JsonFileFormat;
-import org.apache.spark.sql.execution.datasources.orc.OrcFileFormat;
-import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat;
-import org.apache.spark.sql.execution.datasources.v2.FileTable;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -90,6 +83,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -107,6 +101,7 @@ import static org.apache.paimon.spark.utils.CatalogUtils.isUpdateColumnDefaultVa
 import static org.apache.paimon.spark.utils.CatalogUtils.removeCatalogName;
 import static org.apache.paimon.spark.utils.CatalogUtils.toIdentifier;
 import static org.apache.paimon.spark.utils.CatalogUtils.toUpdateColumnDefaultValue;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Spark {@link TableCatalog} for paimon. */
 public class SparkCatalog extends SparkBaseCatalog
@@ -162,6 +157,11 @@ public class SparkCatalog extends SparkBaseCatalog
         return catalog;
     }
 
+    @Override
+    public String paimonCatalogName() {
+        return catalogName;
+    }
+
     // ======================= database methods ===============================
 
     @Override
@@ -172,7 +172,7 @@ public class SparkCatalog extends SparkBaseCatalog
     @Override
     public void createNamespace(String[] namespace, Map<String, String> metadata)
             throws NamespaceAlreadyExistsException {
-        checkNamespace(namespace);
+        checkNamespace(namespace, catalogName);
         try {
             String databaseName = getDatabaseNameFromNamespace(namespace);
             catalog.createDatabase(databaseName, false, metadata);
@@ -196,7 +196,7 @@ public class SparkCatalog extends SparkBaseCatalog
         if (namespace.length == 0) {
             return listNamespaces();
         }
-        checkNamespace(namespace);
+        checkNamespace(namespace, catalogName);
         try {
             String databaseName = getDatabaseNameFromNamespace(namespace);
             catalog.getDatabase(databaseName);
@@ -209,7 +209,7 @@ public class SparkCatalog extends SparkBaseCatalog
     @Override
     public Map<String, String> loadNamespaceMetadata(String[] namespace)
             throws NoSuchNamespaceException {
-        checkNamespace(namespace);
+        checkNamespace(namespace, catalogName);
         try {
             String databaseName = getDatabaseNameFromNamespace(namespace);
             return catalog.getDatabase(databaseName).options();
@@ -247,7 +247,7 @@ public class SparkCatalog extends SparkBaseCatalog
      */
     public boolean dropNamespace(String[] namespace, boolean cascade)
             throws NoSuchNamespaceException {
-        checkNamespace(namespace);
+        checkNamespace(namespace, catalogName);
         try {
             String databaseName = getDatabaseNameFromNamespace(namespace);
             catalog.dropDatabase(databaseName, false, cascade);
@@ -263,7 +263,7 @@ public class SparkCatalog extends SparkBaseCatalog
     @Override
     public void alterNamespace(String[] namespace, NamespaceChange... changes)
             throws NoSuchNamespaceException {
-        checkNamespace(namespace);
+        checkNamespace(namespace, catalogName);
         try {
             String databaseName = getDatabaseNameFromNamespace(namespace);
             List<PropertyChange> propertyChanges =
@@ -278,7 +278,7 @@ public class SparkCatalog extends SparkBaseCatalog
 
     @Override
     public Identifier[] listTables(String[] namespace) throws NoSuchNamespaceException {
-        checkNamespace(namespace);
+        checkNamespace(namespace, catalogName);
         try {
             String databaseName = getDatabaseNameFromNamespace(namespace);
             return catalog.listTables(databaseName).stream()
@@ -291,7 +291,7 @@ public class SparkCatalog extends SparkBaseCatalog
 
     @Override
     public void invalidateTable(Identifier ident) {
-        catalog.invalidateTable(toIdentifier(ident));
+        catalog.invalidateTable(toIdentifier(ident, catalogName));
     }
 
     @Override
@@ -344,7 +344,7 @@ public class SparkCatalog extends SparkBaseCatalog
         List<SchemaChange> schemaChanges =
                 Arrays.stream(changes).map(this::toSchemaChange).collect(Collectors.toList());
         try {
-            catalog.alterTable(toIdentifier(ident), schemaChanges, false);
+            catalog.alterTable(toIdentifier(ident, catalogName), schemaChanges, false);
             return loadTable(ident);
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
@@ -362,7 +362,9 @@ public class SparkCatalog extends SparkBaseCatalog
             throws TableAlreadyExistsException, NoSuchNamespaceException {
         try {
             catalog.createTable(
-                    toIdentifier(ident), toInitialSchema(schema, partitions, properties), false);
+                    toIdentifier(ident, catalogName),
+                    toInitialSchema(schema, partitions, properties),
+                    false);
             return loadTable(ident);
         } catch (Catalog.TableAlreadyExistException e) {
             throw new TableAlreadyExistsException(ident);
@@ -376,7 +378,7 @@ public class SparkCatalog extends SparkBaseCatalog
     @Override
     public boolean dropTable(Identifier ident) {
         try {
-            catalog.dropTable(toIdentifier(ident), false);
+            catalog.dropTable(toIdentifier(ident, catalogName), false);
             return true;
         } catch (Catalog.TableNotExistException e) {
             return false;
@@ -454,6 +456,7 @@ public class SparkCatalog extends SparkBaseCatalog
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Map<String, String> normalizedProperties = new HashMap<>(properties);
+        String blobFieldName = properties.get(CoreOptions.BLOB_FIELD.key());
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
         if (!usePaimon(provider)) {
             if (isFormatTable(provider)) {
@@ -486,7 +489,15 @@ public class SparkCatalog extends SparkBaseCatalog
 
         for (StructField field : schema.fields()) {
             String name = field.name();
-            DataType type = toPaimonType(field.dataType()).copy(field.nullable());
+            DataType type;
+            if (Objects.equals(blobFieldName, name)) {
+                checkArgument(
+                        field.dataType() instanceof org.apache.spark.sql.types.BinaryType,
+                        "The type of blob field must be binary");
+                type = new BlobType();
+            } else {
+                type = toPaimonType(field.dataType()).copy(field.nullable());
+            }
             String comment = field.getComment().getOrElse(() -> null);
             if (field.metadata().contains(CURRENT_DEFAULT_COLUMN_METADATA_KEY)) {
                 String defaultValue =
@@ -510,8 +521,8 @@ public class SparkCatalog extends SparkBaseCatalog
             throws NoSuchTableException, TableAlreadyExistsException {
         try {
             catalog.renameTable(
-                    toIdentifier(oldIdent),
-                    toIdentifier(removeCatalogName(newIdent, catalogName)),
+                    toIdentifier(oldIdent, catalogName),
+                    toIdentifier(removeCatalogName(newIdent, catalogName), catalogName),
                     false);
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(oldIdent);
@@ -524,36 +535,35 @@ public class SparkCatalog extends SparkBaseCatalog
 
     @Override
     public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
-        if (isFunctionNamespace(namespace)) {
-            List<Identifier> functionIdentifiers = new ArrayList<>();
-            PaimonFunctions.names()
-                    .forEach(name -> functionIdentifiers.add(Identifier.of(namespace, name)));
-            if (namespace.length > 0) {
-                String databaseName = getDatabaseNameFromNamespace(namespace);
-                try {
-                    catalog.listFunctions(databaseName)
-                            .forEach(
-                                    name ->
-                                            functionIdentifiers.add(
-                                                    Identifier.of(namespace, name)));
-                } catch (Catalog.DatabaseNotExistException e) {
-                    throw new NoSuchNamespaceException(namespace);
-                }
+        if (isSystemFunctionNamespace(namespace)) {
+            List<Identifier> result = new ArrayList<>();
+            PaimonFunctions.names().forEach(name -> result.add(Identifier.of(namespace, name)));
+            return result.toArray(new Identifier[0]);
+        } else if (isDatabaseFunctionNamespace(namespace)) {
+            List<Identifier> result = new ArrayList<>();
+            String databaseName = getDatabaseNameFromNamespace(namespace);
+            try {
+                catalog.listFunctions(databaseName)
+                        .forEach(name -> result.add(Identifier.of(namespace, name)));
+            } catch (Catalog.DatabaseNotExistException e) {
+                throw new NoSuchNamespaceException(namespace);
             }
-            return functionIdentifiers.toArray(new Identifier[0]);
+            return result.toArray(new Identifier[0]);
         }
         throw new NoSuchNamespaceException(namespace);
     }
 
     @Override
     public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
-        if (isFunctionNamespace(ident.namespace())) {
+        String[] namespace = ident.namespace();
+        if (isSystemFunctionNamespace(namespace)) {
             UnboundFunction func = PaimonFunctions.load(ident.name());
             if (func != null) {
                 return func;
             }
+        } else if (isDatabaseFunctionNamespace(namespace)) {
             try {
-                Function paimonFunction = catalog.getFunction(toIdentifier(ident));
+                Function paimonFunction = catalog.getFunction(toIdentifier(ident, catalogName));
                 FunctionDefinition functionDefinition =
                         paimonFunction.definition(FUNCTION_DEFINITION_NAME);
                 if (functionDefinition instanceof FunctionDefinition.LambdaFunctionDefinition) {
@@ -582,11 +592,14 @@ public class SparkCatalog extends SparkBaseCatalog
         throw new NoSuchFunctionException(ident);
     }
 
-    private boolean isFunctionNamespace(String[] namespace) {
+    private boolean isSystemFunctionNamespace(String[] namespace) {
         // Allow for empty namespace, as Spark's bucket join will use `bucket` function with empty
         // namespace to generate transforms for partitioning.
-        // Otherwise, check if it is paimon namespace.
-        return namespace.length == 0 || (namespace.length == 1 && namespaceExists(namespace));
+        return namespace.length == 0 || isSystemNamespace(namespace);
+    }
+
+    private boolean isDatabaseFunctionNamespace(String[] namespace) {
+        return namespace.length == 1 && namespaceExists(namespace);
     }
 
     private PaimonV1FunctionRegistry v1FunctionRegistry() {
@@ -638,73 +651,23 @@ public class SparkCatalog extends SparkBaseCatalog
     protected org.apache.spark.sql.connector.catalog.Table loadSparkTable(
             Identifier ident, Map<String, String> extraOptions) throws NoSuchTableException {
         try {
-            org.apache.paimon.table.Table paimonTable = catalog.getTable(toIdentifier(ident));
-            if (paimonTable instanceof FormatTable) {
-                return convertToFileTable(ident, (FormatTable) paimonTable);
+            org.apache.paimon.catalog.Identifier tblIdent = toIdentifier(ident, catalogName);
+            org.apache.paimon.table.Table table =
+                    copyWithSQLConf(
+                            catalog.getTable(tblIdent), catalogName, tblIdent, extraOptions);
+            if (table instanceof FormatTable) {
+                return toSparkFormatTable(ident, (FormatTable) table);
+            } else if (table instanceof IcebergTable) {
+                return new SparkIcebergTable(table);
+            } else if (table instanceof LanceTable) {
+                return new SparkLanceTable(table);
+            } else if (table instanceof ObjectTable) {
+                return new SparkObjectTable(table);
             } else {
-                return new SparkTable(
-                        copyWithSQLConf(
-                                paimonTable, catalogName, toIdentifier(ident), extraOptions));
+                return new SparkTable(table);
             }
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
-        }
-    }
-
-    private static FileTable convertToFileTable(Identifier ident, FormatTable formatTable) {
-        SparkSession spark = PaimonSparkSession$.MODULE$.active();
-        StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
-        StructType partitionSchema =
-                SparkTypeUtils.fromPaimonRowType(
-                        TypeUtils.project(formatTable.rowType(), formatTable.partitionKeys()));
-        List<String> pathList = new ArrayList<>();
-        pathList.add(formatTable.location());
-        Options options = Options.fromMap(formatTable.options());
-        CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(options.toMap());
-        if (formatTable.format() == FormatTable.Format.CSV) {
-            options.set("sep", options.get(CsvOptions.FIELD_DELIMITER));
-            dsOptions = new CaseInsensitiveStringMap(options.toMap());
-            return new PartitionedCSVTable(
-                    ident.name(),
-                    spark,
-                    dsOptions,
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
-                    CSVFileFormat.class,
-                    partitionSchema);
-        } else if (formatTable.format() == FormatTable.Format.ORC) {
-            return new PartitionedOrcTable(
-                    ident.name(),
-                    spark,
-                    dsOptions,
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
-                    OrcFileFormat.class,
-                    partitionSchema);
-        } else if (formatTable.format() == FormatTable.Format.PARQUET) {
-            return new PartitionedParquetTable(
-                    ident.name(),
-                    spark,
-                    dsOptions,
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
-                    ParquetFileFormat.class,
-                    partitionSchema);
-        } else if (formatTable.format() == FormatTable.Format.JSON) {
-            return new PartitionedJsonTable(
-                    ident.name(),
-                    spark,
-                    dsOptions,
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
-                    JsonFileFormat.class,
-                    partitionSchema);
-        } else {
-            throw new UnsupportedOperationException(
-                    "Unsupported format table "
-                            + ident.name()
-                            + " format "
-                            + formatTable.format().name());
         }
     }
 

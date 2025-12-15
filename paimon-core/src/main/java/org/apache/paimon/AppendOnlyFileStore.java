@@ -27,6 +27,7 @@ import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.BucketSelectConverter;
 import org.apache.paimon.operation.BucketedAppendFileStoreWrite;
+import org.apache.paimon.operation.DataEvolutionFileStoreScan;
 import org.apache.paimon.operation.DataEvolutionSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.predicate.Predicate;
@@ -167,6 +168,17 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     }
                     return Optional.empty();
                 };
+
+        if (options().dataEvolutionEnabled()) {
+            return new DataEvolutionFileStoreScan(
+                    newManifestsReader(),
+                    bucketSelectConverter,
+                    snapshotManager(),
+                    schemaManager,
+                    schema,
+                    manifestFileFactory(),
+                    options.scanManifestParallelism());
+        }
 
         return new AppendOnlyFileStoreScan(
                 newManifestsReader(),

@@ -21,24 +21,25 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder, TopN}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.{InnerTable, SpecialFields}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn._
+import org.apache.paimon.table.{SpecialFields, Table}
 import org.apache.paimon.table.source.ReadBuilder
 import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.Preconditions.checkState
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.types.StructType
 
 trait ColumnPruningAndPushDown extends Scan with Logging {
-  def table: InnerTable
+  def table: Table
   def requiredSchema: StructType
   def filters: Seq[Predicate]
   def pushDownLimit: Option[Int] = None
   def pushDownTopN: Option[TopN] = None
 
+  val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
+
   lazy val tableRowType: RowType = {
-    val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
     if (coreOptions.rowTrackingEnabled()) {
       SpecialFields.rowTypeWithRowTracking(table.rowType())
     } else {
@@ -53,16 +54,30 @@ trait ColumnPruningAndPushDown extends Scan with Logging {
   }
 
   private[paimon] val (readTableRowType, metadataFields) = {
-    checkState(
-      requiredSchema.fields.forall(
-        field =>
-          tableRowType.containsField(field.name) ||
-            PaimonMetadataColumn.SUPPORTED_METADATA_COLUMNS.contains(field.name)))
+    requiredSchema.fields.foreach(f => checkMetadataColumn(f.name))
     val (_requiredTableFields, _metadataFields) =
       requiredSchema.fields.partition(field => tableRowType.containsField(field.name))
     val _readTableRowType =
       SparkTypeUtils.prunePaimonRowType(StructType(_requiredTableFields), tableRowType)
     (_readTableRowType, _metadataFields)
+  }
+
+  private def checkMetadataColumn(fieldName: String): Unit = {
+    if (PATH_AND_INDEX_META_COLUMNS.contains(fieldName)) {
+      if (!table.primaryKeys().isEmpty && !coreOptions.deletionVectorsEnabled()) {
+        // Here we only issue a warning because after full compaction, primary-key tables can query the
+        // index and file path too.
+        logWarning(
+          s"Only non-primary-key or deletion-vector or full compacted tables support metadata column: $fieldName")
+      }
+    }
+
+    if (ROW_TRACKING_META_COLUMNS.contains(fieldName)) {
+      if (!coreOptions.rowTrackingEnabled()) {
+        throw new UnsupportedOperationException(
+          s"Only row-tracking tables support metadata column: $fieldName")
+      }
+    }
   }
 
   lazy val readBuilder: ReadBuilder = {

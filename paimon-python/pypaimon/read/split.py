@@ -17,10 +17,11 @@
 ################################################################################
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.source.deletion_file import DeletionFile
 
 
 @dataclass
@@ -32,7 +33,10 @@ class Split:
     _file_paths: List[str]
     _row_count: int
     _file_size: int
+    split_start_row: int = None
+    split_end_row: int = None
     raw_convertible: bool = False
+    data_deletion_files: Optional[List[DeletionFile]] = None
 
     @property
     def row_count(self) -> int:

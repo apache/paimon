@@ -25,17 +25,16 @@ import uuid
 
 import pyarrow as pa
 
+from pypaimon import CatalogFactory, Schema
 from pypaimon.api.api_response import ConfigResponse
 from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.api.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
-from pypaimon import CatalogFactory
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType)
-from pypaimon import Schema
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
@@ -228,3 +227,39 @@ class RESTBaseTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         return table_read.to_arrow(splits)
+
+    def _write_test_table_with_schema(self, table, pa_schema):
+        """Write test data using the specified PyArrow schema."""
+        write_builder = table.new_batch_write_builder()
+
+        # first write
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data1 = {
+            'user_id': [1, 2, 3, 4],
+            'item_id': [1001, 1002, 1003, 1004],
+            'behavior': ['a', 'b', 'c', None],
+            'dt': ['p1', 'p1', 'p2', 'p1'],
+            'long-dt': ['2024-10-10', '2024-10-10', '2024-10-10', '2024-01-01'],
+        }
+        pa_table = pa.Table.from_pydict(data1, schema=pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # second write
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data2 = {
+            'user_id': [5, 6, 7, 8],
+            'item_id': [1005, 1006, 1007, 1008],
+            'behavior': ['e', 'f', 'g', 'h'],
+            'dt': ['p2', 'p1', 'p2', 'p2'],
+            'long-dt': ['2024-10-10', '2025-01-23', 'abcdefghijklmnopk', '2025-08-08'],
+        }
+        pa_table = pa.Table.from_pydict(data2, schema=pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()

@@ -33,7 +33,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashMap;
 import java.util.List;
@@ -60,12 +59,22 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         TEST_HIVE_METASTORE.stop();
     }
 
-    private static Stream<Arguments> testArguments() {
+    private static Stream<Arguments> testProcedureArguments() {
         return Stream.of(Arguments.of("orc"), Arguments.of("avro"), Arguments.of("parquet"));
     }
 
+    private static Stream<Arguments> testActionArguments() {
+        return Stream.of(
+                Arguments.of("orc", false),
+                Arguments.of("avro", false),
+                Arguments.of("parquet", false),
+                Arguments.of("orc", true),
+                Arguments.of("avro", true),
+                Arguments.of("parquet", true));
+    }
+
     @ParameterizedTest
-    @MethodSource("testArguments")
+    @MethodSource("testProcedureArguments")
     public void testMigrateProcedure(String format) throws Exception {
         testUpgradeNonPartitionTable(format);
         resetMetastore();
@@ -143,8 +152,8 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testMigrateAction(String format) throws Exception {
+    @MethodSource("testActionArguments")
+    public void testMigrateAction(String format, boolean forceStartFlinkJob) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -166,6 +175,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                 "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
         MigrateTableAction migrateTableAction =
                 new MigrateTableAction("hive", "default.hivetable", catalogConf, "", 6);
+        migrateTableAction.forceStartFlinkJob(forceStartFlinkJob);
         migrateTableAction.run();
 
         tEnv.executeSql(

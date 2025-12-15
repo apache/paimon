@@ -36,6 +36,7 @@ import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.utils.CompactedChangelogPathResolver;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.FileOperationThreadPool;
 import org.apache.paimon.utils.IndexFilePathFactories;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -57,6 +58,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -66,7 +68,6 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.table.sink.BatchWriteBuilder.COMMIT_IDENTIFIER;
-import static org.apache.paimon.utils.ManifestReadThreadPool.getExecutorService;
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialReturn;
 
@@ -79,18 +80,16 @@ public class TableCommitImpl implements InnerTableCommit {
     @Nullable private final Runnable expireSnapshots;
     @Nullable private final PartitionExpire partitionExpire;
     @Nullable private final TagAutoManager tagAutoManager;
-
     @Nullable private final Duration consumerExpireTime;
     private final ConsumerManager consumerManager;
-
     private final ExecutorService maintainExecutor;
     private final AtomicReference<Throwable> maintainError;
-
     private final String tableName;
+    private final boolean forceCreatingSnapshot;
+    private final ThreadPoolExecutor fileCheckExecutor;
 
     @Nullable private Map<String, String> overwritePartition = null;
     private boolean batchCommitted = false;
-    private final boolean forceCreatingSnapshot;
     private boolean expireForEmptyCommit = true;
 
     public TableCommitImpl(
@@ -102,7 +101,8 @@ public class TableCommitImpl implements InnerTableCommit {
             ConsumerManager consumerManager,
             ExpireExecutionMode expireExecutionMode,
             String tableName,
-            boolean forceCreatingSnapshot) {
+            boolean forceCreatingSnapshot,
+            int threadNum) {
         if (partitionExpire != null) {
             commit.withPartitionExpire(partitionExpire);
         }
@@ -125,6 +125,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
         this.tableName = tableName;
         this.forceCreatingSnapshot = forceCreatingSnapshot;
+        this.fileCheckExecutor = FileOperationThreadPool.getExecutorService(threadNum);
     }
 
     public boolean forceCreatingSnapshot() {
@@ -154,6 +155,12 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl expireForEmptyCommit(boolean expireForEmptyCommit) {
         this.expireForEmptyCommit = expireForEmptyCommit;
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl appendCommitCheckConflict(boolean appendCommitCheckConflict) {
+        commit.appendCommitCheckConflict(appendCommitCheckConflict);
         return this;
     }
 
@@ -294,17 +301,12 @@ public class TableCommitImpl implements InnerTableCommit {
                 msg.newFilesIncrement().newIndexFiles().stream()
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
-                msg.newFilesIncrement().deletedIndexFiles().stream()
-                        .map(indexFileFactory::toPath)
-                        .forEach(files::add);
-                msg.compactIncrement().compactBefore().forEach(collector);
                 msg.compactIncrement().compactAfter().forEach(collector);
                 msg.compactIncrement().newIndexFiles().stream()
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
-                msg.compactIncrement().deletedIndexFiles().stream()
-                        .map(indexFileFactory::toPath)
-                        .forEach(files::add);
+
+                // skip compact before files, deleted index files
             }
         }
 
@@ -329,7 +331,7 @@ public class TableCommitImpl implements InnerTableCommit {
         List<Path> nonExistFiles =
                 Lists.newArrayList(
                         randomlyExecuteSequentialReturn(
-                                getExecutorService(null),
+                                fileCheckExecutor,
                                 f -> nonExists.test(f) ? singletonList(f) : emptyList(),
                                 resolvedFiles));
 
@@ -354,15 +356,19 @@ public class TableCommitImpl implements InnerTableCommit {
             throw new RuntimeException(maintainError.get());
         }
 
-        executor.execute(
-                () -> {
-                    try {
-                        maintain(identifier, doExpire);
-                    } catch (Throwable t) {
-                        LOG.error("Executing maintain encountered an error.", t);
-                        maintainError.compareAndSet(null, t);
-                    }
-                });
+        if (batchCommitted) {
+            maintain(identifier, doExpire);
+        } else {
+            executor.execute(
+                    () -> {
+                        try {
+                            maintain(identifier, doExpire);
+                        } catch (Throwable t) {
+                            LOG.error("Executing maintain encountered an error.", t);
+                            maintainError.compareAndSet(null, t);
+                        }
+                    });
+        }
     }
 
     private void maintain(long identifier, boolean doExpire) {

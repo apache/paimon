@@ -30,6 +30,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
@@ -59,7 +60,6 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.DEFAULT_AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
-import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
@@ -159,7 +159,7 @@ public class SchemaValidation {
 
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
-        fileFormat.validateDataFields(new RowType(schema.fields()));
+        fileFormat.validateDataFields(BlobType.splitBlob(new RowType(schema.fields())).getLeft());
 
         // Check column names in schema
         schema.fieldNames()
@@ -239,6 +239,8 @@ public class SchemaValidation {
         validateMergeFunctionFactory(schema);
 
         validateRowTracking(schema, options);
+
+        validateIncrementalClustering(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -559,22 +561,13 @@ public class SchemaValidation {
                         "Cannot define 'bucket-key' with bucket = -1, please remove the 'bucket-key' setting or specify a bucket number.");
             }
 
-            if (schema.primaryKeys().isEmpty()
-                    && options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null) {
+            if (schema.primaryKeys().isEmpty() && options.fullCompactionDeltaCommits() != null) {
                 throw new RuntimeException(
                         "AppendOnlyTable of unaware or dynamic bucket does not support 'full-compaction.delta-commits'");
             }
         } else if (bucket < 1 && !isPostponeBucketTable(schema, bucket)) {
             throw new RuntimeException("The number of buckets needs to be greater than 0.");
         } else {
-            if (schema.crossPartitionUpdate()) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
-                                        + "(Primary key constraint %s not include all partition fields %s).",
-                                schema.primaryKeys(), schema.partitionKeys()));
-            }
-
             if (schema.primaryKeys().isEmpty() && schema.bucketKeys().isEmpty()) {
                 throw new RuntimeException(
                         "You should define a 'bucket-key' for bucketed append mode.");
@@ -654,6 +647,36 @@ public class SchemaValidation {
             checkArgument(
                     !options.deletionVectorsEnabled(),
                     "Data evolution config must disabled with deletion-vectors.enabled");
+        }
+
+        List<String> blobNames =
+                BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldNames();
+        if (!blobNames.isEmpty()) {
+            checkArgument(
+                    options.dataEvolutionEnabled(),
+                    "Data evolution config must enabled for table with BLOB type column.");
+            checkArgument(
+                    blobNames.size() == 1,
+                    "Table with BLOB type column only support one BLOB column.");
+            checkArgument(
+                    schema.fields().size() > 1,
+                    "Table with BLOB type column must have other normal columns.");
+            checkArgument(
+                    !schema.partitionKeys().contains(blobNames.get(0)),
+                    "The BLOB type column can not be part of partition keys.");
+        }
+    }
+
+    private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {
+        if (options.clusteringIncrementalEnabled()) {
+            checkArgument(
+                    options.bucket() == -1,
+                    "Cannot define %s for incremental clustering  table, it only support bucket = -1",
+                    CoreOptions.BUCKET.key());
+            checkArgument(
+                    schema.primaryKeys().isEmpty(),
+                    "Cannot define %s for incremental clustering table.",
+                    PRIMARY_KEY.key());
         }
     }
 }

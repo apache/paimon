@@ -32,6 +32,7 @@ import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -57,6 +58,7 @@ public class ManifestFileTest {
     public void testWriteAndReadManifestFile() {
         List<ManifestEntry> entries = generateData();
         ManifestFileMeta meta = gen.createManifestFileMeta(entries);
+        System.out.println(tempDir.toString());
         ManifestFile manifestFile = createManifestFile(tempDir.toString());
 
         List<ManifestFileMeta> actualMetas = manifestFile.write(entries);
@@ -83,6 +85,39 @@ public class ManifestFileTest {
             Path manifestDir = new Path(tempDir.toString() + "/manifest");
             assertThat(LocalFileIO.create().listStatus(manifestDir)).isEmpty();
         }
+    }
+
+    @Test
+    void testManifestCreationTimeTimestamp() {
+        List<ManifestEntry> entries = generateData();
+        ManifestFile manifestFile = createManifestFile(tempDir.toString());
+
+        List<ManifestFileMeta> actualMetas = manifestFile.write(entries);
+        List<ManifestEntry> actualEntries =
+                actualMetas.stream()
+                        .flatMap(m -> manifestFile.read(m.fileName(), m.fileSize()).stream())
+                        .collect(Collectors.toList());
+
+        int creationTimesFound = 0;
+        for (ManifestEntry entry : actualEntries) {
+            if (entry.file().creationTime() != null) {
+                creationTimesFound++;
+                org.apache.paimon.data.Timestamp creationTime = entry.file().creationTime();
+                assertThat(creationTime).isNotNull();
+                long epochMillis = entry.file().creationTimeEpochMillis();
+                assertThat(epochMillis).isPositive();
+                long expectedEpochMillis = creationTime.getMillisecond();
+                java.time.ZoneId systemZone = java.time.ZoneId.systemDefault();
+                java.time.ZoneOffset offset =
+                        systemZone
+                                .getRules()
+                                .getOffset(java.time.Instant.ofEpochMilli(expectedEpochMillis));
+                expectedEpochMillis = expectedEpochMillis - (offset.getTotalSeconds() * 1000L);
+                assertThat(epochMillis).isEqualTo(expectedEpochMillis);
+            }
+        }
+
+        assertThat(creationTimesFound).isPositive();
     }
 
     private List<ManifestEntry> generateData() {

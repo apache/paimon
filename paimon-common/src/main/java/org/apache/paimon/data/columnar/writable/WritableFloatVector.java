@@ -36,6 +36,8 @@ public interface WritableFloatVector extends WritableColumnVector, FloatColumnVe
      */
     void setFloatsFromBinary(int rowId, int count, byte[] src, int srcIndex);
 
+    void appendFloat(float v);
+
     /** Fill the column vector with the provided value. */
     void fill(float value);
 }

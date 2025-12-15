@@ -26,6 +26,7 @@ on:
       - '**/*.md'
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
+      - 'paimon-lucene/**'
 
 env:
   JDK_VERSION: 11
@@ -56,7 +57,7 @@ jobs:
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
           test_modules=""
-          for suffix in 2.0 2.1 common; do
+          for suffix in 2.0 2.1 2.2 common; do
           test_modules+="org.apache.paimon:paimon-flink-${suffix},"
           done
           test_modules="${test_modules%,}"

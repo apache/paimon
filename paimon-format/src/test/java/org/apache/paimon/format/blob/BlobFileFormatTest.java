@@ -83,7 +83,7 @@ public class BlobFileFormatTest {
         List<byte[]> result = new ArrayList<>();
         readerFactory
                 .createReader(context)
-                .forEachRemaining(row -> result.add(row.getBlob(0).toBytes()));
+                .forEachRemaining(row -> result.add(row.getBlob(0).toData()));
 
         // assert
         assertThat(result).containsExactlyElementsOf(blobs);
@@ -95,7 +95,7 @@ public class BlobFileFormatTest {
         result.clear();
         readerFactory
                 .createReader(context)
-                .forEachRemaining(row -> result.add(row.getBlob(0).toBytes()));
+                .forEachRemaining(row -> result.add(row.getBlob(0).toData()));
 
         // assert
         assertThat(result).containsOnly(blobs.get(1));

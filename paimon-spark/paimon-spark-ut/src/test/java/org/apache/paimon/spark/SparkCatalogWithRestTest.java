@@ -165,6 +165,9 @@ public class SparkCatalogWithRestTest {
                                 .get(0)
                                 .toString())
                 .isEqualTo("[3]");
+        assertThat(spark.sql("show user functions").collectAsList().toString())
+                .contains("[paimon.db2.area_func]");
+
         paimonCatalog.dropFunction(identifier, false);
         cleanFunction(functionName);
     }

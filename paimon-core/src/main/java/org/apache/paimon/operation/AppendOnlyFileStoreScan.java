@@ -44,7 +44,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     private final boolean fileIndexReadEnabled;
 
-    private Predicate inputFilter;
+    protected Predicate inputFilter;
 
     // cache not evolved filter by schema id
     private final Map<Long, Predicate> notEvolvedFilterMapping = new ConcurrentHashMap<>();

@@ -22,78 +22,28 @@ import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggregation
 import org.apache.paimon.table.{FileStoreTable, InnerTable}
+import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions
 import org.apache.spark.sql.connector.expressions.{NamedReference, SortOrder}
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
 import org.apache.spark.sql.connector.read._
-import org.apache.spark.sql.sources.Filter
 
-import java.util.Collections
+import java.util.{List => JList}
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable
 
 class PaimonScanBuilder(table: InnerTable)
   extends PaimonBaseScanBuilder(table)
-  with SupportsPushDownV2Filters
-  with SupportsPushDownLimit
+  with PaimonBasePushDown
   with SupportsPushDownAggregates
   with SupportsPushDownTopN {
 
   private var localScan: Option[Scan] = None
 
-  private var pushedSparkPredicates = Array.empty[SparkPredicate]
-
-  /** Pushes down filters, and returns filters that need to be evaluated after scanning. */
-  override def pushPredicates(predicates: Array[SparkPredicate]): Array[SparkPredicate] = {
-    val pushable = mutable.ArrayBuffer.empty[(SparkPredicate, Predicate)]
-    val postScan = mutable.ArrayBuffer.empty[SparkPredicate]
-    val reserved = mutable.ArrayBuffer.empty[Filter]
-
-    val converter = SparkV2FilterConverter(table.rowType)
-    val visitor = new PartitionPredicateVisitor(table.partitionKeys())
-    predicates.foreach {
-      predicate =>
-        converter.convert(predicate) match {
-          case Some(paimonPredicate) =>
-            pushable.append((predicate, paimonPredicate))
-            if (paimonPredicate.visit(visitor)) {
-              // We need to filter the stats using filter instead of predicate.
-              reserved.append(PaimonUtils.filterV2ToV1(predicate).get)
-            } else {
-              postScan.append(predicate)
-            }
-          case None =>
-            postScan.append(predicate)
-        }
-    }
-
-    if (pushable.nonEmpty) {
-      this.pushedSparkPredicates = pushable.map(_._1).toArray
-      this.pushedPaimonPredicates = pushable.map(_._2).toArray
-    }
-    if (reserved.nonEmpty) {
-      this.reservedFilters = reserved.toArray
-    }
-    if (postScan.nonEmpty) {
-      this.hasPostScanPredicates = true
-    }
-    postScan.toArray
-  }
-
-  override def pushedPredicates: Array[SparkPredicate] = {
-    pushedSparkPredicates
-  }
-
-  override def pushLimit(limit: Int): Boolean = {
-    // It is safe, since we will do nothing if it is the primary table and the split is not `rawConvertible`
-    pushDownLimit = Some(limit)
-    // just make the best effort to push down limit
-    false
-  }
+  override protected var partitionKeys: JList[String] = table.partitionKeys()
+  override protected var rowType: RowType = table.rowType()
 
   override def pushTopN(orders: Array[SortOrder], limit: Int): Boolean = {
     if (hasPostScanPredicates) {
@@ -184,7 +134,13 @@ class PaimonScanBuilder(table: InnerTable)
     if (localScan.isDefined) {
       localScan.get
     } else {
-      super.build()
+      PaimonScan(
+        table,
+        requiredSchema,
+        pushedPaimonPredicates,
+        reservedFilters,
+        pushDownLimit,
+        pushDownTopN)
     }
   }
 }

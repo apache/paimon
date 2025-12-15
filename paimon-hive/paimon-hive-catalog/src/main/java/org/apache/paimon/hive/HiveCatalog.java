@@ -164,19 +164,19 @@ public class HiveCatalog extends AbstractCatalog {
     private final LocationHelper locationHelper;
 
     public HiveCatalog(FileIO fileIO, HiveConf hiveConf, String clientClassName, String warehouse) {
-        this(fileIO, hiveConf, clientClassName, new Options(), warehouse);
+        this(fileIO, hiveConf, clientClassName, CatalogContext.create(new Options()), warehouse);
     }
 
     public HiveCatalog(
             FileIO fileIO,
             HiveConf hiveConf,
             String clientClassName,
-            Options options,
+            CatalogContext context,
             String warehouse) {
-        super(fileIO, options);
+        super(fileIO, context);
         this.hiveConf = hiveConf;
         this.clientClassName = clientClassName;
-        this.options = options;
+        this.options = context.options();
         this.warehouse = warehouse;
 
         boolean needLocationInProperties =
@@ -206,7 +206,7 @@ public class HiveCatalog extends AbstractCatalog {
     public Optional<CatalogLockContext> lockContext() {
         return Optional.of(
                 new HiveCatalogLockContext(
-                        new SerializableHiveConf(hiveConf), clientClassName, catalogOptions));
+                        new SerializableHiveConf(hiveConf), clientClassName, options));
     }
 
     @Override
@@ -358,11 +358,32 @@ public class HiveCatalog extends AbstractCatalog {
                 Identifier.create(identifier.getDatabaseName(), identifier.getTableName());
         Table hmsTable = getHmsTable(tableIdentifier);
         TableSchema schema = loadTableSchema(tableIdentifier, hmsTable);
-
         if (!metastorePartitioned(schema)) {
+            LOG.info("partition create: not metastorePartitioned");
             return;
         }
+        createPartitionsUtil(
+                identifier,
+                partitions,
+                new CoreOptions(schema.options()).formatTablePartitionOnlyValueInPath(),
+                hmsTable);
+    }
 
+    public void createPartitionsUtil(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean partitionOnlyValueInPath)
+            throws TableNotExistException {
+        Table hmsTable = getHmsTable(identifier);
+        createPartitionsUtil(identifier, partitions, partitionOnlyValueInPath, hmsTable);
+    }
+
+    private void createPartitionsUtil(
+            Identifier tableIdentifier,
+            List<Map<String, String>> partitions,
+            boolean partitionOnlyValueInPath,
+            Table hmsTable)
+            throws TableNotExistException {
         int currentTime = (int) (System.currentTimeMillis() / 1000);
         StorageDescriptor sd = hmsTable.getSd();
         String dataFilePath = getDataFilePath(tableIdentifier, hmsTable);
@@ -370,13 +391,14 @@ public class HiveCatalog extends AbstractCatalog {
         for (Map<String, String> partitionSpec : partitions) {
             Partition hivePartition = new Partition();
             StorageDescriptor newSd = new StorageDescriptor(sd);
-            hivePartition.setDbName(identifier.getDatabaseName());
-            hivePartition.setTableName(identifier.getTableName());
+            hivePartition.setDbName(tableIdentifier.getDatabaseName());
+            hivePartition.setTableName(tableIdentifier.getTableName());
             hivePartition.setValues(new ArrayList<>(partitionSpec.values()));
             hivePartition.setSd(newSd);
             hivePartition.setCreateTime(currentTime);
             hivePartition.setLastAccessTime(currentTime);
-            String partitionLocation = getPartitionLocation(dataFilePath, partitionSpec);
+            String partitionLocation =
+                    getPartitionLocation(dataFilePath, partitionSpec, partitionOnlyValueInPath);
             locationHelper.specifyPartitionLocation(hivePartition, partitionLocation);
             hivePartitions.add(hivePartition);
         }
@@ -429,10 +451,12 @@ public class HiveCatalog extends AbstractCatalog {
                 : tableLocation;
     }
 
-    private String getPartitionLocation(String dataFilePath, Map<String, String> partitionSpec) {
+    private String getPartitionLocation(
+            String dataFilePath, Map<String, String> partitionSpec, boolean onlyValue) {
         return dataFilePath
                 + Path.SEPARATOR
-                + PartitionPathUtils.generatePartitionPath(new LinkedHashMap<>(partitionSpec));
+                + PartitionPathUtils.generatePartitionPathUtil(
+                        new LinkedHashMap<>(partitionSpec), onlyValue);
     }
 
     @Override
@@ -516,13 +540,7 @@ public class HiveCatalog extends AbstractCatalog {
         String tagToPartitionField = table.coreOptions().tagToPartitionField();
         if (tagToPartitionField != null) {
             try {
-                List<Partition> partitions =
-                        clients.run(
-                                client ->
-                                        client.listPartitions(
-                                                identifier.getDatabaseName(),
-                                                identifier.getTableName(),
-                                                Short.MAX_VALUE));
+                List<Partition> partitions = listPartitionsFromHms(identifier);
                 return partitions.stream()
                         .map(
                                 part -> {
@@ -556,6 +574,17 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
         return listPartitionsFromFileSystem(table);
+    }
+
+    @VisibleForTesting
+    public List<Partition> listPartitionsFromHms(Identifier identifier)
+            throws TException, InterruptedException {
+        return clients.run(
+                client ->
+                        client.listPartitions(
+                                identifier.getDatabaseName(),
+                                identifier.getTableName(),
+                                Short.MAX_VALUE));
     }
 
     private List<Map<String, String>> removePartitionsExistsInOtherBranches(
@@ -914,7 +943,6 @@ public class HiveCatalog extends AbstractCatalog {
         List<String> primaryKeys = schema.primaryKeys();
         Map<String, String> options = schema.options();
         int highestFieldId = RowType.currentHighestFieldId(fields);
-
         TableSchema newSchema =
                 new TableSchema(
                         0,
@@ -1087,8 +1115,7 @@ public class HiveCatalog extends AbstractCatalog {
         // file.format option has a default value and cannot be empty.
         FormatTable.Format provider = FormatTable.parseFormat(coreOptions.formatType());
 
-        Map<String, String> tblProperties = new HashMap<>();
-
+        Map<String, String> tblProperties = new HashMap<>(tableSchema.options());
         Table table = newHmsTable(identifier, tblProperties, provider, externalTable);
         updateHmsTable(table, identifier, tableSchema, provider, location);
 
@@ -1202,7 +1229,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public boolean caseSensitive() {
-        return catalogOptions.getOptional(CASE_SENSITIVE).orElse(false);
+        return options.getOptional(CASE_SENSITIVE).orElse(false);
     }
 
     @Override
@@ -1211,7 +1238,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     public boolean syncAllProperties() {
-        return catalogOptions.get(SYNC_ALL_PROPERTIES);
+        return options.get(SYNC_ALL_PROPERTIES);
     }
 
     @Override
@@ -1328,7 +1355,7 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public CatalogLoader catalogLoader() {
         return new HiveCatalogLoader(
-                fileIO, new SerializableHiveConf(hiveConf), clientClassName, options, warehouse);
+                fileIO, new SerializableHiveConf(hiveConf), clientClassName, context, warehouse);
     }
 
     public Table getHmsTable(Identifier identifier)
@@ -1341,7 +1368,7 @@ public class HiveCatalog extends AbstractCatalog {
         } catch (NoSuchObjectException e) {
             throw new TableNotExistException(identifier);
         } catch (TException e) {
-            if (e.getMessage().contains("Permission.NotAllow")) {
+            if (e.getMessage() != null && e.getMessage().contains("Permission.NotAllow")) {
                 throw new TableNoPermissionException(identifier, e);
             }
             throw new RuntimeException(
@@ -1715,7 +1742,7 @@ public class HiveCatalog extends AbstractCatalog {
                 fileIO,
                 hiveConf,
                 options.get(HiveCatalogOptions.METASTORE_CLIENT_CLASS),
-                options,
+                context,
                 warehouse.toUri().toString());
     }
 

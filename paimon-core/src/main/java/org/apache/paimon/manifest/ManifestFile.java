@@ -27,6 +27,7 @@ import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -146,14 +147,14 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         try {
             writer.write(entries);
             writer.close();
+            return writer.result();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        return writer.result();
     }
 
     public RollingFileWriter<ManifestEntry, ManifestFileMeta> createRollingWriter() {
-        return new RollingFileWriter<>(
+        return new RollingFileWriterImpl<>(
                 () -> new ManifestEntryWriter(writerFactory, pathFactory.newPath(), compression),
                 suggestedFileSize);
     }
@@ -175,6 +176,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private int maxBucket = Integer.MIN_VALUE;
         private int minLevel = Integer.MAX_VALUE;
         private int maxLevel = Integer.MIN_VALUE;
+        private @Nullable RowIdStats rowIdStats = new RowIdStats();
 
         ManifestEntryWriter(FormatWriterFactory factory, Path path, String fileCompression) {
             super(
@@ -207,6 +209,14 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             maxBucket = Math.max(maxBucket, entry.bucket());
             minLevel = Math.min(minLevel, entry.level());
             maxLevel = Math.max(maxLevel, entry.level());
+            if (rowIdStats != null) {
+                Long firstRowId = entry.file().firstRowId();
+                if (firstRowId == null) {
+                    rowIdStats = null;
+                } else {
+                    rowIdStats.collect(firstRowId, entry.file().rowCount());
+                }
+            }
 
             partitionStatsCollector.collect(entry.partition());
         }
@@ -215,7 +225,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         public ManifestFileMeta result() throws IOException {
             return new ManifestFileMeta(
                     path.getName(),
-                    outputBytes,
+                    outputBytes(),
                     numAddedFiles,
                     numDeletedFiles,
                     partitionStatsSerializer.toBinaryAllMode(partitionStatsCollector.extract()),
@@ -225,7 +235,20 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     minBucket,
                     maxBucket,
                     minLevel,
-                    maxLevel);
+                    maxLevel,
+                    rowIdStats == null ? null : rowIdStats.minRowId,
+                    rowIdStats == null ? null : rowIdStats.maxRowId);
+        }
+    }
+
+    private static class RowIdStats {
+
+        private long minRowId = Long.MAX_VALUE;
+        private long maxRowId = Long.MIN_VALUE;
+
+        private void collect(long firstRowId, long rowCount) {
+            minRowId = Math.min(minRowId, firstRowId);
+            maxRowId = Math.max(maxRowId, firstRowId + rowCount - 1);
         }
     }
 

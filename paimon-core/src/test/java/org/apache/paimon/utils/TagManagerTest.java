@@ -136,6 +136,42 @@ public class TagManagerTest {
         assertThat(tags.get(0).getValue()).contains("tag");
     }
 
+    @Test
+    public void testRenameTagWithExistingTargetName() throws Exception {
+        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 4);
+        tagManager = new TagManager(fileIO, store.options().path());
+        SnapshotManager snapshotManager = store.snapshotManager();
+        TestKeyValueGenerator gen =
+                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        for (int bucket : Arrays.asList(0, 1)) {
+            List<KeyValue> kvs = partitionedData(5, gen);
+            writeData(store, kvs, partition, bucket, writers);
+        }
+        commitData(store, commitIdentifier++, writers);
+
+        Snapshot snapshot = snapshotManager.snapshot(1);
+        tagManager.createTag(
+                snapshot,
+                "tag1",
+                store.options().tagDefaultTimeRetained(),
+                Collections.emptyList(),
+                false);
+        tagManager.createTag(
+                snapshot,
+                "tag2",
+                store.options().tagDefaultTimeRetained(),
+                Collections.emptyList(),
+                false);
+
+        IllegalArgumentException exception =
+                Assertions.assertThrows(
+                        IllegalArgumentException.class, () -> tagManager.renameTag("tag1", "tag2"));
+        Assertions.assertTrue(exception.getMessage().contains("Tag 'tag2' already exists."));
+    }
+
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode, int buckets)
             throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();

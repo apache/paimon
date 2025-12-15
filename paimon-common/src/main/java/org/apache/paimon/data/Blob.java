@@ -19,9 +19,13 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.utils.UriReader;
 
 import java.io.IOException;
+import java.util.function.Supplier;
 
 /**
  * Blob interface, provides bytes and input stream methods.
@@ -31,7 +35,37 @@ import java.io.IOException;
 @Public
 public interface Blob {
 
-    byte[] toBytes();
+    byte[] toData();
+
+    BlobDescriptor toDescriptor();
 
     SeekableInputStream newInputStream() throws IOException;
+
+    static Blob fromData(byte[] data) {
+        return new BlobData(data);
+    }
+
+    static Blob fromLocal(String file) {
+        return fromFile(LocalFileIO.create(), file);
+    }
+
+    static Blob fromHttp(String uri) {
+        return fromDescriptor(UriReader.fromHttp(), new BlobDescriptor(uri, 0, -1));
+    }
+
+    static Blob fromFile(FileIO fileIO, String file) {
+        return fromFile(fileIO, file, 0, -1);
+    }
+
+    static Blob fromFile(FileIO fileIO, String file, long offset, long length) {
+        return fromDescriptor(UriReader.fromFile(fileIO), new BlobDescriptor(file, offset, length));
+    }
+
+    static Blob fromDescriptor(UriReader reader, BlobDescriptor descriptor) {
+        return new BlobRef(reader, descriptor);
+    }
+
+    static Blob fromInputStream(Supplier<SeekableInputStream> supplier) {
+        return new BlobStream(supplier);
+    }
 }

@@ -30,6 +30,7 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -41,6 +42,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,23 +82,23 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
-    protected final Options catalogOptions;
+    protected final CatalogContext context;
 
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
         this.tableDefaultOptions = new HashMap<>();
-        this.catalogOptions = new Options();
+        this.context = CatalogContext.create(new Options());
     }
 
-    protected AbstractCatalog(FileIO fileIO, Options options) {
+    protected AbstractCatalog(FileIO fileIO, CatalogContext context) {
         this.fileIO = fileIO;
-        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(options.toMap());
-        this.catalogOptions = options;
+        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(context.options().toMap());
+        this.context = context;
     }
 
     @Override
     public Map<String, String> options() {
-        return catalogOptions.toMap();
+        return context.options().toMap();
     }
 
     public abstract String warehouse();
@@ -114,7 +116,7 @@ public abstract class AbstractCatalog implements Catalog {
             return Optional.empty();
         }
 
-        String lock = catalogOptions.get(LOCK_TYPE);
+        String lock = context.options().get(LOCK_TYPE);
         if (lock == null) {
             return defaultLockFactory();
         }
@@ -129,11 +131,11 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     public Optional<CatalogLockContext> lockContext() {
-        return Optional.of(CatalogLockContext.fromOptions(catalogOptions));
+        return Optional.of(CatalogLockContext.fromOptions(context.options()));
     }
 
     protected boolean lockEnabled() {
-        return catalogOptions.getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
+        return context.options().getOptional(LOCK_ENABLED).orElse(fileIO.isObjectStore());
     }
 
     protected boolean allowCustomTablePath() {
@@ -250,17 +252,27 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public PagedList<String> listTablesPaged(
-            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
+            String databaseName,
+            Integer maxResults,
+            String pageToken,
+            String tableNamePattern,
+            String tableType)
             throws DatabaseNotExistException {
         CatalogUtils.validateNamePattern(this, tableNamePattern);
+        CatalogUtils.validateTableType(this, tableType);
         return new PagedList<>(listTables(databaseName), null);
     }
 
     @Override
     public PagedList<Table> listTableDetailsPaged(
-            String databaseName, Integer maxResults, String pageToken, String tableNamePattern)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException {
         CatalogUtils.validateNamePattern(this, tableNamePattern);
+        CatalogUtils.validateTableType(this, tableType);
         if (isSystemDatabase(databaseName)) {
             List<Table> systemTables =
                     SystemTableLoader.loadGlobalTableNames().stream()
@@ -285,16 +297,21 @@ public abstract class AbstractCatalog implements Catalog {
         // check db exists
         getDatabase(databaseName);
 
-        return listTableDetailsPagedImpl(databaseName, maxResults, pageToken);
+        return listTableDetailsPagedImpl(
+                databaseName, maxResults, pageToken, tableNamePattern, tableType);
     }
 
     protected abstract List<String> listTablesImpl(String databaseName);
 
     protected PagedList<Table> listTableDetailsPagedImpl(
-            String databaseName, Integer maxResults, String pageToken)
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException {
         PagedList<String> pagedTableNames =
-                listTablesPaged(databaseName, maxResults, pageToken, null);
+                listTablesPaged(databaseName, maxResults, pageToken, tableNamePattern, tableType);
         return new PagedList<>(
                 pagedTableNames.getElements().stream()
                         .map(
@@ -366,7 +383,7 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotBranch(identifier, "createTable");
         checkNotSystemTable(identifier, "createTable");
-        validateCreateTable(schema);
+        validateCreateTable(schema, false);
         validateCustomTablePath(schema.options());
 
         // check db exists
@@ -459,7 +476,9 @@ public abstract class AbstractCatalog implements Catalog {
                 this::fileIO,
                 this::loadTableMetadata,
                 lockFactory().orElse(null),
-                lockContext().orElse(null));
+                lockContext().orElse(null),
+                context,
+                false);
     }
 
     @Override
@@ -480,6 +499,36 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public List<String> listBranches(Identifier identifier) throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public GetTagResponse getTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void createTag(
+            Identifier identifier,
+            String tagName,
+            @Nullable Long snapshotId,
+            @Nullable String timeRetained,
+            boolean ignoreIfExists)
+            throws TableNotExistException, SnapshotNotExistException, TagAlreadyExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public PagedList<String> listTagsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void deleteTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
         throw new UnsupportedOperationException();
     }
 

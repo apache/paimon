@@ -18,13 +18,17 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.csv.CsvOptions;
+import org.apache.paimon.format.json.JsonOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.DefaultPartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
@@ -46,12 +50,15 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.paimon.format.text.HadoopCompressionUtils.isCompressed;
+import static org.apache.paimon.format.text.TextLineReader.isDefaultDelimiter;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 
@@ -59,16 +66,22 @@ import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 public class FormatTableScan implements InnerTableScan {
 
     private final FormatTable table;
+    private final CoreOptions coreOptions;
     @Nullable private PartitionPredicate partitionFilter;
     @Nullable private final Integer limit;
+    private final long targetSplitSize;
+    private final FormatTable.Format format;
 
     public FormatTableScan(
             FormatTable table,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable Integer limit) {
         this.table = table;
+        this.coreOptions = new CoreOptions(table.options());
         this.partitionFilter = partitionFilter;
         this.limit = limit;
+        this.targetSplitSize = coreOptions.splitTargetSize();
+        this.format = table.format();
     }
 
     @Override
@@ -86,7 +99,11 @@ public class FormatTableScan implements InnerTableScan {
     public List<PartitionEntry> listPartitionEntries() {
         List<Pair<LinkedHashMap<String, String>, Path>> partition2Paths =
                 searchPartSpecAndPaths(
-                        table.fileIO(), new Path(table.location()), table.partitionKeys().size());
+                        table.fileIO(),
+                        new Path(table.location()),
+                        table.partitionKeys().size(),
+                        table.partitionKeys(),
+                        coreOptions.formatTablePartitionOnlyValueInPath());
         List<PartitionEntry> partitionEntries = new ArrayList<>();
         for (Pair<LinkedHashMap<String, String>, Path> partition2Path : partition2Paths) {
             BinaryRow row = toPartitionRow(partition2Path.getKey());
@@ -144,6 +161,7 @@ public class FormatTableScan implements InnerTableScan {
     }
 
     private List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
+        boolean onlyValueInPath = coreOptions.formatTablePartitionOnlyValueInPath();
         if (partitionFilter instanceof MultiplePartitionPredicate) {
             // generate partitions directly
             Set<BinaryRow> partitions = ((MultiplePartitionPredicate) partitionFilter).partitions();
@@ -152,7 +170,8 @@ public class FormatTableScan implements InnerTableScan {
                     table.partitionType(),
                     table.defaultPartName(),
                     new Path(table.location()),
-                    partitions);
+                    partitions,
+                    onlyValueInPath);
         } else {
             // search paths
             Pair<Path, Integer> scanPathAndLevel =
@@ -160,10 +179,14 @@ public class FormatTableScan implements InnerTableScan {
                             new Path(table.location()),
                             table.partitionKeys(),
                             partitionFilter,
-                            table.partitionType());
-            Path scanPath = scanPathAndLevel.getLeft();
-            int level = scanPathAndLevel.getRight();
-            return searchPartSpecAndPaths(table.fileIO(), scanPath, level);
+                            table.partitionType(),
+                            onlyValueInPath);
+            return searchPartSpecAndPaths(
+                    table.fileIO(),
+                    scanPathAndLevel.getLeft(),
+                    scanPathAndLevel.getRight(),
+                    table.partitionKeys(),
+                    onlyValueInPath);
         }
     }
 
@@ -172,7 +195,8 @@ public class FormatTableScan implements InnerTableScan {
             RowType partitionType,
             String defaultPartName,
             Path tablePath,
-            Set<BinaryRow> partitions) {
+            Set<BinaryRow> partitions,
+            boolean onlyValueInPath) {
         InternalRowPartitionComputer partitionComputer =
                 new InternalRowPartitionComputer(
                         defaultPartName,
@@ -182,7 +206,11 @@ public class FormatTableScan implements InnerTableScan {
         List<Pair<LinkedHashMap<String, String>, Path>> result = new ArrayList<>();
         for (BinaryRow part : partitions) {
             LinkedHashMap<String, String> partSpec = partitionComputer.generatePartValues(part);
-            String path = PartitionPathUtils.generatePartitionPath(partSpec);
+
+            String path =
+                    onlyValueInPath
+                            ? PartitionPathUtils.generatePartitionPathUtil(partSpec, true)
+                            : PartitionPathUtils.generatePartitionPath(partSpec);
             result.add(Pair.of(partSpec, new Path(tablePath, path)));
         }
         return result;
@@ -192,7 +220,8 @@ public class FormatTableScan implements InnerTableScan {
             Path tableLocation,
             List<String> partitionKeys,
             PartitionPredicate partitionFilter,
-            RowType partitionType) {
+            RowType partitionType,
+            boolean onlyValueInPath) {
         Path scanPath = tableLocation;
         int level = partitionKeys.size();
         if (!partitionKeys.isEmpty()) {
@@ -205,7 +234,8 @@ public class FormatTableScan implements InnerTableScan {
                 if (!equalityPrefix.isEmpty()) {
                     // Use optimized scan for specific partition path
                     String partitionPath =
-                            PartitionPathUtils.generatePartitionPath(equalityPrefix, partitionType);
+                            PartitionPathUtils.generatePartitionPath(
+                                    equalityPrefix, partitionType, onlyValueInPath);
                     scanPath = new Path(tableLocation, partitionPath);
                     level = partitionKeys.size() - equalityPrefix.size();
                 }
@@ -220,12 +250,51 @@ public class FormatTableScan implements InnerTableScan {
         FileStatus[] files = fileIO.listFiles(path, true);
         for (FileStatus file : files) {
             if (isDataFileName(file.getPath().getName())) {
-                FormatDataSplit split =
-                        new FormatDataSplit(file.getPath(), 0, file.getLen(), partition);
-                splits.add(split);
+                List<FormatDataSplit> fileSplits = tryToSplitLargeFile(file, partition);
+                splits.addAll(fileSplits);
             }
         }
         return splits;
+    }
+
+    private List<FormatDataSplit> tryToSplitLargeFile(FileStatus file, BinaryRow partition) {
+        if (!preferToSplitFile(file)) {
+            return Collections.singletonList(
+                    new FormatDataSplit(file.getPath(), file.getLen(), partition));
+        }
+        List<FormatDataSplit> splits = new ArrayList<>();
+        long remainingBytes = file.getLen();
+        long currentStart = 0;
+
+        while (remainingBytes > 0) {
+            long splitSize = Math.min(targetSplitSize, remainingBytes);
+
+            FormatDataSplit split =
+                    new FormatDataSplit(
+                            file.getPath(), file.getLen(), currentStart, splitSize, partition);
+            splits.add(split);
+            currentStart += splitSize;
+            remainingBytes -= splitSize;
+        }
+        return splits;
+    }
+
+    private boolean preferToSplitFile(FileStatus file) {
+        if (file.getLen() <= targetSplitSize) {
+            return false;
+        }
+
+        Options options = coreOptions.toConfiguration();
+        switch (format) {
+            case CSV:
+                return !isCompressed(file.getPath())
+                        && isDefaultDelimiter(options.get(CsvOptions.LINE_DELIMITER));
+            case JSON:
+                return !isCompressed(file.getPath())
+                        && isDefaultDelimiter(options.get(JsonOptions.LINE_DELIMITER));
+            default:
+                return false;
+        }
     }
 
     public static Map<String, String> extractLeadingEqualityPartitionSpecWhenOnlyAnd(

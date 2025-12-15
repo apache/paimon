@@ -59,6 +59,13 @@ public class HeapByteVector extends AbstractHeapVector implements WritableByteVe
     }
 
     @Override
+    public void appendByte(byte v) {
+        reserve(elementsAppended + 1);
+        setByte(elementsAppended, v);
+        elementsAppended++;
+    }
+
+    @Override
     void reserveForHeapVector(int newCapacity) {
         if (vector.length < newCapacity) {
             vector = Arrays.copyOf(vector, newCapacity);

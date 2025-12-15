@@ -22,6 +22,13 @@ import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan}
+import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
+import org.apache.spark.sql.execution.joins.BaseJoinExec
+import org.apache.spark.sql.util.QueryExecutionListener
+
+import scala.collection.mutable
 
 abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
@@ -66,32 +73,63 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
   test("Row Tracking: delete table") {
     withTable("t") {
+      // only enable row tracking
       sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      runAndCheckAnswer()
+      sql("DROP TABLE t")
 
-      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
-      sql("DELETE FROM t WHERE id = 2")
-      checkAnswer(
-        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-        Seq(Row(1, 1, 0, 1), Row(3, 3, 2, 1))
-      )
+      // enable row tracking and deletion vectors
+      sql(
+        "CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'deletion-vectors.enabled' = 'true')")
+      runAndCheckAnswer()
+
+      def runAndCheckAnswer(): Unit = {
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+        sql("DELETE FROM t WHERE id = 2")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(1, 1, 0, 1), Row(3, 3, 2, 1))
+        )
+        sql("DELETE FROM t WHERE _ROW_ID = 2")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(1, 1, 0, 1))
+        )
+      }
     }
   }
 
   test("Row Tracking: update table") {
     withTable("t") {
+      // only enable row tracking
       sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      runAndCheckAnswer()
+      sql("DROP TABLE t")
 
-      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
-      checkAnswer(
-        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-        Seq(Row(1, 1, 0, 1), Row(2, 2, 1, 1), Row(3, 3, 2, 1))
-      )
+      // enable row tracking and deletion vectors
+      sql(
+        "CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'deletion-vectors.enabled' = 'true')")
+      runAndCheckAnswer()
 
-      sql("UPDATE t SET data = 22 WHERE id = 2")
-      checkAnswer(
-        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-        Seq(Row(1, 1, 0, 1), Row(2, 22, 1, 2), Row(3, 3, 2, 1))
-      )
+      def runAndCheckAnswer(): Unit = {
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(1, 1, 0, 1), Row(2, 2, 1, 1), Row(3, 3, 2, 1))
+        )
+
+        sql("UPDATE t SET data = 22 WHERE id = 2")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(1, 1, 0, 1), Row(2, 22, 1, 2), Row(3, 3, 2, 1))
+        )
+
+        sql("UPDATE t SET data = 222 WHERE _ROW_ID = 1")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(1, 1, 0, 1), Row(2, 222, 1, 3), Row(3, 3, 2, 1))
+        )
+      }
     }
   }
 
@@ -316,6 +354,88 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Data Evolution: merge into table with data-evolution on _ROW_ID") {
+    withTable("source", "target") {
+      sql(
+        "CREATE TABLE source (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql(
+        "INSERT INTO source VALUES (1, 100, 'c11'), (3, 300, 'c33'), (5, 500, 'c55'), (7, 700, 'c77'), (9, 900, 'c99')")
+
+      sql(
+        "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3')")
+
+      sql(s"""
+             |MERGE INTO target
+             |USING source
+             |ON target._ROW_ID = source._ROW_ID
+             |WHEN MATCHED AND target.a = 2 THEN UPDATE SET b = source.b + target.b
+             |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET b = source.b, c = source.c
+             |WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (a, b * 1.1, c)
+             |WHEN NOT MATCHED THEN INSERT (a, b, c) VALUES (a, b, c)
+             |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM target ORDER BY a"),
+        Seq(
+          Row(1, 10, "c1", 0, 2),
+          Row(2, 320, "c2", 1, 2),
+          Row(3, 500, "c55", 2, 2),
+          Row(7, 700, "c77", 3, 2),
+          Row(9, 990, "c99", 4, 2))
+      )
+    }
+  }
+
+  test("Data Evolution: merge into table with data-evolution with _ROW_ID shortcut") {
+    withTable("source", "target") {
+      sql("CREATE TABLE source (target_ROW_ID BIGINT, b INT, c STRING)")
+      sql(
+        "INSERT INTO source VALUES (0, 100, 'c11'), (2, 300, 'c33'), (4, 500, 'c55'), (6, 700, 'c77'), (8, 900, 'c99')")
+
+      sql(
+        "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql(
+        "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
+
+      val capturedPlans: mutable.ListBuffer[LogicalPlan] = mutable.ListBuffer.empty
+      val listener = new QueryExecutionListener {
+        override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
+          capturedPlans += qe.analyzed
+        }
+        override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
+          capturedPlans += qe.analyzed
+        }
+      }
+      spark.listenerManager.register(listener)
+      sql(s"""
+             |MERGE INTO target
+             |USING source
+             |ON target._ROW_ID = source.target_ROW_ID
+             |WHEN MATCHED AND target.a = 5 THEN UPDATE SET b = source.b + target.b
+             |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET b = source.b, c = source.c
+             |WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (target_ROW_ID, b * 1.1, c)
+             |WHEN NOT MATCHED THEN INSERT (a, b, c) VALUES (target_ROW_ID, b, c)
+             |""".stripMargin)
+      // Assert that no Join operator was used during
+      // `org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.targetRelatedSplits`
+      assert(capturedPlans.head.collect { case plan: Join => plan }.isEmpty)
+      spark.listenerManager.unregister(listener)
+
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM target ORDER BY a"),
+        Seq(
+          Row(1, 10, "c1", 0, 2),
+          Row(2, 20, "c2", 1, 2),
+          Row(3, 300, "c33", 2, 2),
+          Row(4, 40, "c4", 3, 2),
+          Row(5, 550, "c5", 4, 2),
+          Row(6, 700, "c77", 5, 2),
+          Row(8, 990, "c99", 6, 2))
+      )
+    }
+  }
+
   test("Data Evolution: update table throws exception") {
     withTable("t") {
       sql(
@@ -326,6 +446,21 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
           sql("UPDATE t SET b = 22")
         }.getMessage
           .contains("Update operation is not supported when data evolution is enabled yet."))
+    }
+  }
+
+  test("Data Evolution: compact table throws exception") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      for (i <- 1 to 6) {
+        sql(s"INSERT INTO t VALUES ($i, $i)")
+      }
+      assert(
+        intercept[RuntimeException] {
+          sql("CALL sys.compact(table => 't')")
+        }.getMessage
+          .contains("Compact operation is not supported when data evolution is enabled yet."))
     }
   }
 

@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
@@ -79,8 +80,8 @@ public class HiveCatalogTest extends CatalogTestBase {
         String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.SYNC_ALL_PROPERTIES.key(), "false");
-        catalog =
-                new HiveCatalog(fileIO, hiveConf, metastoreClientClass, catalogOptions, warehouse);
+        CatalogContext context = CatalogContext.create(catalogOptions, hiveConf);
+        catalog = new HiveCatalog(fileIO, hiveConf, metastoreClientClass, context, warehouse);
     }
 
     @Test
@@ -479,6 +480,27 @@ public class HiveCatalogTest extends CatalogTestBase {
                 .containsExactlyInAnyOrder(
                         Collections.singletonMap("dt", "20250102"),
                         Collections.singletonMap("dt", "20250101"));
+    }
+
+    @Test
+    public void testCreateTableWithBlob() throws Exception {
+        String databaseName = "testCreateTableWithBlob";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .column("picture", DataTypes.BLOB())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build(),
+                true);
+
+        assertThat(catalog.listTables(databaseName)).contains("table");
     }
 
     @Test

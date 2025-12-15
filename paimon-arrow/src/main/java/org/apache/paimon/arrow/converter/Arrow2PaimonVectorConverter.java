@@ -95,13 +95,18 @@ public interface Arrow2PaimonVectorConverter {
         return type.accept(Arrow2PaimonVectorConvertorVisitor.INSTANCE);
     }
 
+    static Arrow2PaimonVectorConverter construct(
+            Arrow2PaimonVectorConvertorVisitor visitor, DataType type) {
+        return type.accept(visitor);
+    }
+
     ColumnVector convertVector(FieldVector vector);
 
     /** Visitor to create convertor from arrow to paimon. */
     class Arrow2PaimonVectorConvertorVisitor
             implements DataTypeVisitor<Arrow2PaimonVectorConverter> {
 
-        private static final Arrow2PaimonVectorConvertorVisitor INSTANCE =
+        public static final Arrow2PaimonVectorConvertorVisitor INSTANCE =
                 new Arrow2PaimonVectorConvertorVisitor();
 
         @Override

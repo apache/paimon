@@ -12,21 +12,8 @@ Pypaimon requires Python 3.10+ version.
 
 # Dependencies
 
-Be building, you should install python setuptools:
-
-```commandline
-brew install python-setuptools
-pip3 install readerwriterlock
-pip3 install fsspec
-pip3 install cachetools
-pip3 install ossfs
-pip3 install pyarrow
-pip3 install polars
-pip3 install fastavro
-pip3 install pandas
-pip3 install ray
-pip3 install duckdb
-```
+The core dependencies are listed in `dev/requirements.txt`.
+The development dependencies are listed in `dev/requirements-dev.txt`.
 
 # Build
 
@@ -36,4 +23,11 @@ You can build the source package by executing the following command:
 python3 setup.py sdist
 ```
 
-The package is under `dist/`.
+The package is under `dist/`. Then you can install the package by executing the following command:
+
+```commandline
+pip3 install dist/*.tar.gz
+```
+
+The command will install the package and core dependencies to your local Python environment.
+

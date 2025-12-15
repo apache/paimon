@@ -97,7 +97,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
 
     @Override
     public DataFileMeta result() throws IOException {
-        long fileSize = outputBytes;
+        long fileSize = outputBytes();
         Pair<List<String>, SimpleStats> statsPair =
                 statsArraySerializer.toBinary(fieldStats(fileSize));
         DataFileIndexWriter.FileIndexResult indexResult =

@@ -21,6 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TableType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -33,6 +34,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
@@ -45,10 +47,11 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
-import org.apache.paimon.rest.responses.GetTableTokenResponse;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
@@ -56,6 +59,7 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
@@ -72,12 +76,14 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BRANCH;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
@@ -92,6 +98,7 @@ public class RESTCatalog implements Catalog {
     private final RESTApi api;
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
+    protected final Map<String, String> tableDefaultOptions;
 
     public RESTCatalog(CatalogContext context) {
         this(context, true);
@@ -106,6 +113,7 @@ public class RESTCatalog implements Catalog {
                         context.preferIO(),
                         context.fallbackIO());
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
+        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(this.context.options().toMap());
     }
 
     @Override
@@ -224,10 +232,12 @@ public class RESTCatalog implements Catalog {
             String databaseName,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String tableNamePattern)
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException {
         try {
-            return api.listTablesPaged(databaseName, maxResults, pageToken, tableNamePattern);
+            return api.listTablesPaged(
+                    databaseName, maxResults, pageToken, tableNamePattern, tableType);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
         }
@@ -238,11 +248,13 @@ public class RESTCatalog implements Catalog {
             String db,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String tableNamePattern)
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException {
         try {
             PagedList<GetTableResponse> tables =
-                    api.listTableDetailsPaged(db, maxResults, pageToken, tableNamePattern);
+                    api.listTableDetailsPaged(
+                            db, maxResults, pageToken, tableNamePattern, tableType);
             return new PagedList<>(
                     tables.getElements().stream()
                             .map(t -> toTable(db, t))
@@ -274,7 +286,9 @@ public class RESTCatalog implements Catalog {
                 this::fileIOFromOptions,
                 this::loadTableMetadata,
                 null,
-                null);
+                null,
+                context,
+                true);
     }
 
     @Override
@@ -331,6 +345,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsListTableByType() {
+        return true;
+    }
+
+    @Override
     public boolean supportsVersionManagement() {
         return true;
     }
@@ -345,7 +364,7 @@ public class RESTCatalog implements Catalog {
         try {
             return api.commitSnapshot(identifier, tableUuid, snapshot, statistics);
         } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
+            throw new TableNotExistException(identifier, e);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (BadRequestException e) {
@@ -417,7 +436,9 @@ public class RESTCatalog implements Catalog {
                     this::fileIOFromOptions,
                     i -> toTableMetadata(db, response),
                     null,
-                    null);
+                    null,
+                    context,
+                    true);
         } catch (TableNotExistException e) {
             throw new RuntimeException(e);
         }
@@ -429,9 +450,11 @@ public class RESTCatalog implements Catalog {
         try {
             checkNotBranch(identifier, "createTable");
             checkNotSystemTable(identifier, "createTable");
-            validateCreateTable(schema);
+            validateCreateTable(schema, dataTokenEnabled);
             createExternalTablePathIfNotExist(schema);
-            api.createTable(identifier, schema);
+            tableDefaultOptions.forEach(schema.options()::putIfAbsent);
+            Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
+            api.createTable(identifier, newSchema);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
@@ -948,6 +971,122 @@ public class RESTCatalog implements Catalog {
         }
     }
 
+    /**
+     * Get tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @return {@link GetTagResponse}
+     * @throws TableNotExistException if the table does not exist
+     * @throws TagNotExistException if the tag does not exist
+     * @throws TableNoPermissionException if don't have the permission for this table
+     */
+    @Override
+    public GetTagResponse getTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
+        try {
+            return api.getTag(identifier, tagName);
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
+                throw new TagNotExistException(identifier, tagName);
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    /**
+     * Create tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @param snapshotId optional snapshot id, if not provided uses latest snapshot
+     * @param timeRetained optional time retained as string (e.g., "1d", "12h", "30m")
+     * @param ignoreIfExists if true, ignore if tag already exists
+     * @throws TableNotExistException if the table does not exist
+     * @throws SnapshotNotExistException if the snapshot does not exist
+     * @throws TagAlreadyExistException if the tag already exists and ignoreIfExists is false
+     * @throws TableNoPermissionException if don't have the permission for this table
+     */
+    @Override
+    public void createTag(
+            Identifier identifier,
+            String tagName,
+            @Nullable Long snapshotId,
+            @Nullable String timeRetained,
+            boolean ignoreIfExists)
+            throws TableNotExistException, SnapshotNotExistException, TagAlreadyExistException {
+        try {
+            api.createTag(identifier, tagName, snapshotId, timeRetained);
+        } catch (AlreadyExistsException e) {
+            if (!ignoreIfExists) {
+                throw new TagAlreadyExistException(identifier, tagName);
+            }
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
+                throw new SnapshotNotExistException(
+                        String.format(
+                                "Snapshot %s in table %s doesn't exist.",
+                                e.resourceName(), identifier.getFullName()));
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    /**
+     * Get paged list names of tags under this table. An empty list is returned if none tag exists.
+     *
+     * @param identifier database name and table name.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the names of tags with provided page size in this table and next page token
+     * @throws TableNotExistException if the table does not exist
+     * @throws TableNoPermissionException if don't have the permission for this table
+     */
+    @Override
+    public PagedList<String> listTagsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        try {
+            return api.listTagsPaged(identifier, maxResults, pageToken);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    /**
+     * Delete tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @throws TableNotExistException if the table does not exist
+     * @throws TagNotExistException if the tag does not exist
+     * @throws TableNoPermissionException if don't have the permission for this table
+     */
+    public void deleteTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
+        try {
+            api.deleteTag(identifier, tagName);
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
+                throw new TagNotExistException(identifier, tagName);
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
     @Override
     public boolean caseSensitive() {
         return context.options().getOptional(CASE_SENSITIVE).orElse(true);
@@ -959,17 +1098,6 @@ public class RESTCatalog implements Catalog {
     @VisibleForTesting
     RESTApi api() {
         return api;
-    }
-
-    protected GetTableTokenResponse loadTableToken(Identifier identifier)
-            throws TableNotExistException {
-        try {
-            return api.loadTableToken(identifier);
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
     }
 
     private FileIO fileIOForData(Path path, Identifier identifier) {
@@ -996,5 +1124,31 @@ public class RESTCatalog implements Catalog {
                 }
             }
         }
+    }
+
+    private Schema inferSchemaIfExternalPaimonTable(Schema schema) throws Exception {
+        TableType tableType = Options.fromMap(schema.options()).get(TYPE);
+        String externalLocation = schema.options().get(PATH.key());
+
+        if (TableType.TABLE.equals(tableType) && Objects.nonNull(externalLocation)) {
+            Path externalPath = new Path(externalLocation);
+            SchemaManager schemaManager =
+                    new SchemaManager(fileIOFromOptions(externalPath), externalPath);
+            Optional<TableSchema> latest = schemaManager.latest();
+            if (latest.isPresent()) {
+                // Note we just validate schema here, will not create a new table
+                schemaManager.createTable(schema, true);
+                Schema existsSchema = latest.get().toSchema();
+                // use `owner` and `path` from the user provide schema
+                if (Objects.nonNull(schema.options().get(Catalog.OWNER_PROP))) {
+                    existsSchema
+                            .options()
+                            .put(Catalog.OWNER_PROP, schema.options().get(Catalog.OWNER_PROP));
+                }
+                existsSchema.options().put(PATH.key(), schema.options().get(PATH.key()));
+                return existsSchema;
+            }
+        }
+        return schema;
     }
 }

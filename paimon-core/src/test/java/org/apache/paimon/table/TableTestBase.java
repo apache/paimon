@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -195,6 +196,14 @@ public abstract class TableTestBase {
         return rows;
     }
 
+    protected void readDefault(Consumer<InternalRow> consumer) throws Exception {
+        Table table = getTableDefault();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        reader.forEachRemaining(consumer);
+    }
+
     public void createTableDefault() throws Exception {
         catalog.createTable(identifier(), schemaDefault(), true);
     }
@@ -219,6 +228,18 @@ public abstract class TableTestBase {
             messages.addAll(writeOnce(table, i, size));
         }
         return messages;
+    }
+
+    protected void writeDataDefault(Iterable<InternalRow> rows) throws Exception {
+        Table table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+
+        BatchTableWrite batchTableWrite = builder.newWrite();
+        BatchTableCommit commit = builder.newCommit();
+        for (InternalRow row : rows) {
+            batchTableWrite.write(row);
+        }
+        commit.commit(batchTableWrite.prepareCommit());
     }
 
     public FileStoreTable getTableDefault() throws Exception {

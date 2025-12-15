@@ -26,6 +26,7 @@ import org.apache.paimon.utils.Pair;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.conf.PlainParquetConfiguration;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
@@ -83,7 +84,7 @@ public class ParquetUtil {
             throws IOException {
         return new ParquetFileReader(
                 ParquetInputFile.fromPath(fileIO, path, length),
-                ParquetReadOptions.builder().build(),
+                ParquetReadOptions.builder(new PlainParquetConfiguration()).build(),
                 null);
     }
 

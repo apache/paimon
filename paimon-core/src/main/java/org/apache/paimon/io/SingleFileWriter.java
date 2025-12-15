@@ -32,6 +32,8 @@ import org.apache.paimon.utils.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.function.Function;
@@ -53,7 +55,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     private FormatWriter writer;
     private PositionOutputStream out;
 
-    protected long outputBytes;
+    @Nullable private Long outputBytes;
     private long recordCount;
     protected boolean closed;
 
@@ -161,12 +163,12 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         fileIO.deleteQuietly(path);
     }
 
-    public AbortExecutor abortExecutor() {
+    public FileWriterAbortExecutor abortExecutor() {
         if (!closed) {
             throw new RuntimeException("Writer should be closed!");
         }
 
-        return new AbortExecutor(fileIO, path);
+        return new FileWriterAbortExecutor(fileIO, path);
     }
 
     @Override
@@ -199,19 +201,10 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         }
     }
 
-    /** Abort executor to just have reference of path instead of whole writer. */
-    public static class AbortExecutor {
-
-        private final FileIO fileIO;
-        private final Path path;
-
-        private AbortExecutor(FileIO fileIO, Path path) {
-            this.fileIO = fileIO;
-            this.path = path;
+    protected long outputBytes() throws IOException {
+        if (outputBytes == null) {
+            outputBytes = fileIO.getFileSize(path);
         }
-
-        public void abort() {
-            fileIO.deleteQuietly(path);
-        }
+        return outputBytes;
     }
 }

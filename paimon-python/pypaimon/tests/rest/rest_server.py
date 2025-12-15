@@ -38,7 +38,8 @@ from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
                                                 DatabaseNotExistException,
                                                 TableNoPermissionException,
-                                                TableNotExistException)
+                                                TableNotExistException, DatabaseAlreadyExistException,
+                                                TableAlreadyExistException)
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
@@ -252,9 +253,9 @@ class RESTCatalogServer:
                 source = self.table_metadata_store.get(source_table.get_full_name())
                 self.table_metadata_store.update({destination_table.get_full_name(): source})
                 source_table_dir = (Path(self.data_path) / self.warehouse
-                                    / source_table.database_name / source_table.object_name)
+                                    / source_table.get_database_name() / source_table.get_object_name())
                 destination_table_dir = (Path(self.data_path) / self.warehouse
-                                         / destination_table.database_name / destination_table.object_name)
+                                         / destination_table.get_database_name() / destination_table.get_object_name())
                 if not source_table_dir.exists():
                     destination_table_dir.mkdir(parents=True)
                 else:
@@ -321,6 +322,16 @@ class RESTCatalogServer:
                 ErrorResponse.RESOURCE_TYPE_TABLE, e.identifier.get_table_name(), str(e), 403
             )
             return self._mock_response(response, 403)
+        except DatabaseAlreadyExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_DATABASE, e.database, str(e), 409
+            )
+            return self._mock_response(response, 409)
+        except TableAlreadyExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_TABLE, e.identifier.get_full_name(), str(e), 409
+            )
+            return self._mock_response(response, 409)
         except Exception as e:
             self.logger.error(f"Unexpected error: {e}")
             response = ErrorResponse(None, None, str(e), 500)
@@ -341,7 +352,7 @@ class RESTCatalogServer:
                 table_name_part = table_parts[0]
                 branch_part = table_parts[1]
                 # Recreate identifier without branch for lookup
-                lookup_identifier = Identifier.create(identifier.database_name, table_name_part)
+                lookup_identifier = Identifier.create(identifier.get_database_name(), table_name_part)
             else:
                 lookup_identifier = identifier
                 branch_part = None
@@ -377,6 +388,8 @@ class RESTCatalogServer:
             return self._generate_final_list_databases_response(parameters, databases)
         if method == "POST":
             create_database = JSON.from_json(data, CreateDatabaseRequest)
+            if create_database.name in self.database_store:
+                raise DatabaseAlreadyExistException(create_database.name)
             self.database_store.update({
                 create_database.name: self.mock_database(create_database.name, create_database.options)
             })
@@ -412,13 +425,20 @@ class RESTCatalogServer:
                 return self._generate_final_list_tables_response(parameters, tables)
             elif method == "POST":
                 create_table = JSON.from_json(data, CreateTableRequest)
+                if create_table.identifier.get_full_name() in self.table_metadata_store:
+                    raise TableAlreadyExistException(create_table.identifier)
                 table_metadata = self._create_table_metadata(
-                    create_table.identifier, 1, create_table.schema, str(uuid.uuid4()), False
+                    create_table.identifier, 0, create_table.schema, str(uuid.uuid4()), False
                 )
                 self.table_metadata_store.update({create_table.identifier.get_full_name(): table_metadata})
-                table_dir = Path(self.data_path) / self.warehouse / database_name / create_table.identifier.object_name
+                table_dir = (
+                    Path(self.data_path) / self.warehouse / database_name /
+                    create_table.identifier.get_object_name() / 'schema'
+                )
                 if not table_dir.exists():
                     table_dir.mkdir(parents=True)
+                with open(table_dir / "schema-0", "w") as f:
+                    f.write(JSON.to_json(table_metadata.schema, indent=2))
                 return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
@@ -428,7 +448,8 @@ class RESTCatalogServer:
             if identifier.get_full_name() not in self.table_metadata_store:
                 raise TableNotExistException(identifier)
             table_metadata = self.table_metadata_store[identifier.get_full_name()]
-            table_path = f'file://{self.data_path}/{self.warehouse}/{identifier.database_name}/{identifier.object_name}'
+            table_path = (f'file://{self.data_path}/{self.warehouse}/'
+                          f'{identifier.get_database_name()}/{identifier.get_object_name()}')
             schema = table_metadata.schema.to_schema()
             response = self.mock_table(identifier, table_metadata, table_path, schema)
             return self._mock_response(response, 200)
@@ -441,7 +462,9 @@ class RESTCatalogServer:
 
         elif method == "DELETE":
             # Drop table
-            if identifier.get_full_name() in self.table_metadata_store:
+            if identifier.get_full_name() not in self.table_metadata_store:
+                raise TableNotExistException(identifier)
+            else:
                 del self.table_metadata_store[identifier.get_full_name()]
             if identifier.get_full_name() in self.table_latest_snapshot_store:
                 del self.table_latest_snapshot_store[identifier.get_full_name()]
@@ -502,7 +525,8 @@ class RESTCatalogServer:
         import uuid
 
         # Construct table path: {warehouse}/{database}/{table}
-        table_path = os.path.join(self.data_path, self.warehouse, identifier.database_name, identifier.object_name)
+        table_path = os.path.join(self.data_path, self.warehouse, identifier.get_database_name(),
+                                  identifier.get_object_name())
 
         # Create directory structure
         snapshot_dir = os.path.join(table_path, "snapshot")

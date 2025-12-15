@@ -16,29 +16,28 @@
 # limitations under the License.
 ################################################################################
 
-import os
 import glob
+import os
 import shutil
 import tempfile
 import unittest
-from datetime import datetime, date, time
+from datetime import date, datetime, time
 from decimal import Decimal
 from unittest.mock import Mock
 
 import pandas as pd
 import pyarrow as pa
 
-from pypaimon.table.row.generic_row import GenericRow
-
+from pypaimon import CatalogFactory, Schema
+from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, PyarrowFieldParser)
 from pypaimon.schema.table_schema import TableSchema
-from pypaimon import CatalogFactory
-from pypaimon import Schema
-from pypaimon.manifest.manifest_file_manager import ManifestFileManager
-from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
 from pypaimon.write.file_store_commit import FileStoreCommit
 
 
@@ -211,16 +210,26 @@ class ReaderBasicTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
-        actual_data = table_read.to_arrow(table_scan.plan().splits())
+        splits = table_scan.plan().splits()
+
+        # assert data file without stats
+        first_file = splits[0].files[0]
+        self.assertEqual(first_file.value_stats_cols, [])
+        self.assertEqual(first_file.value_stats, SimpleStats.empty_stats())
+
+        # assert equal
+        actual_data = table_read.to_arrow(splits)
         self.assertEqual(actual_data, expect_data)
 
         # to test GenericRow ability
-        latest_snapshot = table_scan.snapshot_manager.get_latest_snapshot()
-        manifest_files = table_scan.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.manifest_file_manager.read(manifest_files[0].file_name,
-                                                                 lambda row: table_scan._bucket_filter(row))
-        min_value_stats = manifest_entries[0].file.value_stats.min_values.values
-        max_value_stats = manifest_entries[0].file.value_stats.max_values.values
+        latest_snapshot = SnapshotManager(table).get_latest_snapshot()
+        manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
+            manifest_files[0].file_name, lambda row: table_scan.starting_scanner._filter_manifest_entry(row), False)
+        min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
+                                                            table.fields).values
+        max_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.max_values.data,
+                                                            table.fields).values
         expected_min_values = [col[0].as_py() for col in expect_data]
         expected_max_values = [col[1].as_py() for col in expect_data]
         self.assertEqual(min_value_stats, expected_min_values)
@@ -248,7 +257,7 @@ class ReaderBasicTest(unittest.TestCase):
 
         with self.assertRaises(ValueError) as e:
             table_write.write_arrow_batch(record_batch)
-        self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema."))
+        self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema and write cols."))
 
     def test_reader_iterator(self):
         read_builder = self.table.new_read_builder()
@@ -287,10 +296,13 @@ class ReaderBasicTest(unittest.TestCase):
         partition = GenericRow(['East', 'Boston'], partition_fields)
 
         # Create ADD entry
+        from pypaimon.data.timestamp import Timestamp
+        import time
         add_file_meta = Mock(spec=DataFileMeta)
         add_file_meta.row_count = 200
         add_file_meta.file_size = 2048
-        add_file_meta.creation_time = datetime.now()
+        add_file_meta.creation_time = Timestamp.now()
+        add_file_meta.creation_time_epoch_millis = Mock(return_value=int(time.time() * 1000))
 
         add_entry = ManifestEntry(
             kind=0,  # ADD
@@ -304,7 +316,8 @@ class ReaderBasicTest(unittest.TestCase):
         delete_file_meta = Mock(spec=DataFileMeta)
         delete_file_meta.row_count = 80
         delete_file_meta.file_size = 800
-        delete_file_meta.creation_time = datetime.now()
+        delete_file_meta.creation_time = Timestamp.now()
+        delete_file_meta.creation_time_epoch_millis = Mock(return_value=int(time.time() * 1000))
 
         delete_entry = ManifestEntry(
             kind=1,  # DELETE
@@ -340,10 +353,13 @@ class ReaderBasicTest(unittest.TestCase):
             DataField(1, "city", AtomicType("STRING"))
         ]
         partition1 = GenericRow(['East', 'Boston'], partition_fields)
+        from pypaimon.data.timestamp import Timestamp
+        import time
         file_meta1 = Mock(spec=DataFileMeta)
         file_meta1.row_count = 150
         file_meta1.file_size = 1500
-        file_meta1.creation_time = datetime.now()
+        file_meta1.creation_time = Timestamp.now()
+        file_meta1.creation_time_epoch_millis = Mock(return_value=int(time.time() * 1000))
 
         entry1 = ManifestEntry(
             kind=0,  # ADD
@@ -358,7 +374,8 @@ class ReaderBasicTest(unittest.TestCase):
         file_meta2 = Mock(spec=DataFileMeta)
         file_meta2.row_count = 75
         file_meta2.file_size = 750
-        file_meta2.creation_time = datetime.now()
+        file_meta2.creation_time = Timestamp.now()
+        file_meta2.creation_time_epoch_millis = Mock(return_value=int(time.time() * 1000))
 
         entry2 = ManifestEntry(
             kind=1,  # DELETE
@@ -591,6 +608,7 @@ class ReaderBasicTest(unittest.TestCase):
         )
 
         # Create DataFileMeta with value_stats_cols
+        from pypaimon.data.timestamp import Timestamp
         file_meta = DataFileMeta(
             file_name=f"test-file-{test_name}.parquet",
             file_size=1024,
@@ -604,12 +622,14 @@ class ReaderBasicTest(unittest.TestCase):
             schema_id=0,
             level=0,
             extra_files=[],
-            creation_time=1234567890,
+            creation_time=Timestamp.from_epoch_millis(1234567890),
             delete_row_count=0,
             embedded_index=None,
             file_source=None,
             value_stats_cols=value_stats_cols,  # This is the key field we're testing
-            external_path=None
+            external_path=None,
+            first_row_id=None,
+            write_cols=None
         )
 
         # Create ManifestEntry
@@ -626,7 +646,7 @@ class ReaderBasicTest(unittest.TestCase):
         manifest_manager.write(manifest_file_name, [entry])
 
         # Read the manifest entry back
-        entries = manifest_manager.read(manifest_file_name)
+        entries = manifest_manager.read(manifest_file_name, drop_stats=False)
 
         # Verify we have exactly one entry
         self.assertEqual(len(entries), 1)
@@ -640,23 +660,159 @@ class ReaderBasicTest(unittest.TestCase):
         # Verify value_stats structure based on the logic
         if value_stats_cols is None:
             # Should use all table fields - verify we have data for all fields
-            self.assertEqual(len(read_entry.file.value_stats.min_values.values), expected_fields_count)
-            self.assertEqual(len(read_entry.file.value_stats.max_values.values), expected_fields_count)
+            self.assertEqual(read_entry.file.value_stats.min_values.arity, expected_fields_count)
+            self.assertEqual(read_entry.file.value_stats.min_values.arity, expected_fields_count)
             self.assertEqual(len(read_entry.file.value_stats.null_counts), expected_fields_count)
         elif not value_stats_cols:  # Empty list
             # Should use empty fields - verify we have no field data
-            self.assertEqual(len(read_entry.file.value_stats.min_values.values), 0)
-            self.assertEqual(len(read_entry.file.value_stats.max_values.values), 0)
+            self.assertEqual(read_entry.file.value_stats.min_values.arity, 0)
+            self.assertEqual(read_entry.file.value_stats.max_values.arity, 0)
             self.assertEqual(len(read_entry.file.value_stats.null_counts), 0)
         else:
             # Should use specified fields - verify we have data for specified fields only
-            self.assertEqual(len(read_entry.file.value_stats.min_values.values), expected_fields_count)
-            self.assertEqual(len(read_entry.file.value_stats.max_values.values), expected_fields_count)
+            self.assertEqual(read_entry.file.value_stats.min_values.arity, expected_fields_count)
+            self.assertEqual(read_entry.file.value_stats.max_values.arity, expected_fields_count)
             self.assertEqual(len(read_entry.file.value_stats.null_counts), expected_fields_count)
 
         # Verify the actual values match what we expect
         if expected_fields_count > 0:
-            self.assertEqual(read_entry.file.value_stats.min_values.values, min_values)
-            self.assertEqual(read_entry.file.value_stats.max_values.values, max_values)
+            self.assertEqual(
+                GenericRowDeserializer.from_bytes(read_entry.file.value_stats.min_values.data, test_fields).values,
+                min_values)
+            self.assertEqual(
+                GenericRowDeserializer.from_bytes(read_entry.file.value_stats.max_values.data, test_fields).values,
+                max_values)
 
         self.assertEqual(read_entry.file.value_stats.null_counts, null_counts)
+
+    def test_split_target_size(self):
+        """Test source.split.target-size configuration effect on split generation."""
+        from pypaimon.common.core_options import CoreOptions
+
+        pa_schema = pa.schema([
+            ('f0', pa.int64()),
+            ('f1', pa.string())
+        ])
+
+        # Test with small target_split_size (512B) - should generate more splits
+        schema_small = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={CoreOptions.SOURCE_SPLIT_TARGET_SIZE: '512b'}
+        )
+        self.catalog.create_table('default.test_split_target_size_small', schema_small, False)
+        table_small = self.catalog.get_table('default.test_split_target_size_small')
+
+        for i in range(10):
+            write_builder = table_small.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'f0': list(range(i * 100, (i + 1) * 100)),
+                'f1': [f'value_{j}' for j in range(i * 100, (i + 1) * 100)]
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        read_builder = table_small.new_read_builder()
+        splits_small = read_builder.new_scan().plan().splits()
+
+        schema_default = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table('default.test_split_target_size_default', schema_default, False)
+        table_default = self.catalog.get_table('default.test_split_target_size_default')
+
+        for i in range(10):
+            write_builder = table_default.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'f0': list(range(i * 100, (i + 1) * 100)),
+                'f1': [f'value_{j}' for j in range(i * 100, (i + 1) * 100)]
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Generate splits with default target_split_size
+        read_builder = table_default.new_read_builder()
+        splits_default = read_builder.new_scan().plan().splits()
+
+        self.assertGreater(
+            len(splits_small), len(splits_default),
+            f"Small target_split_size should generate more splits. "
+            f"Got {len(splits_small)} splits with 512B vs "
+            f"{len(splits_default)} splits with default")
+
+    def test_split_open_file_cost(self):
+        """Test source.split.open-file-cost configuration effect on split generation."""
+        from pypaimon.common.core_options import CoreOptions
+
+        pa_schema = pa.schema([
+            ('f0', pa.int64()),
+            ('f1', pa.string())
+        ])
+
+        # Test with large open_file_cost (64MB) - should generate more splits
+        schema_large_cost = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                CoreOptions.SOURCE_SPLIT_TARGET_SIZE: '128mb',
+                CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST: '64mb'
+            }
+        )
+        self.catalog.create_table('default.test_split_open_file_cost_large', schema_large_cost, False)
+        table_large_cost = self.catalog.get_table('default.test_split_open_file_cost_large')
+
+        # Write multiple batches to create multiple files
+        # Write 10 batches, each with 100 rows
+        for i in range(10):
+            write_builder = table_large_cost.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'f0': list(range(i * 100, (i + 1) * 100)),
+                'f1': [f'value_{j}' for j in range(i * 100, (i + 1) * 100)]
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Generate splits with large open_file_cost
+        read_builder = table_large_cost.new_read_builder()
+        splits_large_cost = read_builder.new_scan().plan().splits()
+
+        # Test with default open_file_cost (4MB) - should generate fewer splits
+        schema_default = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={CoreOptions.SOURCE_SPLIT_TARGET_SIZE: '128mb'}
+        )
+        self.catalog.create_table('default.test_split_open_file_cost_default', schema_default, False)
+        table_default = self.catalog.get_table('default.test_split_open_file_cost_default')
+
+        # Write same amount of data
+        for i in range(10):
+            write_builder = table_default.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'f0': list(range(i * 100, (i + 1) * 100)),
+                'f1': [f'value_{j}' for j in range(i * 100, (i + 1) * 100)]
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Generate splits with default open_file_cost
+        read_builder = table_default.new_read_builder()
+        splits_default = read_builder.new_scan().plan().splits()
+
+        # With default open_file_cost (4MB), more files can be packed into each split
+        self.assertGreater(
+            len(splits_large_cost), len(splits_default),
+            f"Large open_file_cost should generate more splits. "
+            f"Got {len(splits_large_cost)} splits with 64MB cost vs "
+            f"{len(splits_default)} splits with default")

@@ -77,4 +77,9 @@ public class VFSInputStream extends FSInputStream {
         }
         return (n == -1) ? -1 : oneByteBuf[0] & 0xff;
     }
+
+    @Override
+    public void close() throws IOException {
+        in.close();
+    }
 }

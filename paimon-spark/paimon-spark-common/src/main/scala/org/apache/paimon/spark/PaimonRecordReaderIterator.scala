@@ -22,6 +22,7 @@ import org.apache.paimon.data.{BinaryString, GenericRow, InternalRow => PaimonIn
 import org.apache.paimon.fs.Path
 import org.apache.paimon.reader.{FileRecordIterator, RecordReader}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
+import org.apache.paimon.spark.schema.PaimonMetadataColumn.{PARTITION_AND_BUCKET_META_COLUMNS, PATH_AND_INDEX_META_COLUMNS}
 import org.apache.paimon.table.source.{DataSplit, Split}
 import org.apache.paimon.utils.CloseableIterator
 
@@ -35,26 +36,26 @@ case class PaimonRecordReaderIterator(
     split: Split)
   extends CloseableIterator[PaimonInternalRow] {
 
+  if (
+    metadataColumns.exists(c => PARTITION_AND_BUCKET_META_COLUMNS.contains(c.name)) && !split
+      .isInstanceOf[DataSplit]
+  ) {
+    throw new RuntimeException(
+      "There need be DataSplit when path and index metadata columns are required")
+  }
+
   private val needMetadata = metadataColumns.nonEmpty
+  private val needPathAndIndexMetadata =
+    metadataColumns.exists(c => PATH_AND_INDEX_META_COLUMNS.contains(c.name))
+
   private val metadataRow: GenericRow =
     GenericRow.of(Array.fill(metadataColumns.size)(null.asInstanceOf[AnyRef]): _*)
   private val joinedRow: JoinedRow = JoinedRow.join(null, metadataRow)
 
   private var lastFilePath: Path = _
-  private var isFileRecordIterator: Boolean = false
   private var currentIterator: RecordReader.RecordIterator[PaimonInternalRow] = readBatch()
   private var advanced = false
   private var currentResult: PaimonInternalRow = _
-
-  private def validateMetadataColumns(): Unit = {
-    if (needMetadata) {
-      if (!isFileRecordIterator || !split.isInstanceOf[DataSplit]) {
-        throw new RuntimeException(
-          "There need be FileRecordIterator when metadata columns are required. " +
-            "Only append table or deletion vector table support querying metadata columns.")
-      }
-    }
-  }
 
   override def hasNext: Boolean = {
     if (currentIterator == null) {
@@ -90,19 +91,17 @@ case class PaimonRecordReaderIterator(
     val iter = reader.readBatch()
     iter match {
       case fileRecordIterator: FileRecordIterator[_] =>
-        isFileRecordIterator = true
         if (lastFilePath != fileRecordIterator.filePath()) {
           PaimonUtils.setInputFileName(fileRecordIterator.filePath().toUri.toString)
           lastFilePath = fileRecordIterator.filePath()
         }
-      case _ =>
-        isFileRecordIterator = false
+      case i =>
+        if (i != null && needPathAndIndexMetadata) {
+          throw new RuntimeException(
+            "There need be FileRecordIterator when metadata columns are required. " +
+              "Only append table or deletion vector table support querying metadata columns.")
+        }
     }
-
-    if (iter != null) {
-      validateMetadataColumns()
-    }
-
     iter
   }
 

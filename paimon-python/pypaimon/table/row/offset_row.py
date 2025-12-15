@@ -36,22 +36,19 @@ class OffsetRow(InternalRow):
             raise ValueError(f"Offset {self.offset} plus arity {self.arity} is out of row length {len(row_tuple)}")
         return self
 
-    def get_field(self, pos: int):
-        if pos >= self.arity:
-            raise IndexError(f"Position {pos} is out of bounds for row arity {self.arity}")
-        return self.row_tuple[self.offset + pos]
-
-    def is_null_at(self, pos: int) -> bool:
-        return self.get_field(pos) is None
-
-    def get_row_kind(self) -> RowKind:
-        return RowKind(self.row_kind_byte)
-
     def set_row_kind_byte(self, row_kind_byte: int) -> None:
         """
         Store RowKind as a byte and instantiate it lazily to avoid performance overhead.
         """
         self.row_kind_byte = row_kind_byte
+
+    def get_field(self, pos: int):
+        if pos >= self.arity:
+            raise IndexError(f"Position {pos} is out of bounds for row arity {self.arity}")
+        return self.row_tuple[self.offset + pos]
+
+    def get_row_kind(self) -> RowKind:
+        return RowKind(self.row_kind_byte)
 
     def __len__(self) -> int:
         return self.arity

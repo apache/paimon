@@ -18,13 +18,14 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.{stats, CoreOptions}
 import org.apache.paimon.annotation.VisibleForTesting
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.statistics.StatisticsHelper
-import org.apache.paimon.table.{DataTable, InnerTable}
+import org.apache.paimon.spark.util.OptionUtils
+import org.apache.paimon.stats
+import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{InnerTableScan, Split}
 
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
@@ -52,8 +53,6 @@ abstract class PaimonBaseScan(
   protected var inputPartitions: Seq[PaimonInputPartition] = _
 
   protected var inputSplits: Array[Split] = _
-
-  override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
   lazy val statistics: Optional[stats.Statistics] = table.statistics()
 
@@ -88,7 +87,8 @@ abstract class PaimonBaseScan(
   }
 
   override def toBatch: Batch = {
-    PaimonBatch(lazyInputPartitions, readBuilder, metadataColumns)
+    ensureNoFullScan()
+    PaimonBatch(lazyInputPartitions, readBuilder, coreOptions.blobAsDescriptor(), metadataColumns)
   }
 
   override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream = {
@@ -108,9 +108,9 @@ abstract class PaimonBaseScan(
   override def supportedCustomMetrics: Array[CustomMetric] = {
     Array(
       PaimonNumSplitMetric(),
-      PaimonSplitSizeMetric(),
-      PaimonAvgSplitSizeMetric(),
+      PaimonPartitionSizeMetric(),
       PaimonPlanningDurationMetric(),
+      PaimonScannedSnapshotIdMetric(),
       PaimonScannedManifestsMetric(),
       PaimonSkippedTableFilesMetric(),
       PaimonResultedTableFilesMetric()
@@ -121,18 +121,44 @@ abstract class PaimonBaseScan(
     paimonMetricsRegistry.buildSparkScanMetrics()
   }
 
+  private def ensureNoFullScan(): Unit = {
+    if (OptionUtils.readAllowFullScan()) {
+      return
+    }
+
+    table match {
+      case t: FileStoreTable if !t.partitionKeys().isEmpty =>
+        val skippedFiles = paimonMetricsRegistry.buildSparkScanMetrics().collectFirst {
+          case m: PaimonSkippedTableFilesTaskMetric => m.value
+        }
+        if (skippedFiles.contains(0)) {
+          throw new RuntimeException("Full scan is not supported.")
+        }
+      case _ =>
+    }
+  }
+
   override def description(): String = {
     val pushedFiltersStr = if (filters.nonEmpty) {
       ", PushedFilters: [" + filters.mkString(",") + "]"
     } else {
       ""
     }
+
+    val reservedFiltersStr = if (reservedFilters.nonEmpty) {
+      ", ReservedFilters: [" + reservedFilters.mkString(",") + "]"
+    } else {
+      ""
+    }
+
     val pushedTopNFilterStr = if (pushDownTopN.nonEmpty) {
       s", PushedTopNFilter: [${pushDownTopN.get.toString}]"
     } else {
       ""
     }
-    s"PaimonScan: [${table.name}]" + pushedFiltersStr + pushedTopNFilterStr +
+
+    s"PaimonScan: [${table.name}]" +
+      pushedFiltersStr + reservedFiltersStr + pushedTopNFilterStr +
       pushDownLimit.map(limit => s", Limit: [$limit]").getOrElse("")
   }
 }

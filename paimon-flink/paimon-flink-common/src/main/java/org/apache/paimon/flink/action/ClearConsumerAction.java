@@ -28,7 +28,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /** Clear consumers action for Flink. */
-public class ClearConsumerAction extends TableActionBase {
+public class ClearConsumerAction extends TableActionBase implements LocalAction {
 
     private String includingConsumers;
     private String excludingConsumers;
@@ -49,7 +49,7 @@ public class ClearConsumerAction extends TableActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() {
         FileStoreTable dataTable = (FileStoreTable) table;
         ConsumerManager consumerManager =
                 new ConsumerManager(

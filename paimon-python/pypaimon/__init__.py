@@ -15,8 +15,8 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
 from pypaimon.catalog.catalog_factory import CatalogFactory
+from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
 from pypaimon.schema.schema import Schema
 
 __all__ = [

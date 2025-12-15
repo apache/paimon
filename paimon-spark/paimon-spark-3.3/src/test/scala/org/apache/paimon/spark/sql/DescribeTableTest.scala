@@ -18,4 +18,21 @@
 
 package org.apache.paimon.spark.sql
 
-class DescribeTableTest extends DescribeTableTestBase {}
+import org.apache.spark.sql.DataFrame
+
+class DescribeTableTest extends DescribeTableTestBase {
+  // Spark-3.3 not support DEFAULT syntax.
+  override protected def describeTablePartitionCreateTable(): Unit = {
+    spark.sql("""
+                |CREATE TABLE T (
+                |  id INT NOT NULL,
+                |  name STRING,
+                |  age INT COMMENT 'Age')
+                |  PARTITIONED BY (year INT COMMENT 'Year', month INT, day INT)
+                |""".stripMargin)
+  }
+
+  override protected def describeTablePartitionCheckDefaultValue(res: DataFrame): Unit = {
+    // do nothing.
+  }
+}

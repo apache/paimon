@@ -19,13 +19,12 @@ import shutil
 import tempfile
 import unittest
 
+from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 DatabaseNotExistException,
                                                 TableAlreadyExistException,
                                                 TableNotExistException)
-from pypaimon import CatalogFactory
 from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon import Schema
 from pypaimon.table.file_store_table import FileStoreTable
 
 

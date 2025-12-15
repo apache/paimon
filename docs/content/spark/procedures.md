@@ -54,7 +54,7 @@ This section introduce all available spark procedures about paimon.
          SET spark.sql.shuffle.partitions=10; --set the compact parallelism <br/><br/>
          CALL sys.compact(table => 'T', partitions => 'p=0;p=1',  order_strategy => 'zorder', order_by => 'a,b') <br/><br/>
          CALL sys.compact(table => 'T', where => 'p>0 and p<3', order_strategy => 'zorder', order_by => 'a,b') <br/><br/>
-         CALL sys.compact(table => 'T', where => 'dt>10 and h<20', order_strategy => 'zorder', order_by => 'a,b', options => 'sink.parallelism=4')<br/><br/> 
+         CALL sys.compact(table => 'T', where => 'dt>10 and h<20', order_strategy => 'zorder', order_by => 'a,b', options => 'target-file-size=128m')<br/><br/> 
          CALL sys.compact(table => 'T', partition_idle_time => '60s')<br/><br/>
          CALL sys.compact(table => 'T', compact_strategy => 'minor')<br/><br/>
       </td>
@@ -370,9 +370,9 @@ This section introduce all available spark procedures about paimon.
       </td>
       <td>
          -- mark single partition done<br/>
-         CALL sys.mark_partition_done(table => 'default.T', parititions => 'day=2024-07-01')<br/><br/>
+         CALL sys.mark_partition_done(table => 'default.T', partitions => 'day=2024-07-01')<br/><br/>
          -- mark multiple partitions done<br/>
-         CALL sys.mark_partition_done(table => 'default.T', parititions => 'day=2024-07-01;day=2024-07-02')
+         CALL sys.mark_partition_done(table => 'default.T', partitions => 'day=2024-07-01;day=2024-07-02')
       </td>
    </tr>
    <tr>
@@ -410,13 +410,6 @@ This section introduce all available spark procedures about paimon.
       <tr>
       <td>create_function</td>
       <td>
-         CALL sys.create_function(<br/>
-                'function_identifier',<br/>
-                '[{"id": 0, "name":"length", "type":"INT"}, {"id": 1, "name":"width", "type":"INT"}]',<br/>
-                '[{"id": 0, "name":"area", "type":"BIGINT"}]',<br/>
-                true, 'comment', 'k1=v1,k2=v2')<br/>
-      </td>
-      <td>
          To create a function. Arguments:
             <li>function: the target function identifier. Cannot be empty.</li>
             <li>inputParams: inputParams of the function.</li>
@@ -438,11 +431,6 @@ This section introduce all available spark procedures about paimon.
    <tr>
       <td>alter_function</td>
       <td>
-         CALL sys.alter_function(<br/>
-                'function_identifier',<br/>
-                '{"action" : "addDefinition", "name" : "spark", "definition" : {"type" : "lambda", "definition" : "(Integer length, Integer width) -> { return (long) length * width; }", "language": "JAVA" } }')<br/>
-      </td>
-      <td>
          To alter a function. Arguments:
             <li>function: the target function identifier. Cannot be empty.</li>
             <li>change: change of the function.</li>
@@ -456,14 +444,36 @@ This section introduce all available spark procedures about paimon.
    <tr>
       <td>drop_function</td>
       <td>
-         CALL [catalog.]sys.drop_function('function_identifier')<br/>
-      </td>
-      <td>
          To drop a function. Arguments:
             <li>function: the target function identifier. Cannot be empty.</li>
       </td>
       <td>
          CALL sys.drop_function(`function` => 'function_identifier')<br/>
+      </td>
+   </tr>
+   <tr>
+      <td>rewrite_file_index</td>
+      <td>
+         To rewrite the file index for the table. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>where: partition predicate. Left empty for all partitions.</li>
+      </td>
+      <td>
+         CALL sys.rewrite_file_index(table => "t")<br/>
+         CALL sys.rewrite_file_index(table => "t", where => "day = '2025-08-17'")<br/>
+      </td>
+   </tr>
+   <tr>
+      <td>copy</td>
+      <td>
+         copy table files. Arguments:
+            <li>source_table: the source table identifier. Cannot be empty.</li>
+            <li>target_table: the target table identifier. Cannot be empty.</li>
+            <li>where: partition predicate. Left empty for all partitions.</li>
+      </td>
+      <td>
+         CALL sys.copy(source_table => "t1", target_table => "t1_copy")<br/>
+         CALL sys.copy(source_table => "t1", target_table => "t1_copy", where => "day = '2025-08-17'")<br/>
       </td>
    </tr>
    </tbody>

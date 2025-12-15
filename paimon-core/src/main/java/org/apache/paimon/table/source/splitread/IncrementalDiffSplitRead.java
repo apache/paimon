@@ -22,6 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
@@ -31,6 +32,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.KeyValueTableRead;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FieldsComparator;
@@ -78,13 +80,20 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
+    public SplitRead<InternalRow> withVariantAccess(VariantAccessInfo[] variantAccess) {
+        mergeRead.withVariantAccess(variantAccess);
+        return this;
+    }
+
+    @Override
     public SplitRead<InternalRow> withFilter(@Nullable Predicate predicate) {
         mergeRead.withFilter(predicate);
         return this;
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
+    public RecordReader<InternalRow> createReader(Split s) throws IOException {
+        DataSplit split = (DataSplit) s;
         RecordReader<KeyValue> reader =
                 readDiff(
                         mergeRead.createMergeReader(

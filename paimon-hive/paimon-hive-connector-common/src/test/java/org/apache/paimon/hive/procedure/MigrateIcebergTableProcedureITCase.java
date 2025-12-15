@@ -34,15 +34,19 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThatList;
 
@@ -58,6 +62,16 @@ public class MigrateIcebergTableProcedureITCase extends ActionITCaseBase {
 
     @TempDir java.nio.file.Path iceTempDir;
     @TempDir java.nio.file.Path paiTempDir;
+
+    public static Stream<Arguments> actionArguments() {
+        List<Arguments> argumentsList = new ArrayList<>();
+        for (boolean isPartitioned : Arrays.asList(false, true)) {
+            for (boolean startFlinkJob : Arrays.asList(false, true)) {
+                argumentsList.add(Arguments.of(isPartitioned, startFlinkJob));
+            }
+        }
+        return argumentsList.stream();
+    }
 
     @BeforeEach
     public void beforeEach() {
@@ -145,8 +159,9 @@ public class MigrateIcebergTableProcedureITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testMigrateIcebergTableAction(boolean isPartitioned) throws Exception {
+    @MethodSource("actionArguments")
+    public void testMigrateIcebergTableAction(boolean isPartitioned, boolean forceStartFlinkJob)
+            throws Exception {
         TableEnvironment tEnv =
                 TableEnvironmentImpl.create(
                         EnvironmentSettings.newInstance().inBatchMode().build());
@@ -186,6 +201,7 @@ public class MigrateIcebergTableProcedureITCase extends ActionITCaseBase {
         MigrateIcebergTableAction migrateIcebergTableAction =
                 new MigrateIcebergTableAction(
                         "default." + icebergTable, catalogConf, icebergOptions, "", 6);
+        migrateIcebergTableAction.forceStartFlinkJob(forceStartFlinkJob);
         migrateIcebergTableAction.run();
 
         tEnv.executeSql(paimonCatalogDdl(true));

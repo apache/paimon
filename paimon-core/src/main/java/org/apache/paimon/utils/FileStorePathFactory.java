@@ -23,7 +23,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexInDataFileDirPathFactory;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -173,15 +172,25 @@ public class FileStorePathFactory {
                 createExternalPathProvider(partition, bucket));
     }
 
-    public DataFilePathFactory createFormatTableDataFilePathFactory(BinaryRow partition) {
+    public DataFilePathFactory createFormatTableDataFilePathFactory(
+            BinaryRow partition, boolean onlyValue) {
         return new DataFilePathFactory(
-                partitionPath(partition),
+                partitionPath(partition, onlyValue),
                 formatIdentifier,
                 dataFilePrefix,
                 changelogFilePrefix,
                 fileSuffixIncludeCompression,
                 fileCompression,
                 createExternalPartitionPathProvider(partition));
+    }
+
+    private ExternalPathProvider createExternalPartitionPathProvider(
+            BinaryRow partition, boolean onlyValue) {
+        if (externalPaths == null || externalPaths.isEmpty()) {
+            return null;
+        }
+
+        return new ExternalPathProvider(externalPaths, partitionPath(partition, onlyValue));
     }
 
     private ExternalPathProvider createExternalPartitionPathProvider(BinaryRow partition) {
@@ -192,9 +201,9 @@ public class FileStorePathFactory {
         return new ExternalPathProvider(externalPaths, partitionPath(partition));
     }
 
-    public Path partitionPath(BinaryRow partition) {
+    private Path partitionPath(BinaryRow partition, boolean onlyValue) {
         Path relativeBucketPath = null;
-        String partitionPath = getPartitionString(partition);
+        String partitionPath = getPartitionString(partition, onlyValue);
         if (!partitionPath.isEmpty()) {
             relativeBucketPath = new Path(partitionPath);
         }
@@ -205,6 +214,10 @@ public class FileStorePathFactory {
                             : new Path(dataFilePathDirectory);
         }
         return relativeBucketPath != null ? new Path(root, relativeBucketPath) : root;
+    }
+
+    public Path partitionPath(BinaryRow partition) {
+        return partitionPath(partition, false);
     }
 
     @Nullable
@@ -246,6 +259,14 @@ public class FileStorePathFactory {
                 partitionComputer.generatePartValues(
                         Preconditions.checkNotNull(
                                 partition, "Partition row data is null. This is unexpected.")));
+    }
+
+    public String getPartitionString(BinaryRow partition, boolean onlyValue) {
+        return PartitionPathUtils.generatePartitionPathUtil(
+                partitionComputer.generatePartValues(
+                        Preconditions.checkNotNull(
+                                partition, "Partition row data is null. This is unexpected.")),
+                onlyValue);
     }
 
     // @TODO, need to be changed
@@ -313,27 +334,27 @@ public class FileStorePathFactory {
             DataFilePathFactory dataFilePathFactory = createDataFilePathFactory(partition, bucket);
             return new IndexInDataFileDirPathFactory(uuid, indexFileCount, dataFilePathFactory);
         } else {
-            return new IndexPathFactory() {
-                @Override
-                public Path newPath() {
-                    return toPath(INDEX_PREFIX + uuid + "-" + indexFileCount.getAndIncrement());
-                }
-
-                @Override
-                public Path toPath(IndexFileMeta file) {
-                    return toPath(file.fileName());
-                }
-
-                @Override
-                public boolean isExternalPath() {
-                    return false;
-                }
-
-                private Path toPath(String fileName) {
-                    return new Path(indexPath(), fileName);
-                }
-            };
+            return globalIndexFileFactory();
         }
+    }
+
+    public IndexPathFactory globalIndexFileFactory() {
+        return new IndexPathFactory() {
+            @Override
+            public Path toPath(String fileName) {
+                return new Path(indexPath(), fileName);
+            }
+
+            @Override
+            public Path newPath() {
+                return toPath(INDEX_PREFIX + uuid + "-" + indexFileCount.getAndIncrement());
+            }
+
+            @Override
+            public boolean isExternalPath() {
+                return false;
+            }
+        };
     }
 
     public PathFactory statsFileFactory() {

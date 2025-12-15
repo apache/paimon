@@ -21,7 +21,6 @@ package org.apache.paimon.lookup;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.lookup.sort.SortLookupStoreFactory;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.Options;
@@ -48,7 +47,7 @@ public interface LookupStoreFactory {
     LookupStoreWriter createWriter(File file, @Nullable BloomFilter.Builder bloomFilter)
             throws IOException;
 
-    LookupStoreReader createReader(File file, Context context) throws IOException;
+    LookupStoreReader createReader(File file) throws IOException;
 
     static Function<Long, BloomFilter.Builder> bfGenerator(Options options) {
         Function<Long, BloomFilter.Builder> bfGenerator = rowCount -> null;
@@ -68,20 +67,8 @@ public interface LookupStoreFactory {
     static LookupStoreFactory create(
             CoreOptions options, CacheManager cacheManager, Comparator<MemorySlice> keyComparator) {
         CompressOptions compression = options.lookupCompressOptions();
-        switch (options.lookupLocalFileType()) {
-            case SORT:
-                return new SortLookupStoreFactory(
-                        keyComparator, cacheManager, options.cachePageSize(), compression);
-            case HASH:
-                return new HashLookupStoreFactory(
-                        cacheManager,
-                        options.cachePageSize(),
-                        options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR),
-                        compression);
-            default:
-                throw new IllegalArgumentException(
-                        "Unsupported lookup local file type: " + options.lookupLocalFileType());
-        }
+        return new SortLookupStoreFactory(
+                keyComparator, cacheManager, options.cachePageSize(), compression);
     }
 
     /** Context between writer and reader. */

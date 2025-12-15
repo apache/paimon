@@ -131,7 +131,7 @@ public class BinlogTable extends AuditLogTable {
                         (row1, row2) ->
                                 new AuditLogRow(
                                         readProjection, convertToArray(row1, row2, fieldGetters)),
-                        wrapped.rowType());
+                        this.wrappedReadType);
             } else {
                 return dataRead.createReader(split)
                         .transform(
