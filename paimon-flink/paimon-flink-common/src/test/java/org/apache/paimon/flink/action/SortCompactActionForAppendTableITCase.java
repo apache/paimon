@@ -94,8 +94,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
     @Test
     public void testOrderResult() throws Exception {
         prepareData(300, 2);
-        assertThatCode(() -> order(Arrays.asList("f1", "f2")))
-                .doesNotThrowAnyException();
+        assertThatCode(() -> order(Arrays.asList("f1", "f2"))).doesNotThrowAnyException();
 
         List<ManifestEntry> files = getTable().store().newScan().plan().files();
 
@@ -120,8 +119,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
                             i.set(current);
                         });
 
-        assertThatCode(() -> order(Arrays.asList("f2", "f1")))
-                .doesNotThrowAnyException();
+        assertThatCode(() -> order(Arrays.asList("f2", "f1"))).doesNotThrowAnyException();
 
         files = getTable().store().newScan().plan().files();
 
@@ -306,15 +304,13 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
     @Test
     public void testRandomSuffixWorks() throws Exception {
         prepareSameData(200);
-        assertThatCode(() -> order(Collections.singletonList("f1")))
-                .doesNotThrowAnyException();
+        assertThatCode(() -> order(Collections.singletonList("f1"))).doesNotThrowAnyException();
         List<ManifestEntry> files = getTable().store().newScan().plan().files();
         assertThat(files.size()).isEqualTo(3);
 
         dropTable();
         prepareSameData(200);
-        assertThatCode(() -> zorder(Arrays.asList("f1", "f2")))
-                .doesNotThrowAnyException();
+        assertThatCode(() -> zorder(Arrays.asList("f1", "f2"))).doesNotThrowAnyException();
         files = getTable().store().newScan().plan().files();
         assertThat(files.size()).isEqualTo(3);
     }

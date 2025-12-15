@@ -1210,8 +1210,7 @@ public class ParquetReadWriteTest {
 
             assertEquals(
                     0, result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).getArray(2).size());
-            assertTrue(
-                    result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).isNullAt(3));
+            assertTrue(result.getRow(5, 2).getArray(1).getRow(0, 2).getArray(0).isNullAt(3));
 
             assertEquals(
                     origin.getRow(5, 2).getArray(1).getRow(0, 2).getInt(1),

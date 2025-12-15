@@ -649,8 +649,7 @@ public class SparkWriteITCase {
                                         name.endsWith(defaultExtension)
                                                 && !name.endsWith(newExtension))
                         .count());
-        assertEquals(
-                2, files.stream().filter(name -> name.endsWith(newExtension)).count());
+        assertEquals(2, files.stream().filter(name -> name.endsWith(newExtension)).count());
 
         // reset config
         spark.conf().unset("spark.paimon.file.suffix.include.compression");
@@ -693,8 +692,7 @@ public class SparkWriteITCase {
                                         name.endsWith(defaultExtension)
                                                 && !name.endsWith(newExtension))
                         .count());
-        assertEquals(
-                1, files.stream().filter(name -> name.endsWith(newExtension)).count());
+        assertEquals(1, files.stream().filter(name -> name.endsWith(newExtension)).count());
 
         // reset config
         spark.conf().unset("spark.paimon.file.suffix.include.compression");

@@ -180,15 +180,13 @@ class SimpleSqlPredicateConvertorTest {
     @Test
     public void testIsNull() throws Exception {
         Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a is null ");
-        assertThat(predicate)
-                .isEqualTo(predicateBuilder.isNull(predicateBuilder.indexOf("a")));
+        assertThat(predicate).isEqualTo(predicateBuilder.isNull(predicateBuilder.indexOf("a")));
     }
 
     @Test
     public void testIsNotNull() throws Exception {
         Predicate predicate = simpleSqlPredicateConvertor.convertSqlToPredicate("a is not  null ");
-        assertThat(predicate)
-                .isEqualTo(predicateBuilder.isNotNull(predicateBuilder.indexOf("a")));
+        assertThat(predicate).isEqualTo(predicateBuilder.isNotNull(predicateBuilder.indexOf("a")));
     }
 
     @Test
@@ -222,8 +220,7 @@ class SimpleSqlPredicateConvertorTest {
 
     @Test
     public void testFieldNoFound() {
-        assertThatThrownBy(
-                        () -> simpleSqlPredicateConvertor.convertSqlToPredicate("f =1"))
+        assertThatThrownBy(() -> simpleSqlPredicateConvertor.convertSqlToPredicate("f =1"))
                 .hasMessage("Field `f` not found");
     }
 
@@ -236,8 +233,7 @@ class SimpleSqlPredicateConvertorTest {
                                         "substring(f,0,1) =1"))
                 .hasMessage("SUBSTRING(`f` FROM 0 FOR 1) or 1 not been supported.");
         // like not supported
-        assertThatThrownBy(
-                        () -> simpleSqlPredicateConvertor.convertSqlToPredicate("b like 'x'"))
+        assertThatThrownBy(() -> simpleSqlPredicateConvertor.convertSqlToPredicate("b like 'x'"))
                 .hasMessage("LIKE not been supported.");
     }
 }

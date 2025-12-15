@@ -33,11 +33,9 @@ public class BitSetTest {
     @Test
     public void testBitSet() {
         BitSet bitSet = new BitSet(100);
-        assertThatThrownBy(
-                        () -> bitSet.setMemorySegment(MemorySegment.wrap(new byte[99]), 0))
+        assertThatThrownBy(() -> bitSet.setMemorySegment(MemorySegment.wrap(new byte[99]), 0))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(
-                        () -> bitSet.setMemorySegment(MemorySegment.wrap(new byte[100]), 1))
+        assertThatThrownBy(() -> bitSet.setMemorySegment(MemorySegment.wrap(new byte[100]), 1))
                 .isInstanceOf(IllegalArgumentException.class);
         bitSet.setMemorySegment(MemorySegment.wrap(new byte[100]), 0);
         IntStream.range(0, 100).forEach(i -> assertThat(bitSet.get(i)).isFalse());

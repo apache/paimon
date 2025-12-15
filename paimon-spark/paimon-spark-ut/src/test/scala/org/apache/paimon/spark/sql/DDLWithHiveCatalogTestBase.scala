@@ -21,6 +21,7 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FileStoreTable
+
 import org.apache.spark.sql.{AnalysisException, Row, SparkSession}
 import org.junit.jupiter.api.Assertions.{assertEquals, assertTrue}
 
@@ -275,8 +276,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                   s"ALTER DATABASE $databaseName SET LOCATION '${dBLocation.getCanonicalPath}'")
               } catch {
                 case e: AnalysisException =>
-                  assertTrue(
-                    e.getMessage.contains("does not support altering database location"))
+                  assertTrue(e.getMessage.contains("does not support altering database location"))
               }
           }
         }

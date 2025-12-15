@@ -60,8 +60,7 @@ public class ByteArraySeekableStreamTest {
                 if (testPosition >= b.length) {
                     break;
                 }
-                assertThat(b[testPosition])
-                        .isEqualTo((byte) byteArraySeekableStream.read());
+                assertThat(b[testPosition]).isEqualTo((byte) byteArraySeekableStream.read());
             }
         }
     }

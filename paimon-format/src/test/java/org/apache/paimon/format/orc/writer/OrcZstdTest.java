@@ -67,10 +67,8 @@ class OrcZstdTest {
                         .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
         assertThat(orc).isInstanceOf(OrcFileFormat.class);
 
-        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", ""))
-                .isEqualTo("zstd");
-        assertThat(
-                        orc.orcProperties().getProperty(IDENTIFIER + ".compression.zstd.level", ""))
+        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("zstd");
+        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compression.zstd.level", ""))
                 .isEqualTo("1");
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".stripe.size", ""))
                 .isEqualTo("31457280");

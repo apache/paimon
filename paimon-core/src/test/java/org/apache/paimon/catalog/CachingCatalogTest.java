@@ -343,8 +343,7 @@ class CachingCatalogTest extends CatalogTestBase {
 
     @Test
     public void testCachingCatalogRejectsExpirationIntervalOfZero() {
-        assertThatThrownBy(
-                        () -> new TestableCachingCatalog(this.catalog, Duration.ZERO, ticker))
+        assertThatThrownBy(() -> new TestableCachingCatalog(this.catalog, Duration.ZERO, ticker))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
                         "When 'cache.expire-after-access' is set to negative or 0, the catalog cache should be disabled.");

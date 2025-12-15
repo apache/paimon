@@ -46,10 +46,7 @@ public class ManifestReadThreadPoolTest {
         Iterable<Integer> re = sequentialBatchedExecute(i -> singletonList(i + 1), nums, null);
 
         AtomicInteger atomicInteger = new AtomicInteger(0);
-        re.forEach(
-                i ->
-                        assertThat(i)
-                                .isEqualTo(nums.get(atomicInteger.getAndIncrement()) + 1));
+        re.forEach(i -> assertThat(i).isEqualTo(nums.get(atomicInteger.getAndIncrement()) + 1));
     }
 
     @Test
@@ -63,10 +60,7 @@ public class ManifestReadThreadPoolTest {
         Iterable<Integer> re = sequentialBatchedExecute(i -> singletonList(i + 1), nums, null);
 
         AtomicInteger atomicInteger = new AtomicInteger(0);
-        re.forEach(
-                i ->
-                        assertThat(i)
-                                .isEqualTo(nums.get(atomicInteger.getAndIncrement()) + 1));
+        re.forEach(i -> assertThat(i).isEqualTo(nums.get(atomicInteger.getAndIncrement()) + 1));
     }
 
     @Test

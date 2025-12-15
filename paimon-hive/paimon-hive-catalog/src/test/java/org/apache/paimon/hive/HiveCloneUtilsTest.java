@@ -22,12 +22,12 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.hive.clone.HiveCloneUtils;
 
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import static org.assertj.core.api.Assertions.assertThatList;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThatList;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 

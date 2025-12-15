@@ -125,8 +125,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         .setMax(BinaryString.fromString("S8"))
                         .setNullCount(2L)
                         .build());
-        assertThat(scanSource.reportStatistics().getColumnStats())
-                .isEqualTo(expectedColStats);
+        assertThat(scanSource.reportStatistics().getColumnStats()).isEqualTo(expectedColStats);
     }
 
     @Test
@@ -288,8 +287,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         .setMax(BinaryString.fromString("S5"))
                         .setNullCount(0L)
                         .build());
-        assertThat(keyFilterSource.reportStatistics().getColumnStats())
-                .isEqualTo(expectedColStats);
+        assertThat(keyFilterSource.reportStatistics().getColumnStats()).isEqualTo(expectedColStats);
     }
 
     @Test
@@ -366,8 +364,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         .setMax(BinaryString.fromString("S8"))
                         .setNullCount(0L)
                         .build());
-        assertThat(keyFilterSource.reportStatistics().getColumnStats())
-                .isEqualTo(expectedColStats);
+        assertThat(keyFilterSource.reportStatistics().getColumnStats()).isEqualTo(expectedColStats);
     }
 
     protected FileStoreTable writeData() throws Exception {

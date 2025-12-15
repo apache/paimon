@@ -50,16 +50,14 @@ public class FastHashVisitorTest {
     public void testIntType() {
         FastHash function = FastHash.getHashFunction(DataTypes.INT());
         int c = RANDOM.nextInt();
-        assertThat(function.hash(c))
-                .isEqualTo((FastHash.FastHashVisitor.getLongHash(c)));
+        assertThat(function.hash(c)).isEqualTo((FastHash.FastHashVisitor.getLongHash(c)));
     }
 
     @Test
     public void testBigIntType() {
         FastHash function = FastHash.getHashFunction(DataTypes.BIGINT());
         long c = RANDOM.nextLong();
-        assertThat(function.hash(c))
-                .isEqualTo((FastHash.FastHashVisitor.getLongHash(c)));
+        assertThat(function.hash(c)).isEqualTo((FastHash.FastHashVisitor.getLongHash(c)));
     }
 
     @Test
@@ -82,8 +80,7 @@ public class FastHashVisitorTest {
     public void testDateType() {
         FastHash function = FastHash.getHashFunction(DataTypes.DATE());
         int c = RANDOM.nextInt();
-        assertThat(function.hash(c))
-                .isEqualTo((FastHash.FastHashVisitor.getLongHash(c)));
+        assertThat(function.hash(c)).isEqualTo((FastHash.FastHashVisitor.getLongHash(c)));
     }
 
     @Test

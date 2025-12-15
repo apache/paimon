@@ -66,8 +66,7 @@ public class InternalRowSerializerTest {
         InternalRowTypeSerializer internalRowTypeSerializer =
                 new InternalRowTypeSerializer(rowType.getFieldTypes().toArray(new DataType[0]));
 
-        assertThat(internalRowTypeSerializer)
-                .isEqualTo(internalRowTypeSerializer.duplicate());
+        assertThat(internalRowTypeSerializer).isEqualTo(internalRowTypeSerializer.duplicate());
     }
 
     @Test

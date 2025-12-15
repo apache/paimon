@@ -46,16 +46,11 @@ public class BloomFilterTest {
 
     @Test
     public void testEstimatedHashFunctions() {
-        assertThat(BloomFilter.builder(1000, 0.01).getFilter().numHashFunctions())
-                .isEqualTo(7);
-        assertThat(BloomFilter.builder(10_000, 0.01).getFilter().numHashFunctions())
-                .isEqualTo(7);
-        assertThat(BloomFilter.builder(100_000, 0.01).getFilter().numHashFunctions())
-                .isEqualTo(7);
-        assertThat(BloomFilter.builder(100_000, 0.01).getFilter().numHashFunctions())
-                .isEqualTo(7);
-        assertThat(BloomFilter.builder(100_000, 0.05).getFilter().numHashFunctions())
-                .isEqualTo(4);
+        assertThat(BloomFilter.builder(1000, 0.01).getFilter().numHashFunctions()).isEqualTo(7);
+        assertThat(BloomFilter.builder(10_000, 0.01).getFilter().numHashFunctions()).isEqualTo(7);
+        assertThat(BloomFilter.builder(100_000, 0.01).getFilter().numHashFunctions()).isEqualTo(7);
+        assertThat(BloomFilter.builder(100_000, 0.01).getFilter().numHashFunctions()).isEqualTo(7);
+        assertThat(BloomFilter.builder(100_000, 0.05).getFilter().numHashFunctions()).isEqualTo(4);
         assertThat(BloomFilter.builder(1_000_000, 0.01).getFilter().numHashFunctions())
                 .isEqualTo(7);
         assertThat(BloomFilter.builder(1_000_000, 0.05).getFilter().numHashFunctions())
@@ -130,13 +125,11 @@ public class BloomFilterTest {
         // clear segment1
         filter.reset();
         Arrays.stream(inputs1)
-                .forEach(
-                        i -> assertThat(filter.testHash(Integer.hashCode(i))).isFalse());
+                .forEach(i -> assertThat(filter.testHash(Integer.hashCode(i))).isFalse());
         // clear segment2
         filter.setMemorySegment(segment2, 0);
         filter.reset();
         Arrays.stream(inputs2)
-                .forEach(
-                        i -> assertThat(filter.testHash(Integer.hashCode(i))).isFalse());
+                .forEach(i -> assertThat(filter.testHash(Integer.hashCode(i))).isFalse());
     }
 }

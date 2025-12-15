@@ -53,10 +53,7 @@ public class OneElementFieldVectorGeneratorTest {
                         new ArrowBatchReader(new RowType(Arrays.asList(dataField)), true);
                 Iterable<InternalRow> it =
                         reader.readBatch(new VectorSchemaRoot(Arrays.asList(fieldVector)));
-                it.forEach(
-                        i ->
-                                assertThat(i.getString(0))
-                                        .isEqualTo(genericRow.getString(0)));
+                it.forEach(i -> assertThat(i.getString(0)).isEqualTo(genericRow.getString(0)));
             }
         }
 

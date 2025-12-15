@@ -19,8 +19,9 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.spark.sources.PaimonSourceOffset
+
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.streaming.{StreamTest, StreamingQueryException, Trigger}
+import org.apache.spark.sql.streaming.{StreamingQueryException, StreamTest, Trigger}
 import org.junit.jupiter.api.Assertions.{assertEquals, assertFalse, assertTrue}
 
 import java.util.concurrent.TimeUnit
@@ -431,9 +432,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
           query.processAllAvailable()
           // Each batch can consume one data split.
           // Therefore it takes totalDataSplitNum batches to consume all the data.
-          assertEquals(
-            totalDataSplitNum,
-            query.recentProgress.count(_.numInputRows != 0))
+          assertEquals(totalDataSplitNum, query.recentProgress.count(_.numInputRows != 0))
           assertEquals(
             PaimonSourceOffset(3L, 1L, scanSnapshot = false),
             PaimonSourceOffset(query.lastProgress.sources(0).endOffset))
@@ -443,9 +442,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
           spark.sql("INSERT INTO T VALUES (40, 'v_40'), (41, 'v_41'), (42, 'v_42')")
           query.processAllAvailable()
           // Two additional batches are required to consume the new data.
-          assertEquals(
-            totalDataSplitNum + 2,
-            query.recentProgress.count(_.numInputRows != 0))
+          assertEquals(totalDataSplitNum + 2, query.recentProgress.count(_.numInputRows != 0))
           assertEquals(
             PaimonSourceOffset(4L, 1L, scanSnapshot = false),
             PaimonSourceOffset(query.lastProgress.sources(0).endOffset))

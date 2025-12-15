@@ -131,8 +131,7 @@ public class TagManagerTest {
         assertEquals(1, tags.size());
         Tag tag = tags.get(0).getKey();
         String tagJson = tag.toJson();
-        assertTrue(
-                tagJson.contains("tagCreateTime") && tagJson.contains("tagTimeRetained"));
+        assertTrue(tagJson.contains("tagCreateTime") && tagJson.contains("tagTimeRetained"));
         assertEquals(tag, Tag.fromJson(tagJson));
         assertThat(tags.get(0).getValue()).contains("tag");
     }

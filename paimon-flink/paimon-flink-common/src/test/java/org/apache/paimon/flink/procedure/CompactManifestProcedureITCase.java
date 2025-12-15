@@ -56,8 +56,7 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
         sql(
                 "INSERT OVERWRITE T VALUES (1, '101', 15, '20221208'), (4, '1001', 16, '20221208'), (5, '10001', 15, '20221209')");
 
-        assertThat(
-                        sql("SELECT sum(num_deleted_files) FROM T$manifests").get(0).getField(0))
+        assertThat(sql("SELECT sum(num_deleted_files) FROM T$manifests").get(0).getField(0))
                 .isEqualTo(9L);
 
         assertThat(
@@ -68,8 +67,7 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
                                 .toString())
                 .isEqualTo("success");
 
-        assertThat(
-                        sql("SELECT sum(num_deleted_files) FROM T$manifests").get(0).getField(0))
+        assertThat(sql("SELECT sum(num_deleted_files) FROM T$manifests").get(0).getField(0))
                 .isEqualTo(0L);
 
         assertThat(sql("SELECT * FROM T ORDER BY k").toString())

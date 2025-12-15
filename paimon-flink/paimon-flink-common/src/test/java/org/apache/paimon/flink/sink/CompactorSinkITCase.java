@@ -171,8 +171,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
                 .withInput(source)
                 .build();
 
-        assertThat(env.getTransformations().get(0).getParallelism())
-                .isEqualTo(sinkParalellism);
+        assertThat(env.getTransformations().get(0).getParallelism()).isEqualTo(sinkParalellism);
     }
 
     private List<Map<String, String>> getSpecifiedPartitions() {

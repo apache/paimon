@@ -141,12 +141,10 @@ public class VectorMappingUtilsTest {
         assertThat(((IntColumnVector) newColumnVectors[0]).getInt(0)).isEqualTo(0);
 
         assertThat(newColumnVectors[1]).isInstanceOf(ByteColumnVector.class);
-        assertThat(((ByteColumnVector) newColumnVectors[1]).getByte(0))
-                .isEqualTo((byte) 1);
+        assertThat(((ByteColumnVector) newColumnVectors[1]).getByte(0)).isEqualTo((byte) 1);
 
         assertThat(newColumnVectors[2]).isInstanceOf(ShortColumnVector.class);
-        assertThat(((ShortColumnVector) newColumnVectors[2]).getShort(0))
-                .isEqualTo((short) 2);
+        assertThat(((ShortColumnVector) newColumnVectors[2]).getShort(0)).isEqualTo((short) 2);
 
         assertThat(newColumnVectors[3]).isInstanceOf(LongColumnVector.class);
         assertThat(((LongColumnVector) newColumnVectors[3]).getLong(0)).isEqualTo(3L);
@@ -156,8 +154,7 @@ public class VectorMappingUtilsTest {
                 .isEqualTo("4".getBytes());
 
         assertThat(newColumnVectors[5]).isInstanceOf(DoubleColumnVector.class);
-        assertThat(((DoubleColumnVector) newColumnVectors[5]).getDouble(0))
-                .isEqualTo(5.0);
+        assertThat(((DoubleColumnVector) newColumnVectors[5]).getDouble(0)).isEqualTo(5.0);
 
         assertThat(newColumnVectors[7]).isInstanceOf(BytesColumnVector.class);
         assertThat(((BytesColumnVector) newColumnVectors[7]).getBytes(0).data)
@@ -168,8 +165,7 @@ public class VectorMappingUtilsTest {
                 .isEqualTo("7".getBytes());
 
         assertThat(newColumnVectors[9]).isInstanceOf(BooleanColumnVector.class);
-        assertThat(((BooleanColumnVector) newColumnVectors[9]).getBoolean(0))
-                .isEqualTo(true);
+        assertThat(((BooleanColumnVector) newColumnVectors[9]).getBoolean(0)).isEqualTo(true);
 
         assertThat(newColumnVectors[10]).isInstanceOf(IntColumnVector.class);
         assertThat(((IntColumnVector) newColumnVectors[10]).getInt(0)).isEqualTo(9);
@@ -180,7 +176,6 @@ public class VectorMappingUtilsTest {
         assertThat(newColumnVectors[12]).isInstanceOf(TimestampColumnVector.class);
 
         assertThat(newColumnVectors[13]).isInstanceOf(FloatColumnVector.class);
-        assertThat(((FloatColumnVector) newColumnVectors[13]).getFloat(0))
-                .isEqualTo((float) 12.0);
+        assertThat(((FloatColumnVector) newColumnVectors[13]).getFloat(0)).isEqualTo((float) 12.0);
     }
 }

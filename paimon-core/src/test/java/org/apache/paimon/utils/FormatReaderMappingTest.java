@@ -140,8 +140,7 @@ public class FormatReaderMappingTest {
                         null,
                         null);
 
-        assertThat(formatReaderMapping.getIndexMapping())
-                .containsExactly(0, 1, 0, -1, 2);
+        assertThat(formatReaderMapping.getIndexMapping()).containsExactly(0, 1, 0, -1, 2);
         List<DataField> trimmed = trimmedKeyPair.getRight().getFields();
         assertThat(trimmed.get(0).id()).isEqualTo(1);
         assertThat(trimmed.get(1).id()).isEqualTo(0);

@@ -484,8 +484,7 @@ public class AppendOnlyWriterTest {
             writer.write(row(j, String.valueOf(s), PART));
         }
         // we got only one file after commit
-        assertThat(writer.prepareCommit(true).newFilesIncrement().newFiles().size())
-                .isEqualTo(1);
+        assertThat(writer.prepareCommit(true).newFilesIncrement().newFiles().size()).isEqualTo(1);
         writer.close();
 
         writer = createEmptyWriter(Long.MAX_VALUE, false);
@@ -498,8 +497,7 @@ public class AppendOnlyWriterTest {
             writer.write(row(j, String.valueOf(s), PART));
         }
         // we got 100 files
-        assertThat(writer.prepareCommit(true).newFilesIncrement().newFiles().size())
-                .isEqualTo(100);
+        assertThat(writer.prepareCommit(true).newFilesIncrement().newFiles().size()).isEqualTo(100);
         writer.close();
     }
 

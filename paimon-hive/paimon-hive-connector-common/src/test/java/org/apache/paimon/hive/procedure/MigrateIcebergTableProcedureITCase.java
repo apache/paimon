@@ -29,7 +29,6 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.types.Row;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -135,8 +134,7 @@ public class MigrateIcebergTableProcedureITCase extends ActionITCaseBase {
                     .await();
         }
 
-        assertThatList(
-                        Arrays.asList(Row.of("a", 1, 1), Row.of("b", 2, 2), Row.of("c", 3, 3)))
+        assertThatList(Arrays.asList(Row.of("a", 1, 1), Row.of("b", 2, 2), Row.of("c", 3, 3)))
                 .containsExactlyInAnyOrderElementsOf(
                         ImmutableList.copyOf(
                                 tEnv.executeSql(
@@ -192,8 +190,7 @@ public class MigrateIcebergTableProcedureITCase extends ActionITCaseBase {
 
         tEnv.executeSql(paimonCatalogDdl(true));
         tEnv.executeSql("USE CATALOG my_paimon");
-        assertThatList(
-                        Arrays.asList(Row.of("a", 1, 1), Row.of("b", 2, 2), Row.of("c", 3, 3)))
+        assertThatList(Arrays.asList(Row.of("a", 1, 1), Row.of("b", 2, 2), Row.of("c", 3, 3)))
                 .containsExactlyInAnyOrderElementsOf(
                         ImmutableList.copyOf(
                                 tEnv.executeSql(
