@@ -38,7 +38,6 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -51,8 +50,7 @@ import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.*;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 
@@ -206,7 +204,7 @@ public class CloneActionITCase extends ActionITCaseBase {
                 .run();
 
         List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
 
         List<Row> files = sql(tEnv, "SELECT file_path FROM test.`test_table$files`");
         assertThat(files).hasSize(1);
@@ -343,7 +341,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
         // first run, validate clone
         List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
 
         if (specificFilter) {
             // test other partitions
@@ -362,12 +360,12 @@ public class CloneActionITCase extends ActionITCaseBase {
             // expect all
             r1 = sql(tEnv, "SELECT * FROM PAIMON_GE.%s.%s", dbName, tableName);
             r2 = sql(tEnv, "SELECT * FROM test.test_table");
-            Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+            assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
         } else {
             // run again, validate overwrite
             createAction(CloneAction.class, args).run();
             r2 = sql(tEnv, "SELECT * FROM test.test_table");
-            Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+            assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
         }
     }
 
@@ -479,8 +477,8 @@ public class CloneActionITCase extends ActionITCaseBase {
         List<Row> actualR1 = sql(tEnv, "SELECT * FROM test.%s", tableName1);
         List<Row> actualR2 = sql(tEnv, "SELECT * FROM test.%s", tableName2);
 
-        Assertions.assertThatList(actualR1).containsExactlyInAnyOrderElementsOf(r1);
-        Assertions.assertThatList(actualR2).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(actualR1).containsExactlyInAnyOrderElementsOf(r1);
+        assertThatList(actualR2).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     @Test
@@ -541,8 +539,8 @@ public class CloneActionITCase extends ActionITCaseBase {
         List<Row> actualR1 = sql(tEnv, "SELECT * FROM test.%s", tableName1);
         List<Row> actualR2 = sql(tEnv, "SELECT * FROM test.%s", tableName2);
 
-        Assertions.assertThatList(actualR1).containsExactlyInAnyOrderElementsOf(r1);
-        Assertions.assertThatList(actualR2).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(actualR1).containsExactlyInAnyOrderElementsOf(r1);
+        assertThatList(actualR2).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     @Test
@@ -605,10 +603,10 @@ public class CloneActionITCase extends ActionITCaseBase {
             FileStoreTable paimonTable =
                     paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
 
-            Assertions.assertThat(paimonTable.partitionKeys()).containsExactly("id2", "id3");
+            assertThat(paimonTable.partitionKeys()).containsExactly("id2", "id3");
 
             List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
-            Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+            assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
         }
     }
 
@@ -660,10 +658,10 @@ public class CloneActionITCase extends ActionITCaseBase {
         FileStoreTable paimonTable =
                 paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
 
-        Assertions.assertThat(paimonTable.partitionKeys()).containsExactly("id2", "id3");
+        assertThat(paimonTable.partitionKeys()).containsExactly("id2", "id3");
 
         List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     @Test
@@ -743,8 +741,8 @@ public class CloneActionITCase extends ActionITCaseBase {
                         .map(row -> row.getField(0).toString())
                         .collect(Collectors.toList());
 
-        Assertions.assertThatList(actualDB1Tables).containsExactlyInAnyOrderElementsOf(db1Tables);
-        Assertions.assertThatList(actualDB2Tables).containsExactlyInAnyOrderElementsOf(db2Tables);
+        assertThatList(actualDB1Tables).containsExactlyInAnyOrderElementsOf(db1Tables);
+        assertThatList(actualDB2Tables).containsExactlyInAnyOrderElementsOf(db2Tables);
     }
 
     @Test
@@ -824,8 +822,8 @@ public class CloneActionITCase extends ActionITCaseBase {
                         .map(row -> row.getField(0).toString())
                         .collect(Collectors.toList());
 
-        Assertions.assertThatList(actualDB1Tables).containsExactlyInAnyOrderElementsOf(db1Tables);
-        Assertions.assertThatList(actualDB2Tables).containsExactlyInAnyOrderElementsOf(db2Tables);
+        assertThatList(actualDB1Tables).containsExactlyInAnyOrderElementsOf(db1Tables);
+        assertThatList(actualDB2Tables).containsExactlyInAnyOrderElementsOf(db2Tables);
     }
 
     @Test
@@ -885,7 +883,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         assertThat(paimonTable.partitionKeys()).containsExactly("id2", "id3");
 
         List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     @Test
@@ -945,7 +943,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         assertThat(paimonTable.partitionKeys()).containsExactly("id2", "id3");
 
         List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     @Test
@@ -1007,7 +1005,7 @@ public class CloneActionITCase extends ActionITCaseBase {
         assertEquals(paimonTable.options().get(CoreOptions.FILE_FORMAT.key()), preferFileFormat);
 
         List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     private String[] ddls(String format) {

@@ -37,7 +37,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.Text
 import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -50,6 +49,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 /** Test for DebeziumBsonRecordParser. */
 public class DebeziumBsonRecordParserTest {
@@ -137,26 +138,26 @@ public class DebeziumBsonRecordParserTest {
     public void extractInsertRecord() throws Exception {
         DebeziumBsonRecordParser parser =
                 new DebeziumBsonRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
-        Assertions.assertFalse(insertList.isEmpty());
+        assertFalse(insertList.isEmpty());
         for (CdcSourceRecord cdcRecord : insertList) {
             Schema schema = parser.buildSchema(cdcRecord);
-            Assertions.assertEquals(schema.primaryKeys(), Arrays.asList("_id"));
+            assertEquals(schema.primaryKeys(), Arrays.asList("_id"));
 
             List<RichCdcMultiplexRecord> records = parser.extractRecords();
-            Assertions.assertEquals(records.size(), 1);
+            assertEquals(records.size(), 1);
 
             CdcRecord result = records.get(0).toRichCdcRecord().toCdcRecord();
-            Assertions.assertEquals(result.kind(), RowKind.INSERT);
-            Assertions.assertEquals(beforeEvent, result.data());
+            assertEquals(result.kind(), RowKind.INSERT);
+            assertEquals(beforeEvent, result.data());
 
             String dbName = parser.getDatabaseName();
-            Assertions.assertEquals(dbName, "bigdata_test");
+            assertEquals(dbName, "bigdata_test");
 
             String tableName = parser.getTableName();
-            Assertions.assertEquals(tableName, "sync_test_table");
+            assertEquals(tableName, "sync_test_table");
 
             MessageQueueCdcTimestampExtractor extractor = new MessageQueueCdcTimestampExtractor();
-            Assertions.assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
+            assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
         }
     }
 
@@ -164,34 +165,34 @@ public class DebeziumBsonRecordParserTest {
     public void extractUpdateRecord() throws Exception {
         DebeziumBsonRecordParser parser =
                 new DebeziumBsonRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
-        Assertions.assertFalse(updateList.isEmpty());
+        assertFalse(updateList.isEmpty());
         for (CdcSourceRecord cdcRecord : updateList) {
             Schema schema = parser.buildSchema(cdcRecord);
-            Assertions.assertEquals(schema.primaryKeys(), Arrays.asList("_id"));
+            assertEquals(schema.primaryKeys(), Arrays.asList("_id"));
 
             List<RichCdcMultiplexRecord> records = parser.extractRecords();
-            Assertions.assertEquals(records.size(), 2);
+            assertEquals(records.size(), 2);
 
             CdcRecord updateBefore = records.get(0).toRichCdcRecord().toCdcRecord();
-            Assertions.assertEquals(updateBefore.kind(), RowKind.DELETE);
+            assertEquals(updateBefore.kind(), RowKind.DELETE);
             if (parser.checkBeforeExists()) {
-                Assertions.assertEquals(beforeEvent, updateBefore.data());
+                assertEquals(beforeEvent, updateBefore.data());
             } else {
-                Assertions.assertEquals(keyEvent, updateBefore.data());
+                assertEquals(keyEvent, updateBefore.data());
             }
 
             CdcRecord updateAfter = records.get(1).toRichCdcRecord().toCdcRecord();
-            Assertions.assertEquals(updateAfter.kind(), RowKind.INSERT);
-            Assertions.assertEquals(afterEvent, updateAfter.data());
+            assertEquals(updateAfter.kind(), RowKind.INSERT);
+            assertEquals(afterEvent, updateAfter.data());
 
             String dbName = parser.getDatabaseName();
-            Assertions.assertEquals(dbName, "bigdata_test");
+            assertEquals(dbName, "bigdata_test");
 
             String tableName = parser.getTableName();
-            Assertions.assertEquals(tableName, "sync_test_table");
+            assertEquals(tableName, "sync_test_table");
 
             MessageQueueCdcTimestampExtractor extractor = new MessageQueueCdcTimestampExtractor();
-            Assertions.assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
+            assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
         }
     }
 
@@ -199,30 +200,30 @@ public class DebeziumBsonRecordParserTest {
     public void extractDeleteRecord() throws Exception {
         DebeziumBsonRecordParser parser =
                 new DebeziumBsonRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
-        Assertions.assertFalse(deleteList.isEmpty());
+        assertFalse(deleteList.isEmpty());
         for (CdcSourceRecord cdcRecord : deleteList) {
             Schema schema = parser.buildSchema(cdcRecord);
-            Assertions.assertEquals(schema.primaryKeys(), Arrays.asList("_id"));
+            assertEquals(schema.primaryKeys(), Arrays.asList("_id"));
 
             List<RichCdcMultiplexRecord> records = parser.extractRecords();
-            Assertions.assertEquals(records.size(), 1);
+            assertEquals(records.size(), 1);
 
             CdcRecord result = records.get(0).toRichCdcRecord().toCdcRecord();
-            Assertions.assertEquals(result.kind(), RowKind.DELETE);
+            assertEquals(result.kind(), RowKind.DELETE);
             if (parser.checkBeforeExists()) {
-                Assertions.assertEquals(beforeEvent, result.data());
+                assertEquals(beforeEvent, result.data());
             } else {
-                Assertions.assertEquals(keyEvent, result.data());
+                assertEquals(keyEvent, result.data());
             }
 
             String dbName = parser.getDatabaseName();
-            Assertions.assertEquals(dbName, "bigdata_test");
+            assertEquals(dbName, "bigdata_test");
 
             String tableName = parser.getTableName();
-            Assertions.assertEquals(tableName, "sync_test_table");
+            assertEquals(tableName, "sync_test_table");
 
             MessageQueueCdcTimestampExtractor extractor = new MessageQueueCdcTimestampExtractor();
-            Assertions.assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
+            assertTrue(extractor.extractTimestamp(cdcRecord) > 0);
         }
     }
 
@@ -231,7 +232,7 @@ public class DebeziumBsonRecordParserTest {
         DebeziumBsonRecordParser parser =
                 new DebeziumBsonRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
 
-        Assertions.assertFalse(jsonRecords.isEmpty());
+        assertFalse(jsonRecords.isEmpty());
         for (int i = 0; i < jsonRecords.size(); i++) {
             CdcSourceRecord bsonRecord = bsonRecords.get(i);
             CdcSourceRecord jsonRecord = jsonRecords.get(i);
@@ -252,7 +253,7 @@ public class DebeziumBsonRecordParserTest {
                                 if (!JsonSerdeUtil.isNull(entry.getValue())) {
                                     expectValue = entry.getValue().asText();
                                 }
-                                Assertions.assertEquals(expectValue, resultMap.get(key));
+                                assertEquals(expectValue, resultMap.get(key));
                             });
         }
     }

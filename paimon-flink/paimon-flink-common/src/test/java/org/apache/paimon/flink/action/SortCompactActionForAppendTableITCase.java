@@ -41,7 +41,6 @@ import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -50,6 +49,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Order Rewrite Action tests for {@link SortCompactAction}. */
 public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
@@ -79,7 +81,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
     @Test
     public void testOrderBy() throws Exception {
         prepareData(300, 1);
-        Assertions.assertThatCode(
+        assertThatCode(
                         () ->
                                 order(
                                         Arrays.asList(
@@ -92,7 +94,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
     @Test
     public void testOrderResult() throws Exception {
         prepareData(300, 2);
-        Assertions.assertThatCode(() -> order(Arrays.asList("f1", "f2")))
+        assertThatCode(() -> order(Arrays.asList("f1", "f2")))
                 .doesNotThrowAnyException();
 
         List<ManifestEntry> files = getTable().store().newScan().plan().files();
@@ -114,11 +116,11 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
                 .forEachRemaining(
                         a -> {
                             Integer current = a.getInt(1);
-                            Assertions.assertThat(current).isGreaterThanOrEqualTo(i.get());
+                            assertThat(current).isGreaterThanOrEqualTo(i.get());
                             i.set(current);
                         });
 
-        Assertions.assertThatCode(() -> order(Arrays.asList("f2", "f1")))
+        assertThatCode(() -> order(Arrays.asList("f2", "f1")))
                 .doesNotThrowAnyException();
 
         files = getTable().store().newScan().plan().files();
@@ -140,7 +142,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
                 .forEachRemaining(
                         a -> {
                             int current = a.getShort(2);
-                            Assertions.assertThat(current).isGreaterThanOrEqualTo(i.get());
+                            assertThat(current).isGreaterThanOrEqualTo(i.get());
                             i.set(current);
                         });
     }
@@ -149,7 +151,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
     public void testAllBasicTypeWorksWithZorder() throws Exception {
         prepareData(300, 1);
         // All the basic types should support zorder
-        Assertions.assertThatCode(
+        assertThatCode(
                         () ->
                                 zorder(
                                         Arrays.asList(
@@ -163,7 +165,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
     public void testAllBasicTypeWorksWithHilbert() throws Exception {
         prepareData(300, 1);
         // All the basic types should support hilbert
-        Assertions.assertThatCode(
+        assertThatCode(
                         () ->
                                 hilbert(
                                         Arrays.asList(
@@ -186,7 +188,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
                         .plan()
                         .files();
         // before zorder, we don't filter any file
-        Assertions.assertThat(files.size()).isEqualTo(filesFilter.size());
+        assertThat(files.size()).isEqualTo(filesFilter.size());
 
         zorder(Arrays.asList("f2", "f1"));
 
@@ -196,7 +198,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
                         .withFilter(predicate)
                         .plan()
                         .files();
-        Assertions.assertThat(files.size()).isGreaterThan(filesFilter.size());
+        assertThat(files.size()).isGreaterThan(filesFilter.size());
     }
 
     @Test
@@ -213,7 +215,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
                         .files();
 
         // before hilbert, we don't filter any file
-        Assertions.assertThat(files.size()).isEqualTo(filesFilter.size());
+        assertThat(files.size()).isEqualTo(filesFilter.size());
 
         hilbert(Arrays.asList("f2", "f1"));
 
@@ -223,7 +225,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
                         .withFilter(predicate)
                         .plan()
                         .files();
-        Assertions.assertThat(files.size()).isGreaterThan(filesFilter.size());
+        assertThat(files.size()).isGreaterThan(filesFilter.size());
     }
 
     @Test
@@ -249,7 +251,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
                         .plan()
                         .files();
 
-        Assertions.assertThat(filesFilterZorder.size() / (double) filesZorder.size())
+        assertThat(filesFilterZorder.size() / (double) filesZorder.size())
                 .isLessThan(filesFilterOrder.size() / (double) filesOrder.size());
     }
 
@@ -276,7 +278,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
                         .plan()
                         .files();
 
-        Assertions.assertThat(filesFilterHilbert.size() / (double) filesHilbert.size())
+        assertThat(filesFilterHilbert.size() / (double) filesHilbert.size())
                 .isLessThan(filesFilterOrder.size() / (double) filesOrder.size());
     }
 
@@ -293,7 +295,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
                         .withOrderStrategy("zorder")
                         .withOrderColumns(Collections.singletonList("f0"));
 
-        Assertions.assertThat(
+        assertThat(
                         sortCompactAction
                                 .table
                                 .options()
@@ -304,17 +306,17 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
     @Test
     public void testRandomSuffixWorks() throws Exception {
         prepareSameData(200);
-        Assertions.assertThatCode(() -> order(Collections.singletonList("f1")))
+        assertThatCode(() -> order(Collections.singletonList("f1")))
                 .doesNotThrowAnyException();
         List<ManifestEntry> files = getTable().store().newScan().plan().files();
-        Assertions.assertThat(files.size()).isEqualTo(3);
+        assertThat(files.size()).isEqualTo(3);
 
         dropTable();
         prepareSameData(200);
-        Assertions.assertThatCode(() -> zorder(Arrays.asList("f1", "f2")))
+        assertThatCode(() -> zorder(Arrays.asList("f1", "f2")))
                 .doesNotThrowAnyException();
         files = getTable().store().newScan().plan().files();
-        Assertions.assertThat(files.size()).isEqualTo(3);
+        assertThat(files.size()).isEqualTo(3);
     }
 
     @Test
@@ -383,7 +385,7 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
             ArrayList<String> extraCompactionConfig =
                     Lists.newArrayList(
                             "--table_conf", "sort-compaction.local-sample.magnification=1");
-            Assertions.assertThatCode(
+            assertThatCode(
                             () -> {
                                 createAction(
                                                 "order",

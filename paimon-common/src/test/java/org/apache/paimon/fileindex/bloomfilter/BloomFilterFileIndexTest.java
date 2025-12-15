@@ -24,13 +24,14 @@ import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link BloomFilterFileIndex}. */
 public class BloomFilterFileIndexTest {
@@ -67,7 +68,7 @@ public class BloomFilterFileIndexTest {
                         new ByteArraySeekableStream(serializedBytes), 0, serializedBytes.length);
 
         for (byte[] bytes : testData) {
-            Assertions.assertThat(reader.visitEqual(null, bytes).remain()).isTrue();
+            assertThat(reader.visitEqual(null, bytes).remain()).isTrue();
         }
 
         int errorCount = 0;
@@ -80,7 +81,7 @@ public class BloomFilterFileIndexTest {
         }
 
         // ffp should be less than 0.03
-        Assertions.assertThat((double) errorCount / num).isLessThan(0.03);
+        assertThat((double) errorCount / num).isLessThan(0.03);
     }
 
     @Test
@@ -110,7 +111,7 @@ public class BloomFilterFileIndexTest {
                         new ByteArraySeekableStream(serializedBytes), 0, serializedBytes.length);
 
         for (Long value : testData) {
-            Assertions.assertThat(reader.visitEqual(null, value).remain()).isTrue();
+            assertThat(reader.visitEqual(null, value).remain()).isTrue();
         }
 
         int errorCount = 0;
@@ -123,7 +124,7 @@ public class BloomFilterFileIndexTest {
         }
 
         // ffp should be less than 0.03
-        Assertions.assertThat((double) errorCount / num).isLessThan(0.03);
+        assertThat((double) errorCount / num).isLessThan(0.03);
     }
 
     private byte[] random() {

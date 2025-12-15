@@ -29,8 +29,9 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Statistics tests for table with primary keys. */
 public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestBase {
@@ -53,7 +54,7 @@ public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestB
                         null,
                         null,
                         null);
-        Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(9L);
+        assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(9L);
         // TODO validate column statistics
     }
 

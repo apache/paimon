@@ -29,7 +29,6 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -178,7 +177,7 @@ public class RangePartitionAndSortForAppendTableITCase extends CatalogITCaseBase
                                 int result = internalRow.getInt(0);
                                 min.set(Math.min(min.get(), result));
                                 max.set(Math.max(max.get(), result));
-                                Assertions.assertThat(result).isGreaterThanOrEqualTo(current.get());
+                                assertThat(result).isGreaterThanOrEqualTo(current.get());
                                 current.set(result);
                             });
             minMaxOfEachFile.add(Tuple2.of(min.get(), max.get()));
@@ -217,7 +216,7 @@ public class RangePartitionAndSortForAppendTableITCase extends CatalogITCaseBase
                         .withFilter(predicate)
                         .plan()
                         .files();
-        Assertions.assertThat(files.size()).isGreaterThan(filesFilter.size());
+        assertThat(files.size()).isGreaterThan(filesFilter.size());
     }
 
     @Test
@@ -244,7 +243,7 @@ public class RangePartitionAndSortForAppendTableITCase extends CatalogITCaseBase
                         .withFilter(predicate)
                         .plan()
                         .files();
-        Assertions.assertThat(files.size()).isGreaterThan(filesFilter.size());
+        assertThat(files.size()).isGreaterThan(filesFilter.size());
     }
 
     private List<Row> generateSinkRows() {

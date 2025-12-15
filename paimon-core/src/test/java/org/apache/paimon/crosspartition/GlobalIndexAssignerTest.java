@@ -31,7 +31,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Pair;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
@@ -133,7 +132,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         // change partition
         assigner.processInput(GenericRow.of(1, 1, 1));
         assigner.processInput(GenericRow.of(2, 1, 2));
-        Assertions.assertThat(output)
+        assertThat(output)
                 .containsExactly(
                         Pair.of(GenericRow.of(1, 1, 1), 0),
                         Pair.of(GenericRow.ofKind(RowKind.DELETE, 1, 1, 2), 0),
@@ -149,7 +148,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
 
         // move from full bucket
         assigner.processInput(GenericRow.of(2, 4, 4));
-        Assertions.assertThat(output)
+        assertThat(output)
                 .containsExactly(
                         Pair.of(GenericRow.ofKind(RowKind.DELETE, 1, 4, 4), 0),
                         Pair.of(GenericRow.of(2, 4, 4), 0));
@@ -177,7 +176,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         // change partition
         assigner.processInput(GenericRow.of(1, 1, 1));
         assigner.processInput(GenericRow.of(2, 1, 2));
-        Assertions.assertThat(output)
+        assertThat(output)
                 .containsExactly(
                         Pair.of(GenericRow.of(1, 1, 1), 0), Pair.of(GenericRow.of(1, 1, 2), 0));
         output.clear();
@@ -201,7 +200,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         // change partition
         assigner.processInput(GenericRow.of(1, 1, 1));
         assigner.processInput(GenericRow.of(2, 1, 2));
-        Assertions.assertThat(output).containsExactly(Pair.of(GenericRow.of(1, 1, 1), 0));
+        assertThat(output).containsExactly(Pair.of(GenericRow.of(1, 1, 1), 0));
         output.clear();
 
         // test partition 2 no effect

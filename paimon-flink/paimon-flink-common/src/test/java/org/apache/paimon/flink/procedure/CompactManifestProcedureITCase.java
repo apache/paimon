@@ -20,10 +20,11 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.CatalogITCaseBase;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Objects;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link CompactManifestProcedure}. */
 public class CompactManifestProcedureITCase extends CatalogITCaseBase {
@@ -55,11 +56,11 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
         sql(
                 "INSERT OVERWRITE T VALUES (1, '101', 15, '20221208'), (4, '1001', 16, '20221208'), (5, '10001', 15, '20221209')");
 
-        Assertions.assertThat(
+        assertThat(
                         sql("SELECT sum(num_deleted_files) FROM T$manifests").get(0).getField(0))
                 .isEqualTo(9L);
 
-        Assertions.assertThat(
+        assertThat(
                         Objects.requireNonNull(
                                         sql("CALL sys.compact_manifest(`table` => 'default.T')")
                                                 .get(0)
@@ -67,11 +68,11 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
                                 .toString())
                 .isEqualTo("success");
 
-        Assertions.assertThat(
+        assertThat(
                         sql("SELECT sum(num_deleted_files) FROM T$manifests").get(0).getField(0))
                 .isEqualTo(0L);
 
-        Assertions.assertThat(sql("SELECT * FROM T ORDER BY k").toString())
+        assertThat(sql("SELECT * FROM T ORDER BY k").toString())
                 .isEqualTo(
                         "[+I[1, 101, 15, 20221208], +I[4, 1001, 16, 20221208], +I[5, 10001, 15, 20221209]]");
     }
@@ -106,13 +107,13 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
         sql(
                 "INSERT OVERWRITE T$branch_branch1 VALUES (1, '101', 15, '20221208'), (4, '1001', 16, '20221208'), (5, '10001', 15, '20221209')");
 
-        Assertions.assertThat(
+        assertThat(
                         sql("SELECT sum(num_deleted_files) FROM T$branch_branch1$manifests")
                                 .get(0)
                                 .getField(0))
                 .isEqualTo(9L);
 
-        Assertions.assertThat(
+        assertThat(
                         Objects.requireNonNull(
                                         sql("CALL sys.compact_manifest(`table` => 'default.T$branch_branch1')")
                                                 .get(0)
@@ -120,13 +121,13 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
                                 .toString())
                 .isEqualTo("success");
 
-        Assertions.assertThat(
+        assertThat(
                         sql("SELECT sum(num_deleted_files) FROM T$branch_branch1$manifests")
                                 .get(0)
                                 .getField(0))
                 .isEqualTo(0L);
 
-        Assertions.assertThat(sql("SELECT * FROM T$branch_branch1 ORDER BY k").toString())
+        assertThat(sql("SELECT * FROM T$branch_branch1 ORDER BY k").toString())
                 .isEqualTo(
                         "[+I[1, 101, 15, 20221208], +I[4, 1001, 16, 20221208], +I[5, 10001, 15, 20221209]]");
     }

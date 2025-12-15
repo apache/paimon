@@ -68,7 +68,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
 import org.apache.commons.io.FileUtils;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -452,11 +451,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(tables).containsExactly("table_name");
         assertNull(pagedTables.getNextPageToken());
 
-        Assertions.assertThrows(
+        assertThrows(
                 BadRequestException.class,
                 () -> catalog.listTablesPaged(databaseName, null, null, "%table"));
 
-        Assertions.assertThrows(
+        assertThrows(
                 BadRequestException.class,
                 () -> catalog.listTablesPaged(databaseName, null, null, "ta%le"));
     }
@@ -534,18 +533,18 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertNull(pagedTableDetails.getNextPageToken());
 
         pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table_");
-        Assertions.assertTrue(pagedTableDetails.getElements().isEmpty());
+        assertTrue(pagedTableDetails.getElements().isEmpty());
         assertNull(pagedTableDetails.getNextPageToken());
 
         pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table_%");
         assertPagedTableDetails(pagedTableDetails, 1, "table_name");
         assertNull(pagedTableDetails.getNextPageToken());
 
-        Assertions.assertThrows(
+        assertThrows(
                 BadRequestException.class,
                 () -> catalog.listTableDetailsPaged(databaseName, null, null, "ta%le"));
 
-        Assertions.assertThrows(
+        assertThrows(
                 BadRequestException.class,
                 () -> catalog.listTableDetailsPaged(databaseName, null, null, "%tale"));
     }
@@ -704,11 +703,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertTrue(pagedTables.getElements().isEmpty());
         assertNull(pagedTables.getNextPageToken());
 
-        Assertions.assertThrows(
+        assertThrows(
                 BadRequestException.class,
                 () -> catalog.listTablesPagedGlobally(databaseNamePattern, "ta%le", null, null));
 
-        Assertions.assertThrows(
+        assertThrows(
                 BadRequestException.class,
                 () -> catalog.listTablesPagedGlobally(databaseNamePattern, "%tale", null, null));
     }
@@ -813,11 +812,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertTrue(pagedViews.getElements().isEmpty());
         assertNull(pagedViews.getNextPageToken());
 
-        Assertions.assertThrows(
+        assertThrows(
                 BadRequestException.class,
                 () -> catalog.listViewsPaged(databaseName, null, null, "vi%ew"));
 
-        Assertions.assertThrows(
+        assertThrows(
                 BadRequestException.class,
                 () -> catalog.listViewsPaged(databaseName, null, null, "%view"));
     }
@@ -893,18 +892,18 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertNull(pagedViewDetails.getNextPageToken());
 
         pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, "view_");
-        Assertions.assertTrue(pagedViewDetails.getElements().isEmpty());
+        assertTrue(pagedViewDetails.getElements().isEmpty());
         assertNull(pagedViewDetails.getNextPageToken());
 
         pagedViewDetails = catalog.listViewDetailsPaged(databaseName, null, null, "view_%");
         assertPagedViewDetails(pagedViewDetails, view, 1, "view_name");
         assertNull(pagedViewDetails.getNextPageToken());
 
-        Assertions.assertThrows(
+        assertThrows(
                 BadRequestException.class,
                 () -> catalog.listViewDetailsPaged(databaseName, null, null, "vi%ew"));
 
-        Assertions.assertThrows(
+        assertThrows(
                 BadRequestException.class,
                 () -> catalog.listViewDetailsPaged(databaseName, null, null, "%view"));
     }

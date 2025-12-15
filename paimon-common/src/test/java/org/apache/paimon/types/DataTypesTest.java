@@ -18,7 +18,6 @@
 
 package org.apache.paimon.types;
 
-import org.assertj.core.api.Assertions;
 import org.assertj.core.api.ObjectAssert;
 import org.assertj.core.api.ThrowingConsumer;
 import org.junit.jupiter.api.Test;
@@ -248,6 +247,6 @@ public class DataTypesTest {
     }
 
     public static <T> ObjectAssert<T> assertThat(T actual) {
-        return Assertions.assertThat(actual);
+        return assertThat(actual);
     }
 }

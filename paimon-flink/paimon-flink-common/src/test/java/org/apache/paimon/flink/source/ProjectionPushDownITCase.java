@@ -26,7 +26,6 @@ import org.apache.flink.table.api.ExplainFormat;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -34,6 +33,8 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link SupportsProjectionPushDown}. */
 public class ProjectionPushDownITCase extends CatalogITCaseBase {
@@ -142,8 +143,8 @@ public class ProjectionPushDownITCase extends CatalogITCaseBase {
         String plan = tEnv.explainSql(sql, ExplainFormat.TEXT);
         String[] lines = plan.split("\n");
         String trimmed = Arrays.stream(lines).map(String::trim).collect(Collectors.joining("\n"));
-        Assertions.assertThat(trimmed).contains(planIdentifier);
+        assertThat(trimmed).contains(planIdentifier);
         List<Row> result = batchSql(sql);
-        Assertions.assertThat(result).containsExactlyInAnyOrder(expectedRows);
+        assertThat(result).containsExactlyInAnyOrder(expectedRows);
     }
 }

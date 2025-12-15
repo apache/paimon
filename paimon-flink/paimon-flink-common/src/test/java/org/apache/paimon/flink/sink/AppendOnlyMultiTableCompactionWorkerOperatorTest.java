@@ -32,7 +32,6 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.SourceOperatorStreamTask;
 import org.apache.flink.streaming.util.MockOutput;
 import org.apache.flink.streaming.util.MockStreamConfig;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -42,6 +41,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.sink.AppendOnlySingleTableCompactionWorkerOperatorTest.packTask;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** test for {@link AppendOnlyMultiTableCompactionWorkerOperator}. */
 public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestBase {
@@ -83,7 +84,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestB
                     .forEach(records::add);
         }
 
-        Assertions.assertThat(records.size()).isEqualTo(8);
+        assertThat(records.size()).isEqualTo(8);
         workerOperator.open();
 
         for (StreamRecord<MultiTableAppendCompactTask> record : records) {
@@ -94,7 +95,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestB
         Long timeStart = System.currentTimeMillis();
         long timeout = 60_000L;
 
-        Assertions.assertThatCode(
+        assertThatCode(
                         () -> {
                             while (committables.size() != 8) {
                                 committables.addAll(
@@ -114,7 +115,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestB
                 .doesNotThrowAnyException();
         committables.forEach(
                 a ->
-                        Assertions.assertThat(
+                        assertThat(
                                         ((CommitMessageImpl) a.wrappedCommittable())
                                                         .compactIncrement()
                                                         .compactAfter()
@@ -125,6 +126,6 @@ public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestB
                 committables.stream()
                         .map(MultiTableCommittable::getTable)
                         .collect(Collectors.toSet());
-        Assertions.assertThat(table).hasSameElementsAs(Arrays.asList(tables));
+        assertThat(table).hasSameElementsAs(Arrays.asList(tables));
     }
 }

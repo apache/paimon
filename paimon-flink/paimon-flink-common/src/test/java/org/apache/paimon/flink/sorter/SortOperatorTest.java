@@ -32,12 +32,13 @@ import org.apache.paimon.utils.MutableObjectIterator;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SortOperator}. */
 public class SortOperatorTest {
@@ -86,7 +87,7 @@ public class SortOperatorTest {
         BinaryRow reuse = new BinaryRow(3);
         long i = 1;
         while ((row = iterator.next(reuse)) != null) {
-            Assertions.assertThat(row.getLong(0)).isEqualTo(i++);
+            assertThat(row.getLong(0)).isEqualTo(i++);
         }
 
         harness.close();
@@ -143,7 +144,7 @@ public class SortOperatorTest {
 
     private void assertNoDataFile(File fileDir) {
         if (fileDir.exists()) {
-            Assertions.assertThat(fileDir.isDirectory()).isTrue();
+            assertThat(fileDir.isDirectory()).isTrue();
             for (File file : fileDir.listFiles()) {
                 assertNoDataFile(file);
             }

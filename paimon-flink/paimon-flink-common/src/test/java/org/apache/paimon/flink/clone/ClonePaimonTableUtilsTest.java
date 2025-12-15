@@ -21,12 +21,12 @@ package org.apache.paimon.flink.clone;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThatList;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -50,7 +50,7 @@ public class ClonePaimonTableUtilsTest {
                         Identifier.create("db2", "tbl1"),
                         Identifier.create("db2", "tbl2"),
                         Identifier.create("db2", "tbl3"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
                 ClonePaimonTableUtils.listTables(
@@ -61,14 +61,14 @@ public class ClonePaimonTableUtilsTest {
                         Identifier.create("db1", "tbl2"),
                         Identifier.create("db2", "tbl2"),
                         Identifier.create("db2", "tbl3"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
                 ClonePaimonTableUtils.listTables(
                         mockPaimonCatalog, Arrays.asList("db1.tbl3", "db2.tbl1"), null);
         expectedTables =
                 Arrays.asList(Identifier.create("db1", "tbl3"), Identifier.create("db2", "tbl1"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
                 ClonePaimonTableUtils.listTables(
@@ -76,7 +76,7 @@ public class ClonePaimonTableUtilsTest {
                         Arrays.asList("db1.tbl3", "db2.tbl1"),
                         Arrays.asList("db1.tbl3"));
         expectedTables = Arrays.asList(Identifier.create("db2", "tbl1"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
     }
 
     @Test
@@ -91,20 +91,20 @@ public class ClonePaimonTableUtilsTest {
                         Identifier.create("db1", "tbl1"),
                         Identifier.create("db1", "tbl2"),
                         Identifier.create("db1", "tbl3"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
                 ClonePaimonTableUtils.listTables(
                         mockPaimonCatalog, "db1", null, Arrays.asList("db1.tbl1"));
         expectedTables =
                 Arrays.asList(Identifier.create("db1", "tbl2"), Identifier.create("db1", "tbl3"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
                 ClonePaimonTableUtils.listTables(
                         mockPaimonCatalog, "db1", Arrays.asList("db1.tbl1"), null);
         expectedTables = Arrays.asList(Identifier.create("db1", "tbl1"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
                 ClonePaimonTableUtils.listTables(
@@ -113,6 +113,6 @@ public class ClonePaimonTableUtilsTest {
                         Arrays.asList("db1.tbl1", "db1.tbl2"),
                         Arrays.asList("db1.tbl1"));
         expectedTables = Arrays.asList(Identifier.create("db1", "tbl2"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
     }
 }

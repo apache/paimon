@@ -42,7 +42,6 @@ import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.ddl.CreateCatalogOperation;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
-import org.assertj.core.api.Assertions;
 import org.assertj.core.api.ListAssert;
 import org.junit.jupiter.api.BeforeEach;
 
@@ -59,6 +58,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for catalog. */
 public abstract class CatalogITCaseBase extends AbstractTestBase {
@@ -158,7 +158,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
             try (CloseableIterator<Row> iter =
                     tEnv.executeSql(String.format(query, args)).collect()) {
                 try {
-                    checker.accept(Assertions.assertThat(ImmutableList.copyOf(iter)));
+                    checker.accept(assertThat(ImmutableList.copyOf(iter)));
                     return;
                 } catch (AssertionError e) {
                     if (System.currentTimeMillis() - start >= 3 * 60 * 1000) {

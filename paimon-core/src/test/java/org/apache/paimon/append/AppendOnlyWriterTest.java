@@ -51,7 +51,6 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -335,8 +334,8 @@ public class AppendOnlyWriterTest {
         }
 
         RowBuffer buffer = writer.getWriteBuffer();
-        Assertions.assertThat(buffer.size()).isEqualTo(100);
-        Assertions.assertThat(buffer.memoryOccupancy()).isLessThanOrEqualTo(16384L);
+        assertThat(buffer.size()).isEqualTo(100);
+        assertThat(buffer.memoryOccupancy()).isLessThanOrEqualTo(16384L);
 
         writer.close();
     }
@@ -403,7 +402,7 @@ public class AppendOnlyWriterTest {
         writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
 
         RowBuffer buffer = writer.getWriteBuffer();
-        Assertions.assertThat(buffer).isNull();
+        assertThat(buffer).isNull();
 
         writer.close();
     }
@@ -424,23 +423,23 @@ public class AppendOnlyWriterTest {
         }
 
         writer.flush(false, false);
-        Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
-        Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
-        Assertions.assertThat(writer.getNewFiles().size()).isGreaterThan(0);
+        assertThat(writer.memoryOccupancy()).isEqualTo(0L);
+        assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
+        assertThat(writer.getNewFiles().size()).isGreaterThan(0);
         long rowCount =
                 writer.getNewFiles().stream().map(DataFileMeta::rowCount).reduce(0L, Long::sum);
-        Assertions.assertThat(rowCount).isEqualTo(100);
+        assertThat(rowCount).isEqualTo(100);
 
         for (int j = 0; j < 100; j++) {
             writer.write(row(j, String.valueOf(s), PART));
         }
         writer.flush(false, false);
 
-        Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
-        Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
-        Assertions.assertThat(writer.getNewFiles().size()).isGreaterThan(1);
+        assertThat(writer.memoryOccupancy()).isEqualTo(0L);
+        assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
+        assertThat(writer.getNewFiles().size()).isGreaterThan(1);
         rowCount = writer.getNewFiles().stream().map(DataFileMeta::rowCount).reduce(0L, Long::sum);
-        Assertions.assertThat(rowCount).isEqualTo(200);
+        assertThat(rowCount).isEqualTo(200);
     }
 
     @Test
@@ -465,9 +464,9 @@ public class AppendOnlyWriterTest {
 
         for (ChannelWithMeta meta : channel) {
             File file = new File(meta.getChannel().getPath());
-            Assertions.assertThat(file.exists()).isEqualTo(false);
+            assertThat(file.exists()).isEqualTo(false);
         }
-        Assertions.assertThat(writer.getWriteBuffer()).isEqualTo(null);
+        assertThat(writer.getWriteBuffer()).isEqualTo(null);
     }
 
     @Test
@@ -485,7 +484,7 @@ public class AppendOnlyWriterTest {
             writer.write(row(j, String.valueOf(s), PART));
         }
         // we got only one file after commit
-        Assertions.assertThat(writer.prepareCommit(true).newFilesIncrement().newFiles().size())
+        assertThat(writer.prepareCommit(true).newFilesIncrement().newFiles().size())
                 .isEqualTo(1);
         writer.close();
 
@@ -499,7 +498,7 @@ public class AppendOnlyWriterTest {
             writer.write(row(j, String.valueOf(s), PART));
         }
         // we got 100 files
-        Assertions.assertThat(writer.prepareCommit(true).newFilesIncrement().newFiles().size())
+        assertThat(writer.prepareCommit(true).newFilesIncrement().newFiles().size())
                 .isEqualTo(100);
         writer.close();
     }

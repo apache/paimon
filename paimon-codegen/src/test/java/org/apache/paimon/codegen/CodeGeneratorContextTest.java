@@ -18,10 +18,11 @@
 
 package org.apache.paimon.codegen;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.Serializable;
+
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Tests for {@link CodeGeneratorContext}. */
 public class CodeGeneratorContextTest {
@@ -32,7 +33,7 @@ public class CodeGeneratorContextTest {
         Thread.currentThread()
                 .setContextClassLoader(ClassLoader.getSystemClassLoader().getParent());
 
-        Assertions.assertThatCode(
+        assertThatCode(
                         () ->
                                 new CodeGeneratorContext()
                                         .addReusableObjectInternal(o, "careless", "careless"))

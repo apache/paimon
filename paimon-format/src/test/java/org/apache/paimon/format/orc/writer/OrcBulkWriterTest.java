@@ -31,11 +31,12 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 class OrcBulkWriterTest {
 
@@ -44,7 +45,7 @@ class OrcBulkWriterTest {
         Options options = new Options();
         options.set(CoreOptions.WRITE_BATCH_SIZE, 1);
         FileFormat orc = FileFormat.fromIdentifier("orc", options);
-        Assertions.assertThat(orc).isInstanceOf(OrcFileFormat.class);
+        assertThat(orc).isInstanceOf(OrcFileFormat.class);
 
         RowType rowType =
                 RowType.builder()
@@ -52,15 +53,15 @@ class OrcBulkWriterTest {
                         .field("b", DataTypes.STRING())
                         .build();
         FormatWriterFactory writerFactory = orc.createWriterFactory(rowType);
-        Assertions.assertThat(writerFactory).isInstanceOf(OrcWriterFactory.class);
+        assertThat(writerFactory).isInstanceOf(OrcWriterFactory.class);
 
         Path path = new Path(tempDir.toUri().toString(), "1.orc");
         PositionOutputStream out = LocalFileIO.create().newOutputStream(path, false);
         FormatWriter formatWriter = writerFactory.create(out, "zstd");
 
-        Assertions.assertThat(formatWriter).isInstanceOf(OrcBulkWriter.class);
+        assertThat(formatWriter).isInstanceOf(OrcBulkWriter.class);
 
         OrcBulkWriter orcBulkWriter = (OrcBulkWriter) formatWriter;
-        Assertions.assertThat(orcBulkWriter.getRowBatch().getMaxSize()).isEqualTo(1);
+        assertThat(orcBulkWriter.getRowBatch().getMaxSize()).isEqualTo(1);
     }
 }

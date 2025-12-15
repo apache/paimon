@@ -28,7 +28,6 @@ import org.apache.flink.table.api.SqlDialect;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -41,6 +40,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.stream.Stream;
+
+import static org.assertj.core.api.Assertions.assertThatList;
 
 /** Tests for {@code MigrateFileProcedure}. */
 public class MigrateTableProcedureITCase extends ActionITCaseBase {
@@ -107,7 +108,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                 .await();
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     public void testUpgradeNonPartitionTable(String format) throws Exception {
@@ -138,7 +139,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                 .await();
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     @ParameterizedTest
@@ -176,7 +177,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         tEnv.useCatalog("PAIMON");
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     protected static String data(int i) {

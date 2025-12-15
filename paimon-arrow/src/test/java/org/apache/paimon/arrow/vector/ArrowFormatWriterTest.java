@@ -35,7 +35,6 @@ import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -47,6 +46,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link org.apache.paimon.arrow.vector.ArrowFormatWriter}. */
 public class ArrowFormatWriterTest {
@@ -115,7 +116,7 @@ public class ArrowFormatWriterTest {
                 InternalRow expectec = list.get(i);
 
                 for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
-                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                    assertThat(fieldGetter.getFieldOrNull(actual))
                             .isEqualTo(fieldGetter.getFieldOrNull(expectec));
                 }
             }
@@ -158,7 +159,7 @@ public class ArrowFormatWriterTest {
                 InternalRow expectec = list.get(i);
 
                 for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
-                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                    assertThat(fieldGetter.getFieldOrNull(actual))
                             .isEqualTo(fieldGetter.getFieldOrNull(expectec));
                 }
             }
@@ -194,9 +195,9 @@ public class ArrowFormatWriterTest {
 
             if (limitMemory) {
                 for (int i = 0; i < 64; i++) {
-                    Assertions.assertThat(writer.write(genericRow)).isTrue();
+                    assertThat(writer.write(genericRow)).isTrue();
                 }
-                Assertions.assertThat(writer.write(genericRow)).isFalse();
+                assertThat(writer.write(genericRow)).isFalse();
             }
             writer.reset();
 
@@ -211,8 +212,8 @@ public class ArrowFormatWriterTest {
             }
 
             if (limitMemory) {
-                Assertions.assertThat(writer.memoryUsed()).isLessThan(memoryLimit);
-                Assertions.assertThat(writer.getAllocator().getAllocatedMemory())
+                assertThat(writer.memoryUsed()).isLessThan(memoryLimit);
+                assertThat(writer.getAllocator().getAllocatedMemory())
                         .isGreaterThan(memoryLimit)
                         .isLessThan(2 * memoryLimit);
             }
@@ -244,7 +245,7 @@ public class ArrowFormatWriterTest {
                 InternalRow expectec = list.get(i);
 
                 for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
-                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                    assertThat(fieldGetter.getFieldOrNull(actual))
                             .isEqualTo(fieldGetter.getFieldOrNull(expectec));
                 }
             }
@@ -301,7 +302,7 @@ public class ArrowFormatWriterTest {
             InternalRow expectec = list.get(i);
 
             for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
-                Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                assertThat(fieldGetter.getFieldOrNull(actual))
                         .isEqualTo(fieldGetter.getFieldOrNull(expectec));
             }
         }

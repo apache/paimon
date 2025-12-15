@@ -25,12 +25,13 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FormatReaderMapping.Builder}. */
 public class FormatReaderMappingTest {
@@ -82,16 +83,16 @@ public class FormatReaderMappingTest {
 
         Pair<int[], RowType> res = FormatReaderMapping.Builder.trimKeyFields(testFields, allFields);
 
-        Assertions.assertThat(res.getKey()).containsExactly(0, 1, 2, 3, 1, 4, 2, 0, 5);
+        assertThat(res.getKey()).containsExactly(0, 1, 2, 3, 1, 4, 2, 0, 5);
 
         List<DataField> fields = res.getRight().getFields();
-        Assertions.assertThat(fields.size()).isEqualTo(6);
-        Assertions.assertThat(fields.get(0).id()).isEqualTo(1);
-        Assertions.assertThat(fields.get(1).id()).isEqualTo(3);
-        Assertions.assertThat(fields.get(2).id()).isEqualTo(5);
-        Assertions.assertThat(fields.get(3).id()).isEqualTo(7);
-        Assertions.assertThat(fields.get(4).id()).isEqualTo(4);
-        Assertions.assertThat(fields.get(5).id()).isEqualTo(6);
+        assertThat(fields.size()).isEqualTo(6);
+        assertThat(fields.get(0).id()).isEqualTo(1);
+        assertThat(fields.get(1).id()).isEqualTo(3);
+        assertThat(fields.get(2).id()).isEqualTo(5);
+        assertThat(fields.get(3).id()).isEqualTo(7);
+        assertThat(fields.get(4).id()).isEqualTo(4);
+        assertThat(fields.get(5).id()).isEqualTo(6);
     }
 
     @Test
@@ -139,12 +140,12 @@ public class FormatReaderMappingTest {
                         null,
                         null);
 
-        Assertions.assertThat(formatReaderMapping.getIndexMapping())
+        assertThat(formatReaderMapping.getIndexMapping())
                 .containsExactly(0, 1, 0, -1, 2);
         List<DataField> trimmed = trimmedKeyPair.getRight().getFields();
-        Assertions.assertThat(trimmed.get(0).id()).isEqualTo(1);
-        Assertions.assertThat(trimmed.get(1).id()).isEqualTo(0);
-        Assertions.assertThat(trimmed.get(2).id()).isEqualTo(3);
-        Assertions.assertThat(trimmed.size()).isEqualTo(3);
+        assertThat(trimmed.get(0).id()).isEqualTo(1);
+        assertThat(trimmed.get(1).id()).isEqualTo(0);
+        assertThat(trimmed.get(2).id()).isEqualTo(3);
+        assertThat(trimmed.size()).isEqualTo(3);
     }
 }

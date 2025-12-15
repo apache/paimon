@@ -29,13 +29,15 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.assertj.core.api.Assertions;
+
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThatList;
 
 /** Test clone Hudi table. */
 public class CloneActionForHudiITCase extends ActionITCaseBase {
@@ -121,7 +123,7 @@ public class CloneActionForHudiITCase extends ActionITCaseBase {
                 .run();
 
         List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     @Test
@@ -194,7 +196,7 @@ public class CloneActionForHudiITCase extends ActionITCaseBase {
                 .run();
 
         List<Row> r2 = sql(tEnv, "SELECT * FROM test.test_table");
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     private List<Row> sql(TableEnvironment tEnv, String query, Object... args) {

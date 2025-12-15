@@ -44,7 +44,6 @@ import org.apache.paimon.utils.FakeTicker;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -344,7 +343,7 @@ class CachingCatalogTest extends CatalogTestBase {
 
     @Test
     public void testCachingCatalogRejectsExpirationIntervalOfZero() {
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () -> new TestableCachingCatalog(this.catalog, Duration.ZERO, ticker))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(

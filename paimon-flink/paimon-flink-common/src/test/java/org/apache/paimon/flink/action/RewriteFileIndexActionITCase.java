@@ -32,13 +32,14 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link RewriteFileIndexAction}. */
 public class RewriteFileIndexActionITCase extends ActionITCaseBase {
@@ -161,7 +162,7 @@ public class RewriteFileIndexActionITCase extends ActionITCaseBase {
                                     .collect(Collectors.toList());
 
                     // Means no index file
-                    Assertions.assertThat(extraFiles.size()).isEqualTo(0);
+                    assertThat(extraFiles.size()).isEqualTo(0);
                 });
 
         List<ManifestEntry> partition20221208List =
@@ -183,7 +184,7 @@ public class RewriteFileIndexActionITCase extends ActionITCaseBase {
                             .filter(s -> s.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
                             .collect(Collectors.toList());
 
-            Assertions.assertThat(extraFiles.size()).isEqualTo(1);
+            assertThat(extraFiles.size()).isEqualTo(1);
 
             String file = extraFiles.get(0);
 
@@ -196,33 +197,33 @@ public class RewriteFileIndexActionITCase extends ActionITCaseBase {
                     FileIndexFormat.createReader(
                             table.fileIO().newInputStream(indexFilePath), table.rowType())) {
                 Set<FileIndexReader> readerSetK = reader.readColumnIndex("k");
-                Assertions.assertThat(readerSetK.size()).isEqualTo(1);
+                assertThat(readerSetK.size()).isEqualTo(1);
 
                 Predicate predicateK = new PredicateBuilder(table.rowType()).equal(0, 1);
                 for (FileIndexReader fileIndexReader : readerSetK) {
-                    Assertions.assertThat(predicateK.visit(fileIndexReader).remain()).isTrue();
+                    assertThat(predicateK.visit(fileIndexReader).remain()).isTrue();
                 }
 
                 predicateK = new PredicateBuilder(table.rowType()).equal(0, 4);
                 for (FileIndexReader fileIndexReader : readerSetK) {
-                    Assertions.assertThat(predicateK.visit(fileIndexReader).remain()).isFalse();
+                    assertThat(predicateK.visit(fileIndexReader).remain()).isFalse();
                 }
 
                 Set<FileIndexReader> readerSetV = reader.readColumnIndex("v");
-                Assertions.assertThat(readerSetV.size()).isEqualTo(1);
+                assertThat(readerSetV.size()).isEqualTo(1);
 
                 Predicate predicateV =
                         new PredicateBuilder(table.rowType())
                                 .equal(1, BinaryString.fromString("100"));
                 for (FileIndexReader fileIndexReader : readerSetV) {
-                    Assertions.assertThat(predicateV.visit(fileIndexReader).remain()).isTrue();
+                    assertThat(predicateV.visit(fileIndexReader).remain()).isTrue();
                 }
 
                 predicateV =
                         new PredicateBuilder(table.rowType())
                                 .equal(1, BinaryString.fromString("101"));
                 for (FileIndexReader fileIndexReader : readerSetV) {
-                    Assertions.assertThat(predicateV.visit(fileIndexReader).remain()).isFalse();
+                    assertThat(predicateV.visit(fileIndexReader).remain()).isFalse();
                 }
             }
         }

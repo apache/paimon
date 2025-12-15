@@ -37,13 +37,14 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Pair;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Sort Compact Action tests for dynamic bucket table. */
 public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
@@ -73,7 +74,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
                         .withValueFilter(predicate)
                         .plan()
                         .files();
-        Assertions.assertThat(filesFilterZorder.size() / (double) filesZorder.size())
+        assertThat(filesFilterZorder.size() / (double) filesZorder.size())
                 .isLessThan(filesFilter.size() / (double) files.size());
     }
 
@@ -103,7 +104,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
                         .plan()
                         .files();
 
-        Assertions.assertThat(filesFilterZorder.size() / (double) filesZorder.size())
+        assertThat(filesFilterZorder.size() / (double) filesZorder.size())
                 .isLessThan(filesFilter.size() / (double) files.size());
     }
 
@@ -133,7 +134,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
                         .plan()
                         .files();
 
-        Assertions.assertThat(filesFilterHilbert.size() / (double) filesHilbert.size())
+        assertThat(filesFilterHilbert.size() / (double) filesHilbert.size())
                 .isLessThan(filesFilter.size() / (double) files.size());
     }
 
@@ -164,7 +165,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
                         .withValueFilter(predicate)
                         .plan()
                         .files();
-        Assertions.assertThat(filesFilterZorder.size() / (double) filesZorder.size())
+        assertThat(filesFilterZorder.size() / (double) filesZorder.size())
                 .isLessThan(filesFilter.size() / (double) files.size());
     }
 

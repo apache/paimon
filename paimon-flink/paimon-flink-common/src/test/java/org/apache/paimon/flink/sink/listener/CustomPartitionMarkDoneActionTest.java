@@ -27,7 +27,6 @@ import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.streaming.api.operators.collect.utils.MockOperatorStateStore;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION;
@@ -36,6 +35,7 @@ import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT;
 import static org.apache.paimon.CoreOptions.PartitionMarkDoneAction.CUSTOM;
 import static org.apache.paimon.flink.sink.listener.ListenerTestUtils.notifyCommits;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for custom PartitionMarkDoneAction. */
 public class CustomPartitionMarkDoneActionTest extends TableTestBase {
@@ -61,7 +61,7 @@ public class CustomPartitionMarkDoneActionTest extends TableTestBase {
 
         // Throwing the exception, if the parameter 'partition.mark-done-action.custom.class' is not
         // set.
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 PartitionMarkDoneListener.create(
                                         getClass().getClassLoader(),

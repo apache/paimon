@@ -18,7 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -31,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** This test mainly test for the methods in {@link ManifestReadThreadPool}. */
 public class ManifestReadThreadPoolTest {
@@ -48,7 +48,7 @@ public class ManifestReadThreadPoolTest {
         AtomicInteger atomicInteger = new AtomicInteger(0);
         re.forEach(
                 i ->
-                        Assertions.assertThat(i)
+                        assertThat(i)
                                 .isEqualTo(nums.get(atomicInteger.getAndIncrement()) + 1));
     }
 
@@ -65,7 +65,7 @@ public class ManifestReadThreadPoolTest {
         AtomicInteger atomicInteger = new AtomicInteger(0);
         re.forEach(
                 i ->
-                        Assertions.assertThat(i)
+                        assertThat(i)
                                 .isEqualTo(nums.get(atomicInteger.getAndIncrement()) + 1));
     }
 
@@ -87,7 +87,7 @@ public class ManifestReadThreadPoolTest {
         AtomicInteger atomicInteger = new AtomicInteger(0);
         while (iterator.hasNext()) {
             Integer i = iterator.next();
-            Assertions.assertThat(i).isEqualTo(nums.get(atomicInteger.getAndIncrement()) + 1);
+            assertThat(i).isEqualTo(nums.get(atomicInteger.getAndIncrement()) + 1);
         }
     }
 
@@ -109,7 +109,7 @@ public class ManifestReadThreadPoolTest {
         AtomicInteger atomicInteger = new AtomicInteger(0);
         while (iterator.hasNext()) {
             Integer i = iterator.next();
-            Assertions.assertThat(i).isEqualTo(nums.get(atomicInteger.getAndIncrement()) + 1);
+            assertThat(i).isEqualTo(nums.get(atomicInteger.getAndIncrement()) + 1);
         }
     }
 
@@ -118,14 +118,14 @@ public class ManifestReadThreadPoolTest {
         Iterable<Integer> re =
                 sequentialBatchedExecute(
                         i -> singletonList(i + 1), (List<Integer>) Collections.EMPTY_LIST, null);
-        Assertions.assertThat(!re.iterator().hasNext()).isTrue();
+        assertThat(!re.iterator().hasNext()).isTrue();
     }
 
     @Test
     public void testForSingletonInput() {
         Iterable<Integer> re =
                 sequentialBatchedExecute(i -> singletonList(i + 1), singletonList(1), null);
-        re.forEach(i -> Assertions.assertThat(i).isEqualTo(2));
+        re.forEach(i -> assertThat(i).isEqualTo(2));
     }
 
     @Test
@@ -138,7 +138,7 @@ public class ManifestReadThreadPoolTest {
                             queueSize);
             Integer[] result = new Integer[] {6, 7, 8, 9, 10};
 
-            Assertions.assertThat(re).hasSameElementsAs(Arrays.asList(result));
+            assertThat(re).hasSameElementsAs(Arrays.asList(result));
         }
     }
 }

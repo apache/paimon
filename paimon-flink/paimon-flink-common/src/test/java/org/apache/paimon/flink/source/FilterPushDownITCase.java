@@ -26,7 +26,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.flink.table.api.ExplainFormat;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -115,7 +114,7 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
     public void testStreamingReadingNotConsumePartitionCondition() throws TimeoutException {
         String sql = "SELECT * FROM T WHERE a = 5";
         String plan = sEnv.explainSql(sql, ExplainFormat.TEXT);
-        Assertions.assertThat(plan)
+        assertThat(plan)
                 .contains(
                         "Calc(select=[CAST(5 AS INTEGER) AS a, b, c], where=[(a = 5)])\n"
                                 + "+- TableSourceScan(table=[[PAIMON, default, T, filter=[=(a, 5)]]], fields=[a, b, c])");
@@ -140,8 +139,8 @@ public class FilterPushDownITCase extends CatalogITCaseBase {
         String plan = tEnv.explainSql(sql, ExplainFormat.TEXT);
         String[] lines = plan.split("\n");
         String trimmed = Arrays.stream(lines).map(String::trim).collect(Collectors.joining("\n"));
-        Assertions.assertThat(trimmed).contains(planIdentifier);
+        assertThat(trimmed).contains(planIdentifier);
         List<Row> result = batchSql(sql);
-        Assertions.assertThat(result).containsExactlyInAnyOrder(expectedRows);
+        assertThat(result).containsExactlyInAnyOrder(expectedRows);
     }
 }

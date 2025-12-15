@@ -20,10 +20,12 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.memory.MemorySegment;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.stream.IntStream;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link org.apache.paimon.utils.BitSet}. */
 public class BitSetTest {
@@ -31,18 +33,18 @@ public class BitSetTest {
     @Test
     public void testBitSet() {
         BitSet bitSet = new BitSet(100);
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () -> bitSet.setMemorySegment(MemorySegment.wrap(new byte[99]), 0))
                 .isInstanceOf(IllegalArgumentException.class);
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () -> bitSet.setMemorySegment(MemorySegment.wrap(new byte[100]), 1))
                 .isInstanceOf(IllegalArgumentException.class);
         bitSet.setMemorySegment(MemorySegment.wrap(new byte[100]), 0);
-        IntStream.range(0, 100).forEach(i -> Assertions.assertThat(bitSet.get(i)).isFalse());
+        IntStream.range(0, 100).forEach(i -> assertThat(bitSet.get(i)).isFalse());
         IntStream.range(0, 50).forEach(bitSet::set);
-        IntStream.range(0, 50).forEach(i -> Assertions.assertThat(bitSet.get(i)).isTrue());
-        IntStream.range(50, 100).forEach(i -> Assertions.assertThat(bitSet.get(i)).isFalse());
+        IntStream.range(0, 50).forEach(i -> assertThat(bitSet.get(i)).isTrue());
+        IntStream.range(50, 100).forEach(i -> assertThat(bitSet.get(i)).isFalse());
         bitSet.clear();
-        IntStream.range(0, 100).forEach(i -> Assertions.assertThat(bitSet.get(i)).isFalse());
+        IntStream.range(0, 100).forEach(i -> assertThat(bitSet.get(i)).isFalse());
     }
 }

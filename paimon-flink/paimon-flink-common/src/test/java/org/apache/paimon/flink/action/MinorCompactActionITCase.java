@@ -25,7 +25,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -34,6 +33,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for compact strategy {@link CompactAction}. */
 public class MinorCompactActionITCase extends CompactActionITCaseBase {
@@ -170,7 +170,7 @@ public class MinorCompactActionITCase extends CompactActionITCaseBase {
                         CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER.key() + "=3");
         StreamExecutionEnvironment env =
                 streamExecutionEnvironmentBuilder().streamingMode().build();
-        Assertions.assertThatThrownBy(() -> action.withStreamExecutionEnvironment(env).build())
+        assertThatThrownBy(() -> action.withStreamExecutionEnvironment(env).build())
                 .hasMessage(
                         "The full compact strategy is only supported in batch mode. Please add -Dexecution.runtime-mode=BATCH.");
     }
@@ -183,7 +183,7 @@ public class MinorCompactActionITCase extends CompactActionITCaseBase {
                 Arrays.asList("dt", "hh", "k"),
                 Collections.emptyList(),
                 Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 createAction(
                                         CompactAction.class,

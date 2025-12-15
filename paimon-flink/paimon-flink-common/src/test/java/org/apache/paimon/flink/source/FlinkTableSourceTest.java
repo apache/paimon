@@ -37,10 +37,11 @@ import org.apache.flink.table.expressions.FieldReferenceExpression;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FlinkTableSource}. */
 public class FlinkTableSourceTest extends TableTestBase {
@@ -58,7 +59,7 @@ public class FlinkTableSourceTest extends TableTestBase {
 
         // col1 = 1
         List<ResolvedExpression> filters = ImmutableList.of(col1Equal1());
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+        assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(filters);
     }
 
@@ -82,57 +83,57 @@ public class FlinkTableSourceTest extends TableTestBase {
 
         // col1 = 1 && p1 = 1 => [p1 = 1]
         List<ResolvedExpression> filters = ImmutableList.of(col1Equal1(), p1Equal1());
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+        assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(ImmutableList.of(filters.get(0)));
 
         // col1 = 1 && p2 like '%a' => None
         filters = ImmutableList.of(col1Equal1(), p2Like("%a"));
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+        assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(filters);
 
         // col1 = 1 && p2 like 'a%' => [p2 like 'a%']
         filters = ImmutableList.of(col1Equal1(), p2Like("a%"));
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+        assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(ImmutableList.of(filters.get(0)));
 
         // rand(42) > 0.1 => None
         filters = ImmutableList.of(rand());
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+        assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(filters);
 
         // upper(p1) = "A" => [upper(p1) = "A"]
         filters = ImmutableList.of(upperP2EqualA());
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+        assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(filters);
 
         // col1 = 1 && (p2 like 'a%' or p1 = 1) => [p2 like 'a%' or p1 = 1]
         filters = ImmutableList.of(col1Equal1(), or(p2Like("a%"), p1Equal1()));
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+        assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(ImmutableList.of(filters.get(0)));
 
         // col1 = 1 && (p2 like '%a' or p1 = 1) => None
         filters = ImmutableList.of(col1Equal1(), or(p2Like("%a"), p1Equal1()));
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+        assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .containsExactlyInAnyOrder(filters.toArray(new ResolvedExpression[0]));
 
         // col1 = 1 && (p2 like 'a%' && p1 = 1) => [p2 like 'a%' && p1 = 1]
         filters = ImmutableList.of(col1Equal1(), and(p2Like("a%"), p1Equal1()));
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+        assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(ImmutableList.of(filters.get(0)));
 
         // col1 = 1 && (p2 like '%a' && p1 = 1) => None
         filters = ImmutableList.of(col1Equal1(), and(p2Like("%a"), p1Equal1()));
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+        assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .containsExactlyInAnyOrder(filters.toArray(new ResolvedExpression[0]));
 
         // p2 like 'a%' && (col1 = 1 or p1 = 1) => [col1 = 1 or p1 = 1]
         filters = ImmutableList.of(p2Like("a%"), or(col1Equal1(), p1Equal1()));
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+        assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(ImmutableList.of(filters.get(1)));
 
         // p2 like 'a%' && (col1 = 1 && p1 = 1) => [col1 = 1 && p1 = 1]
         filters = ImmutableList.of(p2Like("a%"), and(col1Equal1(), p1Equal1()));
-        Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
+        assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(ImmutableList.of(filters.get(1)));
     }
 

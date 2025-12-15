@@ -25,7 +25,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -492,11 +491,11 @@ public class SnapshotManagerTest {
             localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
 
-        Assertions.assertThat(changelogManager.earliestLongLivedChangelogId()).isEqualTo(1);
-        Assertions.assertThat(changelogManager.latestLongLivedChangelogId()).isEqualTo(5);
-        Assertions.assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(6);
-        Assertions.assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
-        Assertions.assertThat(changelogManager.changelog(1)).isNotNull();
+        assertThat(changelogManager.earliestLongLivedChangelogId()).isEqualTo(1);
+        assertThat(changelogManager.latestLongLivedChangelogId()).isEqualTo(5);
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(6);
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
+        assertThat(changelogManager.changelog(1)).isNotNull();
     }
 
     @Test

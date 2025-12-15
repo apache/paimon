@@ -55,7 +55,6 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -430,7 +429,7 @@ public class LocalOrphanFilesCleanTest {
                 id = scan.checkpoint();
             }
         }
-        Assertions.assertThat(data.values().stream().allMatch(List::isEmpty)).isTrue();
+        assertThat(data.values().stream().allMatch(List::isEmpty)).isTrue();
     }
 
     private void validateSnapshot(Snapshot snapshot, List<TestPojo> data) throws Exception {

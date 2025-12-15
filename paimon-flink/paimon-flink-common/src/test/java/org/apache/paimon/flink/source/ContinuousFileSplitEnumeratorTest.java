@@ -33,7 +33,6 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
 import org.apache.flink.core.testutils.ManuallyTriggeredScheduledExecutorService;
 import org.apache.flink.runtime.source.coordinator.ExecutorNotifier;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nullable;
@@ -804,14 +803,14 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         results.put(3L, new DataFilePlan(splits));
         context.triggerAllActions();
 
-        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(16 * 2);
-        Assertions.assertThat(enumerator.splitAssigner.numberOfRemainingSplits()).isEqualTo(16 * 2);
+        assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(16 * 2);
+        assertThat(enumerator.splitAssigner.numberOfRemainingSplits()).isEqualTo(16 * 2);
 
         enumerator.handleSplitRequest(0, "test");
         enumerator.handleSplitRequest(1, "test");
 
-        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(15 * 2);
-        Assertions.assertThat(enumerator.splitAssigner.numberOfRemainingSplits()).isEqualTo(15 * 2);
+        assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(15 * 2);
+        assertThat(enumerator.splitAssigner.numberOfRemainingSplits()).isEqualTo(15 * 2);
     }
 
     @Test
@@ -840,7 +839,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         results.put(1L, new DataFilePlan(splits));
         context.triggerAllActions();
 
-        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(1);
+        assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(1);
 
         // splits 2
         splits = new ArrayList<>();
@@ -849,20 +848,20 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         context.triggerAllActions();
 
         // The snapshot 2 is pending to scan.
-        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(1);
+        assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(1);
 
         // consumed splits 1
         enumerator.handleSplitRequest(0, "test");
-        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(0);
+        assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(0);
         context.triggerAllActions();
 
         // no new snapshot is scanned, because checkpoint is not completed.
-        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(0);
+        assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(0);
 
         enumerator.notifyCheckpointComplete(1);
         context.triggerAllActions();
-        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(1);
-        Assertions.assertThat(enumerator.nextSnapshotId).isEqualTo(3);
+        assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(1);
+        assertThat(enumerator.nextSnapshotId).isEqualTo(3);
     }
 
     private void triggerCheckpointAndComplete(

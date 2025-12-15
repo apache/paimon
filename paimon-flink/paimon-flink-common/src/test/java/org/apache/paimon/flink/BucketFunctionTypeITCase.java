@@ -21,11 +21,12 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions.BucketFunctionType;
 
 import org.apache.flink.types.Row;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Hash type ITCase. */
 public class BucketFunctionTypeITCase extends CatalogITCaseBase {
@@ -45,8 +46,8 @@ public class BucketFunctionTypeITCase extends CatalogITCaseBase {
 
         for (int i = 0; i < 10; i++) {
             List<Row> rows = sql("SELECT * FROM T where a = %s", i);
-            Assertions.assertThat(rows.size()).isEqualTo(1);
-            Assertions.assertThat(rows.get(0)).isEqualTo(Row.of(i, String.valueOf(i), i));
+            assertThat(rows.size()).isEqualTo(1);
+            assertThat(rows.get(0)).isEqualTo(Row.of(i, String.valueOf(i), i));
         }
     }
 }

@@ -18,13 +18,14 @@
 
 package org.apache.paimon.fs;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.Random;
 
 import static org.apache.paimon.utils.RandomUtil.randomBytes;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Test for {@link ByteArraySeekableStream}. */
 public class ByteArraySeekableStreamTest {
@@ -37,7 +38,7 @@ public class ByteArraySeekableStreamTest {
         byte[] b = randomBytes(bl);
         ByteArraySeekableStream byteArraySeekableStream = new ByteArraySeekableStream(b);
 
-        Assertions.assertThat(byteArraySeekableStream.available()).isEqualTo(b.length);
+        assertThat(byteArraySeekableStream.available()).isEqualTo(b.length);
 
         for (int i = 0; i < RANDOM.nextInt(1000); i++) {
             int position = RANDOM.nextInt(bl - 1);
@@ -48,7 +49,7 @@ public class ByteArraySeekableStreamTest {
             byte[] actual = new byte[length];
             byteArraySeekableStream.seek(position);
             byteArraySeekableStream.read(actual);
-            Assertions.assertThat(actual).containsExactly(expected);
+            assertThat(actual).containsExactly(expected);
         }
 
         for (int i = 0; i < RANDOM.nextInt(1000); i++) {
@@ -59,7 +60,7 @@ public class ByteArraySeekableStreamTest {
                 if (testPosition >= b.length) {
                     break;
                 }
-                Assertions.assertThat(b[testPosition])
+                assertThat(b[testPosition])
                         .isEqualTo((byte) byteArraySeekableStream.read());
             }
         }
@@ -70,7 +71,7 @@ public class ByteArraySeekableStreamTest {
         int bl = 10;
         byte[] b = randomBytes(bl);
         ByteArraySeekableStream byteArraySeekableStream = new ByteArraySeekableStream(b);
-        Assertions.assertThatCode(() -> byteArraySeekableStream.seek(10))
+        assertThatCode(() -> byteArraySeekableStream.seek(10))
                 .hasMessage("Can't seek position: 10, length is 10");
     }
 }

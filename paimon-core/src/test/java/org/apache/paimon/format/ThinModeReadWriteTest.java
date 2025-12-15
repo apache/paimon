@@ -30,10 +30,11 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** This class test the compatibility and effectiveness of storage thin mode. */
 public class ThinModeReadWriteTest extends TableTestBase {
@@ -87,7 +88,7 @@ public class ThinModeReadWriteTest extends TableTestBase {
         long size2 = tableSize(table);
         dropTableDefault();
 
-        Assertions.assertThat(size2).isGreaterThan(size1);
+        assertThat(size2).isGreaterThan(size1);
     }
 
     @Test
@@ -113,7 +114,7 @@ public class ThinModeReadWriteTest extends TableTestBase {
 
         List<InternalRow> readed = read(table);
 
-        Assertions.assertThat(readed).containsExactlyInAnyOrder(datas);
+        assertThat(readed).containsExactlyInAnyOrder(datas);
         dropTableDefault();
     }
 

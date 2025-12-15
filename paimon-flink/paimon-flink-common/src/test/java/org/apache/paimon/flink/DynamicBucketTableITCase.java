@@ -29,7 +29,6 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.types.Row;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -126,7 +125,7 @@ public class DynamicBucketTableITCase extends CatalogITCaseBase {
 
         Long records =
                 entries.stream().map(entry -> entry.indexFile().rowCount()).reduce(Long::sum).get();
-        Assertions.assertThat(records).isEqualTo(4);
+        assertThat(records).isEqualTo(4);
 
         catalog.close();
     }

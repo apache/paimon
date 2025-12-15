@@ -21,10 +21,10 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.flink.CatalogITCaseBase;
 
 import org.apache.flink.types.Row;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT Case for {@link ReplaceTagProcedure}. */
 public class ReplaceTagProcedureITCase extends CatalogITCaseBase {
@@ -40,7 +40,7 @@ public class ReplaceTagProcedureITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES (2, 'b')");
         assertThat(paimonTable("T").snapshotManager().snapshotCount()).isEqualTo(2);
 
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 sql(
                                         "CALL sys.replace_tag(`table` => 'default.T', tag => 'test_tag')"))

@@ -69,7 +69,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -1026,9 +1025,9 @@ public abstract class SimpleTableTestBase {
             // verify that tag file exist
             assertThat(tagManager.tagExists("test-tag")).isTrue();
             // Create again failed if tag existed
-            Assertions.assertThatThrownBy(() -> table.createTag("test-tag", 1))
+            assertThatThrownBy(() -> table.createTag("test-tag", 1))
                     .hasMessageContaining("Tag 'test-tag' already exists.");
-            Assertions.assertThatThrownBy(() -> table.createTag("test-tag", 2))
+            assertThatThrownBy(() -> table.createTag("test-tag", 2))
                     .hasMessageContaining("Tag 'test-tag' already exists.");
         }
     }
@@ -1569,7 +1568,7 @@ public abstract class SimpleTableTestBase {
 
         for (Split split : splits) {
             DataSplit dataSplit = (DataSplit) split;
-            Assertions.assertThat(dataSplit.deletionFiles().isPresent()).isFalse();
+            assertThat(dataSplit.deletionFiles().isPresent()).isFalse();
         }
     }
 
@@ -1598,7 +1597,7 @@ public abstract class SimpleTableTestBase {
 
         for (Split split : splits) {
             DataSplit dataSplit = (DataSplit) split;
-            Assertions.assertThat(dataSplit.deletionFiles().isPresent()).isFalse();
+            assertThat(dataSplit.deletionFiles().isPresent()).isFalse();
         }
     }
 

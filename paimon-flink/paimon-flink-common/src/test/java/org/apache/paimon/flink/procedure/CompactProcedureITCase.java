@@ -32,7 +32,6 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -42,6 +41,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT Case for {@link CompactProcedure}. */
 public class CompactProcedureITCase extends CatalogITCaseBase {
@@ -409,7 +409,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
                         + ")");
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
 
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 streamSqlIter(
                                                 "CALL sys.compact(`table` => 'default.T', compact_strategy => 'full', "

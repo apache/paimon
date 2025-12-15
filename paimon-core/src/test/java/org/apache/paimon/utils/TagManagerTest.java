@@ -35,7 +35,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.RowType;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -51,6 +50,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.apache.paimon.operation.FileStoreTestUtils.commitData;
 import static org.apache.paimon.operation.FileStoreTestUtils.partitionedData;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for TagManager. */
 public class TagManagerTest {
@@ -96,10 +97,10 @@ public class TagManagerTest {
         assertThat(tagManager.tagExists("tag")).isTrue();
         Snapshot snapshot = tagManager.getOrThrow("tag").trimToSnapshot();
         String snapshotJson = snapshot.toJson();
-        Assertions.assertTrue(
+        assertTrue(
                 !snapshotJson.contains("tagCreateTime")
                         && !snapshotJson.contains("tagTimeRetained"));
-        Assertions.assertEquals(snapshot, Snapshot.fromJson(snapshotJson));
+        assertEquals(snapshot, Snapshot.fromJson(snapshotJson));
     }
 
     @Test
@@ -127,12 +128,12 @@ public class TagManagerTest {
                 false);
         assertThat(tagManager.tagExists("tag")).isTrue();
         List<Pair<Tag, String>> tags = tagManager.tagObjects();
-        Assertions.assertEquals(1, tags.size());
+        assertEquals(1, tags.size());
         Tag tag = tags.get(0).getKey();
         String tagJson = tag.toJson();
-        Assertions.assertTrue(
+        assertTrue(
                 tagJson.contains("tagCreateTime") && tagJson.contains("tagTimeRetained"));
-        Assertions.assertEquals(tag, Tag.fromJson(tagJson));
+        assertEquals(tag, Tag.fromJson(tagJson));
         assertThat(tags.get(0).getValue()).contains("tag");
     }
 

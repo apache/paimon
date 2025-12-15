@@ -21,10 +21,11 @@ package org.apache.paimon.fileindex.bloomfilter;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataTypes;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Random;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FastHash.FastHashVisitor}. */
 public class FastHashVisitorTest {
@@ -35,21 +36,21 @@ public class FastHashVisitorTest {
     public void testTinyIntType() {
         FastHash function = FastHash.getHashFunction(DataTypes.TINYINT());
         byte c = (byte) RANDOM.nextInt();
-        Assertions.assertThat(function.hash(c)).isEqualTo(FastHash.FastHashVisitor.getLongHash(c));
+        assertThat(function.hash(c)).isEqualTo(FastHash.FastHashVisitor.getLongHash(c));
     }
 
     @Test
     public void testSmallIntType() {
         FastHash function = FastHash.getHashFunction(DataTypes.SMALLINT());
         short c = (short) RANDOM.nextInt();
-        Assertions.assertThat(function.hash(c)).isEqualTo(FastHash.FastHashVisitor.getLongHash(c));
+        assertThat(function.hash(c)).isEqualTo(FastHash.FastHashVisitor.getLongHash(c));
     }
 
     @Test
     public void testIntType() {
         FastHash function = FastHash.getHashFunction(DataTypes.INT());
         int c = RANDOM.nextInt();
-        Assertions.assertThat(function.hash(c))
+        assertThat(function.hash(c))
                 .isEqualTo((FastHash.FastHashVisitor.getLongHash(c)));
     }
 
@@ -57,7 +58,7 @@ public class FastHashVisitorTest {
     public void testBigIntType() {
         FastHash function = FastHash.getHashFunction(DataTypes.BIGINT());
         long c = RANDOM.nextLong();
-        Assertions.assertThat(function.hash(c))
+        assertThat(function.hash(c))
                 .isEqualTo((FastHash.FastHashVisitor.getLongHash(c)));
     }
 
@@ -65,7 +66,7 @@ public class FastHashVisitorTest {
     public void testFloatType() {
         FastHash function = FastHash.getHashFunction(DataTypes.FLOAT());
         float c = RANDOM.nextFloat();
-        Assertions.assertThat(function.hash(c))
+        assertThat(function.hash(c))
                 .isEqualTo((FastHash.FastHashVisitor.getLongHash(Float.floatToIntBits(c))));
     }
 
@@ -73,7 +74,7 @@ public class FastHashVisitorTest {
     public void testDoubleType() {
         FastHash function = FastHash.getHashFunction(DataTypes.DOUBLE());
         double c = RANDOM.nextDouble();
-        Assertions.assertThat(function.hash(c))
+        assertThat(function.hash(c))
                 .isEqualTo((FastHash.FastHashVisitor.getLongHash(Double.doubleToLongBits(c))));
     }
 
@@ -81,7 +82,7 @@ public class FastHashVisitorTest {
     public void testDateType() {
         FastHash function = FastHash.getHashFunction(DataTypes.DATE());
         int c = RANDOM.nextInt();
-        Assertions.assertThat(function.hash(c))
+        assertThat(function.hash(c))
                 .isEqualTo((FastHash.FastHashVisitor.getLongHash(c)));
     }
 
@@ -89,7 +90,7 @@ public class FastHashVisitorTest {
     public void testTimestampType() {
         FastHash function = FastHash.getHashFunction(DataTypes.TIMESTAMP_MILLIS());
         Timestamp c = Timestamp.fromEpochMillis(System.currentTimeMillis());
-        Assertions.assertThat(function.hash(c))
+        assertThat(function.hash(c))
                 .isEqualTo((FastHash.FastHashVisitor.getLongHash(c.getMillisecond())));
     }
 
@@ -97,7 +98,7 @@ public class FastHashVisitorTest {
     public void testLocalZonedTimestampType() {
         FastHash function = FastHash.getHashFunction(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3));
         Timestamp c = Timestamp.fromEpochMillis(System.currentTimeMillis());
-        Assertions.assertThat(function.hash(c))
+        assertThat(function.hash(c))
                 .isEqualTo((FastHash.FastHashVisitor.getLongHash(c.getMillisecond())));
     }
 }

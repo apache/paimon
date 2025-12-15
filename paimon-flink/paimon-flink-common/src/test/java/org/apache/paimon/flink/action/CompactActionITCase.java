@@ -36,7 +36,6 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -52,6 +51,7 @@ import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link CompactAction}. */
 public class CompactActionITCase extends CompactActionITCaseBase {
@@ -590,7 +590,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 rowData(1, 100, 16, BinaryString.fromString("20221208")),
                 rowData(1, 100, 15, BinaryString.fromString("20221209")));
 
-        Assertions.assertThatThrownBy(() -> runAction(false))
+        assertThatThrownBy(() -> runAction(false))
                 .hasMessage("Only partition key can be specialized in compaction action.");
     }
 
@@ -607,7 +607,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 tableOptions);
 
         // partition_idle_time can not be used with order-strategy
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 createAction(
                                         CompactAction.class,

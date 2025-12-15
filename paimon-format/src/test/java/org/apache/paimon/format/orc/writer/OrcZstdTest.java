@@ -40,7 +40,6 @@ import org.apache.orc.CompressionKind;
 import org.apache.orc.OrcFile;
 import org.apache.orc.Reader;
 import org.apache.orc.impl.ZstdCodec;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -50,6 +49,7 @@ import java.util.Random;
 import java.util.UUID;
 
 import static org.apache.paimon.format.orc.OrcFileFormatFactory.IDENTIFIER;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -65,14 +65,14 @@ class OrcZstdTest {
         OrcFileFormat orc =
                 new OrcFileFormatFactory()
                         .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
-        Assertions.assertThat(orc).isInstanceOf(OrcFileFormat.class);
+        assertThat(orc).isInstanceOf(OrcFileFormat.class);
 
-        Assertions.assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", ""))
+        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", ""))
                 .isEqualTo("zstd");
-        Assertions.assertThat(
+        assertThat(
                         orc.orcProperties().getProperty(IDENTIFIER + ".compression.zstd.level", ""))
                 .isEqualTo("1");
-        Assertions.assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".stripe.size", ""))
+        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".stripe.size", ""))
                 .isEqualTo("31457280");
 
         RowType rowType =
@@ -83,13 +83,13 @@ class OrcZstdTest {
                         .field("d", DataTypes.STRING())
                         .build();
         FormatWriterFactory writerFactory = orc.createWriterFactory(rowType);
-        Assertions.assertThat(writerFactory).isInstanceOf(OrcWriterFactory.class);
+        assertThat(writerFactory).isInstanceOf(OrcWriterFactory.class);
 
         Path path = new Path(tempDir.toUri().toString(), "1.orc");
         PositionOutputStream out = LocalFileIO.create().newOutputStream(path, true);
         FormatWriter formatWriter = writerFactory.create(out, "zstd");
 
-        Assertions.assertThat(formatWriter).isInstanceOf(OrcBulkWriter.class);
+        assertThat(formatWriter).isInstanceOf(OrcBulkWriter.class);
 
         Options optionsWithLowLevel = new Options();
         optionsWithLowLevel.set("orc.compress", "zstd");
@@ -113,9 +113,9 @@ class OrcZstdTest {
         OrcFile.ReaderOptions readerOptions = OrcFile.readerOptions(new Configuration());
         Reader reader =
                 OrcFile.createReader(new org.apache.hadoop.fs.Path(path.toString()), readerOptions);
-        Assertions.assertThat(reader.getNumberOfRows()).isEqualTo(1000);
-        Assertions.assertThat(reader.getCompressionKind()).isEqualTo(CompressionKind.ZSTD);
-        Assertions.assertThat(com.github.luben.zstd.util.Native.isLoaded()).isEqualTo(true);
+        assertThat(reader.getNumberOfRows()).isEqualTo(1000);
+        assertThat(reader.getCompressionKind()).isEqualTo(CompressionKind.ZSTD);
+        assertThat(com.github.luben.zstd.util.Native.isLoaded()).isEqualTo(true);
     }
 
     @Test

@@ -23,7 +23,6 @@ import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -36,6 +35,7 @@ import java.util.Random;
 
 import static org.apache.paimon.utils.RandomUtil.randomBytes;
 import static org.apache.paimon.utils.RandomUtil.randomString;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FileIndexFormat}. */
 public class FileIndexFormatFormatTest {
@@ -72,7 +72,7 @@ public class FileIndexFormatFormatTest {
                 byte[] b =
                         reader.getBytesWithNameAndType(column, type)
                                 .orElseThrow(RuntimeException::new);
-                Assertions.assertThat(b).containsExactly(indexes.get(column).get(type));
+                assertThat(b).containsExactly(indexes.get(column).get(type));
             }
         }
     }
@@ -101,8 +101,8 @@ public class FileIndexFormatFormatTest {
                                 .build());
 
         Collection<FileIndexReader> fileIndexFormatList = reader.readColumnIndex("a");
-        Assertions.assertThat(fileIndexFormatList.size()).isEqualTo(1);
-        Assertions.assertThat(new ArrayList<>(fileIndexFormatList).get(0))
+        assertThat(fileIndexFormatList.size()).isEqualTo(1);
+        assertThat(new ArrayList<>(fileIndexFormatList).get(0))
                 .isEqualTo(EmptyFileIndexReader.INSTANCE);
     }
 }

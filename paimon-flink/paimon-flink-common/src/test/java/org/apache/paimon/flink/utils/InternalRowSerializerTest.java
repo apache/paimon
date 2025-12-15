@@ -27,10 +27,11 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputSerializer;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Random;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link InternalRowTypeSerializer}. */
 public class InternalRowSerializerTest {
@@ -55,9 +56,9 @@ public class InternalRowSerializerTest {
                 internalRowTypeSerializer.deserialize(
                         new DataInputDeserializer(dataOutputSerializer.wrapAsByteBuffer()));
 
-        Assertions.assertThat(row.getString(0)).isEqualTo(row1.getString(0));
-        Assertions.assertThat(row.getInt(1)).isEqualTo(row1.getInt(1));
-        Assertions.assertThat(row.getLong(2)).isEqualTo(row1.getLong(2));
+        assertThat(row.getString(0)).isEqualTo(row1.getString(0));
+        assertThat(row.getInt(1)).isEqualTo(row1.getInt(1));
+        assertThat(row.getLong(2)).isEqualTo(row1.getLong(2));
     }
 
     @Test
@@ -65,7 +66,7 @@ public class InternalRowSerializerTest {
         InternalRowTypeSerializer internalRowTypeSerializer =
                 new InternalRowTypeSerializer(rowType.getFieldTypes().toArray(new DataType[0]));
 
-        Assertions.assertThat(internalRowTypeSerializer)
+        assertThat(internalRowTypeSerializer)
                 .isEqualTo(internalRowTypeSerializer.duplicate());
     }
 
@@ -77,9 +78,9 @@ public class InternalRowSerializerTest {
         InternalRow row = GenericRow.of(randomString(), RANDOM.nextInt(), RANDOM.nextLong());
         InternalRow row1 = internalRowTypeSerializer.copy(row);
 
-        Assertions.assertThat(row.getString(0)).isEqualTo(row1.getString(0));
-        Assertions.assertThat(row.getInt(1)).isEqualTo(row1.getInt(1));
-        Assertions.assertThat(row.getLong(2)).isEqualTo(row1.getLong(2));
+        assertThat(row.getString(0)).isEqualTo(row1.getString(0));
+        assertThat(row.getInt(1)).isEqualTo(row1.getInt(1));
+        assertThat(row.getLong(2)).isEqualTo(row1.getLong(2));
     }
 
     private BinaryString randomString() {

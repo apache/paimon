@@ -27,7 +27,6 @@ import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -284,7 +283,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
 
     @Test
     public void testInvalidSequenceGroup() {
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 sql(
                                         "CREATE TABLE SG ("
@@ -295,7 +294,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                                                 + "'fields.g_2.sequence-group'='c,d');"))
                 .hasRootCauseMessage("Field g_0 can not be found in table schema.");
 
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 sql(
                                         "CREATE TABLE SG ("
@@ -306,7 +305,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                                                 + "'fields.g_2.sequence-group'='c,d');"))
                 .hasRootCauseMessage("Field a1 can not be found in table schema.");
 
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 sql(
                                         "CREATE TABLE SG ("
@@ -318,7 +317,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                 .hasRootCauseMessage(
                         "Field a is defined repeatedly by multiple groups: [[g_1], [g_2]].");
 
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 sql(
                                         "CREATE TABLE SG ("

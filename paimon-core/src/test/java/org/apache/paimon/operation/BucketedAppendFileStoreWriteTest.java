@@ -39,7 +39,6 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.types.DataTypes;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -50,6 +49,7 @@ import java.util.Map;
 import java.util.Random;
 
 import static org.apache.paimon.CoreOptions.WRITE_MAX_WRITERS_TO_SPILL;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link BucketedAppendFileStoreWrite}. */
 public class BucketedAppendFileStoreWriteTest {
@@ -77,7 +77,7 @@ public class BucketedAppendFileStoreWriteTest {
                 write.writers().values()) {
             for (AbstractFileStoreWrite.WriterContainer<InternalRow> writerContainer :
                     bucketWriters.values()) {
-                Assertions.assertThat(((AppendOnlyWriter) writerContainer.writer).getWriteBuffer())
+                assertThat(((AppendOnlyWriter) writerContainer.writer).getWriteBuffer())
                         .isEqualTo(null);
             }
         }
@@ -87,7 +87,7 @@ public class BucketedAppendFileStoreWriteTest {
                 write.writers().values()) {
             for (AbstractFileStoreWrite.WriterContainer<InternalRow> writerContainer :
                     bucketWriters.values()) {
-                Assertions.assertThat(((AppendOnlyWriter) writerContainer.writer).getWriteBuffer())
+                assertThat(((AppendOnlyWriter) writerContainer.writer).getWriteBuffer())
                         .isInstanceOf(ExternalBuffer.class);
             }
         }
@@ -99,7 +99,7 @@ public class BucketedAppendFileStoreWriteTest {
         write.write(partition(3), 3, GenericRow.of(3, 3, 0));
         List<CommitMessage> commit = write.prepareCommit(true, Long.MAX_VALUE);
 
-        Assertions.assertThat(commit.size()).isEqualTo(7);
+        assertThat(commit.size()).isEqualTo(7);
 
         long records =
                 commit.stream()
@@ -110,7 +110,7 @@ public class BucketedAppendFileStoreWriteTest {
                                                 .mapToLong(DataFileMeta::rowCount)
                                                 .sum())
                         .sum();
-        Assertions.assertThat(records).isEqualTo(11);
+        assertThat(records).isEqualTo(11);
     }
 
     @Test
@@ -134,14 +134,14 @@ public class BucketedAppendFileStoreWriteTest {
 
         List<CommitMessage> commit = write.prepareCommit(true, Long.MAX_VALUE);
 
-        Assertions.assertThat(commit.size()).isEqualTo(7);
+        assertThat(commit.size()).isEqualTo(7);
 
         long files =
                 commit.stream()
                         .map(s -> (CommitMessageImpl) s)
                         .mapToLong(s -> s.newFilesIncrement().newFiles().size())
                         .sum();
-        Assertions.assertThat(files).isEqualTo(7);
+        assertThat(files).isEqualTo(7);
 
         long records =
                 commit.stream()
@@ -152,7 +152,7 @@ public class BucketedAppendFileStoreWriteTest {
                                                 .mapToLong(DataFileMeta::rowCount)
                                                 .sum())
                         .sum();
-        Assertions.assertThat(records).isEqualTo(1007);
+        assertThat(records).isEqualTo(1007);
     }
 
     protected FileStoreTable createFileStoreTable() throws Exception {
@@ -201,14 +201,14 @@ public class BucketedAppendFileStoreWriteTest {
         FileStoreScan scan = table.store().newScan();
         List<SimpleFileEntry> l0 =
                 scan.withPartitionFilter(Arrays.asList(binaryRow)).readSimpleEntries();
-        Assertions.assertThat(l0.size()).isEqualTo(1);
+        assertThat(l0.size()).isEqualTo(1);
 
         BinaryRow binaryRow1 = partition(1);
         l0 = scan.withPartitionFilter(Arrays.asList(binaryRow, binaryRow1)).readSimpleEntries();
-        Assertions.assertThat(l0.size()).isEqualTo(100);
+        assertThat(l0.size()).isEqualTo(100);
 
         l0 = scan.withPartitionFilter(Arrays.asList(binaryRow1)).readSimpleEntries();
-        Assertions.assertThat(l0.size()).isEqualTo(99);
+        assertThat(l0.size()).isEqualTo(99);
     }
 
     @Test
@@ -227,14 +227,14 @@ public class BucketedAppendFileStoreWriteTest {
         FileStoreScan scan = table.store().newScan();
         List<SimpleFileEntry> l0 =
                 scan.withPartitionFilter(Arrays.asList(binaryRow)).readSimpleEntries();
-        Assertions.assertThat(l0.size()).isEqualTo(100);
+        assertThat(l0.size()).isEqualTo(100);
 
         BinaryRow binaryRow1 = partition(1);
         l0 = scan.withPartitionFilter(Arrays.asList(binaryRow, binaryRow1)).readSimpleEntries();
-        Assertions.assertThat(l0.size()).isEqualTo(100);
+        assertThat(l0.size()).isEqualTo(100);
 
         l0 = scan.withPartitionFilter(Arrays.asList(binaryRow1)).readSimpleEntries();
-        Assertions.assertThat(l0.size()).isEqualTo(0);
+        assertThat(l0.size()).isEqualTo(0);
     }
 
     @Test
@@ -253,14 +253,14 @@ public class BucketedAppendFileStoreWriteTest {
         FileStoreScan scan = table.store().newScan();
         List<SimpleFileEntry> l0 =
                 scan.withPartitionFilter(Arrays.asList(binaryRow)).readSimpleEntries();
-        Assertions.assertThat(l0.size()).isEqualTo(0);
+        assertThat(l0.size()).isEqualTo(0);
 
         BinaryRow binaryRow1 = partition(1);
         l0 = scan.withPartitionFilter(Arrays.asList(binaryRow, binaryRow1)).readSimpleEntries();
-        Assertions.assertThat(l0.size()).isEqualTo(100);
+        assertThat(l0.size()).isEqualTo(100);
 
         l0 = scan.withPartitionFilter(Arrays.asList(binaryRow1)).readSimpleEntries();
-        Assertions.assertThat(l0.size()).isEqualTo(100);
+        assertThat(l0.size()).isEqualTo(100);
     }
 
     private BinaryRow nullPartition() {

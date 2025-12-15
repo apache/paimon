@@ -24,7 +24,6 @@ import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
@@ -537,7 +536,7 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES (2, 'b')");
         assertThat(paimonTable("T").snapshotManager().snapshotCount()).isEqualTo(2L);
 
-        Assertions.assertThatThrownBy(() -> sql("CALL sys.replace_tag('default.T', 'test_tag')"))
+        assertThatThrownBy(() -> sql("CALL sys.replace_tag('default.T', 'test_tag')"))
                 .hasMessageContaining("Tag 'test_tag' doesn't exist.");
 
         sql("CALL sys.create_tag('default.T', 'test_tag')");

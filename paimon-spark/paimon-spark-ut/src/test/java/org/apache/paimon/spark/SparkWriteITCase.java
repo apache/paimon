@@ -31,7 +31,6 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -48,6 +47,8 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** ITCase for spark writer. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -519,9 +520,9 @@ public class SparkWriteITCase {
         List<Row> rows = spark.sql("select file_path from `T$files`").collectAsList();
         List<String> fileNames =
                 rows.stream().map(x -> x.getString(0)).collect(Collectors.toList());
-        Assertions.assertEquals(3, fileNames.size());
+        assertEquals(3, fileNames.size());
         for (String fileName : fileNames) {
-            Assertions.assertTrue(fileName.contains("data-"));
+            assertTrue(fileName.contains("data-"));
         }
     }
 
@@ -540,9 +541,9 @@ public class SparkWriteITCase {
         List<Row> rows = spark.sql("select file_path from `T$files`").collectAsList();
         List<String> fileNames =
                 rows.stream().map(x -> x.getString(0)).collect(Collectors.toList());
-        Assertions.assertEquals(3, fileNames.size());
+        assertEquals(3, fileNames.size());
         for (String fileName : fileNames) {
-            Assertions.assertTrue(fileName.contains("test-"));
+            assertTrue(fileName.contains("test-"));
         }
     }
 
@@ -561,9 +562,9 @@ public class SparkWriteITCase {
         List<Row> rows = spark.sql("select file_path from `T$files`").collectAsList();
         List<String> fileNames =
                 rows.stream().map(x -> x.getString(0)).collect(Collectors.toList());
-        Assertions.assertEquals(3, fileNames.size());
+        assertEquals(3, fileNames.size());
         for (String fileName : fileNames) {
-            Assertions.assertTrue(fileName.contains("test-"));
+            assertTrue(fileName.contains("test-"));
         }
 
         // reset config, it will affect other tests
@@ -582,13 +583,13 @@ public class SparkWriteITCase {
         // default prefix "changelog-"
         spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
         FileStatus[] files1 = fileIO.listStatus(new Path(tabLocation, "bucket-0"));
-        Assertions.assertEquals(1, dataFileCount(files1, "changelog-"));
+        assertEquals(1, dataFileCount(files1, "changelog-"));
 
         // custom prefix "test-changelog"
         spark.conf().set("spark.paimon.changelog-file.prefix", "test-changelog-");
         spark.sql("INSERT INTO T VALUES (2, 2, 'bb')");
         FileStatus[] files2 = fileIO.listStatus(new Path(tabLocation, "bucket-0"));
-        Assertions.assertEquals(1, dataFileCount(files2, "test-changelog-"));
+        assertEquals(1, dataFileCount(files2, "test-changelog-"));
 
         // reset config, it will affect other tests
         spark.conf().unset("spark.paimon.changelog-file.prefix");
@@ -605,7 +606,7 @@ public class SparkWriteITCase {
         FileIO fileIO = table.fileIO();
         Path tabLocation = table.location();
 
-        Assertions.assertTrue(fileIO.exists(new Path(tabLocation, "c=aa/_SUCCESS")));
+        assertTrue(fileIO.exists(new Path(tabLocation, "c=aa/_SUCCESS")));
     }
 
     @Test
@@ -635,12 +636,12 @@ public class SparkWriteITCase {
                 spark.sql("select file_path from `T$files`").collectAsList().stream()
                         .map(x -> x.getString(0))
                         .collect(Collectors.toList());
-        Assertions.assertEquals(4, files.size());
+        assertEquals(4, files.size());
 
         String defaultExtension = "." + "parquet";
         String newExtension = "." + "zst" + "." + "parquet";
         // two data files end with ".parquet", two data file end with ".zst.parquet"
-        Assertions.assertEquals(
+        assertEquals(
                 2,
                 files.stream()
                         .filter(
@@ -648,7 +649,7 @@ public class SparkWriteITCase {
                                         name.endsWith(defaultExtension)
                                                 && !name.endsWith(newExtension))
                         .count());
-        Assertions.assertEquals(
+        assertEquals(
                 2, files.stream().filter(name -> name.endsWith(newExtension)).count());
 
         // reset config
@@ -684,7 +685,7 @@ public class SparkWriteITCase {
         String defaultExtension = "." + "parquet";
         String newExtension = "." + "zst" + "." + "parquet";
         // one changelog file end with ".parquet", one changelog file end with ".zst.parquet"
-        Assertions.assertEquals(
+        assertEquals(
                 1,
                 files.stream()
                         .filter(
@@ -692,7 +693,7 @@ public class SparkWriteITCase {
                                         name.endsWith(defaultExtension)
                                                 && !name.endsWith(newExtension))
                         .count());
-        Assertions.assertEquals(
+        assertEquals(
                 1, files.stream().filter(name -> name.endsWith(newExtension)).count());
 
         // reset config
@@ -712,24 +713,24 @@ public class SparkWriteITCase {
         SnapshotManager snapshotManager = table.snapshotManager();
 
         spark.sql("insert into T values (1, 'aa')");
-        Assertions.assertEquals(1, snapshotManager.latestSnapshotId());
+        assertEquals(1, snapshotManager.latestSnapshotId());
 
         spark.sql("delete from T where id = 1");
-        Assertions.assertEquals(2, snapshotManager.latestSnapshotId());
-        Assertions.assertEquals(
+        assertEquals(2, snapshotManager.latestSnapshotId());
+        assertEquals(
                 -1, Objects.requireNonNull(snapshotManager.latestSnapshot()).deltaRecordCount());
 
         // in batch write, ignore.empty.commit default is true
         spark.sql("delete from T where id = 1");
-        Assertions.assertEquals(2, snapshotManager.latestSnapshotId());
-        Assertions.assertEquals(
+        assertEquals(2, snapshotManager.latestSnapshotId());
+        assertEquals(
                 -1, Objects.requireNonNull(snapshotManager.latestSnapshot()).deltaRecordCount());
 
         // set false to allow commit empty snapshot
         spark.conf().set("spark.paimon.snapshot.ignore-empty-commit", "false");
         spark.sql("delete from T where id = 1");
-        Assertions.assertEquals(3, snapshotManager.latestSnapshotId());
-        Assertions.assertEquals(
+        assertEquals(3, snapshotManager.latestSnapshotId());
+        assertEquals(
                 0, Objects.requireNonNull(snapshotManager.latestSnapshot()).deltaRecordCount());
 
         spark.conf().unset("spark.paimon.snapshot.ignore-empty-commit");

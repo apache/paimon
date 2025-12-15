@@ -18,12 +18,13 @@
 
 package org.apache.paimon.utils;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link BloomFilter64}. */
 public class BloomFilter64Test {
@@ -42,7 +43,7 @@ public class BloomFilter64Test {
         testData.forEach(bloomFilter64::addHash);
 
         for (Long value : testData) {
-            Assertions.assertThat(bloomFilter64.testHash(value)).isTrue();
+            assertThat(bloomFilter64.testHash(value)).isTrue();
         }
 
         int errorCount = 0;
@@ -55,6 +56,6 @@ public class BloomFilter64Test {
         }
 
         // ffp should be less than 0.03
-        Assertions.assertThat((double) errorCount / num).isLessThan(0.03);
+        assertThat((double) errorCount / num).isLessThan(0.03);
     }
 }

@@ -30,7 +30,6 @@ import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -576,9 +575,9 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
         // insert data
         batchSql("INSERT OVERWRITE T PARTITION(p = '2024') VALUES (1)");
-        Assertions.assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(1, "2024"));
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(1, "2024"));
         batchSql("INSERT OVERWRITE T PARTITION(p = '2024') VALUES (2)");
-        Assertions.assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(2, "2024"));
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(2, "2024"));
         iterator.close();
     }
 

@@ -21,9 +21,8 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FileStoreTable
-
 import org.apache.spark.sql.{AnalysisException, Row, SparkSession}
-import org.junit.jupiter.api.Assertions
+import org.junit.jupiter.api.Assertions.{assertEquals, assertTrue}
 
 abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
 
@@ -39,8 +38,8 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
               val comment = "this is a test comment"
               spark.sql(
                 s"CREATE DATABASE paimon_db LOCATION '${dBLocation.getCanonicalPath}' COMMENT '$comment'")
-              Assertions.assertEquals(getDatabaseLocation("paimon_db"), dBLocation.getCanonicalPath)
-              Assertions.assertEquals(getDatabaseComment("paimon_db"), comment)
+              assertEquals(getDatabaseLocation("paimon_db"), dBLocation.getCanonicalPath)
+              assertEquals(getDatabaseComment("paimon_db"), comment)
 
               withTable("paimon_db.paimon_tbl") {
                 spark.sql(s"""
@@ -48,14 +47,14 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                              |USING PAIMON
                              |TBLPROPERTIES ('primary-key' = 'id')
                              |""".stripMargin)
-                Assertions.assertEquals(
+                assertEquals(
                   getTableLocation("paimon_db.paimon_tbl"),
                   s"${dBLocation.getCanonicalPath}/paimon_tbl")
 
                 val fileStoreTable = getPaimonScan("SELECT * FROM paimon_db.paimon_tbl").table
                   .asInstanceOf[FileStoreTable]
-                Assertions.assertEquals("paimon_tbl", fileStoreTable.name())
-                Assertions.assertEquals("paimon_db.paimon_tbl", fileStoreTable.fullName())
+                assertEquals("paimon_tbl", fileStoreTable.name())
+                assertEquals("paimon_db.paimon_tbl", fileStoreTable.fullName())
               }
             }
         }
@@ -72,8 +71,8 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
               val comment = "this is a test comment"
               spark.sql(
                 s"CREATE DATABASE paimon_db LOCATION '${dBLocation.getCanonicalPath}' COMMENT '$comment'")
-              Assertions.assertEquals(getDatabaseLocation("paimon_db"), dBLocation.getCanonicalPath)
-              Assertions.assertEquals(getDatabaseComment("paimon_db"), comment)
+              assertEquals(getDatabaseLocation("paimon_db"), dBLocation.getCanonicalPath)
+              assertEquals(getDatabaseComment("paimon_db"), comment)
 
               withTable("paimon_db.paimon_tbl") {
                 spark.sql(s"""
@@ -82,7 +81,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                              |PARTITIONED BY (name, pt)
                              |TBLPROPERTIES('metastore.partitioned-table' = 'true')
                              |""".stripMargin)
-                Assertions.assertEquals(
+                assertEquals(
                   getTableLocation("paimon_db.paimon_tbl"),
                   s"${dBLocation.getCanonicalPath}/paimon_tbl")
                 spark.sql("insert into paimon_db.paimon_tbl select '1', 'n', 'cc'")
@@ -110,7 +109,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                              |PARTITIONED BY (name, pt)
                              |TBLPROPERTIES('metastore.partitioned-table' = 'false')
                              |""".stripMargin)
-                Assertions.assertEquals(
+                assertEquals(
                   getTableLocation("paimon_db.paimon_tbl2"),
                   s"${dBLocation.getCanonicalPath}/paimon_tbl2")
                 spark.sql("insert into paimon_db.paimon_tbl2 select '1', 'n', 'cc'")
@@ -192,8 +191,8 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
               val comment = "this is a test comment"
               spark.sql(
                 s"CREATE DATABASE paimon_db LOCATION '${dBLocation.getCanonicalPath}' COMMENT '$comment'")
-              Assertions.assertEquals(getDatabaseLocation("paimon_db"), dBLocation.getCanonicalPath)
-              Assertions.assertEquals(getDatabaseComment("paimon_db"), comment)
+              assertEquals(getDatabaseLocation("paimon_db"), dBLocation.getCanonicalPath)
+              assertEquals(getDatabaseComment("paimon_db"), comment)
 
               withTable("paimon_db.paimon_tbl") {
                 spark.sql(s"""
@@ -202,7 +201,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                              |PARTITIONED BY (name, pt)
                              |TBLPROPERTIES('metastore.partitioned-table' = 'true')
                              |""".stripMargin)
-                Assertions.assertEquals(
+                assertEquals(
                   getTableLocation("paimon_db.paimon_tbl"),
                   s"${dBLocation.getCanonicalPath}/paimon_tbl")
                 spark.sql("insert into paimon_db.paimon_tbl select '1', 'n', 'cc'")
@@ -218,7 +217,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                              |PARTITIONED BY (name, pt)
                              |TBLPROPERTIES('metastore.partitioned-table' = 'false')
                              |""".stripMargin)
-                Assertions.assertEquals(
+                assertEquals(
                   getTableLocation("paimon_db.paimon_tbl2"),
                   s"${dBLocation.getCanonicalPath}/paimon_tbl2")
                 spark.sql("insert into paimon_db.paimon_tbl2 select '1', 'n', 'cc'")
@@ -237,9 +236,9 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
         withDatabase("paimon_db") {
           spark.sql(s"CREATE DATABASE paimon_db WITH DBPROPERTIES ('k1' = 'v1', 'k2' = 'v2')")
           val props = getDatabaseProps("paimon_db")
-          Assertions.assertEquals(props("k1"), "v1")
-          Assertions.assertEquals(props("k2"), "v2")
-          Assertions.assertTrue(getDatabaseOwner("paimon_db").nonEmpty)
+          assertEquals(props("k1"), "v1")
+          assertEquals(props("k2"), "v2")
+          assertTrue(getDatabaseOwner("paimon_db").nonEmpty)
         }
     }
   }
@@ -252,12 +251,12 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
         withDatabase(databaseName) {
           spark.sql(s"CREATE DATABASE $databaseName WITH DBPROPERTIES ('k1' = 'v1', 'k2' = 'v2')")
           var props = getDatabaseProps(databaseName)
-          Assertions.assertEquals(props("k1"), "v1")
-          Assertions.assertEquals(props("k2"), "v2")
+          assertEquals(props("k1"), "v1")
+          assertEquals(props("k2"), "v2")
           spark.sql(s"ALTER DATABASE $databaseName SET DBPROPERTIES ('k1' = 'v11', 'k2' = 'v22')")
           props = getDatabaseProps(databaseName)
-          Assertions.assertEquals(props("k1"), "v11")
-          Assertions.assertEquals(props("k2"), "v22")
+          assertEquals(props("k1"), "v11")
+          assertEquals(props("k2"), "v22")
         }
     }
   }
@@ -276,7 +275,7 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                   s"ALTER DATABASE $databaseName SET LOCATION '${dBLocation.getCanonicalPath}'")
               } catch {
                 case e: AnalysisException =>
-                  Assertions.assertTrue(
+                  assertTrue(
                     e.getMessage.contains("does not support altering database location"))
               }
           }
@@ -705,8 +704,8 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                         |CREATE TABLE t1 USING paimon AS SELECT * FROM source
                         |""".stripMargin)
             val t1 = loadTable("paimon_db", "t1")
-            Assertions.assertTrue(t1.primaryKeys().isEmpty)
-            Assertions.assertTrue(t1.partitionKeys().isEmpty)
+            assertTrue(t1.primaryKeys().isEmpty)
+            assertTrue(t1.partitionKeys().isEmpty)
 
             spark.sql(
               """
@@ -717,15 +716,15 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
                 |AS SELECT * FROM source
                 |""".stripMargin)
             val t2 = loadTable("paimon_db", "t2")
-            Assertions.assertEquals(2, t2.primaryKeys().size())
-            Assertions.assertTrue(t2.primaryKeys().contains("a"))
-            Assertions.assertTrue(t2.primaryKeys().contains("pt"))
-            Assertions.assertEquals(1, t2.partitionKeys().size())
-            Assertions.assertEquals("pt", t2.partitionKeys().get(0))
+            assertEquals(2, t2.primaryKeys().size())
+            assertTrue(t2.primaryKeys().contains("a"))
+            assertTrue(t2.primaryKeys().contains("pt"))
+            assertEquals(1, t2.partitionKeys().size())
+            assertEquals("pt", t2.partitionKeys().get(0))
 
             // check all the core options
-            Assertions.assertEquals("5", t2.options().get("bucket"))
-            Assertions.assertEquals("128MB", t2.options().get("target-file-size"))
+            assertEquals("5", t2.options().get("bucket"))
+            assertEquals("128MB", t2.options().get("target-file-size"))
           }
         }
     }

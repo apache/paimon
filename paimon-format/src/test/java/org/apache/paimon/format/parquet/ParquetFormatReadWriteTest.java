@@ -33,12 +33,13 @@ import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** A parquet {@link FormatReadWriteTest}. */
 public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
@@ -83,7 +84,7 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
                 List<ColumnChunkMetaData> columnChunkMetaDataList = blockMetaData.getColumns();
                 for (ColumnChunkMetaData columnChunkMetaData : columnChunkMetaDataList) {
                     BloomFilter filter = reader.readBloomFilter(columnChunkMetaData);
-                    Assertions.assertThat(enabled == (filter != null)).isTrue();
+                    assertThat(enabled == (filter != null)).isTrue();
                 }
             }
         }

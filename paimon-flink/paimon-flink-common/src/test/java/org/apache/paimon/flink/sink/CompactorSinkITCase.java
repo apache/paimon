@@ -46,7 +46,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -172,7 +171,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
                 .withInput(source)
                 .build();
 
-        Assertions.assertThat(env.getTransformations().get(0).getParallelism())
+        assertThat(env.getTransformations().get(0).getParallelism())
                 .isEqualTo(sinkParalellism);
     }
 

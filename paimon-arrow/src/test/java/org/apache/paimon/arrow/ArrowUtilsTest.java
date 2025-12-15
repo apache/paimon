@@ -26,11 +26,12 @@ import org.apache.paimon.types.RowType;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Random;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ArrowUtils}. */
 public class ArrowUtilsTest {
@@ -79,7 +80,7 @@ public class ArrowUtilsTest {
                         .getFields();
 
         for (int i = 0; i < 16; i++) {
-            Assertions.assertThat(
+            assertThat(
                             Integer.parseInt(
                                     fields.get(i).getMetadata().get(ArrowUtils.PARQUET_FIELD_ID)))
                     .isEqualTo(i);
@@ -87,7 +88,7 @@ public class ArrowUtilsTest {
 
         fields = fields.get(15).getChildren().get(0).getChildren();
         for (int i = 16; i < 26; i++) {
-            Assertions.assertThat(
+            assertThat(
                             Integer.parseInt(
                                     fields.get(i - 16)
                                             .getMetadata()
@@ -106,6 +107,6 @@ public class ArrowUtilsTest {
                         .getChildren()
                         .get(1)
                         .getFieldType();
-        Assertions.assertThat(fieldType.isNullable()).isTrue();
+        assertThat(fieldType.isNullable()).isTrue();
     }
 }

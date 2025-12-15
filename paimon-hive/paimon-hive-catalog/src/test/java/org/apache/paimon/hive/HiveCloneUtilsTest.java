@@ -22,7 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.hive.clone.HiveCloneUtils;
 
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import org.assertj.core.api.Assertions;
+import static org.assertj.core.api.Assertions.assertThatList;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -52,7 +52,7 @@ public class HiveCloneUtilsTest {
                         Identifier.create("db2", "tbl1"),
                         Identifier.create("db2", "tbl2"),
                         Identifier.create("db2", "tbl3"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
                 HiveCloneUtils.listTables(
@@ -63,14 +63,14 @@ public class HiveCloneUtilsTest {
                         Identifier.create("db1", "tbl2"),
                         Identifier.create("db2", "tbl2"),
                         Identifier.create("db2", "tbl3"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
                 HiveCloneUtils.listTables(
                         mockHiveCatalog, Arrays.asList("db1.tbl3", "db2.tbl1"), null);
         expectedTables =
                 Arrays.asList(Identifier.create("db1", "tbl3"), Identifier.create("db2", "tbl1"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
                 HiveCloneUtils.listTables(
@@ -78,7 +78,7 @@ public class HiveCloneUtilsTest {
                         Arrays.asList("db1.tbl3", "db2.tbl1"),
                         Arrays.asList("db1.tbl3"));
         expectedTables = Arrays.asList(Identifier.create("db2", "tbl1"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
     }
 
     @Test
@@ -95,18 +95,18 @@ public class HiveCloneUtilsTest {
                         Identifier.create("db1", "tbl1"),
                         Identifier.create("db1", "tbl2"),
                         Identifier.create("db1", "tbl3"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
                 HiveCloneUtils.listTables(mockHiveCatalog, "db1", null, Arrays.asList("db1.tbl1"));
         expectedTables =
                 Arrays.asList(Identifier.create("db1", "tbl2"), Identifier.create("db1", "tbl3"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
                 HiveCloneUtils.listTables(mockHiveCatalog, "db1", Arrays.asList("db1.tbl1"), null);
         expectedTables = Arrays.asList(Identifier.create("db1", "tbl1"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
 
         sourceTables =
                 HiveCloneUtils.listTables(
@@ -115,6 +115,6 @@ public class HiveCloneUtilsTest {
                         Arrays.asList("db1.tbl1", "db1.tbl2"),
                         Arrays.asList("db1.tbl1"));
         expectedTables = Arrays.asList(Identifier.create("db1", "tbl2"));
-        Assertions.assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
+        assertThatList(sourceTables).containsExactlyInAnyOrderElementsOf(expectedTables);
     }
 }

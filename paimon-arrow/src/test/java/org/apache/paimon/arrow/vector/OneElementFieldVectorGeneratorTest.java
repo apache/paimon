@@ -30,10 +30,11 @@ import org.apache.paimon.types.RowType;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link OneElementFieldVectorGenerator}. */
 public class OneElementFieldVectorGeneratorTest {
@@ -54,7 +55,7 @@ public class OneElementFieldVectorGeneratorTest {
                         reader.readBatch(new VectorSchemaRoot(Arrays.asList(fieldVector)));
                 it.forEach(
                         i ->
-                                Assertions.assertThat(i.getString(0))
+                                assertThat(i.getString(0))
                                         .isEqualTo(genericRow.getString(0)));
             }
         }
@@ -71,7 +72,7 @@ public class OneElementFieldVectorGeneratorTest {
                         new ArrowBatchReader(new RowType(Arrays.asList(dataField)), true);
                 Iterable<InternalRow> it =
                         reader.readBatch(new VectorSchemaRoot(Arrays.asList(fieldVector)));
-                it.forEach(i -> Assertions.assertThat(i.getInt(0)).isEqualTo(genericRow.getInt(0)));
+                it.forEach(i -> assertThat(i.getInt(0)).isEqualTo(genericRow.getInt(0)));
             }
         }
 
@@ -83,14 +84,14 @@ public class OneElementFieldVectorGeneratorTest {
             OneElementFieldVectorGenerator oneElementFieldVectorGenerator =
                     new OneElementFieldVectorGenerator(rootAllocator, dataField, value);
             try (FieldVector fieldVector = oneElementFieldVectorGenerator.get(100000)) {
-                Assertions.assertThat(fieldVector.getValueCount()).isEqualTo(100000);
+                assertThat(fieldVector.getValueCount()).isEqualTo(100000);
                 ArrowBatchReader reader =
                         new ArrowBatchReader(new RowType(Arrays.asList(dataField)), true);
                 Iterable<InternalRow> it =
                         reader.readBatch(new VectorSchemaRoot(Arrays.asList(fieldVector)));
                 it.forEach(
                         i ->
-                                Assertions.assertThat(i.getTimestamp(0, 6))
+                                assertThat(i.getTimestamp(0, 6))
                                         .isEqualTo(genericRow.getTimestamp(0, 6)));
             }
         }

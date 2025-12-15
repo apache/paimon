@@ -46,7 +46,6 @@ import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
@@ -71,6 +70,7 @@ import static java.util.Objects.requireNonNull;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.utils.HintFileUtils.EARLIEST;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Base test class for {@link ExpireSnapshotsImpl}. */
 public class ExpireSnapshotsTest {
@@ -463,7 +463,7 @@ public class ExpireSnapshotsTest {
                             }));
         }
 
-        Assertions.assertThatCode(
+        assertThatCode(
                         () -> {
                             s.forEach(Thread::start);
                             s.forEach(

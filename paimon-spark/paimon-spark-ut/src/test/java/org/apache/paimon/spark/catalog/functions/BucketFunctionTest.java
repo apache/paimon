@@ -55,7 +55,6 @@ import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.spark.sql.SparkSession;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -71,6 +70,8 @@ import java.util.Objects;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for Spark bucket functions. */
 public class BucketFunctionTest {
@@ -240,7 +241,7 @@ public class BucketFunctionTest {
                                 "SELECT id_col, __paimon_bucket as expected_bucket, paimon.bucket(%s, %s) FROM %s",
                                 NUM_BUCKETS, String.join(",", bucketColumns), TABLE_NAME))
                 .collectAsList()
-                .forEach(row -> Assertions.assertThat(row.getInt(2)).isEqualTo(row.get(1)));
+                .forEach(row -> assertThat(row.getInt(2)).isEqualTo(row.get(1)));
     }
 
     @Test
@@ -333,6 +334,6 @@ public class BucketFunctionTest {
                                 String.join(",", TIMESTAMP_COL_PRECISION_3),
                                 TABLE_NAME))
                 .collectAsList()
-                .forEach(row -> Assertions.assertThat(row.getInt(2)).isNotEqualTo(row.get(1)));
+                .forEach(row -> assertThat(row.getInt(2)).isNotEqualTo(row.get(1)));
     }
 }

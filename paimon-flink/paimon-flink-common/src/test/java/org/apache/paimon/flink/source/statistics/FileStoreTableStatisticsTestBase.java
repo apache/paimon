@@ -39,7 +39,6 @@ import org.apache.paimon.types.VarCharType;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.plan.stats.ColumnStats;
 import org.apache.flink.table.plan.stats.TableStats;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -48,6 +47,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Statistics tests for {@link FileStoreTable}. */
 public abstract class FileStoreTableStatisticsTestBase {
@@ -90,7 +91,7 @@ public abstract class FileStoreTableStatisticsTestBase {
         commit.updateStatistics(colStats);
         commit.close();
         DataTableSource scanSource = new DataTableSource(identifier, table, false, null, null);
-        Assertions.assertThat(scanSource.reportStatistics().getRowCount()).isEqualTo(9L);
+        assertThat(scanSource.reportStatistics().getRowCount()).isEqualTo(9L);
         Map<String, ColumnStats> expectedColStats = new HashMap<>();
         expectedColStats.put(
                 "pt",
@@ -124,7 +125,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         .setMax(BinaryString.fromString("S8"))
                         .setNullCount(2L)
                         .build());
-        Assertions.assertThat(scanSource.reportStatistics().getColumnStats())
+        assertThat(scanSource.reportStatistics().getColumnStats())
                 .isEqualTo(expectedColStats);
     }
 
@@ -132,7 +133,7 @@ public abstract class FileStoreTableStatisticsTestBase {
     public void testTableStreamingStatistics() throws Exception {
         FileStoreTable table = writeData();
         DataTableSource streamSource = new DataTableSource(identifier, table, true, null, null);
-        Assertions.assertThat(streamSource.reportStatistics()).isEqualTo(TableStats.UNKNOWN);
+        assertThat(streamSource.reportStatistics()).isEqualTo(TableStats.UNKNOWN);
     }
 
     @Test
@@ -152,7 +153,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null);
-        Assertions.assertThat(partitionFilterSource.reportStatistics().getRowCount()).isEqualTo(5L);
+        assertThat(partitionFilterSource.reportStatistics().getRowCount()).isEqualTo(5L);
         Map<String, ColStats<?>> colStatsMap = new HashMap<>();
         colStatsMap.put("pt", ColStats.newColStats(0, 1L, 1, 2, 0L, null, null));
         colStatsMap.put("a", ColStats.newColStats(1, 5L, 10, 90, 0L, null, null));
@@ -209,7 +210,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         .setMax(BinaryString.fromString("S7"))
                         .setNullCount(2L)
                         .build());
-        Assertions.assertThat(partitionFilterSource.reportStatistics().getColumnStats())
+        assertThat(partitionFilterSource.reportStatistics().getColumnStats())
                 .isEqualTo(expectedColStats);
     }
 
@@ -230,7 +231,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null);
-        Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(2L);
+        assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(2L);
         Map<String, ColStats<?>> colStatsMap = new HashMap<>();
         colStatsMap.put("pt", ColStats.newColStats(0, 1L, 2, 2, 0L, null, null));
         colStatsMap.put("a", ColStats.newColStats(1, 1L, 50, 50, 0L, null, null));
@@ -287,7 +288,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         .setMax(BinaryString.fromString("S5"))
                         .setNullCount(0L)
                         .build());
-        Assertions.assertThat(keyFilterSource.reportStatistics().getColumnStats())
+        assertThat(keyFilterSource.reportStatistics().getColumnStats())
                 .isEqualTo(expectedColStats);
     }
 
@@ -308,7 +309,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null);
-        Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(4L);
+        assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(4L);
         Map<String, ColStats<?>> colStatsMap = new HashMap<>();
         colStatsMap.put("pt", ColStats.newColStats(0, 4L, 2, 2, 0L, null, null));
         colStatsMap.put("a", ColStats.newColStats(1, 4L, 50, 50, 0L, null, null));
@@ -365,7 +366,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         .setMax(BinaryString.fromString("S8"))
                         .setNullCount(0L)
                         .build());
-        Assertions.assertThat(keyFilterSource.reportStatistics().getColumnStats())
+        assertThat(keyFilterSource.reportStatistics().getColumnStats())
                 .isEqualTo(expectedColStats);
     }
 

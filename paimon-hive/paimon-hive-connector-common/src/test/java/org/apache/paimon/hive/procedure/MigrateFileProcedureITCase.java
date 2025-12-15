@@ -27,7 +27,6 @@ import org.apache.flink.table.api.SqlDialect;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -37,6 +36,9 @@ import org.junit.jupiter.params.provider.MethodSource;
 import java.util.List;
 import java.util.Random;
 import java.util.stream.Stream;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatList;
 
 /** Tests for {@code MigrateFileProcedure}. */
 public class MigrateFileProcedureITCase extends ActionITCaseBase {
@@ -97,7 +99,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
 
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM paimontable").collect());
 
-        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     public void testMigrateFileAction(String format) throws Exception {
@@ -136,7 +138,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
 
         tEnv.useCatalog("HIVE");
         List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable01").collect());
-        Assertions.assertThat(r1.size() == 0);
+        assertThat(r1.size() == 0);
     }
 
     private String data(int i) {

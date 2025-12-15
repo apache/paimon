@@ -26,7 +26,6 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -39,6 +38,8 @@ import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FileBasedBloomFilter}. */
 @ExtendWith(ParameterizedTestExtension.class)
@@ -74,11 +75,11 @@ public class FileBasedBloomFilterTest {
                         1000);
 
         Arrays.stream(inputs)
-                .forEach(i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isTrue());
+                .forEach(i -> assertThat(filter.testHash(Integer.hashCode(i))).isTrue());
         filter.close();
-        Assertions.assertThat(cacheManager.dataCache().asMap()).isEmpty();
-        Assertions.assertThat(cacheManager.indexCache().asMap()).isEmpty();
-        Assertions.assertThat(filter.bloomFilter().getMemorySegment()).isNull();
+        assertThat(cacheManager.dataCache().asMap()).isEmpty();
+        assertThat(cacheManager.indexCache().asMap()).isEmpty();
+        assertThat(filter.bloomFilter().getMemorySegment()).isNull();
     }
 
     private File writeFile(byte[] bytes) throws IOException {

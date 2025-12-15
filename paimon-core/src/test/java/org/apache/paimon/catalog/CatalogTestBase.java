@@ -70,7 +70,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -406,7 +405,7 @@ public abstract class CatalogTestBase {
         String databaseName = "list_tables_paged_globally_db";
         catalog.createDatabase(databaseName, false);
         if (!catalog.supportsListObjectsPaged() || !catalog.supportsListByPattern()) {
-            Assertions.assertThrows(
+            assertThrows(
                     UnsupportedOperationException.class,
                     () -> catalog.listTablesPagedGlobally(databaseName, null, null, null));
         }
@@ -418,19 +417,19 @@ public abstract class CatalogTestBase {
         }
 
         if (!catalog.supportsListObjectsPaged() || !catalog.supportsListByPattern()) {
-            Assertions.assertThrows(
+            assertThrows(
                     UnsupportedOperationException.class,
                     () -> catalog.listTablesPagedGlobally(null, null, null, null));
-            Assertions.assertThrows(
+            assertThrows(
                     UnsupportedOperationException.class,
                     () -> catalog.listTablesPagedGlobally(databaseName, null, null, null));
-            Assertions.assertThrows(
+            assertThrows(
                     UnsupportedOperationException.class,
                     () -> catalog.listTablesPagedGlobally(null, null, 100, null));
-            Assertions.assertThrows(
+            assertThrows(
                     UnsupportedOperationException.class,
                     () -> catalog.listTablesPagedGlobally(databaseName, "abc", null, null));
-            Assertions.assertThrows(
+            assertThrows(
                     UnsupportedOperationException.class,
                     () -> catalog.listTablesPagedGlobally(databaseName, "abc", null, "table"));
         }
@@ -1106,7 +1105,7 @@ public abstract class CatalogTestBase {
         String databaseName = "list_views_paged_globally_db";
         catalog.createDatabase(databaseName, false);
         if (!catalog.supportsListObjectsPaged() || !catalog.supportsListByPattern()) {
-            Assertions.assertThrows(
+            assertThrows(
                     UnsupportedOperationException.class,
                     () -> catalog.listViewsPagedGlobally(databaseName, null, null, null));
         }
@@ -1118,19 +1117,19 @@ public abstract class CatalogTestBase {
         }
 
         if (!catalog.supportsListObjectsPaged() || !catalog.supportsListByPattern()) {
-            Assertions.assertThrows(
+            assertThrows(
                     UnsupportedOperationException.class,
                     () -> catalog.listViewsPagedGlobally(null, null, null, null));
-            Assertions.assertThrows(
+            assertThrows(
                     UnsupportedOperationException.class,
                     () -> catalog.listViewsPagedGlobally(databaseName, null, null, null));
-            Assertions.assertThrows(
+            assertThrows(
                     UnsupportedOperationException.class,
                     () -> catalog.listViewsPagedGlobally(null, null, 100, null));
-            Assertions.assertThrows(
+            assertThrows(
                     UnsupportedOperationException.class,
                     () -> catalog.listViewsPagedGlobally(databaseName, "abc", null, null));
-            Assertions.assertThrows(
+            assertThrows(
                     UnsupportedOperationException.class,
                     () -> catalog.listViewsPagedGlobally(databaseName, "abc", null, "view"));
         }

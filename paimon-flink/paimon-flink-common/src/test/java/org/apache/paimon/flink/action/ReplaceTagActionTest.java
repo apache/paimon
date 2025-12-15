@@ -21,13 +21,13 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.TagManager;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link ReplaceTagAction}. */
 public class ReplaceTagActionTest extends ActionITCaseBase {
@@ -51,7 +51,7 @@ public class ReplaceTagActionTest extends ActionITCaseBase {
         bEnv.executeSql("INSERT INTO T VALUES (2, 'b')").await();
         assertThat(table.snapshotManager().snapshotCount()).isEqualTo(2);
 
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 bEnv.executeSql(
                                         "CALL sys.replace_tag(`table` => 'default.T', tag => 'test_tag')"))

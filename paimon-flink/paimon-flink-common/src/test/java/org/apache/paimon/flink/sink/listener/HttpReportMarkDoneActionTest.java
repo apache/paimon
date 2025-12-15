@@ -36,7 +36,6 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
 import okhttp3.mockwebserver.RecordedRequest;
-import org.assertj.core.api.Assertions;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -51,6 +50,7 @@ import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_PARAMS;
 import static org.apache.paimon.CoreOptions.PARTITION_MARK_DONE_ACTION_URL;
 import static org.apache.paimon.utils.InternalRowUtilsTest.ROW_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT case fo {@link HttpReportMarkDoneAction}. */
 public class HttpReportMarkDoneActionTest {
@@ -112,7 +112,7 @@ public class HttpReportMarkDoneActionTest {
 
         // status failed.
         server.enqueueResponse(failedResponse, 200);
-        Assertions.assertThatThrownBy(() -> markDoneAction.markDone(partition))
+        assertThatThrownBy(() -> markDoneAction.markDone(partition))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(
                         "The http-report action's response attribute `result` should be 'SUCCESS' but is 'failed'.");
@@ -120,19 +120,19 @@ public class HttpReportMarkDoneActionTest {
         // Illegal response body.
         String unExpectResponse = "{\"unknow\" :\"unknow\"}";
         server.enqueueResponse(unExpectResponse, 200);
-        Assertions.assertThatThrownBy(() -> markDoneAction.markDone(partition))
+        assertThatThrownBy(() -> markDoneAction.markDone(partition))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(
                         "The http-report action's response attribute `result` should be 'SUCCESS' but is 'null'.");
 
         // empty response.
         server.enqueueResponse("", 200);
-        Assertions.assertThatThrownBy(() -> markDoneAction.markDone(partition))
+        assertThatThrownBy(() -> markDoneAction.markDone(partition))
                 .hasMessageContaining("ResponseBody is null or empty.");
 
         // 400.
         server.enqueueResponse(successResponse, 400);
-        Assertions.assertThatThrownBy(() -> markDoneAction.markDone(partition))
+        assertThatThrownBy(() -> markDoneAction.markDone(partition))
                 .hasMessageContaining("Response is not successful");
     }
 

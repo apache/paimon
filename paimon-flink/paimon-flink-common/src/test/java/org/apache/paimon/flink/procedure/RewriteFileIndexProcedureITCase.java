@@ -32,7 +32,6 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.table.api.config.TableConfigOptions;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -40,6 +39,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for {@link RewriteFileIndexProcedure}. */
 public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
@@ -80,7 +81,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
         reader.forEachRemaining(r -> count.incrementAndGet());
 
         // parquet format predicate would not reduce record read from file
-        Assertions.assertThat(count.get()).isEqualTo(6);
+        assertThat(count.get()).isEqualTo(6);
 
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         sql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='order_id,v')");
@@ -98,7 +99,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
         reader.forEachRemaining(r -> count.incrementAndGet());
 
         // the whole file is filtered, none record left
-        Assertions.assertThat(count.get()).isEqualTo(0);
+        assertThat(count.get()).isEqualTo(0);
     }
 
     @ParameterizedTest
@@ -135,7 +136,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
         reader.forEachRemaining(r -> count.incrementAndGet());
 
         // parquet format predicate would not reduce record read from file
-        Assertions.assertThat(count.get()).isEqualTo(6);
+        assertThat(count.get()).isEqualTo(6);
 
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         sql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='order_id,v')");
@@ -153,7 +154,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
         reader.forEachRemaining(r -> count.incrementAndGet());
 
         // only partition 20221208 is filtered.
-        Assertions.assertThat(count.get()).isEqualTo(2);
+        assertThat(count.get()).isEqualTo(2);
     }
 
     @ParameterizedTest
@@ -191,7 +192,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
                             .filter(s -> s.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
                             .collect(Collectors.toList());
 
-            Assertions.assertThat(extraFiles.size()).isEqualTo(1);
+            assertThat(extraFiles.size()).isEqualTo(1);
 
             String file = extraFiles.get(0);
 
@@ -205,7 +206,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
                             table.fileIO().newInputStream(indexFilePath), table.rowType())) {
                 Set<FileIndexReader> readerSetK = reader.readColumnIndex("v");
 
-                Assertions.assertThat(readerSetK.size()).isEqualTo(0);
+                assertThat(readerSetK.size()).isEqualTo(0);
             }
         }
 
@@ -225,7 +226,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
                             .filter(s -> s.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
                             .collect(Collectors.toList());
 
-            Assertions.assertThat(extraFiles.size()).isEqualTo(0);
+            assertThat(extraFiles.size()).isEqualTo(0);
         }
     }
 }
