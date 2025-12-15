@@ -115,7 +115,7 @@ public class FormatTableScanTest {
     void testComputeScanPathAndLevelNoPartitionKeys() {
         List<String> partitionKeys = Collections.emptyList();
         RowType partitionType = RowType.of();
-        PartitionPredicate partitionFilter = PartitionPredicate.alwaysTrue();
+        PartitionPredicate partitionFilter = PartitionPredicate.ALWAYS_TRUE;
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(

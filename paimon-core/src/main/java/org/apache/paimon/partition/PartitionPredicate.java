@@ -30,6 +30,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.statistics.FullSimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
@@ -37,13 +38,17 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
+import static org.apache.paimon.predicate.PredicateBuilder.fieldIdxToPartitionIdx;
+import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -102,41 +107,39 @@ public interface PartitionPredicate extends Serializable {
                 new RowDataToObjectArrayConverter(partitionType), partitions);
     }
 
-    static PartitionPredicate alwaysFalse() {
-        return new PartitionPredicate() {
-            @Override
-            public boolean test(BinaryRow part) {
-                return false;
-            }
+    PartitionPredicate ALWAYS_FALSE =
+            new PartitionPredicate() {
+                @Override
+                public boolean test(BinaryRow part) {
+                    return false;
+                }
 
-            @Override
-            public boolean test(
-                    long rowCount,
-                    InternalRow minValues,
-                    InternalRow maxValues,
-                    InternalArray nullCounts) {
-                return false;
-            }
-        };
-    }
+                @Override
+                public boolean test(
+                        long rowCount,
+                        InternalRow minValues,
+                        InternalRow maxValues,
+                        InternalArray nullCounts) {
+                    return false;
+                }
+            };
 
-    static PartitionPredicate alwaysTrue() {
-        return new PartitionPredicate() {
-            @Override
-            public boolean test(BinaryRow part) {
-                return true;
-            }
+    PartitionPredicate ALWAYS_TRUE =
+            new PartitionPredicate() {
+                @Override
+                public boolean test(BinaryRow part) {
+                    return true;
+                }
 
-            @Override
-            public boolean test(
-                    long rowCount,
-                    InternalRow minValues,
-                    InternalRow maxValues,
-                    InternalArray nullCounts) {
-                return true;
-            }
-        };
-    }
+                @Override
+                public boolean test(
+                        long rowCount,
+                        InternalRow minValues,
+                        InternalRow maxValues,
+                        InternalArray nullCounts) {
+                    return true;
+                }
+            };
 
     /** A {@link PartitionPredicate} using {@link Predicate}. */
     class DefaultPartitionPredicate implements PartitionPredicate {
@@ -165,6 +168,26 @@ public interface PartitionPredicate extends Serializable {
 
         public Predicate predicate() {
             return predicate;
+        }
+
+        @Override
+        public String toString() {
+            return predicate.toString();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            DefaultPartitionPredicate that = (DefaultPartitionPredicate) o;
+            return Objects.equals(predicate, that.predicate);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(predicate);
         }
     }
 
@@ -253,6 +276,23 @@ public interface PartitionPredicate extends Serializable {
         public Set<BinaryRow> partitions() {
             return partitions;
         }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            MultiplePartitionPredicate that = (MultiplePartitionPredicate) o;
+            return fieldNum == that.fieldNum
+                    && Objects.equals(partitions, that.partitions)
+                    && Objects.deepEquals(min, that.min)
+                    && Objects.deepEquals(max, that.max);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partitions, fieldNum, Arrays.hashCode(min), Arrays.hashCode(max));
+        }
     }
 
     static Predicate createPartitionPredicate(RowType rowType, Map<String, Object> partition) {
@@ -339,5 +379,40 @@ public interface PartitionPredicate extends Serializable {
             RowType partitionType, List<Map<String, String>> values, String defaultPartValue) {
         return fromMultiple(
                 partitionType, createBinaryPartitions(values, partitionType, defaultPartValue));
+    }
+
+    static Pair<Optional<PartitionPredicate>, List<Predicate>>
+            splitPartitionPredicatesAndDataPredicates(
+                    Predicate dataPredicates, RowType tableType, List<String> partitionKeys) {
+        return splitPartitionPredicatesAndDataPredicates(
+                PredicateBuilder.splitAnd(dataPredicates), tableType, partitionKeys);
+    }
+
+    static Pair<Optional<PartitionPredicate>, List<Predicate>>
+            splitPartitionPredicatesAndDataPredicates(
+                    List<Predicate> dataPredicates, RowType tableType, List<String> partitionKeys) {
+        if (partitionKeys.isEmpty()) {
+            return Pair.of(Optional.empty(), dataPredicates);
+        }
+
+        RowType partitionType = tableType.project(partitionKeys);
+        int[] partitionIdx = fieldIdxToPartitionIdx(tableType, partitionKeys);
+
+        List<Predicate> partitionFilters = new ArrayList<>();
+        List<Predicate> nonPartitionFilters = new ArrayList<>();
+        for (Predicate p : dataPredicates) {
+            Optional<Predicate> mapped = transformFieldMapping(p, partitionIdx);
+            if (mapped.isPresent()) {
+                partitionFilters.add(mapped.get());
+            } else {
+                nonPartitionFilters.add(p);
+            }
+        }
+        PartitionPredicate partitionPredicate =
+                partitionFilters.isEmpty()
+                        ? null
+                        : PartitionPredicate.fromPredicate(
+                                partitionType, PredicateBuilder.and(partitionFilters));
+        return Pair.of(Optional.ofNullable(partitionPredicate), nonPartitionFilters);
     }
 }

@@ -24,6 +24,7 @@ import org.apache.paimon.predicate.SortValue.SortDirection;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
@@ -61,5 +62,19 @@ public class TopN implements Serializable {
     public String toString() {
         String sort = orders.stream().map(SortValue::toString).collect(Collectors.joining(", "));
         return String.format("Sort(%s), Limit(%s)", sort, limit);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        TopN topN = (TopN) o;
+        return limit == topN.limit && Objects.equals(orders, topN.orders);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(orders, limit);
     }
 }

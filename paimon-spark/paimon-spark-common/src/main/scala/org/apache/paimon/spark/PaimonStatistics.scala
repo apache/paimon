@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.stats.ColStats
 import org.apache.paimon.types.{DataField, DataType, RowType}
 
@@ -34,16 +33,24 @@ import scala.collection.JavaConverters._
 
 case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
-  private lazy val rowCount: Long = scan.lazyInputPartitions.map(_.rowCount()).sum
-
-  private lazy val scannedTotalSize: Long = rowCount * scan.readSchema().defaultSize
-
   private lazy val paimonStats = if (scan.statistics.isPresent) scan.statistics.get() else null
 
-  lazy val paimonStatsEnabled: Boolean = {
-    paimonStats != null &&
-    paimonStats.mergedRecordSize().isPresent &&
-    paimonStats.mergedRecordCount().isPresent
+  private lazy val paimonStatsEnabled: Boolean = paimonStats != null
+
+  private lazy val rowCount: Long = scan.lazyInputPartitions.map(_.rowCount()).sum
+
+  private lazy val scannedTotalSize: Long = {
+    if (!paimonStatsEnabled) {
+      rowCount * scan.readSchema().defaultSize
+    } else {
+      val readSchemaSize =
+        SparkTypeUtils.toPaimonRowType(scan.readSchema()).getFields.asScala.map(getSizeForField).sum
+      val sizeInBytes = numRows().getAsLong * readSchemaSize
+      // Avoid return 0 bytes if there are some valid rows.
+      // Avoid return too small size in bytes which may less than row count,
+      // note the compression ratio on disk is usually bigger than memory.
+      Math.max(sizeInBytes, numRows().getAsLong)
+    }
   }
 
   private def getSizeForField(field: DataField): Long = {
@@ -54,36 +61,9 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
       .getOrElse(field.`type`().defaultSize().toLong)
   }
 
-  private def getSizeForRow(schema: RowType): Long = {
-    schema.getFields.asScala.map(field => getSizeForField(field)).sum
-  }
+  override def numRows(): OptionalLong = OptionalLong.of(rowCount)
 
-  override def sizeInBytes(): OptionalLong = {
-    if (!paimonStatsEnabled) {
-      return OptionalLong.of(scannedTotalSize)
-    }
-
-    val wholeSchemaSize = getSizeForRow(scan.tableRowType)
-
-    val requiredDataSchemaSize =
-      scan.readTableRowType.getFields.asScala.map(field => getSizeForField(field)).sum
-    val requiredDataSizeInBytes =
-      paimonStats.mergedRecordSize().getAsLong * (requiredDataSchemaSize.toDouble / wholeSchemaSize)
-
-    val metadataSchemaSize =
-      scan.metadataColumns.map(field => getSizeForField(field.toPaimonDataField)).sum
-    val metadataSizeInBytes = paimonStats.mergedRecordCount().getAsLong * metadataSchemaSize
-
-    val sizeInBytes = (requiredDataSizeInBytes + metadataSizeInBytes).toLong
-    // Avoid return 0 bytes if there are some valid rows.
-    // Avoid return too small size in bytes which may less than row count,
-    // note the compression ratio on disk is usually bigger than memory.
-    val normalized = Math.max(sizeInBytes, paimonStats.mergedRecordCount().getAsLong)
-    OptionalLong.of(normalized)
-  }
-
-  override def numRows(): OptionalLong =
-    if (paimonStatsEnabled) paimonStats.mergedRecordCount() else OptionalLong.of(rowCount)
+  override def sizeInBytes(): OptionalLong = OptionalLong.of(scannedTotalSize)
 
   override def columnStats(): java.util.Map[NamedReference, ColumnStatistics] = {
     val requiredFields = scan.requiredStatsSchema.fieldNames
