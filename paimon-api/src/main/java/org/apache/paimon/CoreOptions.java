@@ -482,7 +482,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription("Specify the merge engine for table with primary key.");
 
-    @Immutable
     public static final ConfigOption<Boolean> IGNORE_DELETE =
             key("ignore-delete")
                     .booleanType()
@@ -493,7 +492,6 @@ public class CoreOptions implements Serializable {
                             "partial-update.ignore-delete")
                     .withDescription("Whether to ignore delete records.");
 
-    @Immutable
     public static final ConfigOption<Boolean> IGNORE_UPDATE_BEFORE =
             key("ignore-update-before")
                     .booleanType()

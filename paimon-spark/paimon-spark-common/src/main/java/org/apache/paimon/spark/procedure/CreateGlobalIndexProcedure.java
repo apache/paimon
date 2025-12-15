@@ -60,6 +60,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -337,30 +338,58 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             // Create DataSplit for each shard with exact ranges
             List<IndexedSplit> shardSplits = new ArrayList<>();
             for (Map.Entry<Long, List<DataFileMeta>> shardEntry : filesByShard.entrySet()) {
-                long startRowId = shardEntry.getKey();
+                long shardStart = shardEntry.getKey();
+                long shardEnd = shardStart + rowsPerShard - 1;
                 List<DataFileMeta> shardFiles = shardEntry.getValue();
 
                 if (shardFiles.isEmpty()) {
                     continue;
                 }
 
-                // Use exact shard boundaries: [n*rowsPerShard, (n+1)*rowsPerShard - 1]
-                long minRowId = startRowId;
-                long maxRowId = startRowId + rowsPerShard - 1;
-                Range range = new Range(minRowId, maxRowId);
+                // Sort files by firstRowId to ensure sequential order
+                shardFiles.sort(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId));
 
-                // Create DataSplit for this shard
-                DataSplit dataSplit =
-                        DataSplit.builder()
-                                .withPartition(partition)
-                                .withBucket(0)
-                                .withDataFiles(shardFiles)
-                                .withBucketPath(pathFactory.apply(partition, 0).toString())
-                                .rawConvertible(false)
-                                .build();
+                // Group contiguous files and create separate DataSplits for each group
+                List<DataFileMeta> currentGroup = new ArrayList<>();
+                long currentGroupEnd = -1;
 
-                shardSplits.add(
-                        new IndexedSplit(dataSplit, Collections.singletonList(range), null));
+                for (DataFileMeta file : shardFiles) {
+                    long fileStart = file.nonNullFirstRowId();
+                    long fileEnd = fileStart + file.rowCount() - 1;
+
+                    if (currentGroup.isEmpty()) {
+                        // Start a new group
+                        currentGroup.add(file);
+                        currentGroupEnd = fileEnd;
+                    } else if (fileStart <= currentGroupEnd + 1) {
+                        // File is contiguous with current group (adjacent or overlapping)
+                        currentGroup.add(file);
+                        currentGroupEnd = Math.max(currentGroupEnd, fileEnd);
+                    } else {
+                        // Gap detected, finalize current group and start a new one
+                        createDataSplitForGroup(
+                                currentGroup,
+                                shardStart,
+                                shardEnd,
+                                partition,
+                                pathFactory,
+                                shardSplits);
+                        currentGroup = new ArrayList<>();
+                        currentGroup.add(file);
+                        currentGroupEnd = fileEnd;
+                    }
+                }
+
+                // Don't forget to process the last group
+                if (!currentGroup.isEmpty()) {
+                    createDataSplitForGroup(
+                            currentGroup,
+                            shardStart,
+                            shardEnd,
+                            partition,
+                            pathFactory,
+                            shardSplits);
+                }
             }
 
             if (!shardSplits.isEmpty()) {
@@ -369,6 +398,40 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
         }
 
         return result;
+    }
+
+    private static void createDataSplitForGroup(
+            List<DataFileMeta> files,
+            long shardStart,
+            long shardEnd,
+            BinaryRow partition,
+            BiFunction<BinaryRow, Integer, Path> pathFactory,
+            List<IndexedSplit> shardSplits) {
+        // Calculate the actual row range covered by the files
+        long groupMinRowId = files.get(0).nonNullFirstRowId();
+        long groupMaxRowId =
+                files.stream()
+                        .mapToLong(f -> f.nonNullFirstRowId() + f.rowCount() - 1)
+                        .max()
+                        .getAsLong();
+
+        // Clamp to shard boundaries
+        // Range.from >= shardStart, Range.to <= shardEnd
+        long rangeFrom = Math.max(groupMinRowId, shardStart);
+        long rangeTo = Math.min(groupMaxRowId, shardEnd);
+
+        Range range = new Range(rangeFrom, rangeTo);
+
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withPartition(partition)
+                        .withBucket(0)
+                        .withDataFiles(files)
+                        .withBucketPath(pathFactory.apply(partition, 0).toString())
+                        .rawConvertible(false)
+                        .build();
+
+        shardSplits.add(new IndexedSplit(dataSplit, Collections.singletonList(range), null));
     }
 
     public static ProcedureBuilder builder() {

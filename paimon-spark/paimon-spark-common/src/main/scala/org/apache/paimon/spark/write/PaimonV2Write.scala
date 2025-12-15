@@ -20,12 +20,12 @@ package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{PaimonAppendedChangelogFilesMetric, PaimonAppendedRecordsMetric, PaimonAppendedTableFilesMetric, PaimonBucketsWrittenMetric, PaimonCommitDurationMetric, PaimonNumWritersMetric, PaimonPartitionsWrittenMetric, SparkInternalRowWrapper, SparkUtils}
+import org.apache.paimon.spark._
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.commands.SchemaHelper
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageSerializer, TableWriteImpl}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, TableWriteImpl}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.PaimonSparkSession
@@ -36,13 +36,9 @@ import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.write._
 import org.apache.spark.sql.execution.SQLExecution
 import org.apache.spark.sql.execution.metric.SQLMetrics
-import org.apache.spark.sql.execution.ui.SQLPlanMetric
 import org.apache.spark.sql.types.StructType
 
-import java.io.{IOException, UncheckedIOException}
-
 import scala.collection.JavaConverters._
-import scala.util.{Failure, Success, Try}
 
 class PaimonV2Write(
     override val originTable: FileStoreTable,
@@ -140,16 +136,7 @@ private case class PaimonBatchWrite(
     logInfo(s"Committing to table ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     batchTableCommit.withMetricRegistry(metricRegistry)
-
-    val commitMessages = messages
-      .collect {
-        case taskCommit: TaskCommit => taskCommit.commitMessages()
-        case other =>
-          throw new IllegalArgumentException(s"${other.getClass.getName} is not supported")
-      }
-      .flatten
-      .toSeq
-
+    val commitMessages = WriteTaskResult.merge(messages)
     try {
       val start = System.currentTimeMillis()
       batchTableCommit.commit(commitMessages.asJava)
@@ -192,18 +179,18 @@ private case class WriterFactory(
   extends DataWriterFactory {
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
-    PaimonDataWriter(batchWriteBuilder, writeSchema, dataSchema, fullCompactionDeltaCommits)
+    PaimonV2DataWriter(batchWriteBuilder, writeSchema, dataSchema, fullCompactionDeltaCommits)
   }
 }
 
-private case class PaimonDataWriter(
+private case class PaimonV2DataWriter(
     writeBuilder: BatchWriteBuilder,
     writeSchema: StructType,
     dataSchema: StructType,
     fullCompactionDeltaCommits: Option[Int],
-    batchId: Long = -1)
-  extends DataWriter[InternalRow]
-  with DataWriteHelper {
+    batchId: Option[Long] = None)
+  extends abstractInnerTableDataWrite[InternalRow]
+  with InnerTableV2DataWrite {
 
   private val ioManager = SparkUtils.createIOManager()
 
@@ -227,14 +214,8 @@ private case class PaimonDataWriter(
     postWrite(write.writeAndReturn(rowConverter.apply(record)))
   }
 
-  override def commit(): WriterCommitMessage = {
-    try {
-      preFinish()
-      val commitMessages = write.prepareCommit().asScala.toSeq
-      TaskCommit(commitMessages)
-    } finally {
-      close()
-    }
+  override def commitImpl(): Seq[CommitMessage] = {
+    write.prepareCommit().asScala.toSeq
   }
 
   override def abort(): Unit = close()
@@ -250,40 +231,5 @@ private case class PaimonDataWriter(
 
   override def currentMetricsValues(): Array[CustomTaskMetric] = {
     metricRegistry.buildSparkWriteMetrics()
-  }
-}
-
-class TaskCommit private (
-    private val serializedMessageBytes: Seq[Array[Byte]]
-) extends WriterCommitMessage {
-  def commitMessages(): Seq[CommitMessage] = {
-    val deserializer = new CommitMessageSerializer()
-    serializedMessageBytes.map {
-      bytes =>
-        Try(deserializer.deserialize(deserializer.getVersion, bytes)) match {
-          case Success(msg) => msg
-          case Failure(e: IOException) => throw new UncheckedIOException(e)
-          case Failure(e) => throw e
-        }
-    }
-  }
-}
-
-object TaskCommit {
-  def apply(commitMessages: Seq[CommitMessage]): TaskCommit = {
-    val serializer = new CommitMessageSerializer()
-    val serializedBytes: Seq[Array[Byte]] = Option(commitMessages)
-      .filter(_.nonEmpty)
-      .map(_.map {
-        msg =>
-          Try(serializer.serialize(msg)) match {
-            case Success(serializedBytes) => serializedBytes
-            case Failure(e: IOException) => throw new UncheckedIOException(e)
-            case Failure(e) => throw e
-          }
-      })
-      .getOrElse(Seq.empty)
-
-    new TaskCommit(serializedBytes)
   }
 }

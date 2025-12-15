@@ -18,8 +18,64 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.utils.LazyField;
+import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import java.util.function.Supplier;
+
 /** Top-k global index result for vector index. */
 public interface TopkGlobalIndexResult extends GlobalIndexResult {
 
-    public ScoreGetter scoreGetter();
+    ScoreGetter scoreGetter();
+
+    default GlobalIndexResult and(GlobalIndexResult other) {
+        throw new UnsupportedOperationException("Please realize this by specified global index");
+    }
+
+    @Override
+    default GlobalIndexResult or(GlobalIndexResult other) {
+        if (!(other instanceof TopkGlobalIndexResult)) {
+            return GlobalIndexResult.super.or(other);
+        }
+        RoaringNavigableMap64 thisRowIds = results();
+        ScoreGetter thisScoreGetter = scoreGetter();
+
+        RoaringNavigableMap64 otherRowIds = other.results();
+        ScoreGetter otherScoreGetter = ((TopkGlobalIndexResult) other).scoreGetter();
+
+        final RoaringNavigableMap64 resultOr = RoaringNavigableMap64.or(thisRowIds, otherRowIds);
+        return new TopkGlobalIndexResult() {
+            @Override
+            public ScoreGetter scoreGetter() {
+                return rowId -> {
+                    if (thisRowIds.contains(rowId)) {
+                        return thisScoreGetter.score(rowId);
+                    }
+                    return otherScoreGetter.score(rowId);
+                };
+            }
+
+            @Override
+            public RoaringNavigableMap64 results() {
+                return resultOr;
+            }
+        };
+    }
+
+    /** Returns a new {@link TopkGlobalIndexResult} from supplier. */
+    static TopkGlobalIndexResult create(
+            Supplier<RoaringNavigableMap64> supplier, ScoreGetter scoreGetter) {
+        LazyField<RoaringNavigableMap64> lazyField = new LazyField<>(supplier);
+        return new TopkGlobalIndexResult() {
+            @Override
+            public ScoreGetter scoreGetter() {
+                return scoreGetter;
+            }
+
+            @Override
+            public RoaringNavigableMap64 results() {
+                return lazyField.get();
+            }
+        };
+    }
 }

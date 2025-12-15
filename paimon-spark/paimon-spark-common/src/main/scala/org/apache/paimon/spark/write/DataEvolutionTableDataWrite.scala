@@ -16,16 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.write
 
 import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.data.{BinaryRow, InternalRow}
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
-import org.apache.paimon.operation.{AbstractFileStoreWrite, AppendFileStoreWrite}
+import org.apache.paimon.operation.AbstractFileStoreWrite
+import org.apache.paimon.spark.SparkUtils
 import org.apache.paimon.spark.util.SparkRowUtils
-import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageImpl, CommitMessageSerializer, TableWriteImpl}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, TableWriteImpl}
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.RecordWriter
 
@@ -33,23 +33,22 @@ import org.apache.spark.sql.Row
 
 import java.util.Collections
 
-import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
-case class DataEvolutionSparkTableWrite(
+case class DataEvolutionTableDataWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
-    firstRowIdToPartitionMap: mutable.HashMap[Long, Tuple2[BinaryRow, Long]],
+    firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Long)],
     blobAsDescriptor: Boolean,
     catalogContext: CatalogContext)
-  extends SparkTableWriteTrait {
+  extends InnerTableV1DataWrite {
 
   private var currentWriter: PerFileWriter = _
   private val ioManager: IOManager = SparkUtils.createIOManager
   private val rowIdIndex = writeType.getFieldCount
   private val firstRowIdIndex = rowIdIndex + 1
-  private val commitMessageImpls = ListBuffer[CommitMessageImpl]()
+  private val commitMessages = ListBuffer[CommitMessageImpl]()
 
   private val toPaimonRow = {
     SparkRowUtils.toPaimonRow(writeType, -1, blobAsDescriptor, catalogContext)
@@ -87,7 +86,7 @@ case class DataEvolutionSparkTableWrite(
 
   def finishCurrentWriter(): Unit = {
     if (currentWriter != null) {
-      commitMessageImpls.append(currentWriter.finish())
+      commitMessages.append(currentWriter.finish())
     }
     currentWriter = null
   }
@@ -97,23 +96,9 @@ case class DataEvolutionSparkTableWrite(
       "DataEvolutionSparkTableWrite does not support writing with bucket.")
   }
 
-  def finish(): Iterator[Array[Byte]] = {
+  override def commitImpl(): Seq[CommitMessage] = {
     finishCurrentWriter()
-    var bytesWritten = 0L
-    var recordsWritten = 0L
-    val commitMessages = new ListBuffer[Array[Byte]]()
-    val serializer = new CommitMessageSerializer()
-    commitMessageImpls.foreach {
-      message: CommitMessageImpl =>
-        message.newFilesIncrement().newFiles().asScala.foreach {
-          dataFileMeta =>
-            bytesWritten += dataFileMeta.fileSize()
-            recordsWritten += dataFileMeta.rowCount()
-        }
-        commitMessages += serializer.serialize(message)
-    }
-    reportOutputMetrics(bytesWritten, recordsWritten)
-    commitMessages.iterator
+    commitMessages.toSeq
   }
 
   override def close(): Unit = {

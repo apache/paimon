@@ -55,6 +55,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     private Predicate filter;
     private List<Range> pushedRowRanges;
+    private GlobalIndexResult globalIndexResult;
 
     public DataEvolutionBatchScan(FileStoreTable wrapped, DataTableBatchScan batchScan) {
         this.table = wrapped;
@@ -148,6 +149,18 @@ public class DataEvolutionBatchScan implements DataTableScan {
     @Override
     public InnerTableScan withRowRanges(List<Range> rowRanges) {
         this.pushedRowRanges = rowRanges;
+        if (globalIndexResult != null) {
+            throw new IllegalStateException("");
+        }
+        return this;
+    }
+
+    // To enable other system computing index result by their own.
+    public InnerTableScan withGlobalIndexResult(GlobalIndexResult globalIndexResult) {
+        this.globalIndexResult = globalIndexResult;
+        if (pushedRowRanges != null) {
+            throw new IllegalStateException("");
+        }
         return this;
     }
 
@@ -160,6 +173,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
     public Plan plan() {
         List<Range> rowRanges = this.pushedRowRanges;
         ScoreGetter scoreGetter = null;
+
         if (rowRanges == null) {
             Optional<GlobalIndexResult> indexResult = evalGlobalIndex();
             if (indexResult.isPresent()) {
@@ -180,6 +194,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     private Optional<GlobalIndexResult> evalGlobalIndex() {
+        if (this.globalIndexResult != null) {
+            return Optional.of(globalIndexResult);
+        }
         if (filter == null) {
             return Optional.empty();
         }
@@ -237,7 +254,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
             float[] scores = null;
             if (scoreGetter != null) {
-                int size = expected.stream().mapToInt(r -> (int) (r.to - r.from + 1)).sum();
+                int size = expected.stream().mapToInt(r -> (int) (r.count())).sum();
                 scores = new float[size];
 
                 int index = 0;
