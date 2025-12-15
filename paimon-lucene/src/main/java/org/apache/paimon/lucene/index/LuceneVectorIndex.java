@@ -42,7 +42,7 @@ public abstract class LuceneVectorIndex<T> {
     }
 
     public LongPoint rowIdLongPoint() {
-        return new LongPoint("row_id", id());
+        return new LongPoint(ROW_ID_FIELD, id());
     }
 
     public void checkDimension(int dimension) {
