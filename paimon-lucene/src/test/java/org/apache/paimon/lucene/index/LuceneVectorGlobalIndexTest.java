@@ -235,11 +235,12 @@ public class LuceneVectorGlobalIndexTest {
             long expectedRowId = offset;
             assertThat(containsRowId(result, expectedRowId)).isTrue();
             assertThat(result.scoreGetter().score(expectedRowId)).isEqualTo(1.0f);
+            expectedRowId = offset + 1;
             RoaringNavigableMap64 filterResults = new RoaringNavigableMap64();
-            filterResults.add(offset);
+            filterResults.add(expectedRowId);
             TopKRowIdFilter filter = new TopKRowIdFilter(filterResults.iterator());
             result = (LuceneTopkGlobalIndexResult) reader.visitTopK(topK, filter);
-            assertThat(result.results().isEmpty()).isEqualTo(true);
+            assertThat(containsRowId(result, expectedRowId)).isTrue();
 
             float[] queryVector = new float[] {0.85f, 0.15f};
             topK = new TopK(queryVector, defaultMetric, 2);
@@ -314,7 +315,7 @@ public class LuceneVectorGlobalIndexTest {
 
         assertThatThrownBy(() -> new TopK(new float[] {0.1f}, defaultMetric, 0))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Limit must be positive");
+                .hasMessageContaining("K must be positive");
     }
 
     private Options createDefaultOptions(int dimension) {

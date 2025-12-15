@@ -34,7 +34,7 @@ public class TopK implements Serializable {
             throw new IllegalArgumentException("Vector cannot be null");
         }
         if (k <= 0) {
-            throw new IllegalArgumentException("Limit must be positive, got: " + k);
+            throw new IllegalArgumentException("K must be positive, got: " + k);
         }
         if (similarityFunction == null || similarityFunction.isEmpty()) {
             throw new IllegalArgumentException("Similarity function cannot be null or empty");

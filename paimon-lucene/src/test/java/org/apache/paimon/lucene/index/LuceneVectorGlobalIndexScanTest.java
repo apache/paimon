@@ -34,6 +34,7 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopK;
@@ -50,6 +51,7 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -115,8 +117,8 @@ public class LuceneVectorGlobalIndexScanTest {
 
         // 5. Use GlobalIndexScanBuilder to get scanner
         GlobalIndexScanBuilder scanBuilder = table.store().newGlobalIndexScanBuilder();
-        List<org.apache.paimon.utils.Range> ranges = scanBuilder.shardList();
-        org.apache.paimon.utils.Range range = ranges.get(0);
+        List<Range> ranges = scanBuilder.shardList();
+        Range range = ranges.get(0);
         RowRangeGlobalIndexScanner scanner = scanBuilder.withRowRange(range).build();
 
         // 6. Execute TopK query
@@ -126,7 +128,7 @@ public class LuceneVectorGlobalIndexScanTest {
         // 7. Verify results without filter
         Predicate topKPredicate =
                 new LeafPredicate(
-                        new org.apache.paimon.predicate.FieldTransform(
+                        new FieldTransform(
                                 new FieldRef(1, "vec", new ArrayType(DataTypes.FLOAT()))),
                         new TopKFunction(topK, null),
                         Collections.emptyList());
@@ -138,11 +140,11 @@ public class LuceneVectorGlobalIndexScanTest {
 
         // 8. Verify results with filter
         RoaringNavigableMap64 filterResults = new RoaringNavigableMap64();
-        filterResults.add(0L);
+        filterResults.add(1L);
         TopKRowIdFilter filter = new TopKRowIdFilter(filterResults.iterator());
         topKPredicate =
                 new LeafPredicate(
-                        new org.apache.paimon.predicate.FieldTransform(
+                        new FieldTransform(
                                 new FieldRef(1, "vec", new ArrayType(DataTypes.FLOAT()))),
                         new TopKFunction(topK, filter),
                         Collections.emptyList());
@@ -150,8 +152,8 @@ public class LuceneVectorGlobalIndexScanTest {
         resultRowIds = new ArrayList<>();
         result.results().iterator().forEachRemaining(resultRowIds::add);
         float score = result.scoreGetter().score(resultRowIds.get(0));
-        assertThat(resultRowIds).contains(0L);
-        assertThat(score).isEqualTo(0.95693785f);
+        assertThat(resultRowIds).contains(1L);
+        assertThat(score).isEqualTo(0.98765427f);
     }
 
     private List<IndexFileMeta> buildIndexManually(float[][] vectors) throws Exception {
