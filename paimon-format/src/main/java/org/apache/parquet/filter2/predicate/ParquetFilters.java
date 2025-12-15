@@ -19,11 +19,11 @@
 package org.apache.parquet.filter2.predicate;
 
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopK;
+import org.apache.paimon.predicate.TopKRowIdFilter;
 import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -210,7 +210,7 @@ public class ParquetFilters {
         }
 
         @Override
-        public FilterPredicate visitTopK(TopK topK, GlobalIndexResult globalIndexResult) {
+        public FilterPredicate visitTopK(TopK topK, TopKRowIdFilter filter) {
             throw new UnsupportedOperationException();
         }
 

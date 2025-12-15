@@ -18,8 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.globalindex.GlobalIndexResult;
-
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -76,7 +74,7 @@ public interface FunctionVisitor<T> extends PredicateVisitor<T> {
 
     T visitNotIn(FieldRef fieldRef, List<Object> literals);
 
-    T visitTopK(TopK topK, GlobalIndexResult globalIndexResult);
+    T visitTopK(TopK topK, TopKRowIdFilter filter);
 
     // ----------------- Compound functions ------------------------
 

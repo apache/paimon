@@ -28,6 +28,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.TopK;
+import org.apache.paimon.predicate.TopKRowIdFilter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
@@ -234,18 +235,10 @@ public class LuceneVectorGlobalIndexTest {
             long expectedRowId = offset;
             assertThat(containsRowId(result, expectedRowId)).isTrue();
             assertThat(result.scoreGetter().score(expectedRowId)).isEqualTo(1.0f);
-
-            GlobalIndexResult globalIndexResult =
-                    new GlobalIndexResult() {
-                        @Override
-                        public RoaringNavigableMap64 results() {
-                            RoaringNavigableMap64 results = new RoaringNavigableMap64();
-                            results.add(offset);
-                            return results;
-                        }
-                    };
-
-            result = (LuceneTopkGlobalIndexResult) reader.visitTopK(topK, globalIndexResult);
+            RoaringNavigableMap64 filterResults = new RoaringNavigableMap64();
+            filterResults.add(offset);
+            TopKRowIdFilter filter = new TopKRowIdFilter(filterResults.iterator());
+            result = (LuceneTopkGlobalIndexResult) reader.visitTopK(topK, filter);
             assertThat(result.results().isEmpty()).isEqualTo(true);
 
             float[] queryVector = new float[] {0.85f, 0.15f};

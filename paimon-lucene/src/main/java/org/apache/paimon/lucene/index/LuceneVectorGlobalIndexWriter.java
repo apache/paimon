@@ -126,6 +126,7 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
                 for (LuceneVectorIndex luceneVectorIndex : batchVectors) {
                     Document doc = new Document();
                     doc.add(luceneVectorIndex.indexableField(similarityFunction));
+                    doc.add(luceneVectorIndex.rowIdLongPoint());
                     doc.add(luceneVectorIndex.rowIdStoredField());
                     writer.addDocument(doc);
                 }

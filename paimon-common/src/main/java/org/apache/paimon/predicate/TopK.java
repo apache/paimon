@@ -27,21 +27,21 @@ public class TopK implements Serializable {
 
     private Object vector;
     private final String similarityFunction;
-    private final int limit;
+    private final int k;
 
-    public TopK(Object vector, String similarityFunction, int limit) {
+    public TopK(Object vector, String similarityFunction, int k) {
         if (vector == null) {
             throw new IllegalArgumentException("Vector cannot be null");
         }
-        if (limit <= 0) {
-            throw new IllegalArgumentException("Limit must be positive, got: " + limit);
+        if (k <= 0) {
+            throw new IllegalArgumentException("Limit must be positive, got: " + k);
         }
         if (similarityFunction == null || similarityFunction.isEmpty()) {
             throw new IllegalArgumentException("Similarity function cannot be null or empty");
         }
         this.vector = vector;
         this.similarityFunction = similarityFunction;
-        this.limit = limit;
+        this.k = k;
     }
 
     public Object vector() {
@@ -52,12 +52,12 @@ public class TopK implements Serializable {
         return similarityFunction;
     }
 
-    public int limit() {
-        return limit;
+    public int k() {
+        return k;
     }
 
     @Override
     public String toString() {
-        return String.format("SimilarityFunction(%s), Limit(%s)", similarityFunction, limit);
+        return String.format("SimilarityFunction(%s), K(%s)", similarityFunction, k);
     }
 }

@@ -25,6 +25,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopK;
+import org.apache.paimon.predicate.TopKRowIdFilter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
@@ -94,19 +95,19 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitTopK(TopK topK, @Nullable GlobalIndexResult globalIndexResult) {
+    public GlobalIndexResult visitTopK(TopK topK, @Nullable TopKRowIdFilter filter) {
         try {
             if (LuceneVectorMetric.fromString(topK.similarityFunction())
                     == vectorIndexOptions.metric()) {
                 ensureLoadIndices(fileReader, ioMetas);
-                Query query = query(topK, fieldType, globalIndexResult);
-                return search(query, topK.limit());
+                Query query = query(topK, fieldType, filter);
+                return search(query, topK.k());
             }
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
                             "Failed to search vector index for TopK with similarity=%s, k=%d",
-                            topK.similarityFunction(), topK.limit()),
+                            topK.similarityFunction(), topK.k()),
                     e);
         }
         return defaultResult;
@@ -156,14 +157,11 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private Query query(TopK topK, DataType dataType, GlobalIndexResult globalIndexResult) {
+    private Query query(TopK topK, DataType dataType, TopKRowIdFilter filter) {
         Query idFilterQuery = null;
-        if (globalIndexResult != null) {
+        if (filter != null && filter.includeRowIds() != null) {
             ArrayList<Long> targetIds = new ArrayList<>();
-            globalIndexResult
-                    .results()
-                    .iterator()
-                    .forEachRemaining(id -> targetIds.add(id - offset));
+            filter.includeRowIds().forEachRemaining(id -> targetIds.add(id - offset));
             idFilterQuery = LongPoint.newSetQuery(ROW_ID_FIELD, targetIds);
         }
         if (dataType instanceof ArrayType
@@ -175,7 +173,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
             return new KnnFloatVectorQuery(
                     LuceneVectorIndex.VECTOR_FIELD,
                     (float[]) topK.vector(),
-                    topK.limit(),
+                    topK.k(),
                     idFilterQuery);
         } else if (dataType instanceof ArrayType
                 && ((ArrayType) dataType).getElementType() instanceof TinyIntType) {
@@ -186,7 +184,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
             return new KnnByteVectorQuery(
                     LuceneVectorIndex.VECTOR_FIELD,
                     (byte[]) topK.vector(),
-                    topK.limit(),
+                    topK.k(),
                     idFilterQuery);
         } else {
             throw new IllegalArgumentException("Unsupported data type: " + dataType);
