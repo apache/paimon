@@ -64,7 +64,7 @@ class OrcBulkWriterTest {
         assertThat(formatWriter).isInstanceOf(OrcBulkWriter.class);
 
         OrcBulkWriter orcBulkWriter = (OrcBulkWriter) formatWriter;
-        Assertions.assertThat(orcBulkWriter.getRowBatch().getMaxSize()).isEqualTo(1);
-        Assertions.assertThat(orcBulkWriter.getMemoryLimit()).isEqualTo(1024);
+        assertThat(orcBulkWriter.getRowBatch().getMaxSize()).isEqualTo(1);
+        assertThat(orcBulkWriter.getMemoryLimit()).isEqualTo(1024);
     }
 }

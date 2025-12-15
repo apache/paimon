@@ -50,8 +50,9 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.apache.paimon.operation.FileStoreTestUtils.commitData;
 import static org.apache.paimon.operation.FileStoreTestUtils.partitionedData;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for TagManager. */
 public class TagManagerTest {
@@ -167,9 +168,9 @@ public class TagManagerTest {
                 false);
 
         IllegalArgumentException exception =
-                Assertions.assertThrows(
+                assertThrows(
                         IllegalArgumentException.class, () -> tagManager.renameTag("tag1", "tag2"));
-        Assertions.assertTrue(exception.getMessage().contains("Tag 'tag2' already exists."));
+        assertTrue(exception.getMessage().contains("Tag 'tag2' already exists."));
     }
 
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode, int buckets)
