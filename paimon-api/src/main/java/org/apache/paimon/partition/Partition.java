@@ -23,6 +23,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import javax.annotation.Nullable;
@@ -48,24 +49,29 @@ public class Partition extends PartitionStatistics {
     @JsonProperty(FIELD_DONE)
     private final boolean done;
 
-    @Nullable
     @JsonProperty(FIELD_CREATED_AT)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
     private final Long createdAt;
 
-    @Nullable
     @JsonProperty(FIELD_CREATED_BY)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
     private final String createdBy;
 
-    @Nullable
     @JsonProperty(FIELD_UPDATED_AT)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
     private final Long updatedAt;
 
-    @Nullable
     @JsonProperty(FIELD_UPDATED_BY)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
     private final String updatedBy;
 
-    @Nullable
     @JsonProperty(FIELD_OPTIONS)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
     private final Map<String, String> options;
 
     @JsonCreator
