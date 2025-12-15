@@ -1040,7 +1040,7 @@ public class SchemaManager implements Serializable {
     public boolean schemaExists(long id) {
         Path path = toSchemaPath(id);
         try {
-            return fileIO.exists(path);
+            return fileIO.fileExists(path);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(

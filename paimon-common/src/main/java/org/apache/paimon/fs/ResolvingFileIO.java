@@ -103,8 +103,8 @@ public class ResolvingFileIO implements FileIO {
     }
 
     @Override
-    public boolean rename(Path src, Path dst) throws IOException {
-        return wrap(() -> fileIO(src).rename(src, dst));
+    public boolean renameImpl(Path src, Path dst) throws IOException {
+        return wrap(() -> fileIO(src).renameImpl(src, dst));
     }
 
     @VisibleForTesting
