@@ -42,24 +42,25 @@ import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS
 import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
-/** Writer refresher for refresh write when configs changed. */
-public class WriterRefresher {
+/** refresh write when configs changed. */
+public class ConfigRefresher {
 
-    private static final Logger LOG = LoggerFactory.getLogger(WriterRefresher.class);
+    private static final Logger LOG = LoggerFactory.getLogger(ConfigRefresher.class);
 
     private FileStoreTable table;
-    private final Refresher refresher;
+    private final WriteRefresher refresher;
     private final Set<String> configGroups;
 
-    private WriterRefresher(FileStoreTable table, Refresher refresher, Set<String> configGroups) {
+    private ConfigRefresher(
+            FileStoreTable table, WriteRefresher refresher, Set<String> configGroups) {
         this.table = table;
         this.refresher = refresher;
         this.configGroups = configGroups;
     }
 
     @Nullable
-    public static WriterRefresher create(
-            boolean isStreaming, FileStoreTable table, Refresher refresher) {
+    public static ConfigRefresher create(
+            boolean isStreaming, FileStoreTable table, WriteRefresher refresher) {
         if (!isStreaming) {
             return null;
         }
@@ -74,7 +75,7 @@ public class WriterRefresher {
         if (configGroups == null || configGroups.isEmpty()) {
             return null;
         }
-        return new WriterRefresher(table, refresher, configGroups);
+        return new ConfigRefresher(table, refresher, configGroups);
     }
 
     /**
@@ -115,11 +116,6 @@ public class WriterRefresher {
 
     public Set<String> configGroups() {
         return configGroups;
-    }
-
-    /** Refresher when configs changed. */
-    public interface Refresher {
-        void refresh(FileStoreTable table) throws Exception;
     }
 
     public static Map<String, String> configGroups(Set<String> groups, CoreOptions options) {

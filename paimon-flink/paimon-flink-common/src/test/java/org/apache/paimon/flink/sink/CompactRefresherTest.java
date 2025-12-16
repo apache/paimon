@@ -47,13 +47,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.sink.WriterRefresher.configGroups;
+import static org.apache.paimon.flink.sink.ConfigRefresher.configGroups;
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link CompactWriterRefresher}. */
-public class CompactWriterRefresherTest {
+/** Test for {@link CompactRefresher}. */
+public class CompactRefresherTest {
 
     @TempDir public java.nio.file.Path tempDir;
 
@@ -93,11 +93,11 @@ public class CompactWriterRefresherTest {
         List<DataField> dataFields = new ArrayList<>();
         Map<String, String> refreshedOptions = new HashMap<>();
         Set<String> groups = Arrays.stream(detectGroups.split(",")).collect(Collectors.toSet());
-        CompactWriterRefresher writerRefresher =
-                CompactWriterRefresher.create(
+        CompactRefresher writerRefresher =
+                CompactRefresher.create(
                         true,
                         table1,
-                        new WriterRefresherTest.TestWriteRefresher(
+                        new ConfigRefresherTest.TestWriteRefresher(
                                 groups, refreshedOptions, dataFields));
         writerRefresher.tryRefresh(
                 table2.newSnapshotReader().read().dataSplits().get(0).dataFiles());
@@ -123,11 +123,11 @@ public class CompactWriterRefresherTest {
         }
 
         List<DataField> dataFields = new ArrayList<>();
-        CompactWriterRefresher writerRefresher =
-                CompactWriterRefresher.create(
+        CompactRefresher writerRefresher =
+                CompactRefresher.create(
                         true,
                         table1,
-                        new WriterRefresherTest.TestWriteRefresher(
+                        new ConfigRefresherTest.TestWriteRefresher(
                                 null, Collections.emptyMap(), dataFields));
         writerRefresher.tryRefresh(
                 table2.newSnapshotReader().read().dataSplits().get(0).dataFiles());
@@ -151,11 +151,11 @@ public class CompactWriterRefresherTest {
 
         Map<String, String> refreshedOptions = new HashMap<>();
         Set<String> groups = Arrays.stream(detectGroups.split(",")).collect(Collectors.toSet());
-        CompactWriterRefresher writerRefresher =
-                CompactWriterRefresher.create(
+        CompactRefresher writerRefresher =
+                CompactRefresher.create(
                         true,
                         table1,
-                        new WriterRefresherTest.TestWriteRefresher(groups, refreshedOptions, null));
+                        new ConfigRefresherTest.TestWriteRefresher(groups, refreshedOptions, null));
         writerRefresher.tryRefresh(Collections.emptyList());
         assertThat(refreshedOptions).isEqualTo(configGroups(groups, table2.coreOptions()));
     }

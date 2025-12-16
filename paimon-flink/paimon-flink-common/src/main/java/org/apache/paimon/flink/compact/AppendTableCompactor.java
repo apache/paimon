@@ -25,7 +25,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.Committable;
-import org.apache.paimon.flink.sink.CompactWriterRefresher;
+import org.apache.paimon.flink.sink.CompactRefresher;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
@@ -66,7 +66,7 @@ public class AppendTableCompactor {
     @Nullable private final CompactionMetrics compactionMetrics;
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
-    @Nullable protected final CompactWriterRefresher compactWriteRefresher;
+    @Nullable protected final CompactRefresher compactRefresher;
 
     public AppendTableCompactor(
             FileStoreTable table,
@@ -92,8 +92,7 @@ public class AppendTableCompactor {
                         ? null
                         // partition and bucket fields are no use.
                         : this.compactionMetrics.createReporter(BinaryRow.EMPTY_ROW, 0);
-        this.compactWriteRefresher =
-                CompactWriterRefresher.create(isStreaming, table, this::replace);
+        this.compactRefresher = CompactRefresher.create(isStreaming, table, this::replace);
     }
 
     public void processElement(AppendCompactTask task) throws Exception {
@@ -225,8 +224,8 @@ public class AppendTableCompactor {
         if (commitUser == null) {
             return;
         }
-        if (compactWriteRefresher != null && (!files.isEmpty())) {
-            compactWriteRefresher.tryRefresh(files);
+        if (compactRefresher != null && (!files.isEmpty())) {
+            compactRefresher.tryRefresh(files);
         }
     }
 }

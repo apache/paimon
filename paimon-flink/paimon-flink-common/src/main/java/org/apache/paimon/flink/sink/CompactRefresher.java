@@ -31,30 +31,30 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.sink.WriterRefresher.configGroups;
+import static org.apache.paimon.flink.sink.ConfigRefresher.configGroups;
 
-/** Writer refresher for dedicated compaction. */
-public class CompactWriterRefresher {
+/** refresh write when table schema changed. This is for dedicated compaction. */
+public class CompactRefresher {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CompactWriterRefresher.class);
+    private static final Logger LOG = LoggerFactory.getLogger(CompactRefresher.class);
 
     private FileStoreTable table;
-    private final WriterRefresher.Refresher refresher;
-    private final WriterRefresher writerRefresher;
+    private final WriteRefresher refresher;
+    private final ConfigRefresher configRefresher;
 
-    private CompactWriterRefresher(FileStoreTable table, WriterRefresher.Refresher refresher) {
+    private CompactRefresher(FileStoreTable table, WriteRefresher refresher) {
         this.table = table;
         this.refresher = refresher;
-        this.writerRefresher = WriterRefresher.create(true, table, refresher);
+        this.configRefresher = ConfigRefresher.create(true, table, refresher);
     }
 
     @Nullable
-    public static CompactWriterRefresher create(
-            boolean isStreaming, FileStoreTable table, WriterRefresher.Refresher refresher) {
+    public static CompactRefresher create(
+            boolean isStreaming, FileStoreTable table, WriteRefresher refresher) {
         if (!isStreaming) {
             return null;
         }
-        return new CompactWriterRefresher(table, refresher);
+        return new CompactRefresher(table, refresher);
     }
 
     /**
@@ -79,13 +79,13 @@ public class CompactWriterRefresher {
                 table = table.copyWithLatestSchema();
 
                 // refresh configs allowed to be updated by the way
-                if (writerRefresher != null) {
+                if (configRefresher != null) {
                     table =
                             table.copy(
                                     configGroups(
-                                            writerRefresher.configGroups(),
+                                            configRefresher.configGroups(),
                                             CoreOptions.fromMap(latest.options())));
-                    writerRefresher.updateTable(table);
+                    configRefresher.updateTable(table);
                 }
 
                 refresher.refresh(table);
@@ -98,8 +98,8 @@ public class CompactWriterRefresher {
 
         } else {
             // try refresh for configs
-            if (writerRefresher != null) {
-                writerRefresher.tryRefresh();
+            if (configRefresher != null) {
+                configRefresher.tryRefresh();
             }
         }
     }
