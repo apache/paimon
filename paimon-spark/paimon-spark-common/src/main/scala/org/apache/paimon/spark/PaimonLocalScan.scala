@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -30,15 +30,15 @@ case class PaimonLocalScan(
     rows: Array[InternalRow],
     readSchema: StructType,
     table: Table,
-    filters: Array[Predicate])
+    pushedPartitionFilters: Seq[PartitionPredicate])
   extends LocalScan {
 
   override def description(): String = {
-    val pushedFiltersStr = if (filters.nonEmpty) {
-      ", PushedFilters: [" + filters.mkString(",") + "]"
+    val pushedPartitionFiltersStr = if (pushedPartitionFilters.nonEmpty) {
+      ", PartitionFilters: [" + pushedPartitionFilters.mkString(",") + "]"
     } else {
       ""
     }
-    s"PaimonLocalScan: [${table.name}]" + pushedFiltersStr
+    s"PaimonLocalScan: [${table.name}]" + pushedPartitionFiltersStr
   }
 }

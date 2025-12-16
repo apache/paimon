@@ -297,21 +297,6 @@ public class PredicateBuilder {
         return result;
     }
 
-    public static Pair<List<Predicate>, List<Predicate>> splitAndByPartition(
-            Predicate predicate, int[] fieldIdxToPartitionIdx) {
-        List<Predicate> partitionFilters = new ArrayList<>();
-        List<Predicate> nonPartitionFilters = new ArrayList<>();
-        for (Predicate p : PredicateBuilder.splitAnd(predicate)) {
-            Optional<Predicate> mapped = transformFieldMapping(p, fieldIdxToPartitionIdx);
-            if (mapped.isPresent()) {
-                partitionFilters.add(mapped.get());
-            } else {
-                nonPartitionFilters.add(p);
-            }
-        }
-        return Pair.of(partitionFilters, nonPartitionFilters);
-    }
-
     public static List<Predicate> splitOr(@Nullable Predicate predicate) {
         if (predicate == null) {
             return Collections.emptyList();

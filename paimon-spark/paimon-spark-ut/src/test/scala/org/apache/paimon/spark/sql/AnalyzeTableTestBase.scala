@@ -439,21 +439,17 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     // paimon will reserve partition filter and not return it to spark, we need to ensure stats are filtered correctly.
     // partition push down hit
     var sql = "SELECT * FROM T WHERE pt < 1"
-    Assertions.assertEquals(
-      if (gteqSpark3_4) 0L else 4L,
-      getScanStatistic(sql).rowCount.get.longValue)
+    Assertions.assertEquals(0L, getScanStatistic(sql).rowCount.get.longValue)
     checkAnswer(spark.sql(sql), Nil)
 
     // partition push down hit and select without it
     sql = "SELECT id FROM T WHERE pt < 1"
-    Assertions.assertEquals(
-      if (gteqSpark3_4) 0L else 4L,
-      getScanStatistic(sql).rowCount.get.longValue)
+    Assertions.assertEquals(0L, getScanStatistic(sql).rowCount.get.longValue)
     checkAnswer(spark.sql(sql), Nil)
 
     // partition push down not hit
     sql = "SELECT * FROM T WHERE id < 1"
-    Assertions.assertEquals(4L, getScanStatistic(sql).rowCount.get.longValue)
+    Assertions.assertEquals(0L, getScanStatistic(sql).rowCount.get.longValue)
     checkAnswer(spark.sql(sql), Nil)
   }
 
@@ -470,12 +466,17 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
           sql("INSERT INTO T VALUES (1, 'a', '1'), (2, 'b', '1'), (3, 'c', '2'), (4, 'd', '3')")
           sql(s"ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS")
 
-          // For col type such as char, varchar that don't have min and max, filter estimation on stats has no effect.
           var sqlText = "SELECT * FROM T WHERE pt < '1'"
-          Assertions.assertEquals(4L, getScanStatistic(sqlText).rowCount.get.longValue)
+          Assertions.assertEquals(
+            if (gteqSpark3_4 && partitionType == "char(10)") 4L else 0L,
+            getScanStatistic(sqlText).rowCount.get.longValue)
+          checkAnswer(sql(sqlText), Nil)
 
           sqlText = "SELECT id FROM T WHERE pt < '1'"
-          Assertions.assertEquals(4L, getScanStatistic(sqlText).rowCount.get.longValue)
+          Assertions.assertEquals(
+            if (gteqSpark3_4 && partitionType == "char(10)") 4L else 0L,
+            getScanStatistic(sqlText).rowCount.get.longValue)
+          checkAnswer(sql(sqlText), Nil)
         }
       })
   }
@@ -525,7 +526,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     spark.sql("ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS")
     val withColStat = checkStatistics()
 
-    assert(withColStat == noColStat)
+    assert(withColStat != noColStat)
   }
 
   test("Query a non-existent catalog") {
@@ -553,5 +554,4 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
       .get
     relation.computeStats()
   }
-
 }
