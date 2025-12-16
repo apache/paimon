@@ -22,9 +22,3 @@ import org.apache.paimon.table.Table
 
 /** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
 case class SparkTable(override val table: Table) extends PaimonSparkTableBase(table) {}
-
-case class SparkIcebergTable(table: Table) extends BaseTable
-
-case class SparkLanceTable(table: Table) extends BaseTable
-
-case class SparkObjectTable(table: Table) extends BaseTable

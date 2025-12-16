@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{Predicate, TopN}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
 import org.apache.paimon.table.{FileStoreTable, InnerTable}
@@ -36,18 +37,12 @@ import scala.collection.mutable
 case class PaimonCopyOnWriteScan(
     table: InnerTable,
     requiredSchema: StructType,
-    filters: Seq[Predicate],
-    reservedFilters: Seq[Filter],
-    override val pushDownLimit: Option[Int],
-    override val pushDownTopN: Option[TopN],
+    pushedPartitionFilters: Seq[PartitionPredicate],
+    pushedDataFilters: Seq[Predicate],
+    override val pushedLimit: Option[Int],
+    override val pushedTopN: Option[TopN],
     bucketedScanDisabled: Boolean = false)
-  extends PaimonScanCommon(
-    table,
-    requiredSchema,
-    filters,
-    reservedFilters,
-    pushDownLimit,
-    pushDownTopN)
+  extends PaimonScanCommon(table, requiredSchema, bucketedScanDisabled)
   with SupportsRuntimeFiltering {
 
   var filteredLocations: mutable.Set[String] = mutable.Set[String]()
@@ -84,7 +79,7 @@ case class PaimonCopyOnWriteScan(
           snapshotReader.dropStats()
         }
 
-        filters.foreach(snapshotReader.withFilter)
+        pushedDataFilters.foreach(snapshotReader.withFilter)
 
         snapshotReader.withDataFileNameFilter(fileName => filteredFileNames.contains(fileName))
 

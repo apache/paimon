@@ -70,10 +70,10 @@ class PaimonSparkCopyOnWriteOperation(table: Table, info: RowLevelOperationInfo)
             val scan = PaimonCopyOnWriteScan(
               t,
               requiredSchema,
-              pushedPaimonPredicates,
-              reservedFilters,
-              pushDownLimit,
-              pushDownTopN)
+              pushedPartitionFilters,
+              pushedDataFilters,
+              pushedLimit,
+              pushedTopN)
             PaimonSparkCopyOnWriteOperation.this.copyOnWriteScan = Option(scan)
             scan
           }
