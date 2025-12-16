@@ -66,9 +66,9 @@ public class BitmapGlobalIndex implements GlobalIndexer {
                 reader, r -> toGlobalResult(indexMeta.rangeEnd(), r), input);
     }
 
-    private GlobalIndexResult toGlobalResult(long rowCount, FileIndexResult result) {
+    private GlobalIndexResult toGlobalResult(long rangeEnd, FileIndexResult result) {
         if (FileIndexResult.REMAIN == result) {
-            return GlobalIndexResult.fromRange(new Range(0L, rowCount - 1));
+            return GlobalIndexResult.fromRange(new Range(0L, rangeEnd));
         } else if (FileIndexResult.SKIP == result) {
             return GlobalIndexResult.createEmpty();
         }
