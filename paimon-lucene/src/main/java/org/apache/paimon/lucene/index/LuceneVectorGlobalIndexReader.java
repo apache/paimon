@@ -21,11 +21,8 @@ package org.apache.paimon.lucene.index;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.AbstractGlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
-import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
-import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.lucene.document.Document;
