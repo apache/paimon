@@ -67,13 +67,8 @@ class PaimonSparkCopyOnWriteOperation(table: Table, info: RowLevelOperationInfo)
       case t: InnerTable =>
         new PaimonScanBuilder(t.copy(options.asCaseSensitiveMap).asInstanceOf[InnerTable]) {
           override def build(): Scan = {
-            val scan = PaimonCopyOnWriteScan(
-              t,
-              requiredSchema,
-              pushedPartitionFilters,
-              pushedDataFilters,
-              pushedLimit,
-              pushedTopN)
+            val scan =
+              PaimonCopyOnWriteScan(t, requiredSchema, pushedPartitionFilters, pushedDataFilters)
             PaimonSparkCopyOnWriteOperation.this.copyOnWriteScan = Option(scan)
             scan
           }

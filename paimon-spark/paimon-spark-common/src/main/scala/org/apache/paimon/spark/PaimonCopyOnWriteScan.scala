@@ -39,8 +39,6 @@ case class PaimonCopyOnWriteScan(
     requiredSchema: StructType,
     pushedPartitionFilters: Seq[PartitionPredicate],
     pushedDataFilters: Seq[Predicate],
-    override val pushedLimit: Option[Int],
-    override val pushedTopN: Option[TopN],
     bucketedScanDisabled: Boolean = false)
   extends PaimonScanCommon(table, requiredSchema, bucketedScanDisabled)
   with SupportsRuntimeFiltering {
@@ -78,6 +76,8 @@ case class PaimonCopyOnWriteScan(
         if (fileStoreTable.coreOptions().manifestDeleteFileDropStats()) {
           snapshotReader.dropStats()
         }
+
+        pushedPartitionFilters.foreach(snapshotReader.withPartitionFilter)
 
         pushedDataFilters.foreach(snapshotReader.withFilter)
 
