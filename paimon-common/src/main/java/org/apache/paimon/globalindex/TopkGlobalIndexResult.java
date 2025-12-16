@@ -32,6 +32,23 @@ public interface TopkGlobalIndexResult extends GlobalIndexResult {
         throw new UnsupportedOperationException("Please realize this by specified global index");
     }
 
+    default TopkGlobalIndexResult offset(long offset) {
+        if (offset == 0) {
+            return this;
+        }
+        RoaringNavigableMap64 roaringNavigableMap64 = results();
+        final RoaringNavigableMap64 roaringNavigableMap64Offset = new RoaringNavigableMap64();
+        final ScoreGetter thisScoreGetter = scoreGetter();
+
+        for (long rowId : roaringNavigableMap64) {
+            roaringNavigableMap64Offset.add(rowId + offset);
+        }
+
+        return create(
+                () -> roaringNavigableMap64Offset,
+                (ScoreGetter) rowId -> thisScoreGetter.score(rowId - offset));
+    }
+
     @Override
     default GlobalIndexResult or(GlobalIndexResult other) {
         if (!(other instanceof TopkGlobalIndexResult)) {

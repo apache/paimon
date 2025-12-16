@@ -34,7 +34,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringBitmap32;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -179,11 +178,11 @@ public class BitmapGlobalIndexTest {
                 reader.visitEqual(
                         fieldRef, BinaryString.fromString(prefix + (approxCardinality / 2)));
         System.out.println("read time: " + (System.currentTimeMillis() - time2));
-        assert result.results().equals(middleBm.toNavigable64(0));
+        assert result.results().equals(middleBm.toNavigable64());
         long time3 = System.currentTimeMillis();
         GlobalIndexResult resultNull = reader.visitIsNull(fieldRef);
         System.out.println("read null bitmap time: " + (System.currentTimeMillis() - time3));
-        assert resultNull.results().equals(nullBm.toNavigable64(0));
+        assert resultNull.results().equals(nullBm.toNavigable64());
     }
 
     private GlobalIndexReader createTestReaderOnWriter(
@@ -217,12 +216,12 @@ public class BitmapGlobalIndexTest {
         String fileName = globalIndexWriter.finish().get(0).fileName();
         Path path = new Path(tempDir.toString(), fileName);
         long fileSize = fileIO.getFileSize(path);
-        Range range = new Range(0, Long.MAX_VALUE);
 
         GlobalIndexFileReader fileReader =
                 prefix -> fileIO.newInputStream(new Path(tempDir.toString(), prefix));
 
-        GlobalIndexIOMeta globalIndexMeta = new GlobalIndexIOMeta(fileName, fileSize, range, null);
+        GlobalIndexIOMeta globalIndexMeta =
+                new GlobalIndexIOMeta(fileName, fileSize, Long.MAX_VALUE, null);
 
         return bitmapGlobalIndex.createReader(
                 fileReader, Collections.singletonList(globalIndexMeta));
