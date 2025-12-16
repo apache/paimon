@@ -1040,6 +1040,18 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The delay duration of stream read when scan incremental snapshots.");
 
+    public static final ConfigOption<Boolean> SCAN_IGNORE_CORRUPT_FILE =
+            key("scan.ignore-corrupt-files")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Ignore corrupt files while scanning.");
+
+    public static final ConfigOption<Boolean> SCAN_IGNORE_LOST_FILE =
+            key("scan.ignore-lost-files")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Ignore lost files while scanning.");
+
     public static final ConfigOption<Boolean> AUTO_CREATE =
             key("auto-create")
                     .booleanType()
@@ -2941,6 +2953,14 @@ public class CoreOptions implements Serializable {
 
     public String scanVersion() {
         return options.get(SCAN_VERSION);
+    }
+
+    public boolean scanIgnoreCorruptFile() {
+        return options.get(SCAN_IGNORE_CORRUPT_FILE);
+    }
+
+    public boolean scanIgnoreLostFile() {
+        return options.get(SCAN_IGNORE_LOST_FILE);
     }
 
     public Pair<String, String> incrementalBetween() {

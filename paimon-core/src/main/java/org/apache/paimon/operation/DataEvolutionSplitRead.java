@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.ForceSingleBatchReader;
 import org.apache.paimon.data.BinaryRow;
@@ -88,6 +89,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final Function<Long, TableSchema> schemaFetcher;
+    private final CoreOptions coreOptions;
 
     protected RowType readRowType;
 
@@ -96,14 +98,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             SchemaManager schemaManager,
             TableSchema schema,
             RowType rowType,
-            FileFormatDiscover formatDiscover,
+            CoreOptions coreOptions,
             FileStorePathFactory pathFactory) {
         this.fileIO = fileIO;
         final Map<Long, TableSchema> cache = new HashMap<>();
         this.schemaFetcher =
                 schemaId -> cache.computeIfAbsent(schemaId, key -> schemaManager.schema(schemaId));
         this.schema = schema;
-        this.formatDiscover = formatDiscover;
+        this.formatDiscover = FileFormatDiscover.of(coreOptions);
+        this.coreOptions = coreOptions;
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
         this.readRowType = rowType;
@@ -371,6 +374,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     readRowType,
                                     formatReaderMapping.getReaderFactory(),
                                     formatReaderContext,
+                                    coreOptions.scanIgnoreCorruptFile(),
+                                    coreOptions.scanIgnoreLostFile(),
                                     formatReaderMapping.getIndexMapping(),
                                     formatReaderMapping.getCastMapping(),
                                     PartitionUtils.create(
@@ -398,6 +403,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 readRowType,
                 formatReaderMapping.getReaderFactory(),
                 formatReaderContext,
+                coreOptions.scanIgnoreCorruptFile(),
+                coreOptions.scanIgnoreLostFile(),
                 formatReaderMapping.getIndexMapping(),
                 formatReaderMapping.getCastMapping(),
                 PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
