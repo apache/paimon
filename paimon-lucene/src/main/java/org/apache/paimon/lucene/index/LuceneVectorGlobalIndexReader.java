@@ -19,10 +19,12 @@
 package org.apache.paimon.lucene.index;
 
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.globalindex.AbstractGlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.lucene.document.Document;
@@ -48,16 +50,15 @@ import java.util.Set;
  * <p>This implementation uses Lucene's native KnnFloatVectorQuery with HNSW graph for efficient
  * approximate nearest neighbor search.
  */
-public class LuceneVectorGlobalIndexReader extends AbstractGlobalIndexReader {
+public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
 
+    private final long rangeEnd;
     private final List<IndexSearcher> searchers;
     private final List<LuceneIndexMMapDirectory> directories;
-    private final List<GlobalIndexIOMeta> ioMetas;
 
     public LuceneVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> ioMetas) throws IOException {
-        super(ioMetas.get(0).rangeEnd());
-        this.ioMetas = ioMetas;
+        this.rangeEnd = ioMetas.get(0).rangeEnd();
         this.searchers = new ArrayList<>();
         this.directories = new ArrayList<>();
         loadIndices(fileReader, ioMetas);
@@ -202,5 +203,77 @@ public class LuceneVectorGlobalIndexReader extends AbstractGlobalIndexReader {
                 }
             }
         }
+    }
+
+    // =================== unsupported =====================
+
+    @Override
+    public GlobalIndexResult visitIsNotNull(FieldRef fieldRef) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitIsNull(FieldRef fieldRef) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitEndsWith(FieldRef fieldRef, Object literal) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitContains(FieldRef fieldRef, Object literal) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitLike(FieldRef fieldRef, Object literal) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitNotEqual(FieldRef fieldRef, Object literal) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitEqual(FieldRef fieldRef, Object literal) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
+    }
+
+    @Override
+    public GlobalIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 }

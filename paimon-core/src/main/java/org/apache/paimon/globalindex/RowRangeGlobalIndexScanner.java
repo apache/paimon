@@ -131,13 +131,13 @@ public class RowRangeGlobalIndexScanner implements Closeable {
                                     .map(this::toGlobalMeta)
                                     .collect(Collectors.toList());
                     GlobalIndexReader innerReader =
-                            new OffsetReader(
+                            new OffsetGlobalIndexReader(
                                     globalIndexer.createReader(indexFileReadWrite, globalMetas),
                                     range.from);
                     unionReader.add(innerReader);
                 }
 
-                readers.add(new GlobalIndexUnionReader(unionReader));
+                readers.add(new UnionGlobalIndexReader(unionReader));
             }
         } catch (IOException e) {
             throw new RuntimeException("Failed to create global index reader", e);
