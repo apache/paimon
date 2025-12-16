@@ -34,7 +34,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringBitmap32;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -217,7 +216,6 @@ public class BitmapGlobalIndexTest {
         String fileName = globalIndexWriter.finish().get(0).fileName();
         Path path = new Path(tempDir.toString(), fileName);
         long fileSize = fileIO.getFileSize(path);
-        Range range = new Range(0, Long.MAX_VALUE);
 
         GlobalIndexFileReader fileReader =
                 prefix -> fileIO.newInputStream(new Path(tempDir.toString(), prefix));
