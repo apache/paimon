@@ -63,14 +63,6 @@ public class CompactWriterRefresher {
      * loss.
      */
     public void tryRefresh(List<DataFileMeta> files) {
-        if (!files.isEmpty()) {
-            tryRefreshForDataFiles(files);
-        } else {
-            tryRefreshForConfig();
-        }
-    }
-
-    private void tryRefreshForDataFiles(List<DataFileMeta> files) {
         long fileSchemaId =
                 files.stream().mapToLong(DataFileMeta::schemaId).max().orElse(table.schema().id());
         if (fileSchemaId > table.schema().id()) {
@@ -80,37 +72,35 @@ public class CompactWriterRefresher {
             }
             TableSchema latest = latestSchema.get();
 
-            if (latest.id() > table.schema().id()) {
-                try {
-                    // here we cannot use table.copy(lastestSchema), because table used for
-                    // dedicated compaction has some dynamic options, we should not overwrite them.
-                    // we just copy the lastest fields and options allowed to be refreshed.
-                    table = table.copyWithLatestSchema();
+            try {
+                // here we cannot use table.copy(lastestSchema), because table used for
+                // dedicated compaction has some dynamic options, we should not overwrite them.
+                // we just copy the lastest fields and options allowed to be refreshed.
+                table = table.copyWithLatestSchema();
 
-                    // refresh configs allowed to be updated by the way
-                    if (writerRefresher != null) {
-                        table =
-                                table.copy(
-                                        configGroups(
-                                                writerRefresher.configGroups(),
-                                                CoreOptions.fromMap(latest.options())));
-                        writerRefresher.updateTable(table);
-                    }
-
-                    refresher.refresh(table);
-                    LOG.info(
-                            "write has been refreshed due to schema in data files changed. new schema id:{}.",
-                            table.schema().id());
-                } catch (Exception e) {
-                    throw new RuntimeException("update write failed.", e);
+                // refresh configs allowed to be updated by the way
+                if (writerRefresher != null) {
+                    table =
+                            table.copy(
+                                    configGroups(
+                                            writerRefresher.configGroups(),
+                                            CoreOptions.fromMap(latest.options())));
+                    writerRefresher.updateTable(table);
                 }
-            }
-        }
-    }
 
-    private void tryRefreshForConfig() {
-        if (writerRefresher != null) {
-            writerRefresher.tryRefresh();
+                refresher.refresh(table);
+                LOG.info(
+                        "write has been refreshed due to schema in data files changed. new schema id:{}.",
+                        table.schema().id());
+            } catch (Exception e) {
+                throw new RuntimeException("update write failed.", e);
+            }
+
+        } else {
+            // try refresh for configs
+            if (writerRefresher != null) {
+                writerRefresher.tryRefresh();
+            }
         }
     }
 }

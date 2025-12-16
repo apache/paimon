@@ -43,7 +43,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -176,10 +175,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
         }
         waitToCompact.clear();
 
-        List<Committable> committables = write.prepareCommit(waitCompaction, checkpointId);
-
-        tryRefreshWrite(Collections.emptyList());
-        return committables;
+        return write.prepareCommit(waitCompaction, checkpointId);
     }
 
     @Override

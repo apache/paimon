@@ -225,7 +225,7 @@ public class AppendTableCompactor {
         if (commitUser == null) {
             return;
         }
-        if (compactWriteRefresher != null) {
+        if (compactWriteRefresher != null && (!files.isEmpty())) {
             compactWriteRefresher.tryRefresh(files);
         }
     }
