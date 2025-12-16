@@ -108,6 +108,20 @@ public interface PartitionPredicate extends Serializable {
                 new RowDataToObjectArrayConverter(partitionType), partitions);
     }
 
+    /** Creates {@link PartitionPredicate} that combines multiple predicates using logical AND. */
+    @Nullable
+    static PartitionPredicate and(List<PartitionPredicate> predicates) {
+        if (predicates.isEmpty()) {
+            return null;
+        }
+
+        if (predicates.size() == 1) {
+            return predicates.get(0);
+        }
+
+        return new AndPartitionPredicate(predicates);
+    }
+
     PartitionPredicate ALWAYS_FALSE =
             new PartitionPredicate() {
                 @Override
@@ -303,9 +317,9 @@ public interface PartitionPredicate extends Serializable {
 
         private final List<PartitionPredicate> predicates;
 
-        public AndPartitionPredicate(List<PartitionPredicate> predicates) {
+        private AndPartitionPredicate(List<PartitionPredicate> predicates) {
             checkArgument(!predicates.isEmpty());
-            this.predicates = Collections.unmodifiableList(predicates);
+            this.predicates = Collections.unmodifiableList(new ArrayList<>(predicates));
         }
 
         @Override

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.partition.PartitionPredicate.AndPartitionPredicate
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggregation
@@ -109,8 +109,7 @@ class PaimonScanBuilder(val table: InnerTable)
 
     val readBuilder = table.newReadBuilder
     if (pushedPartitionFilters.nonEmpty) {
-      readBuilder.withPartitionFilter(
-        new AndPartitionPredicate(pushedPartitionFilters.toList.asJava))
+      readBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.toList.asJava))
     }
     assert(pushedDataFilters.isEmpty)
 
