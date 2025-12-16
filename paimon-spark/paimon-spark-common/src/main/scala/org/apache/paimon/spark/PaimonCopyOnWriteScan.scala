@@ -24,8 +24,10 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
 import org.apache.paimon.table.{FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
 
+import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions.{Expressions, NamedReference}
-import org.apache.spark.sql.connector.read.{Batch, SupportsRuntimeFiltering}
+import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
+import org.apache.spark.sql.connector.read.{Batch, SupportsRuntimeV2Filtering}
 import org.apache.spark.sql.sources.{Filter, In}
 import org.apache.spark.sql.types.StructType
 
@@ -41,7 +43,7 @@ case class PaimonCopyOnWriteScan(
     pushedDataFilters: Seq[Predicate],
     bucketedScanDisabled: Boolean = false)
   extends PaimonScanCommon(table, requiredSchema, bucketedScanDisabled)
-  with SupportsRuntimeFiltering {
+  with SupportsRuntimeV2Filtering {
 
   var filteredLocations: mutable.Set[String] = mutable.Set[String]()
 
@@ -57,7 +59,8 @@ case class PaimonCopyOnWriteScan(
     Array(Expressions.column(FILE_PATH_COLUMN))
   }
 
-  override def filter(runtimefilters: Array[Filter]): Unit = {
+  override def filter(predicates: Array[SparkPredicate]): Unit = {
+    val runtimefilters: Array[Filter] = predicates.flatMap(PaimonUtils.filterV2ToV1)
     for (filter <- runtimefilters) {
       filter match {
         case in: In if in.attribute.equalsIgnoreCase(FILE_PATH_COLUMN) =>
