@@ -31,6 +31,19 @@ public interface GlobalIndexResult {
     /** Returns the bitmap representing row ids. */
     RoaringNavigableMap64 results();
 
+    default GlobalIndexResult offset(long startOffset) {
+        if (startOffset == 0) {
+            return this;
+        }
+        RoaringNavigableMap64 roaringNavigableMap64 = results();
+        final RoaringNavigableMap64 roaringNavigableMap64Offset = new RoaringNavigableMap64();
+
+        for (long rowId : roaringNavigableMap64) {
+            roaringNavigableMap64Offset.add(rowId + startOffset);
+        }
+        return create(() -> roaringNavigableMap64Offset);
+    }
+
     /**
      * Returns the intersection of this result and the other result.
      *

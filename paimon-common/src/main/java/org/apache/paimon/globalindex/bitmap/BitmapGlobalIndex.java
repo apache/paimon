@@ -63,16 +63,16 @@ public class BitmapGlobalIndex implements GlobalIndexer {
         SeekableInputStream input = fileReader.getInputStream(indexMeta.fileName());
         FileIndexReader reader = index.createReader(input, 0, (int) indexMeta.fileSize());
         return new FileIndexReaderWrapper(
-                reader, r -> toGlobalResult(indexMeta.rowIdRange(), r), input);
+                reader, r -> toGlobalResult(indexMeta.rangeEnd(), r), input);
     }
 
-    private GlobalIndexResult toGlobalResult(Range range, FileIndexResult result) {
+    private GlobalIndexResult toGlobalResult(long rowCount, FileIndexResult result) {
         if (FileIndexResult.REMAIN == result) {
-            return GlobalIndexResult.fromRange(range);
+            return GlobalIndexResult.fromRange(new Range(0L, rowCount - 1));
         } else if (FileIndexResult.SKIP == result) {
             return GlobalIndexResult.createEmpty();
         }
         BitmapIndexResult bitmapResult = (BitmapIndexResult) result;
-        return GlobalIndexResult.create(() -> bitmapResult.get().toNavigable64(range.from));
+        return GlobalIndexResult.create(() -> bitmapResult.get().toNavigable64());
     }
 }

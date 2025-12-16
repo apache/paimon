@@ -179,11 +179,11 @@ public class BitmapGlobalIndexTest {
                 reader.visitEqual(
                         fieldRef, BinaryString.fromString(prefix + (approxCardinality / 2)));
         System.out.println("read time: " + (System.currentTimeMillis() - time2));
-        assert result.results().equals(middleBm.toNavigable64(0));
+        assert result.results().equals(middleBm.toNavigable64());
         long time3 = System.currentTimeMillis();
         GlobalIndexResult resultNull = reader.visitIsNull(fieldRef);
         System.out.println("read null bitmap time: " + (System.currentTimeMillis() - time3));
-        assert resultNull.results().equals(nullBm.toNavigable64(0));
+        assert resultNull.results().equals(nullBm.toNavigable64());
     }
 
     private GlobalIndexReader createTestReaderOnWriter(
@@ -222,7 +222,8 @@ public class BitmapGlobalIndexTest {
         GlobalIndexFileReader fileReader =
                 prefix -> fileIO.newInputStream(new Path(tempDir.toString(), prefix));
 
-        GlobalIndexIOMeta globalIndexMeta = new GlobalIndexIOMeta(fileName, fileSize, range, null);
+        GlobalIndexIOMeta globalIndexMeta =
+                new GlobalIndexIOMeta(fileName, fileSize, Long.MAX_VALUE, null);
 
         return bitmapGlobalIndex.createReader(
                 fileReader, Collections.singletonList(globalIndexMeta));

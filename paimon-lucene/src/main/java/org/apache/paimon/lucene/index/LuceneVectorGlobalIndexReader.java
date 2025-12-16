@@ -19,6 +19,7 @@
 package org.apache.paimon.lucene.index;
 
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.globalindex.AbstractGlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -50,7 +51,7 @@ import java.util.Set;
  * <p>This implementation uses Lucene's native KnnFloatVectorQuery with HNSW graph for efficient
  * approximate nearest neighbor search.
  */
-public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
+public class LuceneVectorGlobalIndexReader extends AbstractGlobalIndexReader {
 
     private final List<IndexSearcher> searchers;
     private final List<LuceneIndexMMapDirectory> directories;
@@ -58,6 +59,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
 
     public LuceneVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> ioMetas) throws IOException {
+        super(ioMetas.get(0).rangeEnd());
         this.ioMetas = ioMetas;
         this.searchers = new ArrayList<>();
         this.directories = new ArrayList<>();
@@ -203,85 +205,5 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
                 }
             }
         }
-    }
-
-    // Implementation of FunctionVisitor methods
-    @Override
-    public GlobalIndexResult visitIsNotNull(FieldRef fieldRef) {
-        Range range =
-                ioMetas.stream()
-                        .map(GlobalIndexIOMeta::rowIdRange)
-                        .reduce(Range::union)
-                        .orElse(null);
-        return GlobalIndexResult.fromRange(range);
-    }
-
-    @Override
-    public GlobalIndexResult visitIsNull(FieldRef fieldRef) {
-        throw new UnsupportedOperationException("Vector index does not support isNull predicate");
-    }
-
-    @Override
-    public GlobalIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support startsWith predicate");
-    }
-
-    @Override
-    public GlobalIndexResult visitEndsWith(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support endsWith predicate");
-    }
-
-    @Override
-    public GlobalIndexResult visitContains(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support contains predicate");
-    }
-
-    @Override
-    public GlobalIndexResult visitLike(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support like predicate");
-    }
-
-    @Override
-    public GlobalIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support lessThan predicate");
-    }
-
-    @Override
-    public GlobalIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support greaterOrEqual predicate");
-    }
-
-    @Override
-    public GlobalIndexResult visitNotEqual(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support notEqual predicate");
-    }
-
-    @Override
-    public GlobalIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support lessOrEqual predicate");
-    }
-
-    @Override
-    public GlobalIndexResult visitEqual(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support equal predicate");
-    }
-
-    @Override
-    public GlobalIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support greaterThan predicate");
-    }
-
-    @Override
-    public GlobalIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
-        throw new UnsupportedOperationException("Vector index does not support in predicate");
-    }
-
-    @Override
-    public GlobalIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        throw new UnsupportedOperationException("Vector index does not support notIn predicate");
     }
 }

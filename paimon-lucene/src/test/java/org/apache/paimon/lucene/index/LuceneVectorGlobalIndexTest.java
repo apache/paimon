@@ -118,7 +118,7 @@ public class LuceneVectorGlobalIndexTest {
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(metricIndexPath, result.fileName())),
-                            result.rowRange(),
+                            result.rowRange().to - result.rowRange().from + 1,
                             result.meta()));
 
             try (LuceneVectorGlobalIndexReader reader =
@@ -155,7 +155,7 @@ public class LuceneVectorGlobalIndexTest {
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(dimIndexPath, result.fileName())),
-                            result.rowRange(),
+                            result.rowRange().to - result.rowRange().from + 1,
                             result.meta()));
 
             try (LuceneVectorGlobalIndexReader reader =
@@ -211,7 +211,7 @@ public class LuceneVectorGlobalIndexTest {
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
-                            result.rowRange(),
+                            result.rowRange().to - result.rowRange().from + 1,
                             result.meta()));
         }
 
@@ -259,7 +259,7 @@ public class LuceneVectorGlobalIndexTest {
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
-                            result.rowRange(),
+                            result.rowRange().to - result.rowRange().from + 1,
                             result.meta()));
         }
 
