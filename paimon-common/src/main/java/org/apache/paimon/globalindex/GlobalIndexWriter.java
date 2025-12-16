@@ -29,6 +29,10 @@ public interface GlobalIndexWriter {
 
     void write(@Nullable Object key);
 
+    default void write(@Nullable Object key, long rowId) {
+        write(key);
+    }
+
     List<ResultEntry> finish();
 
     /** Write result meta. */

@@ -29,6 +29,7 @@ import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactoryUtils;
+import org.apache.paimon.spark.globalindex.GlobalIndexTopoBuilder;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -180,15 +181,30 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         Map<BinaryRow, List<IndexedSplit>> splits =
                                 split(table, partitionPredicate, rowsPerShard);
 
+                        List<CommitMessage> indexResults;
                         // Step 2: build index by certain index system
-                        List<CommitMessage> indexResults =
-                                buildIndex(
-                                        table,
-                                        splits,
-                                        indexType,
-                                        readRowType,
-                                        indexField,
-                                        userOptions);
+                        GlobalIndexTopoBuilder topoBuildr =
+                                globalIndexBuilderFactory.createTopoBulder();
+                        if (topoBuildr != null) {
+                            indexResults =
+                                    topoBuildr.buildIndex(
+                                            new JavaSparkContext(spark().sparkContext()),
+                                            table,
+                                            splits,
+                                            indexType,
+                                            readRowType,
+                                            indexField,
+                                            userOptions);
+                        } else {
+                            indexResults =
+                                    buildIndex(
+                                            table,
+                                            splits,
+                                            indexType,
+                                            readRowType,
+                                            indexField,
+                                            userOptions);
+                        }
 
                         // Step 3: commit index meta to a new snapshot
                         commit(table, indexResults);
