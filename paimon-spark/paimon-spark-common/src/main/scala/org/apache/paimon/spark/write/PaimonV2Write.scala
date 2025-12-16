@@ -159,7 +159,7 @@ private case class PaimonBatchWrite(
     // todo: find a more suitable way to get metrics.
     val commitMetrics = metricRegistry.buildSparkCommitMetrics()
     val executionId = spark.sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
-    val executionMetrics = Compatibility.getExecutionMetrics(spark, executionId.toLong)
+    val executionMetrics = Compatibility.getExecutionMetrics(spark, executionId.toLong).distinct
     val metricUpdates = executionMetrics.flatMap {
       m =>
         commitMetrics.find(x => m.metricType.toLowerCase.contains(x.name.toLowerCase)) match {
