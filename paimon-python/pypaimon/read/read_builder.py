@@ -18,7 +18,6 @@
 
 from typing import List, Optional
 
-from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read.table_read import TableRead
@@ -73,7 +72,7 @@ class ReadBuilder:
         if not self._projection:
             return table_fields
         else:
-            if self.table.options.get(CoreOptions.ROW_TRACKING_ENABLED, 'false').lower() == 'true':
+            if self.table.options.row_tracking_enabled():
                 table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
             field_map = {field.name: field for field in table_fields}
             return [field_map[name] for name in self._projection if name in field_map]

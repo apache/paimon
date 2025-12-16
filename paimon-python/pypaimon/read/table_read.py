@@ -176,7 +176,7 @@ class TableRead:
                 predicate=self.predicate,
                 read_type=self.read_type,
                 split=split,
-                row_tracking_enabled=self.table.options.get(CoreOptions.ROW_TRACKING_ENABLED, 'false').lower() == 'true'
+                row_tracking_enabled=self.table.options.row_tracking_enabled()
             )
 
     @staticmethod
