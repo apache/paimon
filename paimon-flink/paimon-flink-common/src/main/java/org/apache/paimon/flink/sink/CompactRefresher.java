@@ -40,7 +40,7 @@ public class CompactRefresher {
 
     private FileStoreTable table;
     private final WriteRefresher refresher;
-    private final ConfigRefresher configRefresher;
+    private final @Nullable ConfigRefresher configRefresher;
 
     private CompactRefresher(FileStoreTable table, WriteRefresher refresher) {
         this.table = table;
