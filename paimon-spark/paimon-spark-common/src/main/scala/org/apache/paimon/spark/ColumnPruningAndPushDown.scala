@@ -20,6 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.partition.PartitionPredicate.AndPartitionPredicate
 import org.apache.paimon.predicate.{Predicate, TopN}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
@@ -92,9 +93,7 @@ trait ColumnPruningAndPushDown extends Scan with Logging {
   lazy val readBuilder: ReadBuilder = {
     val _readBuilder = table.newReadBuilder().withReadType(readTableRowType)
     if (pushedPartitionFilters.nonEmpty) {
-      // todo: remove this, when impl withPartitionFilter(List<PartitionPredicate> partitionPredicate)
-      assert(pushedPartitionFilters.size == 1)
-      _readBuilder.withPartitionFilter(pushedPartitionFilters.head)
+      _readBuilder.withPartitionFilter(new AndPartitionPredicate(pushedPartitionFilters.asJava))
     }
     if (pushedDataFilters.nonEmpty) {
       _readBuilder.withFilter(pushedDataFilters.asJava)

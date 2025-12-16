@@ -39,6 +39,7 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -292,6 +293,65 @@ public interface PartitionPredicate extends Serializable {
         @Override
         public int hashCode() {
             return Objects.hash(partitions, fieldNum, Arrays.hashCode(min), Arrays.hashCode(max));
+        }
+    }
+
+    /** AND-combines multiple partition predicates. */
+    class AndPartitionPredicate implements PartitionPredicate {
+
+        private static final long serialVersionUID = 1L;
+
+        private final List<PartitionPredicate> predicates;
+
+        public AndPartitionPredicate(List<PartitionPredicate> predicates) {
+            checkArgument(!predicates.isEmpty());
+            this.predicates = Collections.unmodifiableList(predicates);
+        }
+
+        @Override
+        public boolean test(BinaryRow partition) {
+            for (PartitionPredicate predicate : predicates) {
+                if (!predicate.test(partition)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        @Override
+        public boolean test(
+                long rowCount,
+                InternalRow minValues,
+                InternalRow maxValues,
+                InternalArray nullCounts) {
+            for (PartitionPredicate predicate : predicates) {
+                if (!predicate.test(rowCount, minValues, maxValues, nullCounts)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        @Override
+        public String toString() {
+            if (predicates.size() == 1) {
+                return predicates.get(0).toString();
+            }
+            return "AND" + "(" + predicates + ")";
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            AndPartitionPredicate that = (AndPartitionPredicate) o;
+            return Objects.equals(predicates, that.predicates);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(predicates);
         }
     }
 
