@@ -296,7 +296,7 @@ public interface PartitionPredicate extends Serializable {
         }
     }
 
-    /** AND-combines multiple partition predicates. */
+    /** AND-combines multiple {@link PartitionPredicate}s. */
     class AndPartitionPredicate implements PartitionPredicate {
 
         private static final long serialVersionUID = 1L;
