@@ -27,8 +27,7 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.TopK;
-import org.apache.paimon.predicate.TopKRowIdFilter;
+import org.apache.paimon.predicate.TopKFunction;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
@@ -128,7 +127,7 @@ public class LuceneVectorGlobalIndexTest {
             try (LuceneVectorGlobalIndexReader reader =
                     new LuceneVectorGlobalIndexReader(
                             fileReader, metas, indexOptions, vectorType)) {
-                TopK topK = new TopK(testVectors.get(0), metric, 3);
+                TopKFunction.TopK topK = new TopKFunction.TopK(testVectors.get(0), metric, 3);
                 GlobalIndexResult searchResult = reader.visitTopK(topK, null);
                 assertThat(searchResult).isNotNull();
             }
@@ -168,7 +167,8 @@ public class LuceneVectorGlobalIndexTest {
                     new LuceneVectorGlobalIndexReader(
                             fileReader, metas, indexOptions, vectorType)) {
                 // Verify search works with this dimension
-                TopK topK = new TopK(testVectors.get(0), defaultMetric, 5);
+                TopKFunction.TopK topK =
+                        new TopKFunction.TopK(testVectors.get(0), defaultMetric, 5);
                 GlobalIndexResult searchResult = reader.visitTopK(topK, null);
                 assertThat(searchResult).isNotNull();
             }
@@ -228,7 +228,7 @@ public class LuceneVectorGlobalIndexTest {
 
         try (LuceneVectorGlobalIndexReader reader =
                 new LuceneVectorGlobalIndexReader(fileReader, metas, indexOptions, vectorType)) {
-            TopK topK = new TopK(vectors[0], defaultMetric, 1);
+            TopKFunction.TopK topK = new TopKFunction.TopK(vectors[0], defaultMetric, 1);
             LuceneTopkGlobalIndexResult result =
                     (LuceneTopkGlobalIndexResult) reader.visitTopK(topK, null);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
@@ -238,12 +238,13 @@ public class LuceneVectorGlobalIndexTest {
             expectedRowId = offset + 1;
             RoaringNavigableMap64 filterResults = new RoaringNavigableMap64();
             filterResults.add(expectedRowId);
-            TopKRowIdFilter filter = new TopKRowIdFilter(filterResults.iterator());
+            TopKFunction.TopKRowIdFilter filter =
+                    new TopKFunction.TopKRowIdFilter(filterResults.iterator());
             result = (LuceneTopkGlobalIndexResult) reader.visitTopK(topK, filter);
             assertThat(containsRowId(result, expectedRowId)).isTrue();
 
             float[] queryVector = new float[] {0.85f, 0.15f};
-            topK = new TopK(queryVector, defaultMetric, 2);
+            topK = new TopKFunction.TopK(queryVector, defaultMetric, 2);
             result = (LuceneTopkGlobalIndexResult) reader.visitTopK(topK, null);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
             long rowId1 = offset + 1;
@@ -293,13 +294,13 @@ public class LuceneVectorGlobalIndexTest {
         try (LuceneVectorGlobalIndexReader reader =
                 new LuceneVectorGlobalIndexReader(
                         fileReader, metas, indexOptions, byteVectorType)) {
-            TopK topK = new TopK(vectors[0], defaultMetric, 1);
+            TopKFunction.TopK topK = new TopKFunction.TopK(vectors[0], defaultMetric, 1);
             GlobalIndexResult result = reader.visitTopK(topK, null);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
             assertThat(containsRowId(result, 0)).isTrue();
 
             byte[] queryVector = new byte[] {85, 15};
-            topK = new TopK(queryVector, defaultMetric, 2);
+            topK = new TopKFunction.TopK(queryVector, defaultMetric, 2);
             result = reader.visitTopK(topK, null);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
             assertThat(containsRowId(result, 1)).isTrue();
@@ -309,11 +310,11 @@ public class LuceneVectorGlobalIndexTest {
 
     @Test
     public void testInvalidTopK() {
-        assertThatThrownBy(() -> new TopK(null, defaultMetric, 10))
+        assertThatThrownBy(() -> new TopKFunction.TopK(null, defaultMetric, 10))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Vector cannot be null");
 
-        assertThatThrownBy(() -> new TopK(new float[] {0.1f}, defaultMetric, 0))
+        assertThatThrownBy(() -> new TopKFunction.TopK(new float[] {0.1f}, defaultMetric, 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("K must be positive");
     }

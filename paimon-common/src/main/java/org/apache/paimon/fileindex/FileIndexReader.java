@@ -20,8 +20,7 @@ package org.apache.paimon.fileindex;
 
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
-import org.apache.paimon.predicate.TopK;
-import org.apache.paimon.predicate.TopKRowIdFilter;
+import org.apache.paimon.predicate.TopKFunction;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.TransformPredicate;
 
@@ -120,7 +119,7 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
     }
 
     @Override
-    public FileIndexResult visitTopK(TopK topK, TopKRowIdFilter filter) {
+    public FileIndexResult visitTopK(TopKFunction.TopK topK, TopKFunction.TopKRowIdFilter filter) {
         throw new UnsupportedOperationException("Should not invoke this");
     }
 

@@ -37,9 +37,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.TopK;
 import org.apache.paimon.predicate.TopKFunction;
-import org.apache.paimon.predicate.TopKRowIdFilter;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -77,6 +75,8 @@ public class LuceneVectorGlobalIndexScanTest {
     private Path tablePath;
     private FileIO fileIO;
     private RowType rowType;
+    private String similarityMetric = "EUCLIDEAN";
+    private String vectorFieldName = "vec";
 
     @BeforeEach
     public void before() throws Exception {
@@ -88,11 +88,11 @@ public class LuceneVectorGlobalIndexScanTest {
         Schema schema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
-                        .column("vec", new ArrayType(DataTypes.FLOAT()))
+                        .column(vectorFieldName, new ArrayType(DataTypes.FLOAT()))
                         .primaryKey("id")
                         .option(CoreOptions.BUCKET.key(), "1")
                         .option("vector.dim", "2")
-                        .option("vector.metric", "EUCLIDEAN")
+                        .option("vector.metric", similarityMetric)
                         .build();
 
         TableSchema tableSchema = schemaManager.createTable(schema);
@@ -123,13 +123,13 @@ public class LuceneVectorGlobalIndexScanTest {
 
         // 6. Execute TopK query
         float[] queryVector = new float[] {0.85f, 0.15f};
-        TopK topK = new TopK(queryVector, "EUCLIDEAN", 2);
+        TopKFunction.TopK topK = new TopKFunction.TopK(queryVector, similarityMetric, 2);
 
         // 7. Verify results without filter
         Predicate topKPredicate =
                 new LeafPredicate(
                         new FieldTransform(
-                                new FieldRef(1, "vec", new ArrayType(DataTypes.FLOAT()))),
+                                new FieldRef(1, vectorFieldName, new ArrayType(DataTypes.FLOAT()))),
                         new TopKFunction(topK, null),
                         Collections.emptyList());
 
@@ -141,11 +141,12 @@ public class LuceneVectorGlobalIndexScanTest {
         // 8. Verify results with filter
         RoaringNavigableMap64 filterResults = new RoaringNavigableMap64();
         filterResults.add(1L);
-        TopKRowIdFilter filter = new TopKRowIdFilter(filterResults.iterator());
+        TopKFunction.TopKRowIdFilter filter =
+                new TopKFunction.TopKRowIdFilter(filterResults.iterator());
         topKPredicate =
                 new LeafPredicate(
                         new FieldTransform(
-                                new FieldRef(1, "vec", new ArrayType(DataTypes.FLOAT()))),
+                                new FieldRef(1, vectorFieldName, new ArrayType(DataTypes.FLOAT()))),
                         new TopKFunction(topK, filter),
                         Collections.emptyList());
         result = (TopkGlobalIndexResult) scanner.scan(topKPredicate).get();
@@ -188,7 +189,7 @@ public class LuceneVectorGlobalIndexScanTest {
         List<GlobalIndexWriter.ResultEntry> entries = writer.finish();
 
         List<IndexFileMeta> metas = new ArrayList<>();
-        int fieldId = rowType.getFieldIndex("vec");
+        int fieldId = rowType.getFieldIndex(vectorFieldName);
 
         for (GlobalIndexWriter.ResultEntry entry : entries) {
             long fileSize = fileIO.getFileSize(new Path(indexDir, entry.fileName()));

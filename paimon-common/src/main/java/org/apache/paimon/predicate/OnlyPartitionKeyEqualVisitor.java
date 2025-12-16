@@ -118,7 +118,7 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
     }
 
     @Override
-    public Boolean visitTopK(TopK topK, TopKRowIdFilter filter) {
+    public Boolean visitTopK(TopKFunction.TopK topK, TopKFunction.TopKRowIdFilter filter) {
         return false;
     }
 

@@ -20,6 +20,8 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.types.DataType;
 
+import java.io.Serializable;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 
@@ -59,5 +61,63 @@ public class TopKFunction extends LeafFunction {
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitTopK(topK, filter);
+    }
+
+    /** Represents the TopK predicate. */
+    public static class TopK implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private Object vector;
+        private final String similarityFunction;
+        private final int k;
+
+        public TopK(Object vector, String similarityFunction, int k) {
+            if (vector == null) {
+                throw new IllegalArgumentException("Vector cannot be null");
+            }
+            if (k <= 0) {
+                throw new IllegalArgumentException("K must be positive, got: " + k);
+            }
+            if (similarityFunction == null || similarityFunction.isEmpty()) {
+                throw new IllegalArgumentException("Similarity function cannot be null or empty");
+            }
+            this.vector = vector;
+            this.similarityFunction = similarityFunction;
+            this.k = k;
+        }
+
+        public Object vector() {
+            return vector;
+        }
+
+        public String similarityFunction() {
+            return similarityFunction;
+        }
+
+        public int k() {
+            return k;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("SimilarityFunction(%s), K(%s)", similarityFunction, k);
+        }
+    }
+
+    /** Represents the TopK row id filter. */
+    public static class TopKRowIdFilter implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private Iterator<Long> includeRowIds;
+
+        public TopKRowIdFilter(Iterator<Long> includeRowIds) {
+            this.includeRowIds = includeRowIds;
+        }
+
+        public Iterator<Long> includeRowIds() {
+            return includeRowIds;
+        }
     }
 }

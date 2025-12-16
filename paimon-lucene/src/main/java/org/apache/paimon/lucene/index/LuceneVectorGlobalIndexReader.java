@@ -24,8 +24,7 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.TopK;
-import org.apache.paimon.predicate.TopKRowIdFilter;
+import org.apache.paimon.predicate.TopKFunction;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
@@ -95,7 +94,8 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitTopK(TopK topK, @Nullable TopKRowIdFilter filter) {
+    public GlobalIndexResult visitTopK(
+            TopKFunction.TopK topK, @Nullable TopKFunction.TopKRowIdFilter filter) {
         try {
             if (LuceneVectorMetric.fromString(topK.similarityFunction())
                     == vectorIndexOptions.metric()) {
@@ -157,10 +157,12 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private Query query(TopK topK, DataType dataType, TopKRowIdFilter filter) {
+    private Query query(
+            TopKFunction.TopK topK, DataType dataType, TopKFunction.TopKRowIdFilter filter) {
         Query idFilterQuery = null;
         if (filter != null && filter.includeRowIds() != null) {
             ArrayList<Long> targetIds = new ArrayList<>();
+            // todo: whether we need to do it in core
             filter.includeRowIds().forEachRemaining(id -> targetIds.add(id - offset));
             idFilterQuery = LongPoint.newSetQuery(ROW_ID_FIELD, targetIds);
         }
@@ -218,6 +220,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
         HashMap<Long, Float> id2scores = new HashMap<>(topK.size());
         for (ScoredRow scoredRow : topK) {
+            // todo: whether we need to do it in core
             long rowId = scoredRow.rowId + offset;
             id2scores.put(rowId, scoredRow.score);
             roaringBitmap64.add(rowId);

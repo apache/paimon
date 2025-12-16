@@ -23,8 +23,7 @@ import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.TopK;
-import org.apache.paimon.predicate.TopKRowIdFilter;
+import org.apache.paimon.predicate.TopKFunction;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -118,12 +117,13 @@ public class FileIndexReaderWrapper implements GlobalIndexReader {
     }
 
     @Override
-    public void close() throws IOException {
-        closeable.close();
+    public GlobalIndexResult visitTopK(
+            TopKFunction.TopK topK, TopKFunction.TopKRowIdFilter filter) {
+        return transform.apply(reader.visitTopK(topK, filter));
     }
 
     @Override
-    public GlobalIndexResult visitTopK(TopK topK, TopKRowIdFilter filter) {
-        return transform.apply(reader.visitTopK(topK, filter));
+    public void close() throws IOException {
+        closeable.close();
     }
 }
