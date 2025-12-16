@@ -24,8 +24,9 @@ from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
-from pypaimon.read.split_read import (MergeFileSplitRead, RawFileSplitRead,
-                                      SplitRead, DataEvolutionSplitRead)
+from pypaimon.read.split_read import (DataEvolutionSplitRead,
+                                      MergeFileSplitRead, RawFileSplitRead,
+                                      SplitRead)
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
 
@@ -159,21 +160,24 @@ class TableRead:
                 table=self.table,
                 predicate=self.predicate,
                 read_type=self.read_type,
-                split=split
+                split=split,
+                row_tracking_enabled=False
             )
         elif self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true':
             return DataEvolutionSplitRead(
                 table=self.table,
                 predicate=self.predicate,
                 read_type=self.read_type,
-                split=split
+                split=split,
+                row_tracking_enabled=True
             )
         else:
             return RawFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,
                 read_type=self.read_type,
-                split=split
+                split=split,
+                row_tracking_enabled=self.table.options.get(CoreOptions.ROW_TRACKING_ENABLED, 'false').lower() == 'true'
             )
 
     @staticmethod
