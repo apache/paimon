@@ -18,14 +18,30 @@
 
 package org.apache.paimon.spark.globalindex;
 
-/** Global index builder factory on spark. */
-public interface GlobalIndexBuilderFactory {
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 
-    String identifier();
+import org.apache.spark.api.java.JavaSparkContext;
 
-    GlobalIndexBuilder create(GlobalIndexBuilderContext context);
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
 
-    default GlobalIndexTopoBuilder createTopoBulder() {
-        return null;
-    }
+/** User defined topology builder. */
+public interface GlobalIndexTopoBuilder {
+
+    List<CommitMessage> buildIndex(
+            JavaSparkContext javaSparkContext,
+            FileStoreTable table,
+            Map<BinaryRow, List<IndexedSplit>> preparedDS,
+            String indexType,
+            RowType readType,
+            DataField indexField,
+            Options options)
+            throws IOException;
 }
