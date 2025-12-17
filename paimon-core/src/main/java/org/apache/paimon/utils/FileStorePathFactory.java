@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.EntropyInjectExternalPathProvider;
 import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexInDataFileDirPathFactory;
@@ -77,6 +78,7 @@ public class FileStorePathFactory {
     private final AtomicInteger indexFileCount;
     private final AtomicInteger statsFileCount;
     private final List<Path> externalPaths;
+    private final CoreOptions.ExternalPathStrategy strategy;
 
     public FileStorePathFactory(
             Path root,
@@ -90,6 +92,7 @@ public class FileStorePathFactory {
             String fileCompression,
             @Nullable String dataFilePathDirectory,
             List<Path> externalPaths,
+            CoreOptions.ExternalPathStrategy strategy,
             boolean indexFileInDataFileDir) {
         this.root = root;
         this.dataFilePathDirectory = dataFilePathDirectory;
@@ -110,6 +113,7 @@ public class FileStorePathFactory {
         this.indexFileCount = new AtomicInteger(0);
         this.statsFileCount = new AtomicInteger(0);
         this.externalPaths = externalPaths;
+        this.strategy = strategy;
     }
 
     public Path root() {
@@ -225,7 +229,10 @@ public class FileStorePathFactory {
         if (externalPaths == null || externalPaths.isEmpty()) {
             return null;
         }
-
+        if (strategy == CoreOptions.ExternalPathStrategy.ENTROPY_INJECT) {
+            return new EntropyInjectExternalPathProvider(
+                    externalPaths, relativeBucketPath(partition, bucket));
+        }
         return new ExternalPathProvider(externalPaths, relativeBucketPath(partition, bucket));
     }
 

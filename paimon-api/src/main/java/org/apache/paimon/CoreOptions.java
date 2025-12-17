@@ -208,6 +208,13 @@ public class CoreOptions implements Serializable {
                                     + ExternalPathStrategy.SPECIFIC_FS
                                     + ", should be the prefix scheme of the external path, now supported are s3 and oss.");
 
+    public static final ConfigOption<Boolean> ENTROPY_INJECT_ENABLED =
+            key("entropy.inject.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "enable entropy injection for data files to avoid being throttled by cloud storage services.");
+
     public static final ConfigOption<Boolean> COMPACTION_FORCE_REWRITE_ALL_FILES =
             key("compaction.force-rewrite-all-files")
                     .booleanType()
@@ -2906,6 +2913,10 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_FILE_EXTERNAL_PATHS);
     }
 
+    public Boolean enableEntropyInject() {
+        return options.get(ENTROPY_INJECT_ENABLED);
+    }
+
     public ExternalPathStrategy externalPathStrategy() {
         return options.get(DATA_FILE_EXTERNAL_PATHS_STRATEGY);
     }
@@ -3879,7 +3890,11 @@ public class CoreOptions implements Serializable {
 
         ROUND_ROBIN(
                 "round-robin",
-                "When writing a new file, a path is chosen from data-file.external-paths in turn.");
+                "When writing a new file, a path is chosen from data-file.external-paths in turn."),
+
+        ENTROPY_INJECT(
+                "entropy-inject",
+                "When writing a new file, a path is chosen based on the hash value of the file's content.");
 
         private final String value;
 
