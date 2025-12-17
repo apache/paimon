@@ -441,6 +441,12 @@ under the License.
             <td>Whether to enable modifying deletion vectors mode.</td>
         </tr>
         <tr>
+            <td><h5>deletion-vectors.overwrite-upgrade</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to upgrade the data files after overwriting a primary key table when deletion vectors enabled and write only is true. Because that batch scan for primary key dv table will skip the level 0 files, the batch overwrite data are not available if deletion-vectors.enabled and write-only are both set to true. This option will upgrade that files to max level so that batch scan can query them.</td>
+        </tr>
+        <tr>
             <td><h5>disable-explicit-type-casting</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
