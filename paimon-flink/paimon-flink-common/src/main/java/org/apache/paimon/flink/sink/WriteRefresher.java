@@ -16,14 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.table.KnownSplitsTable
+import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.spark.sql.connector.read.Scan
-
-class PaimonSplitScanBuilder(table: KnownSplitsTable) extends PaimonScanBuilder(table) {
-  override def build(): Scan = {
-    PaimonSplitScan(table, table.splits(), requiredSchema, pushedPaimonPredicates)
-  }
+/** refresher for refreshing write in streaming mode. */
+public interface WriteRefresher {
+    void refresh(FileStoreTable table) throws Exception;
 }

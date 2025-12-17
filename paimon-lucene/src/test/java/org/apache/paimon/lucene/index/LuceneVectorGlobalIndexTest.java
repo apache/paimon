@@ -121,7 +121,7 @@ public class LuceneVectorGlobalIndexTest {
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(metricIndexPath, result.fileName())),
-                            result.rowRange(),
+                            result.rowRange().to - result.rowRange().from,
                             result.meta()));
 
             try (LuceneVectorGlobalIndexReader reader =
@@ -161,7 +161,7 @@ public class LuceneVectorGlobalIndexTest {
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(dimIndexPath, result.fileName())),
-                            result.rowRange(),
+                            result.rowRange().to - result.rowRange().from,
                             result.meta()));
 
             try (LuceneVectorGlobalIndexReader reader =
@@ -216,14 +216,13 @@ public class LuceneVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         List<GlobalIndexIOMeta> metas = new ArrayList<>();
-        long offset = 10;
         for (int i = 0; i < results.size(); i++) {
             GlobalIndexWriter.ResultEntry result = results.get(i);
             metas.add(
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
-                            result.rowRange().addOffset(offset),
+                            result.rowRange().to - result.rowRange().from,
                             result.meta()));
         }
 
@@ -233,10 +232,10 @@ public class LuceneVectorGlobalIndexTest {
             LuceneTopkGlobalIndexResult result =
                     (LuceneTopkGlobalIndexResult) reader.visitVectorSearch(vectorSearch);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
-            long expectedRowId = offset;
+            long expectedRowId = 0;
             assertThat(containsRowId(result, expectedRowId)).isTrue();
             assertThat(result.scoreGetter().score(expectedRowId)).isEqualTo(1.0f);
-            expectedRowId = offset + 1;
+            expectedRowId = 1;
             RoaringNavigableMap64 filterResults = new RoaringNavigableMap64();
             filterResults.add(expectedRowId);
             vectorSearch =
@@ -248,8 +247,8 @@ public class LuceneVectorGlobalIndexTest {
             vectorSearch = new VectorSearch("vec", queryVector, 2, null, defaultMetric);
             result = (LuceneTopkGlobalIndexResult) reader.visitVectorSearch(vectorSearch);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
-            long rowId1 = offset + 1;
-            long rowId2 = offset + 3;
+            long rowId1 = 1;
+            long rowId2 = 3;
             assertThat(containsRowId(result, rowId1)).isTrue();
             assertThat(containsRowId(result, rowId2)).isTrue();
             assertThat(result.scoreGetter().score(rowId1)).isEqualTo(0.98765427f);
@@ -288,7 +287,7 @@ public class LuceneVectorGlobalIndexTest {
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
-                            result.rowRange(),
+                            result.rowRange().to - result.rowRange().from,
                             result.meta()));
         }
 

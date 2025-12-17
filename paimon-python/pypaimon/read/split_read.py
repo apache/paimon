@@ -19,7 +19,7 @@
 import os
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import List, Optional, Tuple, Callable
+from typing import Callable, List, Optional, Tuple
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
@@ -29,26 +29,31 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.push_down_utils import trim_predicate_by_fields
-from pypaimon.read.reader.concat_batch_reader import ConcatBatchReader, ShardBatchReader, MergeAllBatchReader
+from pypaimon.read.reader.concat_batch_reader import (ConcatBatchReader,
+                                                      MergeAllBatchReader,
+                                                      ShardBatchReader)
 from pypaimon.read.reader.concat_record_reader import ConcatRecordReader
+from pypaimon.read.reader.data_evolution_merge_reader import \
+    DataEvolutionMergeReader
 from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
-from pypaimon.read.reader.data_evolution_merge_reader import DataEvolutionMergeReader
-from pypaimon.read.reader.field_bunch import FieldBunch, DataBunch, BlobBunch
 from pypaimon.read.reader.drop_delete_reader import DropDeleteRecordReader
 from pypaimon.read.reader.empty_record_reader import EmptyFileRecordReader
+from pypaimon.read.reader.field_bunch import BlobBunch, DataBunch, FieldBunch
 from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.format_lance_reader import FormatLanceReader
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
-from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader, RowPositionReader
+from pypaimon.read.reader.iface.record_batch_reader import (RecordBatchReader,
+                                                            RowPositionReader)
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.read.reader.key_value_unwrap_reader import \
     KeyValueUnwrapRecordReader
 from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
 from pypaimon.read.reader.sort_merge_reader import SortMergeReaderWithMinHeap
 from pypaimon.read.split import Split
-from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.data_types import DataField
+from pypaimon.table.special_fields import SpecialFields
 
 KEY_PREFIX = "_KEY_"
 KEY_FIELD_ID_START = 1000000
@@ -58,13 +63,20 @@ NULL_FIELD_INDEX = -1
 class SplitRead(ABC):
     """Abstract base class for split reading operations."""
 
-    def __init__(self, table, predicate: Optional[Predicate], read_type: List[DataField], split: Split):
+    def __init__(
+            self,
+            table,
+            predicate: Optional[Predicate],
+            read_type: List[DataField],
+            split: Split,
+            row_tracking_enabled: bool):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.push_down_predicate = self._push_down_predicate()
         self.split = split
+        self.row_tracking_enabled = row_tracking_enabled
         self.value_arity = len(read_type)
 
         self.trimmed_primary_key = self.table.trimmed_primary_keys
@@ -90,7 +102,7 @@ class SplitRead(ABC):
         """Create a record reader for the given split."""
 
     def file_reader_supplier(self, file: DataFileMeta, for_merge_read: bool,
-                             read_fields: List[str]) -> RecordBatchReader:
+                             read_fields: List[str], row_tracking_enabled: bool) -> RecordBatchReader:
         (read_file_fields, read_arrow_predicate) = self._get_fields_and_predicate(file.schema_id, read_fields)
 
         # Use external_path if available, otherwise use file_path
@@ -117,18 +129,43 @@ class SplitRead(ABC):
 
         index_mapping = self.create_index_mapping()
         partition_info = self._create_partition_info()
+        system_fields = SpecialFields.find_system_fields(self.read_fields)
+        table_schema_fields = (
+            SpecialFields.row_type_with_row_tracking(self.table.table_schema.fields)
+            if row_tracking_enabled else self.table.table_schema.fields
+        )
         if for_merge_read:
-            return DataFileBatchReader(format_reader, index_mapping, partition_info, self.trimmed_primary_key,
-                                       self.table.table_schema.fields)
+            return DataFileBatchReader(
+                format_reader,
+                index_mapping,
+                partition_info,
+                self.trimmed_primary_key,
+                table_schema_fields,
+                file.max_sequence_number,
+                file.first_row_id,
+                row_tracking_enabled,
+                system_fields)
         else:
-            return DataFileBatchReader(format_reader, index_mapping, partition_info, None,
-                                       self.table.table_schema.fields)
+            return DataFileBatchReader(
+                format_reader,
+                index_mapping,
+                partition_info,
+                None,
+                table_schema_fields,
+                file.max_sequence_number,
+                file.first_row_id,
+                row_tracking_enabled,
+                system_fields)
 
     def _get_fields_and_predicate(self, schema_id: int, read_fields):
         key = (schema_id, tuple(read_fields))
         if key not in self.schema_id_2_fields:
             schema = self.table.schema_manager.get_schema(schema_id)
-            schema_field_names = set(field.name for field in schema.fields)
+            schema_fields = (
+                SpecialFields.row_type_with_row_tracking(schema.fields)
+                if self.row_tracking_enabled else schema.fields
+            )
+            schema_field_names = set(field.name for field in schema_fields)
             if self.table.is_primary_key_table:
                 schema_field_names.add('_SEQUENCE_NUMBER')
                 schema_field_names.add('_VALUE_KIND')
@@ -161,10 +198,8 @@ class SplitRead(ABC):
                 key_field = DataField(key_field_id, key_field_name, field.type)
                 all_data_fields.append(key_field)
 
-        sequence_field = DataField(2147483646, "_SEQUENCE_NUMBER", AtomicType("BIGINT", nullable=False))
-        all_data_fields.append(sequence_field)
-        value_kind_field = DataField(2147483645, "_VALUE_KIND", AtomicType("TINYINT", nullable=False))
-        all_data_fields.append(value_kind_field)
+        all_data_fields.append(SpecialFields.SEQUENCE_NUMBER)
+        all_data_fields.append(SpecialFields.VALUE_KIND)
 
         for field in value_field:
             all_data_fields.append(field)
@@ -297,7 +332,8 @@ class SplitRead(ABC):
 
 class RawFileSplitRead(SplitRead):
     def raw_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> RecordReader:
-        file_batch_reader = self.file_reader_supplier(file, False, self._get_final_read_data_fields())
+        file_batch_reader = self.file_reader_supplier(
+            file, False, self._get_final_read_data_fields(), self.row_tracking_enabled)
         dv = dv_factory() if dv_factory else None
         if dv:
             return ApplyDeletionVectorReader(RowPositionReader(file_batch_reader), dv)
@@ -328,12 +364,14 @@ class RawFileSplitRead(SplitRead):
             return concat_reader
 
     def _get_all_data_fields(self):
+        if self.row_tracking_enabled:
+            return SpecialFields.row_type_with_row_tracking(self.table.fields)
         return self.table.fields
 
 
 class MergeFileSplitRead(SplitRead):
     def kv_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> RecordReader:
-        file_batch_reader = self.file_reader_supplier(file, True, self._get_final_read_data_fields())
+        file_batch_reader = self.file_reader_supplier(file, True, self._get_final_read_data_fields(), False)
         dv = dv_factory() if dv_factory else None
         if dv:
             return ApplyDeletionVectorReader(
@@ -517,7 +555,11 @@ class DataEvolutionSplitRead(SplitRead):
 
     def _create_file_reader(self, file: DataFileMeta, read_fields: [str]) -> RecordReader:
         """Create a file reader for a single file."""
-        return self.file_reader_supplier(file=file, for_merge_read=False, read_fields=read_fields)
+        return self.file_reader_supplier(
+            file=file,
+            for_merge_read=False,
+            read_fields=read_fields,
+            row_tracking_enabled=True)
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:
         """Split files into field bunches."""
@@ -558,6 +600,8 @@ class DataEvolutionSplitRead(SplitRead):
             for field in self.table.fields:
                 if field.name == field_name:
                     field_ids.append(field.id)
+        field_ids.append(SpecialFields.ROW_ID.id)
+        field_ids.append(SpecialFields.SEQUENCE_NUMBER.id)
         return field_ids
 
     @staticmethod
@@ -566,4 +610,4 @@ class DataEvolutionSplitRead(SplitRead):
         return file_name.endswith('.blob')
 
     def _get_all_data_fields(self):
-        return self.table.fields
+        return SpecialFields.row_type_with_row_tracking(self.table.fields)

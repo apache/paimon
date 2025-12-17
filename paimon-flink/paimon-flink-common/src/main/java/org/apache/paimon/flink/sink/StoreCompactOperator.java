@@ -70,7 +70,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     private transient DataFileMetaSerializer dataFileMetaSerializer;
     private transient Set<Pair<BinaryRow, Integer>> waitToCompact;
 
-    protected transient @Nullable WriterRefresher writeRefresher;
+    protected transient @Nullable CompactRefresher compactRefresher;
 
     public StoreCompactOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -119,7 +119,8 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                         getContainingTask().getEnvironment().getIOManager(),
                         memoryPoolFactory,
                         getMetricGroup());
-        this.writeRefresher = WriterRefresher.create(write.streamingMode(), table, write::replace);
+        this.compactRefresher =
+                CompactRefresher.create(write.streamingMode(), table, write::replace);
     }
 
     @Override
@@ -150,6 +151,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
         if (write.streamingMode()) {
             write.notifyNewFiles(snapshotId, partition, bucket, files);
+            tryRefreshWrite(files);
         } else {
             Preconditions.checkArgument(
                     files.isEmpty(),
@@ -173,10 +175,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
         }
         waitToCompact.clear();
 
-        List<Committable> committables = write.prepareCommit(waitCompaction, checkpointId);
-
-        tryRefreshWrite();
-        return committables;
+        return write.prepareCommit(waitCompaction, checkpointId);
     }
 
     @Override
@@ -197,9 +196,9 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
         return waitToCompact;
     }
 
-    private void tryRefreshWrite() {
-        if (writeRefresher != null) {
-            writeRefresher.tryRefresh();
+    private void tryRefreshWrite(List<DataFileMeta> files) {
+        if (compactRefresher != null) {
+            compactRefresher.tryRefresh(files);
         }
     }
 

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{Predicate, TopN}
 import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
@@ -34,12 +35,12 @@ import scala.collection.JavaConverters._
 case class PaimonScan(
     table: InnerTable,
     requiredSchema: StructType,
-    filters: Seq[Predicate],
-    reservedFilters: Seq[Filter],
-    override val pushDownLimit: Option[Int],
-    override val pushDownTopN: Option[TopN],
+    pushedPartitionFilters: Seq[PartitionPredicate],
+    pushedDataFilters: Seq[Predicate],
+    override val pushedLimit: Option[Int],
+    override val pushedTopN: Option[TopN],
     bucketedScanDisabled: Boolean = false)
-  extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)
+  extends PaimonBaseScan(table)
   with SupportsRuntimeFiltering
   with SupportsReportPartitioning {
 

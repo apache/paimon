@@ -18,9 +18,9 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.spark.data.SparkInternalRow
+import org.apache.paimon.stats
 import org.apache.paimon.stats.ColStats
-import org.apache.paimon.types.{DataField, DataType, RowType}
+import org.apache.paimon.types.{DataField, DataType}
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
@@ -34,62 +34,45 @@ import scala.collection.JavaConverters._
 
 case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
+  import PaimonImplicits._
+
+  private lazy val paimonStats: Option[stats.Statistics] = scan.statistics
+
   private lazy val rowCount: Long = scan.lazyInputPartitions.map(_.rowCount()).sum
 
-  private lazy val scannedTotalSize: Long = rowCount * scan.readSchema().defaultSize
-
-  private lazy val paimonStats = if (scan.statistics.isPresent) scan.statistics.get() else null
-
-  lazy val paimonStatsEnabled: Boolean = {
-    paimonStats != null &&
-    paimonStats.mergedRecordSize().isPresent &&
-    paimonStats.mergedRecordCount().isPresent
-  }
-
-  private def getSizeForField(field: DataField): Long = {
-    Option(paimonStats.colStats().get(field.name()))
-      .map(_.avgLen())
-      .filter(_.isPresent)
-      .map(_.getAsLong)
-      .getOrElse(field.`type`().defaultSize().toLong)
-  }
-
-  private def getSizeForRow(schema: RowType): Long = {
-    schema.getFields.asScala.map(field => getSizeForField(field)).sum
-  }
-
-  override def sizeInBytes(): OptionalLong = {
-    if (!paimonStatsEnabled) {
-      return OptionalLong.of(scannedTotalSize)
-    }
-
-    val wholeSchemaSize = getSizeForRow(scan.tableRowType)
-
-    val requiredDataSchemaSize =
-      scan.readTableRowType.getFields.asScala.map(field => getSizeForField(field)).sum
-    val requiredDataSizeInBytes =
-      paimonStats.mergedRecordSize().getAsLong * (requiredDataSchemaSize.toDouble / wholeSchemaSize)
-
-    val metadataSchemaSize =
-      scan.metadataColumns.map(field => getSizeForField(field.toPaimonDataField)).sum
-    val metadataSizeInBytes = paimonStats.mergedRecordCount().getAsLong * metadataSchemaSize
-
-    val sizeInBytes = (requiredDataSizeInBytes + metadataSizeInBytes).toLong
+  private lazy val scannedTotalSize: Long = {
+    val readSchemaSize =
+      SparkTypeUtils.toPaimonRowType(scan.readSchema()).getFields.asScala.map(getSizeForField).sum
+    val sizeInBytes = rowCount * readSchemaSize
     // Avoid return 0 bytes if there are some valid rows.
     // Avoid return too small size in bytes which may less than row count,
     // note the compression ratio on disk is usually bigger than memory.
-    val normalized = Math.max(sizeInBytes, paimonStats.mergedRecordCount().getAsLong)
-    OptionalLong.of(normalized)
+    Math.max(sizeInBytes, rowCount)
   }
 
-  override def numRows(): OptionalLong =
-    if (paimonStatsEnabled) paimonStats.mergedRecordCount() else OptionalLong.of(rowCount)
+  private def getSizeForField(field: DataField): Long = {
+    paimonStats match {
+      case Some(stats) =>
+        val colStat = stats.colStats().get(field.name())
+        if (colStat != null && colStat.avgLen().isPresent) {
+          colStat.avgLen().getAsLong
+        } else {
+          field.`type`().defaultSize().toLong
+        }
+      case _ =>
+        field.`type`().defaultSize().toLong
+    }
+  }
+
+  override def numRows(): OptionalLong = OptionalLong.of(rowCount)
+
+  override def sizeInBytes(): OptionalLong = OptionalLong.of(scannedTotalSize)
 
   override def columnStats(): java.util.Map[NamedReference, ColumnStatistics] = {
     val requiredFields = scan.requiredStatsSchema.fieldNames
     val resultMap = new java.util.HashMap[NamedReference, ColumnStatistics]()
-    if (paimonStatsEnabled) {
-      val paimonColStats = paimonStats.colStats()
+    if (paimonStats.isDefined) {
+      val paimonColStats = paimonStats.get.colStats()
       scan.tableRowType.getFields.asScala
         .filter {
           field => requiredFields.contains(field.name) && paimonColStats.containsKey(field.name())

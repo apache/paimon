@@ -70,7 +70,6 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     private volatile boolean indicesLoaded = false;
     private final LuceneVectorIndexOptions vectorIndexOptions;
     private final DataType fieldType;
-    private final long offset;
 
     public LuceneVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader,
@@ -83,13 +82,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         this.fieldType = fieldType;
         this.searchers = new ArrayList<>();
         this.directories = new ArrayList<>();
-        Range range =
-                ioMetas.stream()
-                        .map(GlobalIndexIOMeta::rowIdRange)
-                        .reduce(Range::union)
-                        .orElse(null);
-        this.offset = ioMetas.get(0).rowIdRange().from;
-        this.defaultResult = GlobalIndexResult.fromRange(range);
+        this.defaultResult = GlobalIndexResult.fromRange(new Range(0, ioMetas.get(0).rangeEnd()));
     }
 
     @Override
@@ -161,8 +154,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         Iterator<Long> includeRowIds = vectorSearch.includeRowIds();
         if (includeRowIds != null) {
             ArrayList<Long> targetIds = new ArrayList<>();
-            // todo: whether we need to do it in core
-            includeRowIds.forEachRemaining(id -> targetIds.add(id - offset));
+            includeRowIds.forEachRemaining(id -> targetIds.add(id));
             idFilterQuery = LongPoint.newSetQuery(ROW_ID_FIELD, targetIds);
         }
         if (dataType instanceof ArrayType
@@ -219,8 +211,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
         HashMap<Long, Float> id2scores = new HashMap<>(topK.size());
         for (ScoredRow scoredRow : topK) {
-            // todo: whether we need to do it in core
-            long rowId = scoredRow.rowId + offset;
+            long rowId = scoredRow.rowId;
             id2scores.put(rowId, scoredRow.score);
             roaringBitmap64.add(rowId);
         }
@@ -278,7 +269,8 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    // Implementation of FunctionVisitor methods
+    // =================== unsupported =====================
+
     @Override
     public GlobalIndexResult visitIsNotNull(FieldRef fieldRef) {
         return defaultResult;

@@ -262,7 +262,7 @@ SELECT * FROM TABLE WHERE dt = '20250801' AND class_id = 1 AND score < 60 OR sco
 
 **Optimize the `TOPN` predicate:**
 
-For now, the `TOPN` predicate optimization can not using with other predicates, only support in Apache Spark.
+For now, the `TOPN` predicate optimization can not use with other predicates, only support in Apache Spark.
 ```sql
 SELECT * FROM TABLE WHERE dt = '20250801' ORDER BY score ASC LIMIT 10;
 

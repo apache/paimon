@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.FormatTable
 
@@ -27,6 +28,7 @@ import org.apache.spark.sql.types.StructType
 case class PaimonFormatTableScan(
     table: FormatTable,
     requiredSchema: StructType,
-    filters: Seq[Predicate],
-    override val pushDownLimit: Option[Int])
-  extends PaimonFormatTableBaseScan(table, requiredSchema, filters, pushDownLimit) {}
+    pushedPartitionFilters: Seq[PartitionPredicate],
+    pushedDataFilters: Seq[Predicate],
+    override val pushedLimit: Option[Int])
+  extends PaimonFormatTableBaseScan {}

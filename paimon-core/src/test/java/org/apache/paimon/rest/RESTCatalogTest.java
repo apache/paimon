@@ -2625,6 +2625,61 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 new InternalRowSerializer(partitions.rowType()).toBinaryRow(result.get(0)));
     }
 
+    @Test
+    void testReadPartitionsTable() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "partitions_audit_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("f1", DataTypes.INT())
+                        .primaryKey("pk")
+                        .partitionKeys("f1")
+                        .option("bucket", "1")
+                        .option("metastore.partitioned-table", "true")
+                        .build(),
+                true);
+
+        Table table = catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 1));
+            commit.commit(write.prepareCommit());
+        }
+
+        Table partitionsTable =
+                catalog.getTable(
+                        Identifier.create(
+                                identifier.getDatabaseName(),
+                                identifier.getObjectName() + "$partitions"));
+        ReadBuilder readBuilder = partitionsTable.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        List<InternalRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = read.createReader(splits)) {
+            reader.forEachRemaining(result::add);
+        }
+
+        assertThat(result).isNotEmpty();
+        for (InternalRow row : result) {
+            if (!row.isNullAt(5)) { // created_at
+                assertThat(row.getTimestamp(5, 3)).isNotNull();
+            }
+            assertThat(row.isNullAt(6)).isFalse(); // created_by
+            assertThat(row.getString(6).toString()).isEqualTo("created");
+
+            assertThat(row.isNullAt(7)).isFalse(); // updated_by
+            assertThat(row.getString(7).toString()).isEqualTo("updated");
+
+            if (!row.isNullAt(8)) {
+                String optionsJson = row.getString(8).toString();
+                assertThat(optionsJson).isNotEmpty();
+            }
+        }
+    }
+
     private TestPagedResponse generateTestPagedResponse(
             Map<String, String> queryParams,
             List<Integer> testData,

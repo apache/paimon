@@ -140,6 +140,23 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
     }
   }
 
+  test(s"Paimon Metric: v2 write metric with adaptive plan") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+      sql("CREATE TABLE T (id INT, pt INT) PARTITIONED BY (pt)")
+      val df = sql(s"INSERT INTO T SELECT /*+ REPARTITION(1) */ id, id FROM range(1, 10)")
+      val metrics =
+        df.queryExecution.executedPlan.asInstanceOf[CommandResultExec].commandPhysicalPlan.metrics
+      val statusStore = spark.sharedState.statusStore
+      val lastExecId = statusStore.executionsList().last.executionId
+      val executionMetrics = statusStore.executionMetrics(lastExecId)
+
+      assert(executionMetrics(metrics("appendedTableFiles").id) == "9")
+      assert(executionMetrics(metrics("appendedRecords").id) == "9")
+      assert(executionMetrics(metrics("partitionsWritten").id) == "9")
+      assert(executionMetrics(metrics("bucketsWritten").id) == "9")
+    }
+  }
+
   def metric(metrics: Array[CustomTaskMetric], name: String): Long = {
     metrics.find(_.name() == name).get.value()
   }
