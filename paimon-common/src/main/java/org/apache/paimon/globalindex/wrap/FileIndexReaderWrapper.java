@@ -122,7 +122,7 @@ public class FileIndexReaderWrapper implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
-        return transform.apply(reader.visitVectorSearch(vectorSearch));
+    public GlobalIndexResult visitVectorSearch(FieldRef fieldRef, VectorSearch vectorSearch) {
+        return transform.apply(reader.visitVectorSearch(null, vectorSearch));
     }
 }

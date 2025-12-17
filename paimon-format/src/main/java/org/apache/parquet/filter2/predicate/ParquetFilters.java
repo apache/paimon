@@ -209,7 +209,7 @@ public class ParquetFilters {
         }
 
         @Override
-        public FilterPredicate visitVectorSearch(VectorSearch vectorSearch) {
+        public FilterPredicate visitVectorSearch(FieldRef fieldRef, VectorSearch vectorSearch) {
             throw new UnsupportedOperationException();
         }
 

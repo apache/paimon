@@ -84,7 +84,7 @@ public class EmptyFileIndexReader extends FileIndexReader {
     }
 
     @Override
-    public FileIndexResult visitVectorSearch(VectorSearch vectorSearch) {
+    public FileIndexResult visitVectorSearch(FieldRef fieldRef, VectorSearch vectorSearch) {
         return SKIP;
     }
 }

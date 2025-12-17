@@ -33,6 +33,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -105,6 +106,8 @@ public class LuceneVectorGlobalIndexScanTest {
                     new float[] {0.98f, 0.05f}, new float[] {0.0f, 1.0f}, new float[] {0.05f, 0.98f}
                 };
 
+        FieldRef fieldRef = new FieldRef(1, vectorFieldName, new ArrayType(DataTypes.FLOAT()));
+
         // 3. Manually build vector index
         List<IndexFileMeta> indexFiles = buildIndexManually(vectors);
 
@@ -119,12 +122,12 @@ public class LuceneVectorGlobalIndexScanTest {
 
         // 6. Execute TopK query
         float[] queryVector = new float[] {0.85f, 0.15f};
-        VectorSearch vectorSearch =
-                new VectorSearch(vectorFieldName, queryVector, 2, null, similarityMetric);
+        VectorSearch vectorSearch = new VectorSearch(queryVector, 2);
 
         // 7. Verify results without filter
 
-        TopkGlobalIndexResult result = (TopkGlobalIndexResult) scanner.scan(vectorSearch).get();
+        TopkGlobalIndexResult result =
+                (TopkGlobalIndexResult) scanner.scan(fieldRef, vectorSearch).get();
         List<Long> resultRowIds = new ArrayList<>();
         result.results().iterator().forEachRemaining(resultRowIds::add);
         assertThat(resultRowIds).hasSize(2);
@@ -132,14 +135,8 @@ public class LuceneVectorGlobalIndexScanTest {
         // 8. Verify results with filter
         RoaringNavigableMap64 filterResults = new RoaringNavigableMap64();
         filterResults.add(1L);
-        vectorSearch =
-                new VectorSearch(
-                        vectorFieldName,
-                        queryVector,
-                        2,
-                        filterResults.iterator(),
-                        similarityMetric);
-        result = (TopkGlobalIndexResult) scanner.scan(vectorSearch).get();
+        vectorSearch = new VectorSearch(queryVector, 2, filterResults.iterator());
+        result = (TopkGlobalIndexResult) scanner.scan(fieldRef, vectorSearch).get();
         resultRowIds = new ArrayList<>();
         result.results().iterator().forEachRemaining(resultRowIds::add);
         float score = result.scoreGetter().score(resultRowIds.get(0));

@@ -154,7 +154,8 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
-    public Optional<OrcFilters.Predicate> visitVectorSearch(VectorSearch vectorSearch) {
+    public Optional<OrcFilters.Predicate> visitVectorSearch(
+            FieldRef fieldRef, VectorSearch vectorSearch) {
         return Optional.empty();
     }
 

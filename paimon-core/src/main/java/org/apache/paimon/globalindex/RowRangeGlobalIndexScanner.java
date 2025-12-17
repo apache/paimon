@@ -24,6 +24,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataField;
@@ -105,8 +106,8 @@ public class RowRangeGlobalIndexScanner implements Closeable {
         return globalIndexEvaluator.evaluate(predicate);
     }
 
-    public Optional<GlobalIndexResult> scan(VectorSearch vectorSearch) {
-        return globalIndexEvaluator.evaluate(vectorSearch);
+    public Optional<GlobalIndexResult> scan(FieldRef fieldRef, VectorSearch vectorSearch) {
+        return globalIndexEvaluator.evaluate(fieldRef, vectorSearch);
     }
 
     private Collection<GlobalIndexReader> createReaders(

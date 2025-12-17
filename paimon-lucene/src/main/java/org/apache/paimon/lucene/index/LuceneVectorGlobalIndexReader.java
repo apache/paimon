@@ -86,7 +86,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
+    public GlobalIndexResult visitVectorSearch(FieldRef fieldRef, VectorSearch vectorSearch) {
         try {
             if (vectorSearch.similarityFunction().isEmpty()
                     || LuceneVectorMetric.fromString(vectorSearch.similarityFunction().get())
@@ -159,24 +159,24 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         }
         if (dataType instanceof ArrayType
                 && ((ArrayType) dataType).getElementType() instanceof FloatType) {
-            if (!(vectorSearch.vector() instanceof float[])) {
+            if (!(vectorSearch.search() instanceof float[])) {
                 throw new IllegalArgumentException(
-                        "Expected float[] vector but got: " + vectorSearch.vector().getClass());
+                        "Expected float[] vector but got: " + vectorSearch.search().getClass());
             }
             return new KnnFloatVectorQuery(
                     LuceneVectorIndex.VECTOR_FIELD,
-                    (float[]) vectorSearch.vector(),
+                    (float[]) vectorSearch.search(),
                     vectorSearch.limit(),
                     idFilterQuery);
         } else if (dataType instanceof ArrayType
                 && ((ArrayType) dataType).getElementType() instanceof TinyIntType) {
-            if (!(vectorSearch.vector() instanceof byte[])) {
+            if (!(vectorSearch.search() instanceof byte[])) {
                 throw new IllegalArgumentException(
-                        "Expected byte[] vector but got: " + vectorSearch.vector().getClass());
+                        "Expected byte[] vector but got: " + vectorSearch.search().getClass());
             }
             return new KnnByteVectorQuery(
                     LuceneVectorIndex.VECTOR_FIELD,
-                    (byte[]) vectorSearch.vector(),
+                    (byte[]) vectorSearch.search(),
                     vectorSearch.limit(),
                     idFilterQuery);
         } else {

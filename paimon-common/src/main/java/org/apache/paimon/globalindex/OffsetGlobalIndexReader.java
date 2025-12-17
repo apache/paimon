@@ -109,8 +109,8 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
-        return applyOffset(wrapped.visitVectorSearch(vectorSearch));
+    public GlobalIndexResult visitVectorSearch(FieldRef fieldRef, VectorSearch vectorSearch) {
+        return applyOffset(wrapped.visitVectorSearch(null, vectorSearch));
     }
 
     private GlobalIndexResult applyOffset(GlobalIndexResult result) {

@@ -108,8 +108,8 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
-        return union(reader -> reader.visitVectorSearch(vectorSearch));
+    public GlobalIndexResult visitVectorSearch(FieldRef fieldRef, VectorSearch vectorSearch) {
+        return union(reader -> reader.visitVectorSearch(null, vectorSearch));
     }
 
     private GlobalIndexResult union(Function<GlobalIndexReader, GlobalIndexResult> visitor) {

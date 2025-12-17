@@ -119,7 +119,7 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
     }
 
     @Override
-    public FileIndexResult visitVectorSearch(VectorSearch vectorSearch) {
+    public FileIndexResult visitVectorSearch(FieldRef fieldRef, VectorSearch vectorSearch) {
         throw new UnsupportedOperationException("Should not invoke this");
     }
 

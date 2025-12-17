@@ -127,9 +127,8 @@ public class LuceneVectorGlobalIndexTest {
             try (LuceneVectorGlobalIndexReader reader =
                     new LuceneVectorGlobalIndexReader(
                             fileReader, metas, indexOptions, vectorType)) {
-                VectorSearch vectorSearch =
-                        new VectorSearch("vec", testVectors.get(0), 3, null, metric);
-                GlobalIndexResult searchResult = reader.visitVectorSearch(vectorSearch);
+                VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 3);
+                GlobalIndexResult searchResult = reader.visitVectorSearch(null, vectorSearch);
                 assertThat(searchResult).isNotNull();
             }
         }
@@ -168,9 +167,8 @@ public class LuceneVectorGlobalIndexTest {
                     new LuceneVectorGlobalIndexReader(
                             fileReader, metas, indexOptions, vectorType)) {
                 // Verify search works with this dimension
-                VectorSearch vectorSearch =
-                        new VectorSearch("vec", testVectors.get(0), 5, null, defaultMetric);
-                GlobalIndexResult searchResult = reader.visitVectorSearch(vectorSearch);
+                VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 5);
+                GlobalIndexResult searchResult = reader.visitVectorSearch(null, vectorSearch);
                 assertThat(searchResult).isNotNull();
             }
         }
@@ -228,9 +226,9 @@ public class LuceneVectorGlobalIndexTest {
 
         try (LuceneVectorGlobalIndexReader reader =
                 new LuceneVectorGlobalIndexReader(fileReader, metas, indexOptions, vectorType)) {
-            VectorSearch vectorSearch = new VectorSearch("vec", vectors[0], 1, null, defaultMetric);
+            VectorSearch vectorSearch = new VectorSearch(vectors[0], 1);
             LuceneTopkGlobalIndexResult result =
-                    (LuceneTopkGlobalIndexResult) reader.visitVectorSearch(vectorSearch);
+                    (LuceneTopkGlobalIndexResult) reader.visitVectorSearch(null, vectorSearch);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
             long expectedRowId = 0;
             assertThat(containsRowId(result, expectedRowId)).isTrue();
@@ -238,14 +236,13 @@ public class LuceneVectorGlobalIndexTest {
             expectedRowId = 1;
             RoaringNavigableMap64 filterResults = new RoaringNavigableMap64();
             filterResults.add(expectedRowId);
-            vectorSearch =
-                    new VectorSearch("vec", vectors[0], 1, filterResults.iterator(), defaultMetric);
-            result = (LuceneTopkGlobalIndexResult) reader.visitVectorSearch(vectorSearch);
+            vectorSearch = new VectorSearch(vectors[0], 1, filterResults.iterator(), defaultMetric);
+            result = (LuceneTopkGlobalIndexResult) reader.visitVectorSearch(null, vectorSearch);
             assertThat(containsRowId(result, expectedRowId)).isTrue();
 
             float[] queryVector = new float[] {0.85f, 0.15f};
-            vectorSearch = new VectorSearch("vec", queryVector, 2, null, defaultMetric);
-            result = (LuceneTopkGlobalIndexResult) reader.visitVectorSearch(vectorSearch);
+            vectorSearch = new VectorSearch(queryVector, 2);
+            result = (LuceneTopkGlobalIndexResult) reader.visitVectorSearch(null, vectorSearch);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
             long rowId1 = 1;
             long rowId2 = 3;
@@ -294,14 +291,14 @@ public class LuceneVectorGlobalIndexTest {
         try (LuceneVectorGlobalIndexReader reader =
                 new LuceneVectorGlobalIndexReader(
                         fileReader, metas, indexOptions, byteVectorType)) {
-            VectorSearch vectorSearch = new VectorSearch("vec", vectors[0], 1, null, defaultMetric);
-            GlobalIndexResult result = reader.visitVectorSearch(vectorSearch);
+            VectorSearch vectorSearch = new VectorSearch(vectors[0], 1);
+            GlobalIndexResult result = reader.visitVectorSearch(null, vectorSearch);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
             assertThat(containsRowId(result, 0)).isTrue();
 
             byte[] queryVector = new byte[] {85, 15};
-            vectorSearch = new VectorSearch("vec", queryVector, 2, null, defaultMetric);
-            result = reader.visitVectorSearch(vectorSearch);
+            vectorSearch = new VectorSearch(queryVector, 2);
+            result = reader.visitVectorSearch(null, vectorSearch);
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
             assertThat(containsRowId(result, 1)).isTrue();
             assertThat(containsRowId(result, 3)).isTrue();
@@ -310,12 +307,11 @@ public class LuceneVectorGlobalIndexTest {
 
     @Test
     public void testInvalidTopK() {
-        assertThatThrownBy(() -> new VectorSearch("vec", null, 10, null, defaultMetric))
+        assertThatThrownBy(() -> new VectorSearch(null, 10))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Vector cannot be null");
+                .hasMessageContaining("Search cannot be null");
 
-        assertThatThrownBy(
-                        () -> new VectorSearch("vec", new float[] {0.1f}, 0, null, defaultMetric))
+        assertThatThrownBy(() -> new VectorSearch(new float[] {0.1f}, 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Limit must be positive");
     }
