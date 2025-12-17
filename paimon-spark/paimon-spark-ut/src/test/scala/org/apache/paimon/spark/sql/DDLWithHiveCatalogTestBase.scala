@@ -21,10 +21,9 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FileStoreTable
-
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{AnalysisException, Row}
-import org.junit.jupiter.api.Assertions
+import org.junit.jupiter.api.Assertions.{assertEquals, assertTrue}
 
 abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
 
