@@ -110,13 +110,13 @@ import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Base test class for {@link RESTCatalog}. */
 public abstract class RESTCatalogTest extends CatalogTestBase {
