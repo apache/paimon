@@ -240,7 +240,7 @@ under the License.
             <td><h5>commit.strict-mode.last-safe-snapshot</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
-            <td>If set, committer will check if there are other commit user's COMPACT / OVERWRITE snapshot, starting from the snapshot after this one. If found, commit will be aborted. If the value of this option is -1, committer will not check for its first commit.</td>
+            <td>If set, committer will check if there are other commit user's snapshot starting from the snapshot after this one. If found a COMPACT / OVERWRITE snapshot, or found a APPEND snapshot which committed files to fixed bucket, commit will be aborted.If the value of this option is -1, committer will not check for its first commit.</td>
         </tr>
         <tr>
             <td><h5>commit.timeout</h5></td>
@@ -271,6 +271,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>If set to true, compaction strategy will always include all level 0 files in candidates.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.incremental-size-threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>When incremental size is bigger than this threshold, force a full compaction.</td>
         </tr>
         <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
@@ -429,6 +435,12 @@ under the License.
             <td>Whether to enable deletion vectors mode. In this mode, index files containing deletion vectors are generated when data is written, which marks the data for deletion. During read operations, by applying these index files, merging can be avoided.</td>
         </tr>
         <tr>
+            <td><h5>deletion-vectors.modifiable</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable modifying deletion vectors mode.</td>
+        </tr>
+        <tr>
             <td><h5>disable-explicit-type-casting</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -549,6 +561,18 @@ under the License.
             <td>Whether to force the use of lookup for compaction.</td>
         </tr>
         <tr>
+            <td><h5>format-table.commit-hive-sync-url</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Format table commit hive sync uri.</td>
+        </tr>
+        <tr>
+            <td><h5>format-table.file.compression</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Format table file compression.</td>
+        </tr>
+        <tr>
             <td><h5>format-table.implementation</h5></td>
             <td style="word-wrap: break-word;">paimon</td>
             <td><p>Enum</p></td>
@@ -565,6 +589,24 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>For streaming write, full compaction will be constantly triggered after delta commits. For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable global index for scan.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.row-count-per-shard</h5></td>
+            <td style="word-wrap: break-word;">100000</td>
+            <td>Long</td>
+            <td>Row count per shard for global index.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.thread-num</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent scanner for global index.By default is the number of processors available to the Java virtual machine.</td>
         </tr>
         <tr>
             <td><h5>ignore-delete</h5></td>
@@ -704,6 +746,18 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
             <td>Threshold for merging records to binary buffer in lookup.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.remote-file.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable the remote file for lookup.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.remote-file.level-threshold</h5></td>
+            <td style="word-wrap: break-word;">-2147483648</td>
+            <td>Integer</td>
+            <td>Level threshold of lookup to generate remote lookup files. Level files below this threshold will not generate remote lookup files.</td>
         </tr>
         <tr>
             <td><h5>manifest.compression</h5></td>
@@ -871,9 +925,9 @@ This config option does not affect the default filesystem metastore.</td>
         </tr>
         <tr>
             <td><h5>partition.expiration-strategy</h5></td>
-            <td style="word-wrap: break-word;">values-time</td>
-            <td><p>Enum</p></td>
-            <td>The strategy determines how to extract the partition time and compare it with the current time.<br /><br />Possible values:<ul><li>"values-time": This strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": This strategy compares the last update time of the partition with the current time.</li><li>"custom": This strategy use custom class to expire partitions.</li></ul></td>
+            <td style="word-wrap: break-word;">"values-time"</td>
+            <td>String</td>
+            <td>The strategy determines how to extract the partition time and compare it with the current time.<ul><li>"values-time": This strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": This strategy compares the last update time of the partition with the current time.</li></ul></td>
         </tr>
         <tr>
             <td><h5>partition.expiration-time</h5></td>

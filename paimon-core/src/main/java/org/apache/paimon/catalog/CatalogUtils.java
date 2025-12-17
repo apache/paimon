@@ -38,6 +38,8 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.iceberg.IcebergTable;
 import org.apache.paimon.table.lance.LanceTable;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.system.AllPartitionsTable;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.AllTablesTable;
@@ -59,6 +61,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.AUTO_CREATE;
+import static org.apache.paimon.CoreOptions.FORMAT_TABLE_IMPLEMENTATION;
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.CoreOptions.PARTITION_GENERATE_LEGACY_NAME;
 import static org.apache.paimon.CoreOptions.PATH;
@@ -142,7 +145,7 @@ public class CatalogUtils {
         }
     }
 
-    public static void validateCreateTable(Schema schema) {
+    public static void validateCreateTable(Schema schema, boolean dataTokenEnabled) {
         Options options = Options.fromMap(schema.options());
         checkArgument(
                 !options.get(AUTO_CREATE),
@@ -156,6 +159,14 @@ public class CatalogUtils {
                     options.get(PRIMARY_KEY) == null,
                     "Cannot define %s for format table.",
                     PRIMARY_KEY.key());
+            if (dataTokenEnabled && options.get(PATH) == null) {
+                checkArgument(
+                        options.get(FORMAT_TABLE_IMPLEMENTATION)
+                                != CoreOptions.FormatTableImplementation.ENGINE,
+                        "Cannot define %s is engine for format table when data token is enabled and not define %s.",
+                        FORMAT_TABLE_IMPLEMENTATION.key(),
+                        PATH.key());
+            }
         }
         for (DataField field : schema.fields()) {
             validateDefaultValue(field.type(), field.defaultValue());
@@ -188,8 +199,19 @@ public class CatalogUtils {
                         table.rowType().project(table.partitionKeys()),
                         table.partitionKeys().toArray(new String[0]),
                         options.get(PARTITION_GENERATE_LEGACY_NAME));
-        List<PartitionEntry> partitionEntries =
-                table.newReadBuilder().newScan().listPartitionEntries();
+
+        TableScan scan = table.newReadBuilder().newScan();
+
+        // partitions should be seen even all files are level-0 when enable dv, see
+        // https://github.com/apache/paimon/pull/6531 for details
+        List<PartitionEntry> partitionEntries;
+        if (scan instanceof InnerTableScan) {
+            partitionEntries =
+                    ((InnerTableScan) scan).withLevelFilter(level -> true).listPartitionEntries();
+        } else {
+            partitionEntries = scan.listPartitionEntries();
+        }
+
         List<Partition> partitions = new ArrayList<>(partitionEntries.size());
         for (PartitionEntry entry : partitionEntries) {
             partitions.add(entry.toPartition(computer));
@@ -230,7 +252,7 @@ public class CatalogUtils {
         Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
 
         if (options.type() == TableType.FORMAT_TABLE) {
-            return toFormatTable(identifier, schema, dataFileIO);
+            return toFormatTable(identifier, schema, dataFileIO, catalogContext);
         }
 
         if (options.type() == TableType.OBJECT_TABLE) {
@@ -370,7 +392,10 @@ public class CatalogUtils {
     }
 
     private static FormatTable toFormatTable(
-            Identifier identifier, TableSchema schema, Function<Path, FileIO> fileIO) {
+            Identifier identifier,
+            TableSchema schema,
+            Function<Path, FileIO> fileIO,
+            CatalogContext catalogContext) {
         Map<String, String> options = schema.options();
         FormatTable.Format format =
                 FormatTable.parseFormat(
@@ -387,6 +412,7 @@ public class CatalogUtils {
                 .format(format)
                 .options(options)
                 .comment(schema.comment())
+                .catalogContext(catalogContext)
                 .build();
     }
 

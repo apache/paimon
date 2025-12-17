@@ -31,7 +31,7 @@ This option value will not only store Iceberg metadata like hadoop-catalog, but 
 This Paimon table can be accessed from Iceberg Rest catalog later.
 
 You need to provide information about Rest Catalog by setting options prefixed with `'metadata.iceberg.rest.'`, such as 
-`'metadata.iceberg.rest.uri' = 'https://localhost/'`. Paimon will try to use these options to initialize a iceberg rest catalog, 
+`'metadata.iceberg.rest.uri' = 'https://localhost/'`. Paimon will try to use these options to initialize an iceberg rest catalog, 
 and use this rest catalog to commit metadata.
 
 **Dependency:**
@@ -68,7 +68,7 @@ CREATE TABLE `paimon`.`default`.`T` (
 -- insert some data
 INSERT INTO `paimon`.`default`.`T` VALUES(1, 9, 90),(1, 10, 100),(1, 11, 110),(2, 20, 200);
 
--- create a iceberg rest catalog
+-- create an iceberg rest catalog
 CREATE CATALOG `iceberg` WITH (
   'type' = 'iceberg',
   'catalog-type' = 'rest',

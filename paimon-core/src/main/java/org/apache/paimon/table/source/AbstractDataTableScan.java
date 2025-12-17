@@ -55,6 +55,7 @@ import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -119,6 +120,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public InnerTableScan withReadType(@Nullable RowType readType) {
         this.readType = readType;
+        snapshotReader.withReadType(readType);
         return this;
     }
 
@@ -172,9 +174,13 @@ abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
-    public InnerTableScan withRowIds(List<Long> indices) {
-        snapshotReader.withRowIds(indices);
+    public InnerTableScan withRowRanges(List<Range> rowRanges) {
+        snapshotReader.withRowRanges(rowRanges);
         return this;
+    }
+
+    public SnapshotReader snapshotReader() {
+        return snapshotReader;
     }
 
     public CoreOptions options() {

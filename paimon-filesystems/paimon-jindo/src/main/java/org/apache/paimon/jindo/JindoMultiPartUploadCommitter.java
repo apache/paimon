@@ -24,7 +24,6 @@ import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.Pair;
 
-import com.aliyun.jindodata.api.spec.protos.JdoObjectPart;
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 
 import java.io.IOException;
@@ -32,14 +31,19 @@ import java.util.List;
 
 /** Jindo implementation of MultiPartUploadCommitter. */
 public class JindoMultiPartUploadCommitter
-        extends BaseMultiPartUploadCommitter<JdoObjectPart, String> {
+        extends BaseMultiPartUploadCommitter<SerializableJdoObjectPart, String> {
+
     public JindoMultiPartUploadCommitter(
-            String uploadId, List<JdoObjectPart> uploadedParts, String objectName, long position) {
-        super(uploadId, uploadedParts, objectName, position);
+            String uploadId,
+            List<SerializableJdoObjectPart> uploadedParts,
+            String objectName,
+            long position,
+            Path targetPath) {
+        super(uploadId, uploadedParts, objectName, position, targetPath);
     }
 
     @Override
-    protected MultiPartUploadStore<JdoObjectPart, String> multiPartUploadStore(
+    protected MultiPartUploadStore<SerializableJdoObjectPart, String> multiPartUploadStore(
             FileIO fileIO, Path targetPath) throws IOException {
         JindoFileIO jindoFileIO = (JindoFileIO) fileIO;
         org.apache.hadoop.fs.Path hadoopPath = jindoFileIO.path(targetPath);

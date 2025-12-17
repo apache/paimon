@@ -69,6 +69,8 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -747,5 +749,46 @@ public class SchemaManagerTest {
                         new DataField(
                                 1, "v", new ArrayType(new MapType(DataTypes.INT(), innerType))));
         assertThat(manager.latest().get().logicalRowType()).isEqualTo(outerType);
+    }
+
+    @Test
+    public void testAlterDeletionVectorsMode() throws Exception {
+        // create table
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(schema);
+
+        // write table
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser).withIOManager(IOManager.create(tempDir + "/io"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10L, BinaryString.fromString("apple")));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // assert exception in alter table
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.setOption(
+                                                DELETION_VECTORS_ENABLED.key(), "true")))
+                .hasMessageContaining(
+                        "If modifying table deletion-vectors mode without full-compaction, this may result in data duplication.");
+
+        // assert not exception when set option
+        manager.commitChanges(SchemaChange.setOption(DELETION_VECTORS_MODIFIABLE.key(), "true"));
+        manager.commitChanges(SchemaChange.setOption(DELETION_VECTORS_ENABLED.key(), "true"));
+        table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        assertThat(table.options().get(DELETION_VECTORS_ENABLED.key())).isEqualTo("true");
     }
 }

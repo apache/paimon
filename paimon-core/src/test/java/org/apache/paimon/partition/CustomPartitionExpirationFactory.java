@@ -43,6 +43,10 @@ public class CustomPartitionExpirationFactory implements PartitionExpireStrategy
             Identifier identifier,
             CoreOptions options,
             RowType partitionType) {
+        String strategy = options.partitionExpireStrategy();
+        if (!"custom".equals(strategy)) {
+            throw new UnsupportedOperationException();
+        }
         return new PartitionExpireStrategy(partitionType, options.partitionDefaultName()) {
             @Override
             public List<PartitionEntry> selectExpiredPartitions(

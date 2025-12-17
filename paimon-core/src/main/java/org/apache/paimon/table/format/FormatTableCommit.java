@@ -18,22 +18,33 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.DelegateCatalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommit;
+import org.apache.paimon.utils.PartitionPathUtils;
 
 import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,6 +61,8 @@ public class FormatTableCommit implements BatchTableCommit {
     private List<String> partitionKeys;
     protected Map<String, String> staticPartitions;
     protected boolean overwrite = false;
+    private Catalog hiveCatalog;
+    private Identifier tableIdentifier;
 
     public FormatTableCommit(
             String location,
@@ -57,7 +70,10 @@ public class FormatTableCommit implements BatchTableCommit {
             FileIO fileIO,
             boolean formatTablePartitionOnlyValueInPath,
             boolean overwrite,
-            @Nullable Map<String, String> staticPartitions) {
+            Identifier tableIdentifier,
+            @Nullable Map<String, String> staticPartitions,
+            @Nullable String syncHiveUri,
+            CatalogContext catalogContext) {
         this.location = location;
         this.fileIO = fileIO;
         this.formatTablePartitionOnlyValueInPath = formatTablePartitionOnlyValueInPath;
@@ -65,6 +81,22 @@ public class FormatTableCommit implements BatchTableCommit {
         this.staticPartitions = staticPartitions;
         this.overwrite = overwrite;
         this.partitionKeys = partitionKeys;
+        this.tableIdentifier = tableIdentifier;
+        if (syncHiveUri != null) {
+            try {
+                Options options = new Options();
+                options.set(CatalogOptions.URI, syncHiveUri);
+                options.set(CatalogOptions.METASTORE, "hive");
+                CatalogContext context =
+                        CatalogContext.create(options, catalogContext.hadoopConf());
+                this.hiveCatalog = CatalogFactory.createCatalog(context);
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        String.format(
+                                "Failed to initialize Hive catalog with URI: %s", syncHiveUri),
+                        e);
+            }
+        }
     }
 
     @Override
@@ -80,33 +112,91 @@ public class FormatTableCommit implements BatchTableCommit {
                                     + commitMessage.getClass().getName());
                 }
             }
-            if (overwrite && staticPartitions != null && !staticPartitions.isEmpty()) {
+
+            Set<Map<String, String>> partitionSpecs = new HashSet<>();
+
+            if (staticPartitions != null && !staticPartitions.isEmpty()) {
                 Path partitionPath =
                         buildPartitionPath(
                                 location,
                                 staticPartitions,
                                 formatTablePartitionOnlyValueInPath,
                                 partitionKeys);
-                deletePreviousDataFile(partitionPath);
+                if (staticPartitions.size() == partitionKeys.size()) {
+                    partitionSpecs.add(staticPartitions);
+                }
+                if (overwrite) {
+                    deletePreviousDataFile(partitionPath);
+                }
+                if (!fileIO.exists(partitionPath)) {
+                    fileIO.mkdirs(partitionPath);
+                }
             } else if (overwrite) {
                 Set<Path> partitionPaths = new HashSet<>();
                 for (TwoPhaseOutputStream.Committer c : committers) {
-                    partitionPaths.add(c.targetFilePath().getParent());
+                    partitionPaths.add(c.targetPath().getParent());
                 }
                 for (Path p : partitionPaths) {
                     deletePreviousDataFile(p);
                 }
             }
+
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 committer.commit(this.fileIO);
+                if (partitionKeys != null && !partitionKeys.isEmpty() && hiveCatalog != null) {
+                    partitionSpecs.add(
+                            extractPartitionSpecFromPath(
+                                    committer.targetPath().getParent(), partitionKeys));
+                }
             }
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 committer.clean(this.fileIO);
+            }
+            for (Map<String, String> partitionSpec : partitionSpecs) {
+                if (hiveCatalog != null) {
+                    try {
+                        if (hiveCatalog instanceof DelegateCatalog) {
+                            hiveCatalog = ((DelegateCatalog) hiveCatalog).wrapped();
+                        }
+                        Method hiveCreatePartitionsInHmsMethod =
+                                getHiveCreatePartitionsInHmsMethod();
+                        hiveCreatePartitionsInHmsMethod.invoke(
+                                hiveCatalog,
+                                tableIdentifier,
+                                Collections.singletonList(partitionSpec),
+                                formatTablePartitionOnlyValueInPath);
+                    } catch (Exception ex) {
+                        throw new RuntimeException("Failed to sync partition to hms", ex);
+                    }
+                }
             }
 
         } catch (Exception e) {
             this.abort(commitMessages);
             throw new RuntimeException(e);
+        }
+    }
+
+    private Method getHiveCreatePartitionsInHmsMethod() throws NoSuchMethodException {
+        Method hiveCreatePartitionsInHmsMethod =
+                hiveCatalog
+                        .getClass()
+                        .getDeclaredMethod(
+                                "createPartitionsUtil",
+                                Identifier.class,
+                                List.class,
+                                boolean.class);
+        hiveCreatePartitionsInHmsMethod.setAccessible(true);
+        return hiveCreatePartitionsInHmsMethod;
+    }
+
+    private LinkedHashMap<String, String> extractPartitionSpecFromPath(
+            Path partitionPath, List<String> partitionKeys) {
+        if (formatTablePartitionOnlyValueInPath) {
+            return PartitionPathUtils.extractPartitionSpecFromPathOnlyValue(
+                    partitionPath, partitionKeys);
+        } else {
+            return PartitionPathUtils.extractPartitionSpecFromPath(partitionPath);
         }
     }
 

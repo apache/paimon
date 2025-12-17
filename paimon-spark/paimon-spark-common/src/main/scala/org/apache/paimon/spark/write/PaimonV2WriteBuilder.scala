@@ -22,15 +22,20 @@ import org.apache.paimon.options.Options
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.connector.write.{SupportsDynamicOverwrite, SupportsOverwrite, WriteBuilder}
-import org.apache.spark.sql.sources.{And, Filter}
 import org.apache.spark.sql.types.StructType
 
 class PaimonV2WriteBuilder(table: FileStoreTable, dataSchema: StructType, options: Options)
   extends BaseV2WriteBuilder(table) {
 
-  override def build =
-    new PaimonV2Write(table, overwriteDynamic, overwritePartitions, dataSchema, options)
+  override def build = {
+    val paimonV2Write =
+      new PaimonV2Write(table, overwriteDynamic, overwritePartitions, dataSchema, options)
+    if (isOverwriteFiles) {
+      paimonV2Write.overwriteFiles(copyOnWriteScan)
+    } else {
+      paimonV2Write
+    }
+  }
 
   override def partitionRowType(): RowType = table.schema().logicalPartitionType()
 }

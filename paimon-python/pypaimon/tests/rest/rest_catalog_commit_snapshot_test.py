@@ -216,6 +216,80 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
                 # Verify client was called correctly
                 mock_client.post_with_response_type.assert_called_once()
 
+    def test_rest_catalog_commit_snapshot_with_lance_format(self):
+        """Test snapshot commit with Lance format table."""
+        from pypaimon import Schema
+        import pyarrow as pa
+        import tempfile
+        import shutil
+        from pypaimon.api.api_response import ConfigResponse
+        from pypaimon.api.auth import BearTokenAuthProvider
+        from pypaimon.tests.rest.rest_server import RESTCatalogServer
+        import uuid
+
+        temp_dir = tempfile.mkdtemp(prefix="rest_lance_test_")
+        try:
+            config = ConfigResponse(defaults={"prefix": "mock-test"})
+            token = str(uuid.uuid4())
+            server = RESTCatalogServer(
+                data_path=temp_dir,
+                auth_provider=BearTokenAuthProvider(token),
+                config=config,
+                warehouse="warehouse"
+            )
+            server.start()
+
+            options = {
+                'metastore': 'rest',
+                'uri': f"http://localhost:{server.port}",
+                'warehouse': "warehouse",
+                'dlf.region': 'cn-hangzhou',
+                "token.provider": "bear",
+                'token': token,
+            }
+            catalog = RESTCatalog(CatalogContext.create_from_options(Options(options)))
+            catalog.create_database("default", False)
+
+            # Create table with Lance format
+            pa_schema = pa.schema([
+                ('id', pa.int32()),
+                ('name', pa.string())
+            ])
+            schema = Schema.from_pyarrow_schema(
+                pa_schema,
+                options={'file.format': 'lance'}
+            )
+            identifier = Identifier.create("default", "test_lance_table")
+            catalog.create_table(identifier, schema, False)
+
+            # Write data and commit
+            table = catalog.get_table(identifier)
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+
+            data = pa.Table.from_pydict({
+                'id': [1, 2, 3],
+                'name': ['a', 'b', 'c']
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            commit_messages = table_write.prepare_commit()
+            table_commit.commit(commit_messages)
+            table_write.close()
+            table_commit.close()
+
+            # Verify commit was successful by reading the data back
+            read_builder = table.new_read_builder()
+            table_read = read_builder.new_read()
+            splits = read_builder.new_scan().plan().splits()
+            actual = table_read.to_arrow(splits)
+            self.assertEqual(actual.num_rows, 3)
+            self.assertEqual(actual.column('id').to_pylist(), [1, 2, 3])
+            self.assertEqual(actual.column('name').to_pylist(), ['a', 'b', 'c'])
+        finally:
+            server.shutdown()
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -22,6 +22,7 @@ import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.CoreOptions.{PartitionSinkStrategy, WRITE_ONLY}
 import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
+import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.deletionvectors.DeletionVector
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer
@@ -29,14 +30,14 @@ import org.apache.paimon.fs.Path
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.FileKind
-import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
+import org.apache.paimon.spark.{SparkRow, SparkTypeUtils}
 import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.sort.TableSorter
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
-import org.apache.paimon.spark.write.WriteHelper
-import org.apache.paimon.table.{FileStoreTable, SpecialFields}
+import org.apache.paimon.spark.write.{PaimonDataWrite, WriteHelper, WriteTaskResult}
+import org.apache.paimon.table.{FileStoreTable, PostponeUtils, SpecialFields}
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.sink._
 import org.apache.paimon.types.{RowKind, RowType}
@@ -55,7 +56,7 @@ import scala.collection.JavaConverters._
 case class PaimonSparkWriter(
     table: FileStoreTable,
     writeRowTracking: Boolean = false,
-    batchId: Long = -1)
+    batchId: Option[Long] = None)
   extends WriteHelper {
 
   private lazy val tableSchema = table.schema
@@ -75,7 +76,17 @@ case class PaimonSparkWriter(
     }
   }
 
-  val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
+  val postponeBatchWriteFixedBucket: Boolean =
+    table.bucketMode() == POSTPONE_MODE && coreOptions.postponeBatchWriteFixedBucket()
+
+  val writeBuilder: BatchWriteBuilder = {
+    val tableForWrite = if (postponeBatchWriteFixedBucket) {
+      PostponeUtils.tableForFixBucketWrite(table)
+    } else {
+      table
+    }
+    tableForWrite.newBatchWriteBuilder()
+  }
 
   def writeOnly(): PaimonSparkWriter = {
     PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")))
@@ -104,8 +115,16 @@ case class PaimonSparkWriter(
     val rowKindColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, ROW_KIND_COL)
     val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
+    val postponePartitionBucketComputer: Option[BinaryRow => Integer] =
+      if (postponeBatchWriteFixedBucket) {
+        val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
+        val defaultPostponeNumBuckets = withInitBucketCol.rdd.getNumPartitions
+        Some((p: BinaryRow) => knownNumBuckets.getOrDefault(p, defaultPostponeNumBuckets))
+      } else {
+        None
+      }
 
-    def newWrite() = SparkTableWrite(
+    def newWrite() = PaimonDataWrite(
       writeBuilder,
       writeType,
       rowKindColIdx,
@@ -113,7 +132,8 @@ case class PaimonSparkWriter(
       fullCompactionDeltaCommits,
       batchId,
       coreOptions.blobAsDescriptor(),
-      table.catalogEnvironment().catalogContext()
+      table.catalogEnvironment().catalogContext(),
+      postponePartitionBucketComputer
     )
 
     def sparkParallelism = {
@@ -122,14 +142,14 @@ case class PaimonSparkWriter(
       Math.max(defaultParallelism, numShufflePartitions)
     }
 
-    def writeWithoutBucket(dataFrame: DataFrame): Dataset[Array[Byte]] = {
+    def writeWithoutBucket(dataFrame: DataFrame) = {
       dataFrame.mapPartitions {
         iter =>
           {
             val write = newWrite()
             try {
               iter.foreach(row => write.write(row))
-              write.finish()
+              Iterator.apply(write.commit)
             } finally {
               write.close()
             }
@@ -137,14 +157,14 @@ case class PaimonSparkWriter(
       }
     }
 
-    def writeWithBucket(dataFrame: DataFrame): Dataset[Array[Byte]] = {
+    def writeWithBucket(dataFrame: DataFrame) = {
       dataFrame.mapPartitions {
         iter =>
           {
             val write = newWrite()
             try {
               iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
-              write.finish()
+              Iterator.apply(write.commit)
             } finally {
               write.close()
             }
@@ -152,9 +172,7 @@ case class PaimonSparkWriter(
       }
     }
 
-    def writeWithBucketProcessor(
-        dataFrame: DataFrame,
-        processor: BucketProcessor[Row]): Dataset[Array[Byte]] = {
+    def writeWithBucketProcessor(dataFrame: DataFrame, processor: BucketProcessor[Row]) = {
       val repartitioned = repartitionByPartitionsAndBucket(
         dataFrame
           .mapPartitions(processor.processPartition)(encoderGroupWithBucketCol.encoder)
@@ -162,9 +180,7 @@ case class PaimonSparkWriter(
       writeWithBucket(repartitioned)
     }
 
-    def writeWithBucketAssigner(
-        dataFrame: DataFrame,
-        funcFactory: () => Row => Int): Dataset[Array[Byte]] = {
+    def writeWithBucketAssigner(dataFrame: DataFrame, funcFactory: () => Row => Int) = {
       dataFrame.mapPartitions {
         iter =>
           {
@@ -172,7 +188,7 @@ case class PaimonSparkWriter(
             val write = newWrite()
             try {
               iter.foreach(row => write.write(row, assigner.apply(row)))
-              write.finish()
+              Iterator.apply(write.commit)
             } finally {
               write.close()
             }
@@ -180,18 +196,15 @@ case class PaimonSparkWriter(
       }
     }
 
-    val written: Dataset[Array[Byte]] = bucketMode match {
+    val written = bucketMode match {
       case KEY_DYNAMIC =>
         // Topology: input -> bootstrap -> shuffle by key hash -> bucket-assigner -> shuffle by partition & bucket
         val rowType = SparkTypeUtils.toPaimonType(withInitBucketCol.schema).asInstanceOf[RowType]
         val assignerParallelism = Option(coreOptions.dynamicBucketAssignerParallelism)
           .map(_.toInt)
           .getOrElse(sparkParallelism)
-        val bootstrapped = bootstrapAndRepartitionByKeyHash(
-          withInitBucketCol,
-          assignerParallelism,
-          rowKindColIdx,
-          rowType)
+        val bootstrapped =
+          bootstrapAndRepartitionByKeyHash(withInitBucketCol, assignerParallelism, rowKindColIdx)
 
         val globalDynamicBucketProcessor =
           GlobalDynamicBucketProcessor(
@@ -264,6 +277,16 @@ case class PaimonSparkWriter(
           )
         }
 
+      case POSTPONE_MODE if coreOptions.postponeBatchWriteFixedBucket() =>
+        // Topology: input -> bucket-assigner -> shuffle by partition & bucket
+        writeWithBucketProcessor(
+          withInitBucketCol,
+          PostponeFixBucketProcessor(
+            table,
+            bucketColIdx,
+            encoderGroupWithBucketCol,
+            postponePartitionBucketComputer.get))
+
       case BUCKET_UNAWARE | POSTPONE_MODE =>
         var input = data
         if (tableSchema.partitionKeys().size() > 0) {
@@ -309,10 +332,7 @@ case class PaimonSparkWriter(
         throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")
     }
 
-    written
-      .collect()
-      .map(deserializeCommitMessage(serializer, _))
-      .toSeq
+    WriteTaskResult.merge(written.collect())
   }
 
   /**
@@ -366,7 +386,8 @@ case class PaimonSparkWriter(
               java.util.Collections.emptyList(),
               java.util.Collections.emptyList(),
               added.map(_.indexFile).asJava,
-              deleted.map(_.indexFile).asJava),
+              deleted.map(_.indexFile).asJava
+            ),
             CompactIncrement.emptyIncrement()
           )
           val serializer = new CommitMessageSerializer
@@ -378,7 +399,16 @@ case class PaimonSparkWriter(
   }
 
   def commit(commitMessages: Seq[CommitMessage]): Unit = {
-    val tableCommit = writeBuilder.newCommit()
+    val finalWriteBuilder = if (postponeBatchWriteFixedBucket) {
+      writeBuilder
+        .asInstanceOf[BatchWriteBuilderImpl]
+        .copyWithNewTable(PostponeUtils.tableForCommit(table))
+        // Need to check conflict
+        .appendCommitCheckConflict(true)
+    } else {
+      writeBuilder
+    }
+    val tableCommit = finalWriteBuilder.newCommit()
     try {
       tableCommit.commit(commitMessages.toList.asJava)
     } catch {
@@ -393,11 +423,11 @@ case class PaimonSparkWriter(
   private def bootstrapAndRepartitionByKeyHash(
       data: DataFrame,
       parallelism: Int,
-      rowKindColIdx: Int,
-      rowType: RowType): RDD[(KeyPartOrRow, Array[Byte])] = {
+      rowKindColIdx: Int): RDD[(KeyPartOrRow, Array[Byte])] = {
     val numSparkPartitions = data.rdd.getNumPartitions
     val primaryKeys = table.schema().primaryKeys()
     val bootstrapType = IndexBootstrap.bootstrapType(table.schema())
+    val rowType = table.rowType()
     data.rdd
       .mapPartitions {
         iter =>

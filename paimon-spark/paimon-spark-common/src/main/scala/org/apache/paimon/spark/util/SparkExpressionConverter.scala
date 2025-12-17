@@ -19,43 +19,55 @@
 package org.apache.paimon.spark.util
 
 import org.apache.paimon.data.{BinaryString, Decimal, Timestamp}
-import org.apache.paimon.predicate.{ConcatTransform, FieldRef, FieldTransform, Transform, UpperTransform}
-import org.apache.paimon.spark.SparkTypeUtils
+import org.apache.paimon.predicate._
+import org.apache.paimon.spark.{PaimonImplicits, SparkTypeUtils}
 import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
 import org.apache.paimon.types.{DecimalType, RowType}
 import org.apache.paimon.types.DataTypeRoot._
 
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
-import org.apache.spark.sql.connector.expressions.{Expression, GeneralScalarExpression, Literal, NamedReference}
+import org.apache.spark.sql.connector.expressions.{Cast, Expression, GeneralScalarExpression, Literal, NamedReference}
 
 import scala.collection.JavaConverters._
 
 object SparkExpressionConverter {
 
-  // Supported transform names
+  import PaimonImplicits._
+
+  // Supported general scalar transform names
   private val CONCAT = "CONCAT"
   private val UPPER = "UPPER"
 
   /** Convert Spark [[Expression]] to Paimon [[Transform]], return None if not supported. */
   def toPaimonTransform(exp: Expression, rowType: RowType): Option[Transform] = {
+
+    def convertChildren(children: Seq[Expression]) = {
+      val converted = children.map {
+        case n: NamedReference => Some(toPaimonFieldRef(n, rowType))
+        case l: Literal[_] => Some(toPaimonLiteral(l))
+        case _ => None
+      }
+      if (converted.exists(_.isEmpty)) {
+        None
+      } else {
+        Some(converted.map(_.get).asJava)
+      }
+    }
+
     exp match {
       case n: NamedReference => Some(new FieldTransform(toPaimonFieldRef(n, rowType)))
       case s: GeneralScalarExpression =>
         s.name() match {
-          case CONCAT =>
-            val inputs = exp.children().map {
-              case n: NamedReference => toPaimonFieldRef(n, rowType)
-              case l: Literal[_] => toPaimonLiteral(l)
-              case _ => return None
-            }
-            Some(new ConcatTransform(inputs.toList.asJava))
-          case UPPER =>
-            val inputs = exp.children().map {
-              case n: NamedReference => toPaimonFieldRef(n, rowType)
-              case l: Literal[_] => toPaimonLiteral(l)
-              case _ => return None
-            }
-            Some(new UpperTransform(inputs.toList.asJava))
+          case CONCAT => convertChildren(s.children()).map(i => new ConcatTransform(i))
+          case UPPER => convertChildren(s.children()).map(i => new UpperTransform(i))
+          case _ => None
+        }
+      case c: Cast =>
+        c.expression() match {
+          case n: NamedReference =>
+            CastTransform.tryCreate(
+              toPaimonFieldRef(n, rowType),
+              SparkTypeUtils.toPaimonType(c.dataType()))
           case _ => None
         }
       case _ => None

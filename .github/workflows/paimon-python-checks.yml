@@ -32,6 +32,9 @@ on:
 
 env:
   PYTHON_VERSIONS: "['3.6.15', '3.10']"
+  JDK_VERSION: 8
+  MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
+
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
@@ -49,6 +52,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
+      - name: Set up JDK ${{ env.JDK_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JDK_VERSION }}
+          distribution: 'temurin'
+
+      - name: Set up Maven
+        uses: stCarolas/setup-maven@v4.5
+        with:
+          maven-version: 3.8.8
+
       - name: Install system dependencies
         shell: bash
         run: |
@@ -58,8 +72,18 @@ jobs:
             curl \
             && rm -rf /var/lib/apt/lists/*
 
+      - name: Verify Java and Maven installation
+        run: |
+          java -version
+          mvn -version
+
       - name: Verify Python version
         run: python --version
+
+      - name: Build Java
+        run: |
+          echo "Start compiling modules"
+          mvn -T 2C -B clean install -DskipTests
 
       - name: Install Python dependencies
         shell: bash
@@ -67,10 +91,10 @@ jobs:
           if [[ "${{ matrix.python-version }}" == "3.6.15" ]]; then
             python -m pip install --upgrade pip==21.3.1
             python --version
-            python -m pip install -q readerwriterlock==1.0.9 'fsspec==2021.10.1' 'cachetools==4.2.4' 'ossfs==2021.8.0' pyarrow==6.0.1 pandas==1.1.5 'polars==0.9.12' 'fastavro==1.4.7' zstandard==0.19.0 dataclasses==0.8.0 flake8 pytest py4j==0.10.9.9 requests 2>&1 >/dev/null
+            python -m pip install -q pyroaring readerwriterlock==1.0.9 'fsspec==2021.10.1' 'cachetools==4.2.4' 'ossfs==2021.8.0' pyarrow==6.0.1 pandas==1.1.5 'polars==0.9.12' 'fastavro==1.4.7' zstandard==0.19.0 dataclasses==0.8.0 flake8 pytest py4j==0.10.9.9 requests parameterized==0.8.1 2>&1 >/dev/null
           else
             python -m pip install --upgrade pip
-            python -m pip install -q readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.48.0 fastavro==1.11.1 pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests 2>&1 >/dev/null
+            python -m pip install -q pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.48.0 fastavro==1.11.1 pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==0.39.0 flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 2>&1 >/dev/null
           fi
       - name: Run lint-python.sh
         shell: bash

@@ -22,18 +22,27 @@ import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+import javax.annotation.Nullable;
+
 import java.util.Collections;
 
 /** Operator used with {@link IncrementalClusterSplitSource}, to remove files to be clustered. */
 public class RemoveClusterBeforeFilesOperator extends BoundedOneInputOperator<Split, Committable> {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
+
+    private final @Nullable CommitMessage dvCommitMessage;
+
+    public RemoveClusterBeforeFilesOperator(@Nullable CommitMessage dvCommitMessage) {
+        this.dvCommitMessage = dvCommitMessage;
+    }
 
     @Override
     public void processElement(StreamRecord<Split> element) throws Exception {
@@ -54,5 +63,15 @@ public class RemoveClusterBeforeFilesOperator extends BoundedOneInputOperator<Sp
     }
 
     @Override
-    public void endInput() throws Exception {}
+    public void endInput() throws Exception {
+        emitDvIndexCommitMessages(Long.MAX_VALUE);
+    }
+
+    private void emitDvIndexCommitMessages(long checkpointId) {
+        if (dvCommitMessage != null) {
+            output.collect(
+                    new StreamRecord<>(
+                            new Committable(checkpointId, Committable.Kind.FILE, dvCommitMessage)));
+        }
+    }
 }

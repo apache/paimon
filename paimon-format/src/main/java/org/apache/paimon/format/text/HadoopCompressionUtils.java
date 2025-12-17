@@ -69,11 +69,7 @@ public class HadoopCompressionUtils {
                 return inputStream;
             }
 
-            CompressionCodecFactory codecFactory =
-                    new CompressionCodecFactory(new Configuration(false));
-
-            CompressionCodec codec =
-                    codecFactory.getCodec(new org.apache.hadoop.fs.Path(filePath.toString()));
+            CompressionCodec codec = getCompressionCodec(filePath);
             if (codec != null) {
                 return codec.createInputStream(inputStream);
             }
@@ -81,6 +77,16 @@ public class HadoopCompressionUtils {
         } catch (Exception | UnsatisfiedLinkError e) {
             throw new RuntimeException("Failed to create decompression stream", e);
         }
+    }
+
+    public static boolean isCompressed(Path filePath) {
+        return getCompressionCodec(filePath) != null;
+    }
+
+    public static CompressionCodec getCompressionCodec(Path filePath) {
+        CompressionCodecFactory codecFactory =
+                new CompressionCodecFactory(new Configuration(false));
+        return codecFactory.getCodec(new org.apache.hadoop.fs.Path(filePath.toString()));
     }
 
     /**

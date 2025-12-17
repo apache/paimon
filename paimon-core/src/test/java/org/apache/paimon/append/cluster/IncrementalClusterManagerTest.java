@@ -134,12 +134,7 @@ public class IncrementalClusterManagerTest {
     }
 
     @Test
-    public void testUpgrade() throws Exception {
-        // Create a valid table for IncrementalClusterManager
-        Map<String, String> options = new HashMap<>();
-        FileStoreTable table = createTable(options, Collections.emptyList());
-        IncrementalClusterManager incrementalClusterManager = new IncrementalClusterManager(table);
-
+    public void testUpgrade() {
         // Create test files with different levels
         List<DataFileMeta> filesAfterCluster = new ArrayList<>();
         DataFileMeta file1 = createFile(100, 1, 0);
@@ -197,14 +192,14 @@ public class IncrementalClusterManagerTest {
                                 RowType.of(DataTypes.INT()),
                                 Lists.newArrayList(BinaryRow.singleColumn("pt3"))));
         Map<BinaryRow, CompactUnit> partitionLevels =
-                incrementalClusterManager.prepareForCluster(true);
+                incrementalClusterManager.createCompactUnits(true);
         assertThat(partitionLevels.size()).isEqualTo(2);
         assertThat(partitionLevels.get(BinaryRow.singleColumn("pt1"))).isNotNull();
         assertThat(partitionLevels.get(BinaryRow.singleColumn("pt3"))).isNotNull();
 
         // test don't specify partition and enable history partition auto clustering
         incrementalClusterManager = new IncrementalClusterManager(table);
-        partitionLevels = incrementalClusterManager.prepareForCluster(true);
+        partitionLevels = incrementalClusterManager.createCompactUnits(true);
         assertThat(partitionLevels.size()).isEqualTo(4);
 
         // test specify partition and disable history partition auto clustering
@@ -218,7 +213,7 @@ public class IncrementalClusterManagerTest {
                         PartitionPredicate.fromMultiple(
                                 RowType.of(DataTypes.INT()),
                                 Lists.newArrayList(BinaryRow.singleColumn("pt3"))));
-        partitionLevels = incrementalClusterManager.prepareForCluster(true);
+        partitionLevels = incrementalClusterManager.createCompactUnits(true);
         assertThat(partitionLevels.size()).isEqualTo(1);
         assertThat(partitionLevels.get(BinaryRow.singleColumn("pt3"))).isNotNull();
     }

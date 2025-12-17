@@ -26,6 +26,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.expressions.FieldReference
 import org.apache.spark.sql.connector.expressions.filter.Predicate
+import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.execution.datasources.DataSourceStrategy
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Strategy.translateFilterV2WithMapping
 import org.apache.spark.sql.internal.connector.PredicateUtils
@@ -92,6 +93,10 @@ object PaimonUtils {
     SparkUtils.bytesToString(size)
   }
 
+  def msDurationToString(size: Long): String = {
+    SparkUtils.msDurationToString(size)
+  }
+
   def setInputFileName(inputFileName: String): Unit = {
     InputFileBlockHolder.set(inputFileName, 0, -1)
   }
@@ -133,5 +138,12 @@ object PaimonUtils {
 
   def classForName(clazz: String): Class[_] = {
     SparkUtils.classForName(clazz)
+  }
+
+  def invalidPartitionSpecError(
+      specKeys: String,
+      partitionColumnNames: Seq[String],
+      tableName: String): Throwable = {
+    QueryCompilationErrors.invalidPartitionSpecError(specKeys, partitionColumnNames, tableName)
   }
 }

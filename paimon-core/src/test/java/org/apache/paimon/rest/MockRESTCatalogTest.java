@@ -18,8 +18,10 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
@@ -34,6 +36,8 @@ import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -43,12 +47,15 @@ import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -171,6 +178,28 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     @Test
+    void testCreateTableDefaultOptions() throws Exception {
+        String catalogConfigKey = "default-key";
+        options.set(TABLE_DEFAULT_OPTION_PREFIX + catalogConfigKey, "default-value");
+        RESTCatalog restCatalog = initCatalog(false);
+        Identifier identifier = Identifier.create("db1", "new_table_default_options");
+        restCatalog.createDatabase(identifier.getDatabaseName(), true);
+        restCatalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, true);
+        assertEquals(
+                restCatalog.getTable(identifier).options().get(catalogConfigKey), "default-value");
+        restCatalog.dropTable(identifier, true);
+        restCatalog.dropDatabase(identifier.getDatabaseName(), true, true);
+
+        String catalogConfigInServerKey = "default-key-in-server";
+        restCatalog = initCatalogWithDefaultTableOption(catalogConfigInServerKey, "default-value");
+        restCatalog.createDatabase(identifier.getDatabaseName(), true);
+        restCatalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, true);
+        assertEquals(
+                restCatalog.getTable(identifier).options().get(catalogConfigInServerKey),
+                "default-value");
+    }
+
+    @Test
     void testBaseHeadersInRequests() throws Exception {
         // Set custom headers in options
         String customHeaderName = "custom-header";
@@ -193,6 +222,28 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         // Perform an operation that will trigger REST request
         restCatalog.listDatabases();
         checkHeader(customHeaderName, customHeaderValue);
+    }
+
+    @Test
+    void testCreateFormatTableWhenEnableDataToken() throws Exception {
+        RESTCatalog restCatalog = initCatalog(true);
+        restCatalog.createDatabase("test_db", false);
+        // Create format table with engine impl without path is not allowed
+        Identifier identifier = Identifier.create("test_db", "new_table");
+        Schema schema = Schema.newBuilder().column("c1", DataTypes.INT()).build();
+        schema.options().put(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString());
+        schema.options().put(CoreOptions.FORMAT_TABLE_IMPLEMENTATION.key(), "engine");
+
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> restCatalog.createTable(identifier, schema, false))
+                .withMessage(
+                        "Cannot define format-table.implementation is engine for format table when data token is enabled and not define path.");
+
+        // Create format table with engine impl and path
+        schema.options().put(CoreOptions.PATH.key(), dataPath + UUID.randomUUID());
+        restCatalog.createTable(identifier, schema, false);
+
+        catalog.dropTable(identifier, true);
     }
 
     private void checkHeader(String headerName, String headerValue) {
@@ -232,6 +283,12 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     @Override
     protected Catalog newRestCatalogWithDataToken() throws IOException {
         return initCatalog(true);
+    }
+
+    @Override
+    protected Catalog newRestCatalogWithDataToken(Map<String, String> extraOptions)
+            throws IOException {
+        return initCatalog(true, extraOptions);
     }
 
     @Override
@@ -283,9 +340,28 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     private RESTCatalog initCatalog(boolean enableDataToken) throws IOException {
+        return initCatalogUtil(enableDataToken, Collections.emptyMap(), null, null);
+    }
+
+    private RESTCatalog initCatalog(boolean enableDataToken, Map<String, String> extraOptions)
+            throws IOException {
+        return initCatalogUtil(enableDataToken, extraOptions, null, null);
+    }
+
+    private RESTCatalog initCatalogWithDefaultTableOption(String key, String value)
+            throws IOException {
+        return initCatalogUtil(false, Collections.emptyMap(), key, value);
+    }
+
+    private RESTCatalog initCatalogUtil(
+            boolean enableDataToken,
+            Map<String, String> extraOptions,
+            String createTableDefaultKey,
+            String createTableDefaultValue)
+            throws IOException {
         String restWarehouse = UUID.randomUUID().toString();
-        this.config =
-                new ConfigResponse(
+        Map<String, String> defaultConf =
+                new HashMap<>(
                         ImmutableMap.of(
                                 RESTCatalogInternalOptions.PREFIX.key(),
                                 "paimon",
@@ -294,8 +370,12 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                                 RESTTokenFileIO.DATA_TOKEN_ENABLED.key(),
                                 enableDataToken + "",
                                 CatalogOptions.WAREHOUSE.key(),
-                                restWarehouse),
-                        ImmutableMap.of());
+                                restWarehouse));
+        if (createTableDefaultKey != null) {
+            defaultConf.put(
+                    TABLE_DEFAULT_OPTION_PREFIX + createTableDefaultKey, createTableDefaultValue);
+        }
+        this.config = new ConfigResponse(defaultConf, ImmutableMap.of());
         restCatalogServer =
                 new RESTCatalogServer(dataPath, this.authProvider, this.config, restWarehouse);
         restCatalogServer.start();
@@ -309,6 +389,9 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                         ? dataPath.replaceFirst("file", RESTFileIOTestLoader.SCHEME)
                         : dataPath;
         options.set(RESTTestFileIO.DATA_PATH_CONF_KEY, path);
+        for (Map.Entry<String, String> entry : extraOptions.entrySet()) {
+            options.set(entry.getKey(), entry.getValue());
+        }
         return new RESTCatalog(CatalogContext.create(options));
     }
 }

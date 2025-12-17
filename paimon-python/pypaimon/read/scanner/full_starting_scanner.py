@@ -17,10 +17,13 @@ limitations under the License.
 """
 import os
 from collections import defaultdict
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Dict, Set
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
+from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -54,8 +57,9 @@ class FullStartingScanner(StartingScanner):
         self.partition_key_predicate = trim_and_transform_predicate(
             self.predicate, self.table.field_names, self.table.partition_keys)
 
-        self.target_split_size = 128 * 1024 * 1024
-        self.open_file_cost = 4 * 1024 * 1024
+        # Get split target size and open file cost from table options
+        self.target_split_size = CoreOptions.split_target_size(self.table.options)
+        self.open_file_cost = CoreOptions.split_open_file_cost(self.table.options)
 
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
@@ -63,6 +67,7 @@ class FullStartingScanner(StartingScanner):
         self.only_read_real_buckets = True if int(
             self.table.options.get('bucket', -1)) == BucketMode.POSTPONE_BUCKET.value else False
         self.data_evolution = self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true'
+        self.deletion_vectors_enabled = self.table.options.get('deletion-vectors.enabled', 'false').lower() == 'true'
 
         def schema_fields_func(schema_id: int):
             return self.table.schema_manager.get_schema(schema_id).fields
@@ -76,12 +81,24 @@ class FullStartingScanner(StartingScanner):
         file_entries = self.plan_files()
         if not file_entries:
             return Plan([])
+
+        # Get deletion files map if deletion vectors are enabled.
+        # {partition-bucket -> {filename -> DeletionFile}}
+        deletion_files_map: dict[tuple, dict[str, DeletionFile]] = {}
+        if self.deletion_vectors_enabled:
+            latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+            # Extract unique partition-bucket pairs from file entries
+            buckets = set()
+            for entry in file_entries:
+                buckets.add((tuple(entry.partition.values), entry.bucket))
+            deletion_files_map = self._scan_dv_index(latest_snapshot, buckets)
+
         if self.table.is_primary_key_table:
-            splits = self._create_primary_key_splits(file_entries)
+            splits = self._create_primary_key_splits(file_entries, deletion_files_map)
         elif self.data_evolution:
-            splits = self._create_data_evolution_splits(file_entries)
+            splits = self._create_data_evolution_splits(file_entries, deletion_files_map)
         else:
-            splits = self._create_append_only_splits(file_entries)
+            splits = self._create_append_only_splits(file_entries, deletion_files_map)
 
         splits = self._apply_push_down_limit(splits)
         return Plan(splits)
@@ -116,14 +133,20 @@ class FullStartingScanner(StartingScanner):
             for entry in file_entries:
                 total_row += entry.file.row_count
 
-        # Calculate number of rows this shard should process
-        # Last shard handles all remaining rows (handles non-divisible cases)
-        if self.idx_of_this_subtask == self.number_of_para_subtasks - 1:
-            num_row = total_row - total_row // self.number_of_para_subtasks * self.idx_of_this_subtask
+        # Calculate number of rows this shard should process using balanced distribution
+        # Distribute remainder evenly among first few shards to avoid last shard overload
+        base_rows_per_shard = total_row // self.number_of_para_subtasks
+        remainder = total_row % self.number_of_para_subtasks
+
+        # Each of the first 'remainder' shards gets one extra row
+        if self.idx_of_this_subtask < remainder:
+            num_row = base_rows_per_shard + 1
+            start_row = self.idx_of_this_subtask * (base_rows_per_shard + 1)
         else:
-            num_row = total_row // self.number_of_para_subtasks
-        # Calculate start row and end row position for current shard in all data
-        start_row = self.idx_of_this_subtask * (total_row // self.number_of_para_subtasks)
+            num_row = base_rows_per_shard
+            start_row = (remainder * (base_rows_per_shard + 1) +
+                         (self.idx_of_this_subtask - remainder) * base_rows_per_shard)
+
         end_row = start_row + num_row
 
         plan_start_row = 0
@@ -159,24 +182,25 @@ class FullStartingScanner(StartingScanner):
 
     def _data_evolution_filter_by_shard(self, partitioned_files: defaultdict) -> (defaultdict, int, int):
         total_row = 0
-        first_row_id_set = set()
-        # Sort by file creation time to ensure consistent sharding
         for key, file_entries in partitioned_files.items():
             for entry in file_entries:
-                if entry.file.first_row_id is None:
-                    total_row += entry.file.row_count
-                elif entry.file.first_row_id not in first_row_id_set:
-                    first_row_id_set.add(entry.file.first_row_id)
+                if not self._is_blob_file(entry.file.file_name):
                     total_row += entry.file.row_count
 
-        # Calculate number of rows this shard should process
-        # Last shard handles all remaining rows (handles non-divisible cases)
-        if self.idx_of_this_subtask == self.number_of_para_subtasks - 1:
-            num_row = total_row - total_row // self.number_of_para_subtasks * self.idx_of_this_subtask
+        # Calculate number of rows this shard should process using balanced distribution
+        # Distribute remainder evenly among first few shards to avoid last shard overload
+        base_rows_per_shard = total_row // self.number_of_para_subtasks
+        remainder = total_row % self.number_of_para_subtasks
+
+        # Each of the first 'remainder' shards gets one extra row
+        if self.idx_of_this_subtask < remainder:
+            num_row = base_rows_per_shard + 1
+            start_row = self.idx_of_this_subtask * (base_rows_per_shard + 1)
         else:
-            num_row = total_row // self.number_of_para_subtasks
-        # Calculate start row and end row position for current shard in all data
-        start_row = self.idx_of_this_subtask * (total_row // self.number_of_para_subtasks)
+            num_row = base_rows_per_shard
+            start_row = (remainder * (base_rows_per_shard + 1) +
+                         (self.idx_of_this_subtask - remainder) * base_rows_per_shard)
+
         end_row = start_row + num_row
 
         plan_start_row = 0
@@ -187,14 +211,13 @@ class FullStartingScanner(StartingScanner):
         # Iterate through all file entries to find files that overlap with current shard range
         for key, file_entries in partitioned_files.items():
             filtered_entries = []
-            first_row_id_set = set()
+            blob_added = False  # If it is true, all blobs corresponding to this data file are added
             for entry in file_entries:
-                if entry.file.first_row_id is not None:
-                    if entry.file.first_row_id in first_row_id_set:
+                if self._is_blob_file(entry.file.file_name):
+                    if blob_added:
                         filtered_entries.append(entry)
-                        continue
-                    else:
-                        first_row_id_set.add(entry.file.first_row_id)
+                    continue
+                blob_added = False
                 entry_begin_row = entry_end_row  # Starting row position of current file in all data
                 entry_end_row += entry.file.row_count  # Update to row position after current file
 
@@ -212,6 +235,7 @@ class FullStartingScanner(StartingScanner):
                     plan_end_row = end_row - splits_start_row
                 # Add files that overlap with shard range to result
                 filtered_entries.append(entry)
+                blob_added = True
             if filtered_entries:
                 filtered_partitioned_files[key] = filtered_entries
 
@@ -219,11 +243,16 @@ class FullStartingScanner(StartingScanner):
 
     def _compute_split_start_end_row(self, splits: List[Split], plan_start_row, plan_end_row):
         file_end_row = 0  # end row position of current file in all data
+
         for split in splits:
+            row_cnt = 0
             files = split.files
             split_start_row = file_end_row
             # Iterate through all file entries to find files that overlap with current shard range
             for file in files:
+                if self._is_blob_file(file.file_name):
+                    continue
+                row_cnt += file.row_count
                 file_begin_row = file_end_row  # Starting row position of current file in all data
                 file_end_row += file.row_count  # Update to row position after current file
 
@@ -237,7 +266,7 @@ class FullStartingScanner(StartingScanner):
             if split.split_start_row is None:
                 split.split_start_row = 0
             if split.split_end_row is None:
-                split.split_end_row = split.row_count
+                split.split_end_row = row_cnt
 
     def _primary_key_filter_by_shard(self, file_entries: List[ManifestEntry]) -> List[ManifestEntry]:
         filtered_entries = []
@@ -273,7 +302,8 @@ class FullStartingScanner(StartingScanner):
             return False
         if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
             return False
-
+        if self.deletion_vectors_enabled and entry.file.level == 0:  # do not read level 0 file
+            return False
         # Get SimpleStatsEvolution for this schema
         evolution = self.simple_stats_evolutions.get_or_create(entry.file.schema_id)
 
@@ -302,7 +332,95 @@ class FullStartingScanner(StartingScanner):
                 entry.file.row_count
             )
 
-    def _create_append_only_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
+    def _scan_dv_index(self, snapshot, buckets: Set[tuple]) -> Dict[tuple, Dict[str, DeletionFile]]:
+        """
+        Scan deletion vector index from snapshot.
+        Returns a map of (partition, bucket) -> {filename -> DeletionFile}
+
+        Reference: SnapshotReaderImpl.scanDvIndex() in Java
+        """
+        if not snapshot or not snapshot.index_manifest:
+            return {}
+
+        result = {}
+
+        # Read index manifest file
+        index_manifest_file = IndexManifestFile(self.table)
+        index_entries = index_manifest_file.read(snapshot.index_manifest)
+
+        # Filter by DELETION_VECTORS_INDEX type and requested buckets
+        for entry in index_entries:
+            if entry.index_file.index_type != IndexManifestFile.DELETION_VECTORS_INDEX:
+                continue
+
+            partition_bucket = (tuple(entry.partition.values), entry.bucket)
+            if partition_bucket not in buckets:
+                continue
+
+            # Convert to deletion files
+            deletion_files = self._to_deletion_files(entry)
+            if deletion_files:
+                result[partition_bucket] = deletion_files
+
+        return result
+
+    def _to_deletion_files(self, index_entry) -> Dict[str, DeletionFile]:
+        """
+        Convert index manifest entry to deletion files map.
+        Returns {filename -> DeletionFile}
+        """
+        deletion_files = {}
+        index_file = index_entry.index_file
+
+        # Check if dv_ranges exists
+        if not index_file.dv_ranges:
+            return deletion_files
+
+        # Build deletion file path
+        # Format: manifest/index-manifest-{uuid}
+        index_path = self.table.table_path.rstrip('/') + '/index'
+        dv_file_path = f"{index_path}/{index_file.file_name}"
+
+        # Convert each DeletionVectorMeta to DeletionFile
+        for data_file_name, dv_meta in index_file.dv_ranges.items():
+            deletion_file = DeletionFile(
+                dv_index_path=dv_file_path,
+                offset=dv_meta.offset,
+                length=dv_meta.length,
+                cardinality=dv_meta.cardinality
+            )
+            deletion_files[data_file_name] = deletion_file
+
+        return deletion_files
+
+    def _get_deletion_files_for_split(self, data_files: List[DataFileMeta],
+                                      deletion_files_map: dict,
+                                      partition: GenericRow,
+                                      bucket: int) -> Optional[List[DeletionFile]]:
+        """
+        Get deletion files for the given data files in a split.
+        """
+        if not deletion_files_map:
+            return None
+
+        partition_key = (tuple(partition.values), bucket)
+        file_deletion_map = deletion_files_map.get(partition_key, {})
+
+        if not file_deletion_map:
+            return None
+
+        deletion_files = []
+        for data_file in data_files:
+            deletion_file = file_deletion_map.get(data_file.file_name)
+            if deletion_file:
+                deletion_files.append(deletion_file)
+            else:
+                deletion_files.append(None)
+
+        return deletion_files if any(df is not None for df in deletion_files) else None
+
+    def _create_append_only_splits(
+            self, file_entries: List[ManifestEntry], deletion_files_map: dict = None) -> List['Split']:
         partitioned_files = defaultdict(list)
         for entry in file_entries:
             partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
@@ -322,12 +440,13 @@ class FullStartingScanner(StartingScanner):
 
             packed_files: List[List[DataFileMeta]] = self._pack_for_ordered(data_files, weight_func,
                                                                             self.target_split_size)
-            splits += self._build_split_from_pack(packed_files, file_entries, False)
+            splits += self._build_split_from_pack(packed_files, file_entries, False, deletion_files_map)
         if self.idx_of_this_subtask is not None:
             self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
         return splits
 
-    def _create_primary_key_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
+    def _create_primary_key_splits(
+            self, file_entries: List[ManifestEntry], deletion_files_map: dict = None) -> List['Split']:
         if self.idx_of_this_subtask is not None:
             file_entries = self._primary_key_filter_by_shard(file_entries)
         partitioned_files = defaultdict(list)
@@ -355,64 +474,24 @@ class FullStartingScanner(StartingScanner):
                 [file for sub_pack in pack for file in sub_pack]
                 for pack in packed_files
             ]
-            splits += self._build_split_from_pack(flatten_packed_files, file_entries, True)
+            splits += self._build_split_from_pack(flatten_packed_files, file_entries, True, deletion_files_map)
         return splits
 
-    def _build_split_from_pack(self, packed_files, file_entries, for_primary_key_split: bool) -> List['Split']:
-        splits = []
-        for file_group in packed_files:
-            raw_convertible = True
-            if for_primary_key_split:
-                raw_convertible = len(file_group) == 1
+    def _create_data_evolution_splits(
+            self, file_entries: List[ManifestEntry], deletion_files_map: dict = None) -> List['Split']:
+        def sort_key(manifest_entry: ManifestEntry) -> tuple:
+            first_row_id = manifest_entry.file.first_row_id if manifest_entry.file.first_row_id is not None else float(
+                '-inf')
+            is_blob = 1 if self._is_blob_file(manifest_entry.file.file_name) else 0
+            # For files with same firstRowId, sort by maxSequenceNumber in descending order
+            # (larger sequence number means more recent data)
+            max_seq = manifest_entry.file.max_sequence_number
+            return first_row_id, is_blob, -max_seq
 
-            file_paths = []
-            total_file_size = 0
-            total_record_count = 0
+        sorted_entries = sorted(file_entries, key=sort_key)
 
-            for data_file in file_group:
-                data_file.set_file_path(self.table.table_path, file_entries[0].partition,
-                                        file_entries[0].bucket)
-                file_paths.append(data_file.file_path)
-                total_file_size += data_file.file_size
-                total_record_count += data_file.row_count
-
-            if file_paths:
-                split = Split(
-                    files=file_group,
-                    partition=file_entries[0].partition,
-                    bucket=file_entries[0].bucket,
-                    _file_paths=file_paths,
-                    _row_count=total_record_count,
-                    _file_size=total_file_size,
-                    raw_convertible=raw_convertible
-                )
-                splits.append(split)
-        return splits
-
-    @staticmethod
-    def _pack_for_ordered(items: List, weight_func: Callable, target_weight: int) -> List[List]:
-        packed = []
-        bin_items = []
-        bin_weight = 0
-
-        for item in items:
-            weight = weight_func(item)
-            if bin_weight + weight > target_weight and len(bin_items) > 0:
-                packed.append(list(bin_items))
-                bin_items.clear()
-                bin_weight = 0
-
-            bin_weight += weight
-            bin_items.append(item)
-
-        if len(bin_items) > 0:
-            packed.append(bin_items)
-
-        return packed
-
-    def _create_data_evolution_splits(self, file_entries: List[ManifestEntry]) -> List['Split']:
         partitioned_files = defaultdict(list)
-        for entry in file_entries:
+        for entry in sorted_entries:
             partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
         if self.idx_of_this_subtask is not None:
@@ -422,11 +501,11 @@ class FullStartingScanner(StartingScanner):
             return max(sum(f.file_size for f in file_list), self.open_file_cost)
 
         splits = []
-        for key, file_entries in partitioned_files.items():
-            if not file_entries:
+        for key, sorted_entries in partitioned_files.items():
+            if not sorted_entries:
                 continue
 
-            data_files: List[DataFileMeta] = [e.file for e in file_entries]
+            data_files: List[DataFileMeta] = [e.file for e in sorted_entries]
 
             # Split files by firstRowId for data evolution
             split_by_row_id = self._split_by_row_id(data_files)
@@ -441,7 +520,7 @@ class FullStartingScanner(StartingScanner):
                 for pack in packed_files
             ]
 
-            splits += self._build_split_from_pack(flatten_packed_files, file_entries, False)
+            splits += self._build_split_from_pack(flatten_packed_files, sorted_entries, False, deletion_files_map)
 
         if self.idx_of_this_subtask is not None:
             self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
@@ -450,18 +529,8 @@ class FullStartingScanner(StartingScanner):
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
         split_by_row_id = []
 
-        def sort_key(file: DataFileMeta) -> tuple:
-            first_row_id = file.first_row_id if file.first_row_id is not None else float('-inf')
-            is_blob = 1 if self._is_blob_file(file.file_name) else 0
-            # For files with same firstRowId, sort by maxSequenceNumber in descending order
-            # (larger sequence number means more recent data)
-            max_seq = file.max_sequence_number
-            return (first_row_id, is_blob, -max_seq)
-
-        sorted_files = sorted(files, key=sort_key)
-
         # Filter blob files to only include those within the row ID range of non-blob files
-        sorted_files = self._filter_blob(sorted_files)
+        sorted_files = self._filter_blob(files)
 
         # Split files by firstRowId
         last_row_id = -1
@@ -497,6 +566,70 @@ class FullStartingScanner(StartingScanner):
             split_by_row_id.append(current_split)
 
         return split_by_row_id
+
+    def _build_split_from_pack(self, packed_files, file_entries, for_primary_key_split: bool,
+                               deletion_files_map: dict = None) -> List['Split']:
+        splits = []
+        for file_group in packed_files:
+            raw_convertible = True
+            if for_primary_key_split:
+                raw_convertible = len(file_group) == 1
+
+            file_paths = []
+            total_file_size = 0
+            total_record_count = 0
+
+            for data_file in file_group:
+                data_file.set_file_path(self.table.table_path, file_entries[0].partition,
+                                        file_entries[0].bucket)
+                file_paths.append(data_file.file_path)
+                total_file_size += data_file.file_size
+                total_record_count += data_file.row_count
+
+            if file_paths:
+                # Get deletion files for this split
+                data_deletion_files = None
+                if deletion_files_map:
+                    data_deletion_files = self._get_deletion_files_for_split(
+                        file_group,
+                        deletion_files_map,
+                        file_entries[0].partition,
+                        file_entries[0].bucket
+                    )
+
+                split = Split(
+                    files=file_group,
+                    partition=file_entries[0].partition,
+                    bucket=file_entries[0].bucket,
+                    _file_paths=file_paths,
+                    _row_count=total_record_count,
+                    _file_size=total_file_size,
+                    raw_convertible=raw_convertible,
+                    data_deletion_files=data_deletion_files
+                )
+                splits.append(split)
+        return splits
+
+    @staticmethod
+    def _pack_for_ordered(items: List, weight_func: Callable, target_weight: int) -> List[List]:
+        packed = []
+        bin_items = []
+        bin_weight = 0
+
+        for item in items:
+            weight = weight_func(item)
+            if bin_weight + weight > target_weight and len(bin_items) > 0:
+                packed.append(list(bin_items))
+                bin_items.clear()
+                bin_weight = 0
+
+            bin_weight += weight
+            bin_items.append(item)
+
+        if len(bin_items) > 0:
+            packed.append(bin_items)
+
+        return packed
 
     @staticmethod
     def _is_blob_file(file_name: str) -> bool:

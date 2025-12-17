@@ -44,13 +44,24 @@ public class ArrowBatchReader {
     private final boolean caseSensitive;
 
     public ArrowBatchReader(RowType rowType, boolean caseSensitive) {
+        this(
+                rowType,
+                caseSensitive,
+                Arrow2PaimonVectorConverter.Arrow2PaimonVectorConvertorVisitor.INSTANCE);
+    }
+
+    public ArrowBatchReader(
+            RowType rowType,
+            boolean caseSensitive,
+            Arrow2PaimonVectorConverter.Arrow2PaimonVectorConvertorVisitor visitor) {
         ColumnVector[] columnVectors = new ColumnVector[rowType.getFieldCount()];
         this.convertors = new Arrow2PaimonVectorConverter[rowType.getFieldCount()];
         this.batch = new VectorizedColumnBatch(columnVectors);
         this.projectedRowType = rowType;
 
         for (int i = 0; i < columnVectors.length; i++) {
-            this.convertors[i] = Arrow2PaimonVectorConverter.construct(rowType.getTypeAt(i));
+            this.convertors[i] =
+                    Arrow2PaimonVectorConverter.construct(visitor, rowType.getTypeAt(i));
         }
         this.caseSensitive = caseSensitive;
     }

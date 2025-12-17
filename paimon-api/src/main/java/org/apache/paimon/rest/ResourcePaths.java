@@ -32,6 +32,7 @@ public class ResourcePaths {
     protected static final String TABLES = "tables";
     protected static final String PARTITIONS = "partitions";
     protected static final String BRANCHES = "branches";
+    protected static final String TAGS = "tags";
     protected static final String SNAPSHOTS = "snapshots";
     protected static final String VIEWS = "views";
     protected static final String TABLE_DETAILS = "table-details";
@@ -230,6 +231,29 @@ public class ResourcePaths {
                 BRANCHES,
                 encodeString(branch),
                 "forward");
+    }
+
+    public String tags(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                TAGS);
+    }
+
+    public String tag(String databaseName, String objectName, String tagName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                TAGS,
+                encodeString(tagName));
     }
 
     public String views(String databaseName) {

@@ -73,8 +73,10 @@ class AtomicType(DataType):
         super().__init__(nullable)
         self.type = type
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {"type": self.type if self.nullable else self.type + " NOT NULL"}
+    def to_dict(self) -> str:
+        if not self.nullable:
+            return self.type + " NOT NULL"
+        return self.type
 
     @classmethod
     def from_dict(cls, data: str) -> "AtomicType":
@@ -119,7 +121,8 @@ class MultisetType(DataType):
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "type": "MULTISET{}".format('<' + str(self.element) + '>' if self.element else ''),
+            "type": "MULTISET{}{}".format('<' + str(self.element) + '>' if self.element else '',
+                                          " NOT NULL" if not self.nullable else ""),
             "element": self.element.to_dict() if self.element else None,
             "nullable": self.nullable,
         }
@@ -232,7 +235,10 @@ class RowType(DataType):
         return DataTypeParser.parse_data_type(data)
 
     def __str__(self) -> str:
-        field_strs = ["{}: {}".format(field.name, field.type) for field in self.fields]
+        field_strs = []
+        for field in self.fields:
+            description = " COMMENT {}".format(field.description) if field.description else ""
+            field_strs.append("{}: {}{}".format(field.name, field.type, description))
         null_suffix = "" if self.nullable else " NOT NULL"
         return "ROW<{}>{}".format(', '.join(field_strs), null_suffix)
 

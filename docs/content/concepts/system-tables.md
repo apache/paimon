@@ -351,13 +351,16 @@ You can query the partition files of the table.
 SELECT * FROM my_table$partitions;
 
 /*
-+---------------+----------------+--------------------+--------------------+------------------------+
-|  partition    |   record_count |  file_size_in_bytes|          file_count|        last_update_time|
-+---------------+----------------+--------------------+--------------------+------------------------+
-|  {1}          |           1    |             645    |                1   | 2024-06-24 10:25:57.400|
-+---------------+----------------+--------------------+--------------------+------------------------+
++-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+
+| partition | record_count | file_size_in_bytes| file_count | last_update_time    | created_at          | created_by | updated_by | options |
++-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+
+| {1}       |            1 |               645 |          1 | 2024-06-24 10:25:57 | 2024-06-24 10:20:00 | admin      | test_user  | {}      |
++-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+
 */
 ```
+
+**Note**: 
+- The `created_by`, `created_at`, `updated_by`, and `options` fields are populated from REST catalog audit information. For non-REST catalogs, these fields will be `NULL`.
 
 ### Buckets Table
 
@@ -413,7 +416,7 @@ SELECT * FROM my_table$table_indexes;
 ## Global System Table
 
 Global system tables contain the statistical information of all the tables exists in paimon. For convenient of searching, we create a reference system database called `sys`.
-We can display all the global system tables by sql in flink:
+We can display all the global system tables by sql in flink or spark:
 
 ```sql
 USE sys;

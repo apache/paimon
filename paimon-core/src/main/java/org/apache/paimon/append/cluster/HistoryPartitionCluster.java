@@ -18,6 +18,7 @@
 
 package org.apache.paimon.append.cluster;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
@@ -54,6 +55,7 @@ public class HistoryPartitionCluster {
     private static final Logger LOG = LoggerFactory.getLogger(HistoryPartitionCluster.class);
 
     private final FileStoreTable table;
+    private final Snapshot snapshot;
     private final IncrementalClusterStrategy incrementalClusterStrategy;
     private final InternalRowPartitionComputer partitionComputer;
     private final PartitionPredicate specifiedPartitions;
@@ -63,12 +65,14 @@ public class HistoryPartitionCluster {
 
     public HistoryPartitionCluster(
             FileStoreTable table,
+            Snapshot snapshot,
             IncrementalClusterStrategy incrementalClusterStrategy,
             InternalRowPartitionComputer partitionComputer,
             PartitionPredicate specifiedPartitions,
             Duration historyPartitionIdleTime,
             int historyPartitionLimit) {
         this.table = table;
+        this.snapshot = snapshot;
         this.incrementalClusterStrategy = incrementalClusterStrategy;
         this.partitionComputer = partitionComputer;
         this.specifiedPartitions = specifiedPartitions;
@@ -80,6 +84,7 @@ public class HistoryPartitionCluster {
     @Nullable
     public static HistoryPartitionCluster create(
             FileStoreTable table,
+            Snapshot snapshot,
             IncrementalClusterStrategy incrementalClusterStrategy,
             InternalRowPartitionComputer partitionComputer,
             @Nullable PartitionPredicate specifiedPartitions) {
@@ -98,6 +103,7 @@ public class HistoryPartitionCluster {
         int limit = table.coreOptions().clusteringHistoryPartitionLimit();
         return new HistoryPartitionCluster(
                 table,
+                snapshot,
                 incrementalClusterStrategy,
                 partitionComputer,
                 specifiedPartitions,
@@ -130,7 +136,8 @@ public class HistoryPartitionCluster {
                         .toEpochMilli();
 
         List<BinaryRow> historyPartitions =
-                table.newSnapshotReader().withLevelMinMaxFilter((min, max) -> min < maxLevel)
+                table.newSnapshotReader().withSnapshot(snapshot)
+                        .withLevelMinMaxFilter((min, max) -> min < maxLevel)
                         .withLevelFilter(level -> level < maxLevel).partitionEntries().stream()
                         .filter(entry -> entry.lastFileCreationTime() < historyMilli)
                         .sorted(Comparator.comparingLong(PartitionEntry::lastFileCreationTime))
@@ -140,6 +147,7 @@ public class HistoryPartitionCluster {
         // read dataFileMeta for history partitions
         List<DataSplit> historyDataSplits =
                 table.newSnapshotReader()
+                        .withSnapshot(snapshot)
                         .withPartitionFilter(historyPartitions)
                         .read()
                         .dataSplits();

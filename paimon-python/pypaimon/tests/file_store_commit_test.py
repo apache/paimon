@@ -18,7 +18,6 @@
 
 import unittest
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -41,7 +40,7 @@ class TestFileStoreCommit(unittest.TestCase):
         self.mock_table = Mock()
         self.mock_table.partition_keys = ['dt', 'region']
         self.mock_table.current_branch.return_value = 'main'
-        self.mock_table.table_path = Path('/test/table/path')
+        self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
 
         # Mock snapshot commit
@@ -62,20 +61,24 @@ class TestFileStoreCommit(unittest.TestCase):
         file_store_commit = self._create_file_store_commit()
 
         # Create test data
-        creation_time = datetime(2024, 1, 15, 10, 30, 0)
-        file_meta = DataFileMeta(
+        creation_time_dt = datetime(2024, 1, 15, 10, 30, 0)
+        from pypaimon.data.timestamp import Timestamp
+        from pypaimon.table.row.generic_row import GenericRow
+        from pypaimon.manifest.schema.simple_stats import SimpleStats
+        creation_time = Timestamp.from_local_date_time(creation_time_dt)
+        file_meta = DataFileMeta.create(
             file_name="test_file_1.parquet",
             file_size=1024 * 1024,  # 1MB
             row_count=10000,
-            min_key=None,
-            max_key=None,
-            key_stats=None,
-            value_stats=None,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
             min_sequence_number=1,
             max_sequence_number=100,
             schema_id=0,
             level=0,
-            extra_files=None,
+            extra_files=[],
             creation_time=creation_time,
             external_path=None,
             first_row_id=None,
@@ -100,7 +103,8 @@ class TestFileStoreCommit(unittest.TestCase):
         self.assertEqual(stat.record_count, 10000)
         self.assertEqual(stat.file_count, 1)
         self.assertEqual(stat.file_size_in_bytes, 1024 * 1024)
-        self.assertEqual(stat.last_file_creation_time, int(creation_time.timestamp() * 1000))
+        expected_time = file_meta.creation_time_epoch_millis()
+        self.assertEqual(stat.last_file_creation_time, expected_time)
 
     def test_generate_partition_statistics_multiple_files_same_partition(
             self, mock_manifest_list_manager, mock_manifest_file_manager, mock_snapshot_manager):
@@ -108,38 +112,41 @@ class TestFileStoreCommit(unittest.TestCase):
         # Create FileStoreCommit instance
         file_store_commit = self._create_file_store_commit()
 
-        creation_time_1 = datetime(2024, 1, 15, 10, 30, 0)
-        creation_time_2 = datetime(2024, 1, 15, 11, 30, 0)  # Later time
+        from pypaimon.data.timestamp import Timestamp
+        from pypaimon.table.row.generic_row import GenericRow
+        from pypaimon.manifest.schema.simple_stats import SimpleStats
+        creation_time_1 = Timestamp.from_local_date_time(datetime(2024, 1, 15, 10, 30, 0))
+        creation_time_2 = Timestamp.from_local_date_time(datetime(2024, 1, 15, 11, 30, 0))  # Later time
 
-        file_meta_1 = DataFileMeta(
+        file_meta_1 = DataFileMeta.create(
             file_name="test_file_1.parquet",
             file_size=1024 * 1024,  # 1MB
             row_count=10000,
-            min_key=None,
-            max_key=None,
-            key_stats=None,
-            value_stats=None,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
             min_sequence_number=1,
             max_sequence_number=100,
             schema_id=0,
             level=0,
-            extra_files=None,
+            extra_files=[],
             creation_time=creation_time_1
         )
 
-        file_meta_2 = DataFileMeta(
+        file_meta_2 = DataFileMeta.create(
             file_name="test_file_2.parquet",
             file_size=2 * 1024 * 1024,  # 2MB
             row_count=15000,
-            min_key=None,
-            max_key=None,
-            key_stats=None,
-            value_stats=None,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
             min_sequence_number=101,
             max_sequence_number=200,
             schema_id=0,
             level=0,
-            extra_files=None,
+            extra_files=[],
             creation_time=creation_time_2
         )
 
@@ -160,8 +167,8 @@ class TestFileStoreCommit(unittest.TestCase):
         self.assertEqual(stat.record_count, 25000)  # 10000 + 15000
         self.assertEqual(stat.file_count, 2)
         self.assertEqual(stat.file_size_in_bytes, 3 * 1024 * 1024)  # 1MB + 2MB
-        # Should have the latest creation time
-        self.assertEqual(stat.last_file_creation_time, int(creation_time_2.timestamp() * 1000))
+        expected_time = file_meta_2.creation_time_epoch_millis()
+        self.assertEqual(stat.last_file_creation_time, expected_time)
 
     def test_generate_partition_statistics_multiple_partitions(
             self, mock_manifest_list_manager, mock_manifest_file_manager, mock_snapshot_manager):
@@ -169,22 +176,26 @@ class TestFileStoreCommit(unittest.TestCase):
         # Create FileStoreCommit instance
         file_store_commit = self._create_file_store_commit()
 
-        creation_time = datetime(2024, 1, 15, 10, 30, 0)
+        creation_time_dt = datetime(2024, 1, 15, 10, 30, 0)
+        from pypaimon.data.timestamp import Timestamp
+        from pypaimon.table.row.generic_row import GenericRow
+        from pypaimon.manifest.schema.simple_stats import SimpleStats
+        creation_time = Timestamp.from_local_date_time(creation_time_dt)
 
         # File for partition 1
-        file_meta_1 = DataFileMeta(
+        file_meta_1 = DataFileMeta.create(
             file_name="test_file_1.parquet",
             file_size=1024 * 1024,
             row_count=10000,
-            min_key=None,
-            max_key=None,
-            key_stats=None,
-            value_stats=None,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
             min_sequence_number=1,
             max_sequence_number=100,
             schema_id=0,
             level=0,
-            extra_files=None,
+            extra_files=[],
             creation_time=creation_time,
             external_path=None,
             first_row_id=None,
@@ -192,19 +203,19 @@ class TestFileStoreCommit(unittest.TestCase):
         )
 
         # File for partition 2
-        file_meta_2 = DataFileMeta(
+        file_meta_2 = DataFileMeta.create(
             file_name="test_file_2.parquet",
             file_size=2 * 1024 * 1024,
             row_count=20000,
-            min_key=None,
-            max_key=None,
-            key_stats=None,
-            value_stats=None,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
             min_sequence_number=101,
             max_sequence_number=200,
             schema_id=0,
             level=0,
-            extra_files=None,
+            extra_files=[],
             creation_time=creation_time,
             external_path=None,
             first_row_id=None,
@@ -256,20 +267,24 @@ class TestFileStoreCommit(unittest.TestCase):
         # Create FileStoreCommit instance
         file_store_commit = self._create_file_store_commit()
 
-        creation_time = datetime(2024, 1, 15, 10, 30, 0)
-        file_meta = DataFileMeta(
+        creation_time_dt = datetime(2024, 1, 15, 10, 30, 0)
+        from pypaimon.data.timestamp import Timestamp
+        from pypaimon.table.row.generic_row import GenericRow
+        from pypaimon.manifest.schema.simple_stats import SimpleStats
+        creation_time = Timestamp.from_local_date_time(creation_time_dt)
+        file_meta = DataFileMeta.create(
             file_name="test_file_1.parquet",
             file_size=1024 * 1024,
             row_count=10000,
-            min_key=None,
-            max_key=None,
-            key_stats=None,
-            value_stats=None,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
             min_sequence_number=1,
             max_sequence_number=100,
             schema_id=0,
             level=0,
-            extra_files=None,
+            extra_files=[],
             creation_time=creation_time,
             external_path=None,
             first_row_id=None,
@@ -313,7 +328,6 @@ class TestFileStoreCommit(unittest.TestCase):
             schema_id=0,
             level=0,
             extra_files=None,
-            creation_time=None  # No creation time
         )
 
         commit_message = CommitMessage(
@@ -339,20 +353,23 @@ class TestFileStoreCommit(unittest.TestCase):
         file_store_commit = self._create_file_store_commit()
 
         # Table has 2 partition keys but partition tuple has 3 values
-        file_meta = DataFileMeta(
+        from pypaimon.data.timestamp import Timestamp
+        from pypaimon.table.row.generic_row import GenericRow
+        from pypaimon.manifest.schema.simple_stats import SimpleStats
+        file_meta = DataFileMeta.create(
             file_name="test_file_1.parquet",
             file_size=1024 * 1024,
             row_count=10000,
-            min_key=None,
-            max_key=None,
-            key_stats=None,
-            value_stats=None,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
             min_sequence_number=1,
             max_sequence_number=100,
             schema_id=0,
             level=0,
-            extra_files=None,
-            creation_time=datetime(2024, 1, 15, 10, 30, 0)
+            extra_files=[],
+            creation_time=Timestamp.from_local_date_time(datetime(2024, 1, 15, 10, 30, 0))
         )
 
         commit_message = CommitMessage(

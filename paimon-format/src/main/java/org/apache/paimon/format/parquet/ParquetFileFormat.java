@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -66,6 +67,20 @@ public class ParquetFileFormat extends FileFormat {
             @Nullable List<Predicate> filters) {
         return new ParquetReaderFactory(
                 options, projectedRowType, readBatchSize, ParquetFilters.convert(filters));
+    }
+
+    @Override
+    public FormatReaderFactory createReaderFactory(
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> filters,
+            @Nullable VariantAccessInfo[] variantAccess) {
+        return new ParquetReaderFactory(
+                options,
+                projectedRowType,
+                readBatchSize,
+                ParquetFilters.convert(filters),
+                variantAccess);
     }
 
     @Override

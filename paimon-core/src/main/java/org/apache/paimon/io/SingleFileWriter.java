@@ -32,6 +32,8 @@ import org.apache.paimon.utils.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.function.Function;
@@ -53,7 +55,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     private FormatWriter writer;
     private PositionOutputStream out;
 
-    protected long outputBytes;
+    @Nullable private Long outputBytes;
     private long recordCount;
     protected boolean closed;
 
@@ -197,5 +199,12 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         } finally {
             closed = true;
         }
+    }
+
+    protected long outputBytes() throws IOException {
+        if (outputBytes == null) {
+            outputBytes = fileIO.getFileSize(path);
+        }
+        return outputBytes;
     }
 }

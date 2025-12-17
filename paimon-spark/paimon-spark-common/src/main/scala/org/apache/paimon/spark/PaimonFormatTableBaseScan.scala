@@ -18,28 +18,20 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
-import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.source.Split
 
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Statistics, SupportsReportStatistics}
-import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
 /** Base Scan implementation for [[FormatTable]]. */
-abstract class PaimonFormatTableBaseScan(
-    table: FormatTable,
-    requiredSchema: StructType,
-    filters: Seq[Predicate],
-    pushDownLimit: Option[Int])
+abstract class PaimonFormatTableBaseScan
   extends ColumnPruningAndPushDown
   with SupportsReportStatistics
   with ScanHelper {
 
-  override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
   protected var inputSplits: Array[Split] = _
   protected var inputPartitions: Seq[PaimonInputPartition] = _
 
@@ -73,8 +65,7 @@ abstract class PaimonFormatTableBaseScan(
   override def supportedCustomMetrics: Array[CustomMetric] = {
     Array(
       PaimonNumSplitMetric(),
-      PaimonSplitSizeMetric(),
-      PaimonAvgSplitSizeMetric(),
+      PaimonPartitionSizeMetric(),
       PaimonResultedTableFilesMetric()
     )
   }
@@ -84,14 +75,5 @@ abstract class PaimonFormatTableBaseScan(
     Array(
       PaimonResultedTableFilesTaskMetric(filesCount)
     )
-  }
-
-  override def description(): String = {
-    val pushedFiltersStr = if (filters.nonEmpty) {
-      ", PushedFilters: [" + filters.mkString(",") + "]"
-    } else {
-      ""
-    }
-    s"PaimonFormatTableScan: [${table.name}]" + pushedFiltersStr
   }
 }

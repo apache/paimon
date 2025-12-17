@@ -20,12 +20,12 @@ package org.apache.paimon.s3;
 
 import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
+import org.apache.paimon.fs.Path;
 
 import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
 import com.amazonaws.services.s3.model.PartETag;
 
 import java.io.IOException;
-import java.util.List;
 
 /** S3 implementation of TwoPhaseOutputStream using multipart upload. */
 public class S3TwoPhaseOutputStream
@@ -33,14 +33,15 @@ public class S3TwoPhaseOutputStream
 
     public S3TwoPhaseOutputStream(
             MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore,
-            org.apache.hadoop.fs.Path hadoopPath)
+            org.apache.hadoop.fs.Path hadoopPath,
+            Path targetPath)
             throws IOException {
-        super(multiPartUploadStore, hadoopPath);
+        super(multiPartUploadStore, hadoopPath, targetPath);
     }
 
     @Override
-    public Committer committer(
-            String uploadId, List<PartETag> uploadedParts, String objectName, long position) {
-        return new S3MultiPartUploadCommitter(uploadId, uploadedParts, objectName, position);
+    public Committer committer() {
+        return new S3MultiPartUploadCommitter(
+                uploadId, uploadedParts, objectName, position, targetPath);
     }
 }

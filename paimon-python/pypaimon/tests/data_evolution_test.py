@@ -20,7 +20,8 @@ import tempfile
 import unittest
 
 import pyarrow as pa
-from pypaimon import Schema, CatalogFactory
+
+from pypaimon import CatalogFactory, Schema
 
 
 class DataEvolutionTest(unittest.TestCase):
@@ -78,58 +79,6 @@ class DataEvolutionTest(unittest.TestCase):
         expect_data = pa.Table.from_pydict({
             'f0': [3, 4],
             'f1': [-1001, 1002]
-        }, schema=pa.schema([
-            ('f0', pa.int8()),
-            ('f1', pa.int16()),
-        ]))
-        self.assertEqual(actual_data, expect_data)
-
-    def test_with_shard(self):
-        simple_pa_schema = pa.schema([
-            ('f0', pa.int8()),
-            ('f1', pa.int16()),
-        ])
-        schema = Schema.from_pyarrow_schema(simple_pa_schema,
-                                            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'})
-        self.catalog.create_table('default.test_with_shard', schema, False)
-        table = self.catalog.get_table('default.test_with_shard')
-
-        # write 1
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        expect_data = pa.Table.from_pydict({
-            'f0': [-1, 2],
-            'f1': [-1001, 1002]
-        }, schema=simple_pa_schema)
-        table_write.write_arrow(expect_data)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-        # write 2
-        table_write = write_builder.new_write().with_write_type(['f0'])
-        table_commit = write_builder.new_commit()
-        data2 = pa.Table.from_pydict({
-            'f0': [3, 4],
-        }, schema=pa.schema([
-            ('f0', pa.int8()),
-        ]))
-        table_write.write_arrow(data2)
-        cmts = table_write.prepare_commit()
-        cmts[0].new_files[0].first_row_id = 0
-        table_commit.commit(cmts)
-        table_write.close()
-        table_commit.close()
-
-        read_builder = table.new_read_builder()
-        table_scan = read_builder.new_scan().with_shard(0, 2)
-        table_read = read_builder.new_read()
-        splits = table_scan.plan().splits()
-        actual_data = table_read.to_arrow(splits)
-        expect_data = pa.Table.from_pydict({
-            'f0': [3],
-            'f1': [-1001]
         }, schema=pa.schema([
             ('f0', pa.int8()),
             ('f1', pa.int16()),
@@ -533,3 +482,77 @@ class DataEvolutionTest(unittest.TestCase):
             'f2': [f'c{i}' for i in range(size)],
         }, schema=simple_pa_schema)
         self.assertEqual(actual, expect)
+
+    def test_read_row_tracking_metadata(self):
+        simple_pa_schema = pa.schema([
+            ('f0', pa.int8()),
+            ('f1', pa.int16()),
+        ])
+        schema = Schema.from_pyarrow_schema(simple_pa_schema,
+                                            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'})
+        self.catalog.create_table('default.test_row_tracking_meta', schema, False)
+        table = self.catalog.get_table('default.test_row_tracking_meta')
+
+        # write 1
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        expect_data = pa.Table.from_pydict({
+            'f0': [-1, 2],
+            'f1': [-1001, 1002]
+        }, schema=simple_pa_schema)
+        table_write.write_arrow(expect_data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        read_builder.with_projection(['f0', '_ROW_ID', 'f1', '_SEQUENCE_NUMBER'])
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_data = table_read.to_arrow(table_scan.plan().splits())
+        expect_data = pa.Table.from_pydict({
+            'f0': [-1, 2],
+            '_ROW_ID': [0, 1],
+            'f1': [-1001, 1002],
+            '_SEQUENCE_NUMBER': [1, 1],
+        }, schema=pa.schema([
+            ('f0', pa.int8()),
+            ('_ROW_ID', pa.int64()),
+            ('f1', pa.int16()),
+            ('_SEQUENCE_NUMBER', pa.int64()),
+        ]))
+        self.assertEqual(actual_data, expect_data)
+
+        # write 2
+        table_write = write_builder.new_write().with_write_type(['f0'])
+        table_commit = write_builder.new_commit()
+        data2 = pa.Table.from_pydict({
+            'f0': [3, 4],
+        }, schema=pa.schema([
+            ('f0', pa.int8()),
+        ]))
+        table_write.write_arrow(data2)
+        cmts = table_write.prepare_commit()
+        cmts[0].new_files[0].first_row_id = 0
+        table_commit.commit(cmts)
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        read_builder.with_projection(['f0', 'f1', '_ROW_ID', '_SEQUENCE_NUMBER'])
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_data = table_read.to_arrow(table_scan.plan().splits())
+        expect_data = pa.Table.from_pydict({
+            'f0': [3, 4],
+            'f1': [-1001, 1002],
+            '_ROW_ID': [0, 1],
+            '_SEQUENCE_NUMBER': [2, 2],
+        }, schema=pa.schema([
+            ('f0', pa.int8()),
+            ('f1', pa.int16()),
+            ('_ROW_ID', pa.int64()),
+            ('_SEQUENCE_NUMBER', pa.int64()),
+        ]))
+        self.assertEqual(actual_data, expect_data)

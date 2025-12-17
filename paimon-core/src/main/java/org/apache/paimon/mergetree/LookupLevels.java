@@ -25,14 +25,16 @@ import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.lookup.LookupStoreWriter;
-import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.mergetree.lookup.LookupSerializerFactory;
+import org.apache.paimon.mergetree.lookup.PersistProcessor;
+import org.apache.paimon.mergetree.lookup.RemoteFileDownloader;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
@@ -41,53 +43,69 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
-
-import static org.apache.paimon.utils.VarLengthIntUtils.MAX_VAR_LONG_SIZE;
-import static org.apache.paimon.utils.VarLengthIntUtils.decodeLong;
-import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 
 /** Provide lookup by key. */
 public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
+    public static final String REMOTE_LOOKUP_FILE_SUFFIX = ".lookup";
+
+    private final Function<Long, RowType> schemaFunction;
+    private final long currentSchemaId;
     private final Levels levels;
     private final Comparator<InternalRow> keyComparator;
     private final RowCompactedSerializer keySerializer;
-    private final ValueProcessor<T> valueProcessor;
+    private final PersistProcessor.Factory<T> processorFactory;
+    private final LookupSerializerFactory serializerFactory;
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
     private final Function<String, File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
     private final Function<Long, BloomFilter.Builder> bfGenerator;
-
     private final Cache<String, LookupFile> lookupFileCache;
     private final Set<String> ownCachedFiles;
+    private final Map<Pair<Long, String>, PersistProcessor<T>> schemaIdAndSerVersionToProcessors;
+
+    @Nullable private RemoteFileDownloader remoteFileDownloader;
 
     public LookupLevels(
+            Function<Long, RowType> schemaFunction,
+            long currentSchemaId,
             Levels levels,
             Comparator<InternalRow> keyComparator,
             RowType keyType,
-            ValueProcessor<T> valueProcessor,
+            PersistProcessor.Factory<T> processorFactory,
+            LookupSerializerFactory serializerFactory,
             IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory,
             Function<String, File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
             Function<Long, BloomFilter.Builder> bfGenerator,
             Cache<String, LookupFile> lookupFileCache) {
+        this.schemaFunction = schemaFunction;
+        this.currentSchemaId = currentSchemaId;
         this.levels = levels;
         this.keyComparator = keyComparator;
         this.keySerializer = new RowCompactedSerializer(keyType);
-        this.valueProcessor = valueProcessor;
+        this.processorFactory = processorFactory;
+        this.serializerFactory = serializerFactory;
         this.fileReaderFactory = fileReaderFactory;
         this.localFileFactory = localFileFactory;
         this.lookupStoreFactory = lookupStoreFactory;
         this.bfGenerator = bfGenerator;
         this.lookupFileCache = lookupFileCache;
         this.ownCachedFiles = new HashSet<>();
+        this.schemaIdAndSerVersionToProcessors = new ConcurrentHashMap<>();
         levels.addDropFileCallback(this);
+    }
+
+    public void setRemoteFileDownloader(@Nullable RemoteFileDownloader remoteFileDownloader) {
+        this.remoteFileDownloader = remoteFileDownloader;
     }
 
     public Levels getLevels() {
@@ -140,33 +158,98 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             valueBytes = lookupFile.get(keyBytes);
         } finally {
             if (newCreatedLookupFile) {
-                lookupFileCache.put(file.fileName(), lookupFile);
+                addLocalFile(file, lookupFile);
             }
         }
         if (valueBytes == null) {
             return null;
         }
 
-        return valueProcessor.readFromDisk(
-                key, lookupFile.remoteFile().level(), valueBytes, file.fileName());
+        return getOrCreateProcessor(lookupFile.schemaId(), lookupFile.serVersion())
+                .readFromDisk(key, lookupFile.level(), valueBytes, file.fileName());
     }
 
-    private LookupFile createLookupFile(DataFileMeta file) throws IOException {
+    private PersistProcessor<T> getOrCreateProcessor(long schemaId, String serVersion) {
+        return schemaIdAndSerVersionToProcessors.computeIfAbsent(
+                Pair.of(schemaId, serVersion),
+                id -> {
+                    RowType fileSchema =
+                            schemaId == currentSchemaId ? null : schemaFunction.apply(schemaId);
+                    return processorFactory.create(serVersion, serializerFactory, fileSchema);
+                });
+    }
+
+    public LookupFile createLookupFile(DataFileMeta file) throws IOException {
         File localFile = localFileFactory.apply(file.fileName());
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
         }
-        LookupStoreWriter kvWriter =
-                lookupStoreFactory.createWriter(localFile, bfGenerator.apply(file.rowCount()));
-        try (RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
+
+        long schemaId = this.currentSchemaId;
+        String fileSerVersion = serializerFactory.version();
+        Optional<String> downloadSerVersion = tryToDownloadRemoteSst(file, localFile);
+        if (downloadSerVersion.isPresent()) {
+            // use schema id from remote file
+            schemaId = file.schemaId();
+            fileSerVersion = downloadSerVersion.get();
+        } else {
+            createSstFileFromDataFile(file, localFile);
+        }
+
+        ownCachedFiles.add(file.fileName());
+        return new LookupFile(
+                localFile,
+                file.level(),
+                schemaId,
+                fileSerVersion,
+                lookupStoreFactory.createReader(localFile),
+                () -> ownCachedFiles.remove(file.fileName()));
+    }
+
+    private Optional<String> tryToDownloadRemoteSst(DataFileMeta file, File localFile) {
+        if (remoteFileDownloader == null) {
+            return Optional.empty();
+        }
+        Optional<RemoteSstFile> remoteSstFile = remoteSst(file);
+        if (!remoteSstFile.isPresent()) {
+            return Optional.empty();
+        }
+
+        RemoteSstFile remoteSst = remoteSstFile.get();
+
+        // validate schema matched, no exception here
+        try {
+            getOrCreateProcessor(file.schemaId(), remoteSst.serVersion);
+        } catch (UnsupportedOperationException e) {
+            return Optional.empty();
+        }
+        boolean success =
+                remoteFileDownloader.tryToDownload(file, remoteSst.sstFileName, localFile);
+        if (!success) {
+            return Optional.empty();
+        }
+
+        return Optional.of(remoteSst.serVersion);
+    }
+
+    public void addLocalFile(DataFileMeta file, LookupFile lookupFile) {
+        lookupFileCache.put(file.fileName(), lookupFile);
+    }
+
+    private void createSstFileFromDataFile(DataFileMeta file, File localFile) throws IOException {
+        try (LookupStoreWriter kvWriter =
+                        lookupStoreFactory.createWriter(
+                                localFile, bfGenerator.apply(file.rowCount()));
+                RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
+            PersistProcessor<T> processor =
+                    getOrCreateProcessor(currentSchemaId, serializerFactory.version());
             KeyValue kv;
-            if (valueProcessor.withPosition()) {
+            if (processor.withPosition()) {
                 FileRecordIterator<KeyValue> batch;
                 while ((batch = (FileRecordIterator<KeyValue>) reader.readBatch()) != null) {
                     while ((kv = batch.next()) != null) {
                         byte[] keyBytes = keySerializer.serializeToBytes(kv.key());
-                        byte[] valueBytes =
-                                valueProcessor.persistToDisk(kv, batch.returnedPosition());
+                        byte[] valueBytes = processor.persistToDisk(kv, batch.returnedPosition());
                         kvWriter.put(keyBytes, valueBytes);
                     }
                     batch.releaseBatch();
@@ -176,7 +259,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 while ((batch = reader.readBatch()) != null) {
                     while ((kv = batch.next()) != null) {
                         byte[] keyBytes = keySerializer.serializeToBytes(kv.key());
-                        byte[] valueBytes = valueProcessor.persistToDisk(kv);
+                        byte[] valueBytes = processor.persistToDisk(kv);
                         kvWriter.put(keyBytes, valueBytes);
                     }
                     batch.releaseBatch();
@@ -185,16 +268,42 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         } catch (IOException e) {
             FileIOUtils.deleteFileOrDirectory(localFile);
             throw e;
-        } finally {
-            kvWriter.close();
+        }
+    }
+
+    public Optional<RemoteSstFile> remoteSst(DataFileMeta file) {
+        Optional<String> sstFile =
+                file.extraFiles().stream()
+                        .filter(f -> f.endsWith(REMOTE_LOOKUP_FILE_SUFFIX))
+                        .findFirst();
+        if (!sstFile.isPresent()) {
+            return Optional.empty();
         }
 
-        ownCachedFiles.add(file.fileName());
-        return new LookupFile(
-                localFile,
-                file,
-                lookupStoreFactory.createReader(localFile),
-                () -> ownCachedFiles.remove(file.fileName()));
+        String sstFileName = sstFile.get();
+        String[] split = sstFileName.split("\\.");
+        if (split.length < 3) {
+            return Optional.empty();
+        }
+
+        String processorId = split[split.length - 3];
+        if (!processorFactory.identifier().equals(processorId)) {
+            return Optional.empty();
+        }
+
+        String serVersion = split[split.length - 2];
+        return Optional.of(new RemoteSstFile(sstFileName, serVersion));
+    }
+
+    public String newRemoteSst(DataFileMeta file, long length) {
+        return file.fileName()
+                + "."
+                + length
+                + "."
+                + processorFactory.identifier()
+                + "."
+                + serializerFactory.version()
+                + REMOTE_LOOKUP_FILE_SUFFIX;
     }
 
     @Override
@@ -205,156 +314,15 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         }
     }
 
-    /** Processor to process value. */
-    public interface ValueProcessor<T> {
+    /** Remote sst file with serVersion. */
+    public static class RemoteSstFile {
 
-        boolean withPosition();
+        private final String sstFileName;
+        private final String serVersion;
 
-        byte[] persistToDisk(KeyValue kv);
-
-        default byte[] persistToDisk(KeyValue kv, long rowPosition) {
-            throw new UnsupportedOperationException();
-        }
-
-        T readFromDisk(InternalRow key, int level, byte[] valueBytes, String fileName);
-    }
-
-    /** A {@link ValueProcessor} to return {@link KeyValue}. */
-    public static class KeyValueProcessor implements ValueProcessor<KeyValue> {
-
-        private final RowCompactedSerializer valueSerializer;
-
-        public KeyValueProcessor(RowType valueType) {
-            this.valueSerializer = new RowCompactedSerializer(valueType);
-        }
-
-        @Override
-        public boolean withPosition() {
-            return false;
-        }
-
-        @Override
-        public byte[] persistToDisk(KeyValue kv) {
-            byte[] vBytes = valueSerializer.serializeToBytes(kv.value());
-            byte[] bytes = new byte[vBytes.length + 8 + 1];
-            MemorySegment segment = MemorySegment.wrap(bytes);
-            segment.put(0, vBytes);
-            segment.putLong(bytes.length - 9, kv.sequenceNumber());
-            segment.put(bytes.length - 1, kv.valueKind().toByteValue());
-            return bytes;
-        }
-
-        @Override
-        public KeyValue readFromDisk(InternalRow key, int level, byte[] bytes, String fileName) {
-            InternalRow value = valueSerializer.deserialize(bytes);
-            long sequenceNumber = MemorySegment.wrap(bytes).getLong(bytes.length - 9);
-            RowKind rowKind = RowKind.fromByteValue(bytes[bytes.length - 1]);
-            return new KeyValue().replace(key, sequenceNumber, rowKind, value).setLevel(level);
-        }
-    }
-
-    /** A {@link ValueProcessor} to return {@link Boolean} only. */
-    public static class ContainsValueProcessor implements ValueProcessor<Boolean> {
-
-        private static final byte[] EMPTY_BYTES = new byte[0];
-
-        @Override
-        public boolean withPosition() {
-            return false;
-        }
-
-        @Override
-        public byte[] persistToDisk(KeyValue kv) {
-            return EMPTY_BYTES;
-        }
-
-        @Override
-        public Boolean readFromDisk(InternalRow key, int level, byte[] bytes, String fileName) {
-            return Boolean.TRUE;
-        }
-    }
-
-    /** A {@link ValueProcessor} to return {@link PositionedKeyValue}. */
-    public static class PositionedKeyValueProcessor implements ValueProcessor<PositionedKeyValue> {
-        private final boolean persistValue;
-        private final RowCompactedSerializer valueSerializer;
-
-        public PositionedKeyValueProcessor(RowType valueType, boolean persistValue) {
-            this.persistValue = persistValue;
-            this.valueSerializer = persistValue ? new RowCompactedSerializer(valueType) : null;
-        }
-
-        @Override
-        public boolean withPosition() {
-            return true;
-        }
-
-        @Override
-        public byte[] persistToDisk(KeyValue kv) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public byte[] persistToDisk(KeyValue kv, long rowPosition) {
-            if (persistValue) {
-                byte[] vBytes = valueSerializer.serializeToBytes(kv.value());
-                byte[] bytes = new byte[vBytes.length + 8 + 8 + 1];
-                MemorySegment segment = MemorySegment.wrap(bytes);
-                segment.put(0, vBytes);
-                segment.putLong(bytes.length - 17, rowPosition);
-                segment.putLong(bytes.length - 9, kv.sequenceNumber());
-                segment.put(bytes.length - 1, kv.valueKind().toByteValue());
-                return bytes;
-            } else {
-                byte[] bytes = new byte[MAX_VAR_LONG_SIZE];
-                int len = encodeLong(bytes, rowPosition);
-                return Arrays.copyOf(bytes, len);
-            }
-        }
-
-        @Override
-        public PositionedKeyValue readFromDisk(
-                InternalRow key, int level, byte[] bytes, String fileName) {
-            if (persistValue) {
-                InternalRow value = valueSerializer.deserialize(bytes);
-                MemorySegment segment = MemorySegment.wrap(bytes);
-                long rowPosition = segment.getLong(bytes.length - 17);
-                long sequenceNumber = segment.getLong(bytes.length - 9);
-                RowKind rowKind = RowKind.fromByteValue(bytes[bytes.length - 1]);
-                return new PositionedKeyValue(
-                        new KeyValue().replace(key, sequenceNumber, rowKind, value).setLevel(level),
-                        fileName,
-                        rowPosition);
-            } else {
-                long rowPosition = decodeLong(bytes, 0);
-                return new PositionedKeyValue(null, fileName, rowPosition);
-            }
-        }
-    }
-
-    /** {@link KeyValue} with file name and row position for DeletionVector. */
-    public static class PositionedKeyValue {
-        private final @Nullable KeyValue keyValue;
-        private final String fileName;
-        private final long rowPosition;
-
-        public PositionedKeyValue(@Nullable KeyValue keyValue, String fileName, long rowPosition) {
-            this.keyValue = keyValue;
-            this.fileName = fileName;
-            this.rowPosition = rowPosition;
-        }
-
-        public String fileName() {
-            return fileName;
-        }
-
-        public long rowPosition() {
-            return rowPosition;
-        }
-
-        @Nullable
-        public KeyValue keyValue() {
-            return keyValue;
+        private RemoteSstFile(String sstFileName, String serVersion) {
+            this.sstFileName = sstFileName;
+            this.serVersion = serVersion;
         }
     }
 }

@@ -47,6 +47,7 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -58,6 +59,7 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
@@ -96,6 +98,7 @@ public class RESTCatalog implements Catalog {
     private final RESTApi api;
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
+    protected final Map<String, String> tableDefaultOptions;
 
     public RESTCatalog(CatalogContext context) {
         this(context, true);
@@ -110,6 +113,7 @@ public class RESTCatalog implements Catalog {
                         context.preferIO(),
                         context.fallbackIO());
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
+        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(this.context.options().toMap());
     }
 
     @Override
@@ -446,8 +450,9 @@ public class RESTCatalog implements Catalog {
         try {
             checkNotBranch(identifier, "createTable");
             checkNotSystemTable(identifier, "createTable");
-            validateCreateTable(schema);
+            validateCreateTable(schema, dataTokenEnabled);
             createExternalTablePathIfNotExist(schema);
+            tableDefaultOptions.forEach(schema.options()::putIfAbsent);
             Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
             api.createTable(identifier, newSchema);
         } catch (AlreadyExistsException e) {
@@ -963,6 +968,122 @@ public class RESTCatalog implements Catalog {
             }
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    /**
+     * Get tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @return {@link GetTagResponse}
+     * @throws TableNotExistException if the table does not exist
+     * @throws TagNotExistException if the tag does not exist
+     * @throws TableNoPermissionException if don't have the permission for this table
+     */
+    @Override
+    public GetTagResponse getTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
+        try {
+            return api.getTag(identifier, tagName);
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
+                throw new TagNotExistException(identifier, tagName);
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    /**
+     * Create tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @param snapshotId optional snapshot id, if not provided uses latest snapshot
+     * @param timeRetained optional time retained as string (e.g., "1d", "12h", "30m")
+     * @param ignoreIfExists if true, ignore if tag already exists
+     * @throws TableNotExistException if the table does not exist
+     * @throws SnapshotNotExistException if the snapshot does not exist
+     * @throws TagAlreadyExistException if the tag already exists and ignoreIfExists is false
+     * @throws TableNoPermissionException if don't have the permission for this table
+     */
+    @Override
+    public void createTag(
+            Identifier identifier,
+            String tagName,
+            @Nullable Long snapshotId,
+            @Nullable String timeRetained,
+            boolean ignoreIfExists)
+            throws TableNotExistException, SnapshotNotExistException, TagAlreadyExistException {
+        try {
+            api.createTag(identifier, tagName, snapshotId, timeRetained);
+        } catch (AlreadyExistsException e) {
+            if (!ignoreIfExists) {
+                throw new TagAlreadyExistException(identifier, tagName);
+            }
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
+                throw new SnapshotNotExistException(
+                        String.format(
+                                "Snapshot %s in table %s doesn't exist.",
+                                e.resourceName(), identifier.getFullName()));
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    /**
+     * Get paged list names of tags under this table. An empty list is returned if none tag exists.
+     *
+     * @param identifier database name and table name.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the names of tags with provided page size in this table and next page token
+     * @throws TableNotExistException if the table does not exist
+     * @throws TableNoPermissionException if don't have the permission for this table
+     */
+    @Override
+    public PagedList<String> listTagsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        try {
+            return api.listTagsPaged(identifier, maxResults, pageToken);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    /**
+     * Delete tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @throws TableNotExistException if the table does not exist
+     * @throws TagNotExistException if the tag does not exist
+     * @throws TableNoPermissionException if don't have the permission for this table
+     */
+    public void deleteTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
+        try {
+            api.deleteTag(identifier, tagName);
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
+                throw new TagNotExistException(identifier, tagName);
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
         }
     }
 

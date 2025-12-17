@@ -63,7 +63,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     @Nullable private final ProjectedRow keyRearrange;
     @Nullable private final ProjectedRow trimmedKeyRearrange;
 
-    private Predicate specificPartition;
+    @Nullable private Predicate partitionFilter;
     @Nullable private Filter<InternalRow> cacheRowFilter;
     private QueryExecutor queryExecutor;
 
@@ -143,13 +143,14 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     }
 
     @Override
-    public void specificPartitionFilter(Predicate filter) {
-        this.specificPartition = filter;
+    public void specifyPartitions(
+            List<BinaryRow> scanPartitions, @Nullable Predicate partitionFilter) {
+        this.partitionFilter = partitionFilter;
     }
 
     @Override
     public void open() throws Exception {
-        this.queryExecutor = executorFactory.create(specificPartition, cacheRowFilter);
+        this.queryExecutor = executorFactory.create(partitionFilter, cacheRowFilter);
         refresh();
     }
 

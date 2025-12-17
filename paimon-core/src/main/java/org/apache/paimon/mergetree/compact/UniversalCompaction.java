@@ -47,19 +47,19 @@ public class UniversalCompaction implements CompactStrategy {
     private final int sizeRatio;
     private final int numRunCompactionTrigger;
 
-    @Nullable private final FullCompactTrigger fullCompactTrigger;
+    @Nullable private final EarlyFullCompaction earlyFullCompact;
     @Nullable private final OffPeakHours offPeakHours;
 
     public UniversalCompaction(
             int maxSizeAmp,
             int sizeRatio,
             int numRunCompactionTrigger,
-            @Nullable FullCompactTrigger fullCompactTrigger,
+            @Nullable EarlyFullCompaction earlyFullCompact,
             @Nullable OffPeakHours offPeakHours) {
         this.maxSizeAmp = maxSizeAmp;
         this.sizeRatio = sizeRatio;
         this.numRunCompactionTrigger = numRunCompactionTrigger;
-        this.fullCompactTrigger = fullCompactTrigger;
+        this.earlyFullCompact = earlyFullCompact;
         this.offPeakHours = offPeakHours;
     }
 
@@ -68,8 +68,8 @@ public class UniversalCompaction implements CompactStrategy {
         int maxLevel = numLevels - 1;
 
         // 0 try full compaction by trigger
-        if (fullCompactTrigger != null) {
-            Optional<CompactUnit> unit = fullCompactTrigger.tryFullCompact(numLevels, runs);
+        if (earlyFullCompact != null) {
+            Optional<CompactUnit> unit = earlyFullCompact.tryFullCompact(numLevels, runs);
             if (unit.isPresent()) {
                 return unit;
             }
@@ -137,8 +137,8 @@ public class UniversalCompaction implements CompactStrategy {
 
         // size amplification = percentage of additional size
         if (candidateSize * 100 > maxSizeAmp * earliestRunSize) {
-            if (fullCompactTrigger != null) {
-                fullCompactTrigger.updateLastFullCompaction();
+            if (earlyFullCompact != null) {
+                earlyFullCompact.updateLastFullCompaction();
             }
             return CompactUnit.fromLevelRuns(maxLevel, runs);
         }
@@ -216,8 +216,8 @@ public class UniversalCompaction implements CompactStrategy {
         }
 
         if (runCount == runs.size()) {
-            if (fullCompactTrigger != null) {
-                fullCompactTrigger.updateLastFullCompaction();
+            if (earlyFullCompact != null) {
+                earlyFullCompact.updateLastFullCompaction();
             }
             outputLevel = maxLevel;
         }

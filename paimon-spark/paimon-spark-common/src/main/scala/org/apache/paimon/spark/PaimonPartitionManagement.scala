@@ -50,7 +50,8 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
           fileStoreTable.coreOptions().partitionDefaultName(),
           partitionRowType,
           table.partitionKeys().asScala.toArray,
-          CoreOptions.fromMap(table.options()).legacyPartitionName)
+          CoreOptions.fromMap(table.options()).legacyPartitionName
+        )
 
         rows.map {
           r =>

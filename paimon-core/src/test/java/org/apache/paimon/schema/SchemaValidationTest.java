@@ -56,6 +56,18 @@ class SchemaValidationTest {
                 new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, ""));
     }
 
+    private void validateBlobSchema(Map<String, String> options, List<String> partitions) {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.BLOB()),
+                        new DataField(3, "f3", DataTypes.STRING()));
+        options.put(BUCKET.key(), String.valueOf(-1));
+        validateTableSchema(
+                new TableSchema(1, fields, 10, partitions, Collections.emptyList(), options, ""));
+    }
+
     @Test
     public void testOnlyTimestampMillis() {
         Map<String, String> options = new HashMap<>();
@@ -121,5 +133,22 @@ class SchemaValidationTest {
         assertThatThrownBy(() -> validateTableSchemaExec(options))
                 .hasMessageContaining(
                         "The record level time field type should be one of INT, BIGINT, or TIMESTAMP, but field type is STRING.");
+    }
+
+    @Test
+    public void testBlobTableSchema() {
+        Map<String, String> options = new HashMap<>();
+
+        // 1. must set row-tracking = true and data-evolution = true
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        assertThatThrownBy(() -> validateBlobSchema(options, Collections.emptyList()))
+                .hasMessage("Data evolution config must enabled for table with BLOB type column.");
+
+        // 2. blob column cannot be part of partition keys
+        options.clear();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        assertThatThrownBy(() -> validateBlobSchema(options, Collections.singletonList("f2")))
+                .hasMessage("The BLOB type column can not be part of partition keys.");
     }
 }

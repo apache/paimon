@@ -38,6 +38,9 @@ import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
 import org.apache.paimon.spark.catalog.functions.V1FunctionConverter;
 import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.iceberg.IcebergTable;
+import org.apache.paimon.table.lance.LanceTable;
+import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -648,17 +651,20 @@ public class SparkCatalog extends SparkBaseCatalog
     protected org.apache.spark.sql.connector.catalog.Table loadSparkTable(
             Identifier ident, Map<String, String> extraOptions) throws NoSuchTableException {
         try {
-            org.apache.paimon.table.Table paimonTable =
-                    catalog.getTable(toIdentifier(ident, catalogName));
-            if (paimonTable instanceof FormatTable) {
-                return toSparkFormatTable(ident, (FormatTable) paimonTable);
+            org.apache.paimon.catalog.Identifier tblIdent = toIdentifier(ident, catalogName);
+            org.apache.paimon.table.Table table =
+                    copyWithSQLConf(
+                            catalog.getTable(tblIdent), catalogName, tblIdent, extraOptions);
+            if (table instanceof FormatTable) {
+                return toSparkFormatTable(ident, (FormatTable) table);
+            } else if (table instanceof IcebergTable) {
+                return new SparkIcebergTable(table);
+            } else if (table instanceof LanceTable) {
+                return new SparkLanceTable(table);
+            } else if (table instanceof ObjectTable) {
+                return new SparkObjectTable(table);
             } else {
-                return new SparkTable(
-                        copyWithSQLConf(
-                                paimonTable,
-                                catalogName,
-                                toIdentifier(ident, catalogName),
-                                extraOptions));
+                return new SparkTable(table);
             }
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);

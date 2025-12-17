@@ -18,18 +18,11 @@
 
 package org.apache.paimon.table.source.splitread;
 
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.DataEvolutionSplitRead;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.LazyField;
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
 import java.util.function.Supplier;
-
-import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 
 /** A {@link SplitReadProvider} to create {@link DataEvolutionSplitRead}. */
 public class DataEvolutionSplitReadProvider implements SplitReadProvider {
@@ -48,29 +41,8 @@ public class DataEvolutionSplitReadProvider implements SplitReadProvider {
     }
 
     @Override
-    public boolean match(DataSplit split, boolean forceKeepDelete) {
-        List<DataFileMeta> files = split.dataFiles();
-        if (files.size() < 2) {
-            return false;
-        }
-
-        Set<Long> firstRowIds = new HashSet<>();
-        for (DataFileMeta file : files) {
-            if (isBlobFile(file.fileName())) {
-                return true;
-            }
-            Long current = file.firstRowId();
-            if (current == null
-                    || !file.fileSource().isPresent()
-                    || file.fileSource().get() != FileSource.APPEND) {
-                return false;
-            }
-
-            firstRowIds.add(current);
-        }
-
-        // If all files have a distinct first row id, we don't need to merge fields
-        return firstRowIds.size() != files.size();
+    public boolean match(Split split, Context context) {
+        return true;
     }
 
     @Override

@@ -25,6 +25,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
+import org.apache.paimon.globalindex.GlobalIndexScanBuilderImpl;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.index.IndexFileHandler;
@@ -277,7 +279,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                         newKeyComparator(),
                         bucketMode(),
                         options.deletionVectorsEnabled(),
-                        newIndexFileHandler());
+                        newIndexFileHandler(),
+                        newScan());
         return new FileStoreCommitImpl(
                 snapshotCommit,
                 fileIO,
@@ -360,20 +363,23 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     public abstract Comparator<InternalRow> newKeyComparator();
 
+    @Override
+    public InternalRowPartitionComputer partitionComputer() {
+        return new InternalRowPartitionComputer(
+                options.partitionDefaultName(),
+                schema.logicalPartitionType(),
+                schema.partitionKeys().toArray(new String[0]),
+                options.legacyPartitionName());
+    }
+
     private List<CommitCallback> createCommitCallbacks(String commitUser, FileStoreTable table) {
-        List<CommitCallback> callbacks =
-                new ArrayList<>(CallbackUtils.loadCommitCallbacks(options, table));
+        List<CommitCallback> callbacks = new ArrayList<>();
 
         if (options.partitionedTableInMetastore() && !schema.partitionKeys().isEmpty()) {
             PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
             if (partitionHandler != null) {
-                InternalRowPartitionComputer partitionComputer =
-                        new InternalRowPartitionComputer(
-                                options.partitionDefaultName(),
-                                schema.logicalPartitionType(),
-                                schema.partitionKeys().toArray(new String[0]),
-                                options.legacyPartitionName());
-                callbacks.add(new AddPartitionCommitCallback(partitionHandler, partitionComputer));
+                callbacks.add(
+                        new AddPartitionCommitCallback(partitionHandler, partitionComputer()));
             }
         }
 
@@ -397,6 +403,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             callbacks.add(new IcebergCommitCallback(table, commitUser));
         }
 
+        callbacks.addAll(CallbackUtils.loadCommitCallbacks(options, table));
         return callbacks;
     }
 
@@ -488,5 +495,16 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public void setSnapshotCache(Cache<Path, Snapshot> cache) {
         this.snapshotCache = cache;
+    }
+
+    @Override
+    public GlobalIndexScanBuilder newGlobalIndexScanBuilder() {
+        return new GlobalIndexScanBuilderImpl(
+                options.toConfiguration(),
+                schema.logicalRowType(),
+                fileIO,
+                pathFactory().globalIndexFileFactory(),
+                snapshotManager(),
+                newIndexFileHandler());
     }
 }

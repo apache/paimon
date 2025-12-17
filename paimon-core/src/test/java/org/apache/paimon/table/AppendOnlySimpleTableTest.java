@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.bucket.DefaultBucketFunction;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -36,6 +37,11 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Equal;
@@ -56,6 +62,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ScanMode;
@@ -92,11 +99,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_APPEND_ORDERED;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -114,6 +123,142 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for {@link AppendOnlyFileStoreTable}. */
 public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
+
+    @Test
+    public void testBucketedAppendTableWriteWithInit() throws Exception {
+        innerTestBucketedAppendTableWriteInit(true);
+    }
+
+    @Test
+    public void testBucketedAppendTableWriteNoInit() throws Exception {
+        innerTestBucketedAppendTableWriteInit(false);
+    }
+
+    public void innerTestBucketedAppendTableWriteInit(boolean ordered) throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(BUCKET, 2);
+                            options.set(BUCKET_KEY, "a");
+                            options.set(WRITE_ONLY, true);
+                            options.set(BUCKET_APPEND_ORDERED, ordered);
+                        });
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+
+        // 1. first write
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(write.prepareCommit());
+        }
+
+        // 2. delete all manifests
+        ManifestList manifestList = table.store().manifestListFactory().create();
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+        List<ManifestFileMeta> manifests =
+                manifestList.readAllManifests(table.latestSnapshot().get());
+        for (ManifestFileMeta manifest : manifests) {
+            manifestFile.delete(manifest.fileName());
+        }
+
+        // 3. check new write
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            if (ordered) {
+                assertThatThrownBy(() -> write.write(rowData(1, 10, 100L)))
+                        .hasMessageContaining("FileNotFoundException");
+            } else {
+                // no exception
+                write.write(rowData(1, 10, 100L));
+            }
+        }
+    }
+
+    @Test
+    public void testOverwriteNeverFail() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        Runnable writeRecord =
+                () -> {
+                    BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+                    try (BatchTableWrite write = writeBuilder.newWrite();
+                            BatchTableCommit commit = writeBuilder.newCommit()) {
+                        write.write(rowData(1, 10, 100L));
+                        commit.commit(write.prepareCommit());
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                };
+
+        Runnable overwrite =
+                () -> {
+                    BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder().withOverwrite();
+                    try (BatchTableWrite write = writeBuilder.newWrite();
+                            BatchTableCommit commit = writeBuilder.newCommit()) {
+                        write.write(rowData(1, 10, 100L));
+                        commit.commit(write.prepareCommit());
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                };
+
+        Runnable compact =
+                () -> {
+                    BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder().withOverwrite();
+                    try (BatchTableWrite write = writeBuilder.newWrite();
+                            BatchTableCommit commit = writeBuilder.newCommit()) {
+                        List<DataSplit> splits =
+                                (List) table.newReadBuilder().newScan().plan().splits();
+                        List<DataFileMeta> files =
+                                splits.stream()
+                                        .flatMap(s -> s.dataFiles().stream())
+                                        .collect(Collectors.toList());
+                        FileStoreWrite fileStoreWrite = ((TableWriteImpl) write).getWrite();
+                        CommitMessage commitMessage =
+                                new AppendCompactTask(splits.get(0).partition(), files)
+                                        .doCompact(
+                                                table, (BaseAppendFileStoreWrite) fileStoreWrite);
+                        commit.commit(Collections.singletonList(commitMessage));
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                };
+
+        AtomicReference<Exception> exception = new AtomicReference<>();
+
+        Thread thread1 =
+                new Thread(
+                        () -> {
+                            for (int i = 0; i < 10; i++) {
+                                try {
+                                    writeRecord.run();
+                                    overwrite.run();
+                                } catch (Exception e) {
+                                    exception.set(e);
+                                }
+                            }
+                        });
+
+        Thread thread2 =
+                new Thread(
+                        () -> {
+                            for (int i = 0; i < 10; i++) {
+                                try {
+                                    writeRecord.run();
+                                    compact.run();
+                                } catch (Exception ignored) {
+                                }
+                            }
+                        });
+
+        thread1.start();
+        thread2.start();
+
+        thread1.join();
+        thread2.join();
+
+        assertThat(exception.get()).isNull();
+    }
 
     @Test
     public void testDiscardDuplicateFiles() throws Exception {
@@ -193,6 +338,22 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                                 .newBatchWriteBuilder()
                                 .newWriteSelector())
                 .isEmpty();
+    }
+
+    @Test
+    public void testMinMaxRowIdNull() throws Exception {
+        writeData();
+        FileStoreTable table = createFileStoreTable();
+        List<ManifestFileMeta> manifests =
+                table.store()
+                        .manifestListFactory()
+                        .create()
+                        .readDataManifests(table.latestSnapshot().get());
+        assertThat(manifests.size()).isGreaterThan(0);
+        for (ManifestFileMeta manifest : manifests) {
+            assertThat(manifest.minRowId()).isNull();
+            assertThat(manifest.maxRowId()).isNull();
+        }
     }
 
     @Test

@@ -37,22 +37,28 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             LoggerFactory.getLogger(MultiPartUploadTwoPhaseOutputStream.class);
 
     private final ByteArrayOutputStream buffer;
-    private final List<T> uploadedParts;
     private final MultiPartUploadStore<T, C> multiPartUploadStore;
-    private final String objectName;
 
-    private String uploadId;
-    private long position;
+    protected final String objectName;
+    protected final Path targetPath;
+    protected final String uploadId;
+
+    protected List<T> uploadedParts;
+    protected long position;
+
     private boolean closed = false;
     private Committer committer;
 
     public MultiPartUploadTwoPhaseOutputStream(
-            MultiPartUploadStore<T, C> multiPartUploadStore, org.apache.hadoop.fs.Path hadoopPath)
+            MultiPartUploadStore<T, C> multiPartUploadStore,
+            org.apache.hadoop.fs.Path hadoopPath,
+            Path path)
             throws IOException {
         this.multiPartUploadStore = multiPartUploadStore;
         this.buffer = new ByteArrayOutputStream();
         this.uploadedParts = new ArrayList<>();
         this.objectName = multiPartUploadStore.pathToObject(hadoopPath);
+        this.targetPath = path;
         this.uploadId = multiPartUploadStore.startMultiPartUpload(objectName);
         this.position = 0;
     }
@@ -64,8 +70,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         return 10 << 20;
     }
 
-    public abstract Committer committer(
-            String uploadId, List<T> uploadedParts, String objectName, long position);
+    public abstract Committer committer();
 
     @Override
     public long getPos() throws IOException {
@@ -79,9 +84,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         }
         buffer.write(b);
         position++;
-        if (buffer.size() >= partSizeThreshold()) {
-            uploadPart();
-        }
+        uploadPartIfLargerThanThreshold();
     }
 
     @Override
@@ -97,9 +100,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         int remaining = len;
         int offset = off;
         while (remaining > 0) {
-            if (buffer.size() >= partSizeThreshold()) {
-                uploadPart();
-            }
+            uploadPartIfLargerThanThreshold();
             int currentSize = buffer.size();
             int space = partSizeThreshold() - currentSize;
             int count = Math.min(remaining, space);
@@ -107,10 +108,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             offset += count;
             remaining -= count;
             position += count;
-            // consume buffer if it is full
-            if (buffer.size() >= partSizeThreshold()) {
-                uploadPart();
-            }
+            uploadPartIfLargerThanThreshold();
         }
     }
 
@@ -119,7 +117,7 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
         if (closed) {
             throw new IOException("Stream is closed");
         }
-        uploadPart();
+        uploadPartIfLargerThanThreshold();
     }
 
     @Override
@@ -137,15 +135,18 @@ public abstract class MultiPartUploadTwoPhaseOutputStream<T, C> extends TwoPhase
             throw new IOException("Stream is already closed but committer is null");
         }
         closed = true;
-
-        if (buffer.size() > 0) {
-            uploadPart();
-        }
-
-        return committer(uploadId, uploadedParts, objectName, position);
+        // Only last upload part can be smaller than part size threshold
+        uploadPartUtil();
+        return committer();
     }
 
-    private void uploadPart() throws IOException {
+    private void uploadPartIfLargerThanThreshold() throws IOException {
+        if (buffer.size() >= partSizeThreshold()) {
+            uploadPartUtil();
+        }
+    }
+
+    private void uploadPartUtil() throws IOException {
         if (buffer.size() == 0) {
             return;
         }

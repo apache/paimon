@@ -16,7 +16,6 @@
 # limitations under the License.
 ################################################################################
 import struct
-from pathlib import Path
 from typing import List, Optional, Any, Iterator
 
 import pyarrow as pa
@@ -35,14 +34,15 @@ from pypaimon.table.row.row_kind import RowKind
 class FormatBlobReader(RecordBatchReader):
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
-                 full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool):
+                 full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool,
+                 batch_size: int = 4096):
         self._file_io = file_io
         self._file_path = file_path
         self._push_down_predicate = push_down_predicate
         self._blob_as_descriptor = blob_as_descriptor
-
+        self._batch_size = batch_size
         # Get file size
-        self._file_size = file_io.get_file_size(Path(file_path))
+        self._file_size = file_io.get_file_size(file_path)
 
         # Initialize the low-level blob format reader
         self.file_path = file_path
@@ -93,6 +93,8 @@ class FormatBlobReader(RecordBatchReader):
                     pydict_data[field_name].append(blob_data)
 
                 records_in_batch += 1
+                if records_in_batch >= self._batch_size:
+                    break
 
         except StopIteration:
             # Stop immediately when StopIteration occurs
@@ -124,7 +126,7 @@ class FormatBlobReader(RecordBatchReader):
         self._blob_iterator = None
 
     def _read_index(self) -> None:
-        with self._file_io.new_input_stream(Path(self.file_path)) as f:
+        with self._file_io.new_input_stream(self.file_path) as f:
             # Seek to header: last 5 bytes
             f.seek(self._file_size - 5)
             header = f.read(5)

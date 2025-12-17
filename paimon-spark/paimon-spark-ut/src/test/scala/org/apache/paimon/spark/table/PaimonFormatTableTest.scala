@@ -34,13 +34,51 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     sql("USE test_db")
   }
 
-  test("PaimonFormatTableRead table: csv mode") {
-    val tableName = "paimon_format_test_csv_malformed"
+  test("PaimonFormatTable: partition path validate when insert overwrite empty data") {
+    val tableName = "paimon_format_test_partition_path"
+    val readTableName = s"${tableName}_read"
     withTable(tableName) {
       sql(
         s"CREATE TABLE $tableName (f0 INT, f1 string, f2 INT) USING CSV TBLPROPERTIES (" +
           s"'file.compression'='none', 'seq'='|', 'lineSep'='\n', " +
           "'format-table.implementation'='paimon') PARTITIONED BY (`ds` bigint)")
+      sql(
+        s"CREATE TABLE $readTableName (f0 INT, f1 string, f2 INT) USING CSV TBLPROPERTIES (" +
+          s"'file.compression'='none', 'seq'='|', 'lineSep'='\n', " +
+          "'format-table.implementation'='paimon') PARTITIONED BY (`ds` bigint)")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      val readTable =
+        paimonCatalog
+          .getTable(Identifier.create("test_db", s"$readTableName"))
+          .asInstanceOf[FormatTable]
+
+      table.fileIO().mkdirs(new Path(table.location()))
+      readTable.fileIO().mkdirs(new Path(readTable.location()))
+
+      val partition = 20250920
+      val partitionPath = new Path(table.location(), s"ds=$partition")
+      checkAnswer(
+        sql(s"SELECT * FROM $readTableName where ds = $partition"),
+        Nil
+      )
+      checkAnswer(
+        sql(s"SELECT * FROM $tableName where ds = $partition"),
+        Nil
+      )
+      spark.sql(
+        s"INSERT OVERWRITE $tableName PARTITION (ds = $partition) select `f0`, `f1`, `f2` from $readTableName where ds = $partition")
+      assert(
+        table.fileIO().exists(partitionPath),
+        s"Partition directory should exist after empty insert: $partitionPath")
+    }
+  }
+
+  test("PaimonFormatTableRead table: csv mode") {
+    val tableName = "paimon_format_test_csv_malformed"
+    withTable(tableName) {
+      sql(s"CREATE TABLE $tableName (f0 INT, f1 string, f2 INT) USING CSV TBLPROPERTIES (" +
+        s"'seq'='|', 'lineSep'='\n', 'format-table.implementation'='paimon') PARTITIONED BY (`ds` bigint)")
       val table =
         paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
       val partition = 20250920
@@ -61,14 +99,61 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
-  test("PaimonFormatTable non partition table overwrite: csv") {
-    val tableName = "paimon_non_partiiton_overwrite_test"
+  test("PaimonFormatTable table: csv custom line delimiter") {
+    val tableName = "paimon_format_test_csv_custom_lime_delimiter"
     withTable(tableName) {
       spark.sql(
         s"""
            |CREATE TABLE $tableName (age INT, name STRING)
-           |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon', 'file.compression'='none')
+           |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon', 'file.compression'='gzip', 'lineSep'='abc')
            |""".stripMargin)
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      table.fileIO().mkdirs(new Path(table.location()))
+      spark.sql(s"INSERT INTO $tableName  VALUES (5, 'ab'), (7, 'Larry')")
+      checkAnswer(
+        spark.sql(s"SELECT age, name FROM $tableName ORDER BY age"),
+        Row(5, "ab") :: Row(7, "Larry") :: Nil
+      )
+    }
+  }
+
+  test("PaimonFormatTable write: partition key in diff position") {
+    val tableName = "paimon_format_test_orc_mode"
+    withTable(tableName) {
+      sql(
+        s"CREATE TABLE $tableName (`ds` bigint, age INT, `ds1` bigint, name STRING, `ds2` bigint) USING ORC TBLPROPERTIES (" +
+          s"'format-table.implementation'='paimon') PARTITIONED BY (`ds`, `ds1`, `ds2`)")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      val partition = 20250920
+      table.fileIO().mkdirs(new Path(table.location()))
+      spark.sql(s"INSERT INTO $tableName  VALUES (5, 11, 12, 'ab', 13), (7, 11, 12, 'Larry', 13)")
+      checkAnswer(
+        spark.sql(s"SELECT ds, age, ds1, name, ds2 FROM $tableName ORDER BY age"),
+        Row(5, 11, 12, "ab", 13) :: Row(7, 11, 12, "Larry", 13) :: Nil
+      )
+    }
+  }
+
+  test("PaimonFormatTable: set dynamic options") {
+    withTable("t") {
+      sql(s"create table t (id INT, v INT, pt STRING) using csv")
+
+      withSparkSQLConf("spark.paimon.write.batch-size" -> "256") {
+        val options = getFormatTableScan("SELECT * FROM t").table.options()
+        assert(options.get("write.batch-size") == "256")
+      }
+    }
+  }
+
+  test("PaimonFormatTable non partition table overwrite: csv") {
+    val tableName = "paimon_non_partiiton_overwrite_test"
+    withTable(tableName) {
+      spark.sql(s"""
+                   |CREATE TABLE $tableName (age INT, name STRING)
+                   |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon')
+                   |""".stripMargin)
       val table =
         paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
       table.fileIO().mkdirs(new Path(table.location()))
@@ -88,12 +173,11 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
   test("PaimonFormatTable partition table overwrite: csv") {
     val tableName = "paimon_overwrite_test"
     withTable(tableName) {
-      spark.sql(
-        s"""
-           |CREATE TABLE $tableName (age INT, name STRING)
-           |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon', 'file.compression'='none')
-           |PARTITIONED BY (id INT)
-           |""".stripMargin)
+      spark.sql(s"""
+                   |CREATE TABLE $tableName (age INT, name STRING)
+                   |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon')
+                   |PARTITIONED BY (id INT)
+                   |""".stripMargin)
       val table =
         paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
       table.fileIO().mkdirs(new Path(table.location()))
@@ -115,10 +199,8 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
   test("PaimonFormatTableRead table: csv with field-delimiter") {
     val tableName = "paimon_format_test_csv_options"
     withTable(tableName) {
-      sql(
-        s"CREATE TABLE $tableName (f0 INT, f1 string) USING CSV TBLPROPERTIES (" +
-          s"'file.compression'='none', 'seq'='|', 'lineSep'='\n', " +
-          "'format-table.implementation'='paimon') PARTITIONED BY (`ds` bigint)")
+      sql(s"CREATE TABLE $tableName (f0 INT, f1 string) USING CSV TBLPROPERTIES (" +
+        s"'seq'='|', 'lineSep'='\n', 'format-table.implementation'='paimon') PARTITIONED BY (`ds` bigint)")
       val table =
         paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
       table.fileIO().mkdirs(new Path(table.location()))
@@ -135,10 +217,8 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
   test("PaimonFormatTable: csv with partition path only value") {
     val tableName = "paimon_format_test_partition_path_only_value"
     withTable(tableName) {
-      sql(
-        s"CREATE TABLE $tableName (f0 INT, f1 string) USING CSV TBLPROPERTIES (" +
-          s"'file.compression'='none','format-table.implementation'='paimon'," +
-          "'format-table.partition-path-only-value'='true') PARTITIONED BY (`ds` bigint)")
+      sql(s"CREATE TABLE $tableName (f0 INT, f1 string) USING CSV TBLPROPERTIES (" +
+        s"'format-table.implementation'='paimon','format-table.partition-path-only-value'='true') PARTITIONED BY (`ds` bigint)")
       val table =
         paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
       table.fileIO().mkdirs(new Path(table.location()))

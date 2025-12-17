@@ -64,13 +64,12 @@ abstract class BaseWriteBuilder(table: Table)
     // `dataframe.writeTo(T).overwrite(...)`
     val partitionNames = partitionRowType.getFieldNames.asScala
     val allReferences = filters.flatMap(_.references)
-    val containsDataColumn = allReferences.exists {
-      reference => !partitionNames.exists(conf.resolver.apply(reference, _))
-    }
+    val containsDataColumn =
+      allReferences.exists(reference => !partitionNames.exists(conf.resolver.apply(reference, _)))
     if (containsDataColumn) {
       throw new RuntimeException(
-        s"Only support Overwrite filters on partition column ${partitionNames.mkString(
-            ", ")}, but got ${filters.mkString(", ")}.")
+        s"Only support Overwrite filters on partition column ${partitionNames.mkString(", ")}, " +
+          s"but got ${filters.mkString(", ")}.")
     }
     if (allReferences.distinct.length < allReferences.length) {
       // fail with `part = 1 and part = 2`

@@ -18,7 +18,6 @@
 
 import time
 import uuid
-from pathlib import Path
 from typing import List
 
 from pypaimon.common.core_options import CoreOptions
@@ -158,17 +157,16 @@ class FileStoreCommit:
                 delta_record_count -= entry.file.row_count
         self.manifest_file_manager.write(new_manifest_file, commit_entries)
         # TODO: implement noConflictsOrFail logic
-
         partition_columns = list(zip(*(entry.partition.values for entry in commit_entries)))
         partition_min_stats = [min(col) for col in partition_columns]
         partition_max_stats = [max(col) for col in partition_columns]
         partition_null_counts = [sum(value == 0 for value in col) for col in partition_columns]
         if not all(count == 0 for count in partition_null_counts):
             raise RuntimeError("Partition value should not be null")
-
+        manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
         new_manifest_list = ManifestFileMeta(
             file_name=new_manifest_file,
-            file_size=self.table.file_io.get_file_size(self.manifest_file_manager.manifest_path / new_manifest_file),
+            file_size=self.table.file_io.get_file_size(manifest_file_path),
             num_added_files=added_file_count,
             num_deleted_files=deleted_file_count,
             partition_stats=SimpleStats(
@@ -226,14 +224,19 @@ class FileStoreCommit:
                 raise RuntimeError(f"Failed to commit snapshot {new_snapshot_id}")
 
     def abort(self, commit_messages: List[CommitMessage]):
+        """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
         for message in commit_messages:
             for file in message.new_files:
                 try:
-                    file_path_obj = Path(file.file_path)
-                    if file_path_obj.exists():
-                        file_path_obj.unlink()
+                    path_to_delete = file.external_path if file.external_path else file.file_path
+                    if path_to_delete:
+                        path_str = str(path_to_delete)
+                        self.table.file_io.delete_quietly(path_str)
                 except Exception as e:
-                    print(f"Warning: Failed to clean up file {file.file_path}: {e}")
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    path_to_delete = file.external_path if file.external_path else file.file_path
+                    logger.warning(f"Failed to clean up file {path_to_delete} during abort: {e}")
 
     def close(self):
         """Close the FileStoreCommit and release resources."""
@@ -305,9 +308,9 @@ class FileStoreCommit:
             file_size_in_bytes = file_meta.file_size if entry.kind == 0 else file_meta.file_size * -1
             file_count = 1 if entry.kind == 0 else -1
 
-            # Convert creation_time to milliseconds (Java uses epoch millis)
+            # Use epoch millis
             if file_meta.creation_time:
-                file_creation_time = int(file_meta.creation_time.timestamp() * 1000)
+                file_creation_time = file_meta.creation_time_epoch_millis()
             else:
                 file_creation_time = int(time.time() * 1000)
 
@@ -361,7 +364,7 @@ class FileStoreCommit:
         for entry in commit_entries:
             # Check if this is an append file that needs row ID assignment
             if (entry.kind == 0 and  # ADD kind
-                    entry.file.file_source == "APPEND" and  # APPEND file source
+                    entry.file.file_source == 0 and  # APPEND file source
                     entry.file.first_row_id is None):  # No existing first_row_id
 
                 if self._is_blob_file(entry.file.file_name):

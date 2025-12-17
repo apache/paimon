@@ -68,7 +68,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
 
         TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
         assertThat(store.getUploadedParts()).hasSize(3);
-        assertThat(committer.targetFilePath().toString()).isEqualTo(store.getStartedObjectName());
+        assertThat(committer.targetPath().toString()).isEqualTo(store.getStartedObjectName());
 
         committer.commit(fileIO);
 
@@ -144,7 +144,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         stream.flush();
         assertThat(store.getUploadedParts())
                 .extracting(TestPart::getContent)
-                .containsExactly("abcab", "cdefg", "hij");
+                .containsExactly("abcab", "cdefg");
         TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
         assertThat(store.getUploadedParts()).hasSize(3);
 
@@ -155,6 +155,39 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         assertThat(store.getCompletedParts()).containsExactlyElementsOf(store.getUploadedParts());
         assertThat(store.getCompletedBytes()).isEqualTo(stream.getPos());
         assertThat(store.getAbortedUploadId()).isNull();
+    }
+
+    @Test
+    void testFlushWhenBufferSizeIsSmallerThanThresholdDoesNotUpload() throws IOException {
+        TestMultiPartUploadTwoPhaseOutputStream stream =
+                new TestMultiPartUploadTwoPhaseOutputStream(store, objectPath, 10);
+
+        // Write 3 bytes, which is less than the threshold of 10
+        stream.write("abc".getBytes(StandardCharsets.UTF_8));
+        assertThat(store.getUploadedParts()).isEmpty();
+
+        // Flush should not trigger upload since buffer size (3) < threshold (10)
+        stream.flush();
+        assertThat(store.getUploadedParts()).isEmpty();
+        assertThat(stream.getPos()).isEqualTo(3);
+
+        // Write another 4 bytes, total buffer size is 7, still less than threshold
+        stream.write("defg".getBytes(StandardCharsets.UTF_8));
+        assertThat(store.getUploadedParts()).isEmpty();
+
+        // Flush again, should still not upload since buffer size (7) < threshold (10)
+        stream.flush();
+        assertThat(store.getUploadedParts()).isEmpty();
+        assertThat(stream.getPos()).isEqualTo(7);
+
+        // Only when closeForCommit is called, the remaining buffer should be uploaded
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+        assertThat(store.getUploadedParts()).hasSize(1);
+        assertThat(store.getUploadedParts().get(0).getContent()).isEqualTo("abcdefg");
+        assertThat(store.getUploadedParts().get(0).getPartNumber()).isEqualTo(1);
+
+        committer.commit(fileIO);
+        assertThat(store.getCompletedBytes()).isEqualTo(7);
     }
 
     /** Fake store implementation for testing. */
@@ -259,7 +292,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         private TestMultiPartUploadTwoPhaseOutputStream(
                 FakeMultiPartUploadStore store, org.apache.hadoop.fs.Path path, int threshold)
                 throws IOException {
-            super(store, path);
+            super(store, path, new Path(path.toString()));
             this.store = store;
             this.threshold = threshold;
         }
@@ -270,8 +303,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         }
 
         @Override
-        public Committer committer(
-                String uploadId, List<TestPart> uploadedParts, String objectName, long position) {
+        public Committer committer() {
             return new TestCommitter(store, uploadId, uploadedParts, objectName, position);
         }
     }
@@ -319,7 +351,7 @@ class MultiPartUploadTwoPhaseOutputStreamTest {
         }
 
         @Override
-        public Path targetFilePath() {
+        public Path targetPath() {
             return new Path(objectName);
         }
 

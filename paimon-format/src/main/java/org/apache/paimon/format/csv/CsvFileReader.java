@@ -19,15 +19,17 @@
 package org.apache.paimon.format.csv;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.text.BaseTextFileReader;
+import org.apache.paimon.format.text.TextFileReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 
 /** CSV file reader implementation. */
-public class CsvFileReader extends BaseTextFileReader {
+public class CsvFileReader extends TextFileReader {
 
     private final boolean includeHeader;
     private final CsvParser csvParser;
@@ -39,9 +41,11 @@ public class CsvFileReader extends BaseTextFileReader {
             Path filePath,
             RowType rowReadType,
             RowType projectedRowType,
-            CsvOptions options)
+            CsvOptions options,
+            long offset,
+            @Nullable Long length)
             throws IOException {
-        super(fileIO, filePath, projectedRowType);
+        super(fileIO, filePath, projectedRowType, options.lineDelimiter(), offset, length);
         this.includeHeader = options.includeHeader();
         this.csvParser =
                 new CsvParser(
@@ -59,7 +63,7 @@ public class CsvFileReader extends BaseTextFileReader {
     protected void setupReading() throws IOException {
         // Skip header if needed
         if (includeHeader && !headerSkipped) {
-            bufferedReader.readLine();
+            readLine();
             headerSkipped = true;
         }
     }

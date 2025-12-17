@@ -123,7 +123,8 @@ public class OSSFileIO extends HadoopCompliantFileIO {
         FileSystem fs = getFileSystem(hadoopPath);
         return new OssTwoPhaseOutputStream(
                 new OSSMultiPartUpload((org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs),
-                hadoopPath);
+                hadoopPath,
+                path);
     }
 
     public Options hadoopOptions() {

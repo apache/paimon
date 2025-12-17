@@ -133,6 +133,19 @@ public class TimeTravelUtil {
         return Optional.of(snapshot);
     }
 
+    public static boolean hasTimeTravelOptions(Options options) {
+        if (options.containsKey(CoreOptions.SCAN_VERSION.key())) {
+            return true;
+        }
+
+        for (String key : SCAN_KEYS) {
+            if (options.containsKey(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static void adaptScanVersion(Options options, TagManager tagManager) {
         String version = options.remove(CoreOptions.SCAN_VERSION.key());
         if (version == null) {

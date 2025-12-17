@@ -21,6 +21,8 @@ from typing import List
 
 import fastavro
 
+from datetime import datetime
+
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
@@ -38,7 +40,8 @@ class ManifestFileManager:
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
-        self.manifest_path = table.table_path / "manifest"
+        manifest_path = table.table_path.rstrip('/')
+        self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = table.file_io
         self.partition_keys_fields = self.table.partition_keys_fields
         self.primary_keys_fields = self.table.primary_keys_fields
@@ -50,26 +53,36 @@ class ManifestFileManager:
         def _process_single_manifest(manifest_file: ManifestFileMeta) -> List[ManifestEntry]:
             return self.read(manifest_file.file_name, manifest_entry_filter, drop_stats)
 
+        def _entry_identifier(entry: ManifestEntry) -> tuple:
+            return (
+                tuple(entry.partition.values),
+                entry.bucket,
+                entry.file.level,
+                entry.file.file_name,
+                tuple(entry.file.extra_files) if entry.file.extra_files else (),
+                entry.file.embedded_index,
+                entry.file.external_path,
+            )
+
         deleted_entry_keys = set()
         added_entries = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_results = executor.map(_process_single_manifest, manifest_files)
             for entries in future_results:
                 for entry in entries:
-                    if entry.kind == 0:
+                    if entry.kind == 0:  # ADD
                         added_entries.append(entry)
-                    else:
-                        key = (tuple(entry.partition.values), entry.bucket, entry.file.file_name)
-                        deleted_entry_keys.add(key)
+                    else:  # DELETE
+                        deleted_entry_keys.add(_entry_identifier(entry))
 
         final_entries = [
             entry for entry in added_entries
-            if (tuple(entry.partition.values), entry.bucket, entry.file.file_name) not in deleted_entry_keys
+            if _entry_identifier(entry) not in deleted_entry_keys
         ]
         return final_entries
 
     def read(self, manifest_file_name: str, manifest_entry_filter=None, drop_stats=True) -> List[ManifestEntry]:
-        manifest_file_path = self.manifest_path / manifest_file_name
+        manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"
 
         entries = []
         with self.file_io.new_input_stream(manifest_file_path) as input_stream:
@@ -94,6 +107,22 @@ class ManifestFileManager:
                 max_values=BinaryRow(value_dict['_MAX_VALUES'], fields),
                 null_counts=value_dict['_NULL_COUNTS'],
             )
+            # fastavro returns UTC-aware datetime for timestamp-millis, we need to convert properly
+            from pypaimon.data.timestamp import Timestamp
+            creation_time_value = file_dict['_CREATION_TIME']
+            creation_time_ts = None
+            if creation_time_value is not None:
+                if isinstance(creation_time_value, datetime):
+                    if creation_time_value.tzinfo:
+                        epoch_millis = int(creation_time_value.timestamp() * 1000)
+                        creation_time_ts = Timestamp.from_epoch_millis(epoch_millis)
+                    else:
+                        creation_time_ts = Timestamp.from_local_date_time(creation_time_value)
+                elif isinstance(creation_time_value, (int, float)):
+                    creation_time_ts = Timestamp.from_epoch_millis(int(creation_time_value))
+                else:
+                    raise ValueError(f"Unexpected creation_time type: {type(creation_time_value)}")
+
             file_meta = DataFileMeta(
                 file_name=file_dict['_FILE_NAME'],
                 file_size=file_dict['_FILE_SIZE'],
@@ -107,7 +136,7 @@ class ManifestFileManager:
                 schema_id=file_dict['_SCHEMA_ID'],
                 level=file_dict['_LEVEL'],
                 extra_files=file_dict['_EXTRA_FILES'],
-                creation_time=file_dict['_CREATION_TIME'],
+                creation_time=creation_time_ts,
                 delete_row_count=file_dict['_DELETE_ROW_COUNT'],
                 embedded_index=file_dict['_EMBEDDED_FILE_INDEX'],
                 file_source=file_dict['_FILE_SOURCE'],
@@ -176,7 +205,7 @@ class ManifestFileManager:
                     "_SCHEMA_ID": entry.file.schema_id,
                     "_LEVEL": entry.file.level,
                     "_EXTRA_FILES": entry.file.extra_files,
-                    "_CREATION_TIME": entry.file.creation_time,
+                    "_CREATION_TIME": entry.file.creation_time.get_millisecond() if entry.file.creation_time else None,
                     "_DELETE_ROW_COUNT": entry.file.delete_row_count,
                     "_EMBEDDED_FILE_INDEX": entry.file.embedded_index,
                     "_FILE_SOURCE": entry.file.file_source,
@@ -188,7 +217,7 @@ class ManifestFileManager:
             }
             avro_records.append(avro_record)
 
-        manifest_path = self.manifest_path / file_name
+        manifest_path = f"{self.manifest_path}/{file_name}"
         try:
             buffer = BytesIO()
             fastavro.writer(buffer, MANIFEST_ENTRY_SCHEMA, avro_records)

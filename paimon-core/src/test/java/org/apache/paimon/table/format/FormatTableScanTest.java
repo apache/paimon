@@ -18,14 +18,19 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.csv.CsvOptions;
+import org.apache.paimon.format.json.JsonOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.DataTypes;
@@ -37,12 +42,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
 import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -107,7 +115,7 @@ public class FormatTableScanTest {
     void testComputeScanPathAndLevelNoPartitionKeys() {
         List<String> partitionKeys = Collections.emptyList();
         RowType partitionType = RowType.of();
-        PartitionPredicate partitionFilter = PartitionPredicate.alwaysTrue();
+        PartitionPredicate partitionFilter = PartitionPredicate.ALWAYS_TRUE;
 
         Pair<Path, Integer> result =
                 FormatTableScan.computeScanPathAndLevel(
@@ -667,5 +675,131 @@ public class FormatTableScanTest {
                         partitionKeys, orPredicate);
 
         assertThat(result).isEmpty();
+    }
+
+    @TestTemplate
+    public void testCreateSplitsWithMultipleFiles() throws IOException {
+        for (String format : Arrays.asList("csv", "json")) {
+            Path tableLocation = new Path(new Path(tmpPath.toUri()), format);
+            LocalFileIO fileIO = LocalFileIO.create();
+            Path file1 = new Path(tableLocation, "data1." + format);
+            Path file2 = new Path(tableLocation, "data2." + format);
+            Path file3 = new Path(tableLocation, "data3." + format);
+            writeTestFile(fileIO, file1, 80);
+            writeTestFile(fileIO, file2, 120);
+            writeTestFile(fileIO, file3, 200);
+
+            Map<String, String> options = new HashMap<>();
+            options.put(SOURCE_SPLIT_TARGET_SIZE.key(), "100b");
+
+            FormatTable formatTable =
+                    createFormatTableWithOptions(
+                            tableLocation,
+                            FormatTable.Format.valueOf(format.toUpperCase()),
+                            options);
+            FormatTableScan scan = new FormatTableScan(formatTable, null, null);
+            List<Split> splits = scan.plan().splits();
+            assertThat(splits).hasSize(5);
+        }
+    }
+
+    @TestTemplate
+    public void testCreateSplitsWhenDefineLineDelimiter() throws IOException {
+        for (String format : Arrays.asList("csv", "json")) {
+            Path tableLocation = new Path(new Path(tmpPath.toUri()), format);
+            LocalFileIO fileIO = LocalFileIO.create();
+            Path file1 = new Path(tableLocation, "data1." + format);
+            Path file2 = new Path(tableLocation, "data2." + format);
+            Path file3 = new Path(tableLocation, "data3." + format);
+            writeTestFile(fileIO, file1, 80);
+            writeTestFile(fileIO, file2, 120);
+            writeTestFile(fileIO, file3, 200);
+
+            Map<String, String> options = new HashMap<>();
+            options.put(SOURCE_SPLIT_TARGET_SIZE.key(), "100b");
+            if ("csv".equals(format)) {
+                options.put(CsvOptions.LINE_DELIMITER.key(), "\001");
+            } else {
+                options.put(JsonOptions.LINE_DELIMITER.key(), "\001");
+            }
+
+            FormatTable formatTable =
+                    createFormatTableWithOptions(
+                            tableLocation,
+                            FormatTable.Format.valueOf(format.toUpperCase()),
+                            options);
+            FormatTableScan scan = new FormatTableScan(formatTable, null, null);
+            List<Split> splits = scan.plan().splits();
+            assertThat(splits).hasSize(3);
+        }
+    }
+
+    @TestTemplate
+    public void testCreateSplitsWithParquetFile() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+
+        // Create a large Parquet file (non-splittable)
+        Path parquetFile = new Path(tableLocation, "data.parquet");
+        long fileSize = 300; // 300 bytes
+        writeTestFile(fileIO, parquetFile, fileSize);
+
+        // Set split max size to 100 bytes
+        Map<String, String> options = new HashMap<>();
+        options.put(SOURCE_SPLIT_TARGET_SIZE.key(), "100b");
+
+        FormatTable formatTable =
+                createFormatTableWithOptions(tableLocation, FormatTable.Format.PARQUET, options);
+        FormatTableScan scan = new FormatTableScan(formatTable, null, null);
+        List<Split> splits = scan.plan().splits();
+
+        // Parquet files should NOT be split, should be a single split
+        assertThat(splits).hasSize(1);
+        FormatDataSplit split = (FormatDataSplit) splits.get(0);
+        assertThat(split.filePath()).isEqualTo(parquetFile);
+        assertThat(split.offset()).isEqualTo(0);
+    }
+
+    @TestTemplate
+    public void testCreateSplitsWithEmptyDirectory() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        fileIO.mkdirs(tableLocation);
+
+        FormatTable formatTable =
+                createFormatTableWithOptions(
+                        tableLocation, FormatTable.Format.CSV, Collections.emptyMap());
+        FormatTableScan scan = new FormatTableScan(formatTable, null, null);
+        List<Split> splits = scan.plan().splits();
+
+        assertThat(splits).isEmpty();
+    }
+
+    private void writeTestFile(LocalFileIO fileIO, Path filePath, long size) throws IOException {
+        fileIO.mkdirs(filePath.getParent());
+        try (OutputStream out = fileIO.newOutputStream(filePath, false)) {
+            byte[] data = new byte[(int) size];
+            Arrays.fill(data, (byte) 'a');
+            out.write(data);
+        }
+    }
+
+    private FormatTable createFormatTableWithOptions(
+            Path tableLocation, FormatTable.Format format, Map<String, String> options) {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("name", DataTypes.STRING())
+                        .build();
+
+        return FormatTable.builder()
+                .fileIO(LocalFileIO.create())
+                .identifier(Identifier.create("test_db", "test_table"))
+                .rowType(rowType)
+                .partitionKeys(Collections.emptyList())
+                .location(tableLocation.toString())
+                .format(format)
+                .options(options)
+                .build();
     }
 }

@@ -130,7 +130,7 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
         }
 
         @Override
-        public Path targetFilePath() {
+        public Path targetPath() {
             return targetPath;
         }
 

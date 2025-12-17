@@ -20,7 +20,7 @@ package org.apache.paimon.compression;
 
 import net.jpountz.lz4.LZ4Exception;
 import net.jpountz.lz4.LZ4Factory;
-import net.jpountz.lz4.LZ4FastDecompressor;
+import net.jpountz.lz4.LZ4SafeDecompressor;
 
 import static org.apache.paimon.compression.CompressorUtils.HEADER_LENGTH;
 import static org.apache.paimon.compression.CompressorUtils.readIntLE;
@@ -34,10 +34,10 @@ import static org.apache.paimon.compression.CompressorUtils.validateLength;
  */
 public class Lz4BlockDecompressor implements BlockDecompressor {
 
-    private final LZ4FastDecompressor decompressor;
+    private final LZ4SafeDecompressor decompressor;
 
     public Lz4BlockDecompressor() {
-        this.decompressor = LZ4Factory.fastestInstance().fastDecompressor();
+        this.decompressor = LZ4Factory.fastestInstance().safeDecompressor();
     }
 
     @Override
@@ -57,9 +57,10 @@ public class Lz4BlockDecompressor implements BlockDecompressor {
         }
 
         try {
-            final int compressedLen2 =
-                    decompressor.decompress(src, srcOff + HEADER_LENGTH, dst, dstOff, originalLen);
-            if (compressedLen != compressedLen2) {
+            final int originalLenByLz4 =
+                    decompressor.decompress(
+                            src, srcOff + HEADER_LENGTH, compressedLen, dst, dstOff);
+            if (originalLen != originalLenByLz4) {
                 throw new BufferDecompressionException("Input is corrupted");
             }
         } catch (LZ4Exception e) {

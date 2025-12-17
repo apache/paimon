@@ -301,10 +301,15 @@ public class PartitionPathUtils {
         ArrayList<FileStatus> result = new ArrayList<>();
 
         try {
-            FileStatus fileStatus = fileIO.getFileStatus(path);
-            listStatusRecursively(fileIO, fileStatus, 0, expectLevel, result);
-        } catch (IOException ignore) {
-            return new FileStatus[0];
+            if (fileIO.exists(path)) {
+                // ignore hidden file
+                FileStatus fileStatus = fileIO.getFileStatus(path);
+                listStatusRecursively(fileIO, fileStatus, 0, expectLevel, result);
+            } else {
+                return new FileStatus[0];
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to list files in " + path, e);
         }
 
         return result.toArray(new FileStatus[0]);

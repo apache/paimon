@@ -20,6 +20,7 @@ import logging
 
 import pandas as pd
 import pyarrow as pa
+import unittest
 
 from pypaimon.api.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
@@ -28,6 +29,8 @@ from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.identifier import Identifier
 from pypaimon import Schema
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
+
+import ray
 
 
 class RESTTableReadWriteTest(RESTBaseTest):
@@ -137,6 +140,16 @@ class RESTTableReadWriteTest(RESTBaseTest):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'avro'})
         self.rest_catalog.create_table('default.test_append_only_avro', schema, False)
         table = self.rest_catalog.get_table('default.test_append_only_avro')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        self.assertEqual(actual, self.expected)
+
+    def test_lance_ao_reader(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
+        self.rest_catalog.create_table('default.test_append_only_lance', schema, False)
+        table = self.rest_catalog.get_table('default.test_append_only_lance')
         self._write_test_table(table)
 
         read_builder = table.new_read_builder()
@@ -281,6 +294,92 @@ class RESTTableReadWriteTest(RESTBaseTest):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
+    def test_pk_lance_reader(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={
+                                                'bucket': '2',
+                                                'file.format': 'lance'
+                                            })
+        self.rest_catalog.drop_table('default.test_pk_lance', True)
+        self.rest_catalog.create_table('default.test_pk_lance', schema, False)
+        table = self.rest_catalog.get_table('default.test_pk_lance')
+        # Use table's schema for writing to ensure schema consistency
+        from pypaimon.schema.data_types import PyarrowFieldParser
+        table_pa_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+        self._write_test_table_with_schema(table, table_pa_schema)
+
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        self.assertEqual(actual, self.expected)
+
+    def test_lance_ao_reader_with_filter(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
+        self.rest_catalog.create_table('default.test_append_only_lance_filter', schema, False)
+        table = self.rest_catalog.get_table('default.test_append_only_lance_filter')
+        self._write_test_table(table)
+
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        p1 = predicate_builder.less_than('user_id', 7)
+        p2 = predicate_builder.greater_or_equal('user_id', 2)
+        p3 = predicate_builder.between('user_id', 0, 6)
+        p4 = predicate_builder.is_not_in('behavior', ['b', 'e'])
+        p5 = predicate_builder.is_in('dt', ['p1'])
+        p6 = predicate_builder.is_not_null('behavior')
+        g1 = predicate_builder.and_predicates([p1, p2, p3, p4, p5, p6])
+        read_builder = table.new_read_builder().with_filter(g1)
+        actual = self._read_test_table(read_builder)
+        expected = pa.concat_tables([
+            self.expected.slice(5, 1)  # 6/f
+        ])
+        self.assertEqual(actual.sort_by('user_id'), expected)
+
+    def test_pk_lance_reader_with_filter(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={
+                                                'bucket': '2',
+                                                'file.format': 'lance'
+                                            })
+        self.rest_catalog.create_table('default.test_pk_lance_filter', schema, False)
+        table = self.rest_catalog.get_table('default.test_pk_lance_filter')
+        from pypaimon.schema.data_types import PyarrowFieldParser
+        table_pa_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+        self._write_test_table_with_schema(table, table_pa_schema)
+
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        p1 = predicate_builder.is_in('dt', ['p1'])
+        p2 = predicate_builder.between('user_id', 2, 7)
+        p3 = predicate_builder.is_not_null('behavior')
+        g1 = predicate_builder.and_predicates([p1, p2, p3])
+        read_builder = table.new_read_builder().with_filter(g1)
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        expected = pa.concat_tables([
+            self.expected.slice(1, 1),  # 2/b
+            self.expected.slice(5, 1)  # 7/g
+        ])
+        self.assertEqual(actual, expected)
+
+    @unittest.skip("does not support dynamic bucket in dummy rest server")
+    def test_pk_lance_reader_no_bucket(self):
+        """Test Lance format with PrimaryKey table without specifying bucket."""
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={'file.format': 'lance'})
+        self.rest_catalog.drop_table('default.test_pk_lance_no_bucket', True)
+        self.rest_catalog.create_table('default.test_pk_lance_no_bucket', schema, False)
+        table = self.rest_catalog.get_table('default.test_pk_lance_no_bucket')
+        from pypaimon.schema.data_types import PyarrowFieldParser
+        table_pa_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+        self._write_test_table_with_schema(table, table_pa_schema)
+
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        self.assertEqual(actual, self.expected)
+
     def test_pk_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
@@ -361,6 +460,70 @@ class RESTTableReadWriteTest(RESTBaseTest):
         actual = duckdb_con.query("SELECT * FROM duckdb_table").fetchdf()
         expect = pd.DataFrame(self.raw_data)
         pd.testing.assert_frame_equal(actual.reset_index(drop=True), expect.reset_index(drop=True))
+
+    def test_reader_ray_data(self):
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+
+        read_builder = self.table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+
+        ray_dataset = table_read.to_ray(splits, parallelism=2)
+
+        self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
+        self.assertEqual(ray_dataset.count(), 8, "Should have 8 rows")
+
+        df = ray_dataset.to_pandas()
+        expect = pd.DataFrame(self.raw_data)
+        pd.testing.assert_frame_equal(df.sort_values(by='user_id').reset_index(drop=True),
+                                      expect.sort_values(by='user_id').reset_index(drop=True))
+
+    def test_ray_data_write_and_read(self):
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('value', pa.int64()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.rest_catalog.create_table('default.test_ray_write_read', schema, False)
+        table = self.rest_catalog.get_table('default.test_ray_write_read')
+
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'value': [100, 200, 300],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(test_data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+
+        ray_dataset = table_read.to_ray(splits, parallelism=2)
+
+        self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
+        self.assertEqual(ray_dataset.count(), 3, "Should have 3 rows")
+
+        df = ray_dataset.to_pandas()
+        expected_df = pd.DataFrame({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'value': [100, 200, 300],
+        })
+        expected_df['id'] = expected_df['id'].astype('int32')
+        pd.testing.assert_frame_equal(df.sort_values(by='id').reset_index(drop=True),
+                                      expected_df.sort_values(by='id').reset_index(drop=True))
 
     def test_write_wide_table_large_data(self):
         logging.basicConfig(level=logging.INFO)

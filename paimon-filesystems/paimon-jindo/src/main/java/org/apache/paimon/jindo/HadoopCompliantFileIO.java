@@ -22,6 +22,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.utils.Pair;
@@ -88,6 +89,26 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     }
 
     @Override
+    public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        org.apache.hadoop.fs.RemoteIterator<org.apache.hadoop.fs.LocatedFileStatus> hadoopIter =
+                getFileSystem(hadoopPath).listFiles(hadoopPath, recursive);
+        return new RemoteIterator<FileStatus>() {
+            @Override
+            public boolean hasNext() throws IOException {
+                return hadoopIter.hasNext();
+            }
+
+            @Override
+            public FileStatus next() throws IOException {
+                org.apache.hadoop.fs.FileStatus hadoopStatus = hadoopIter.next();
+                return new HadoopFileStatus(hadoopStatus);
+            }
+        };
+    }
+
+    @Override
     public boolean exists(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         return getFileSystem(hadoopPath).exists(hadoopPath);
@@ -114,7 +135,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
     protected org.apache.hadoop.fs.Path path(Path path) {
         URI uri = path.toUri();
-        if (uri.getScheme().equals("oss") && uri.getUserInfo() != null) {
+        if ("oss".equals(uri.getScheme()) && uri.getUserInfo() != null) {
             path = new Path("oss:/" + uri.getPath());
         }
         return new org.apache.hadoop.fs.Path(path.toUri());

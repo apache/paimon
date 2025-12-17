@@ -21,8 +21,8 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.PostponeUtils;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
@@ -30,10 +30,7 @@ import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.Map;
-
-import static org.apache.paimon.CoreOptions.BUCKET;
 
 /** {@link FlinkSink} for writing records into fixed bucket of postpone table. */
 public class PostponeFixedBucketSink extends FlinkWriteSink<InternalRow> {
@@ -71,15 +68,20 @@ public class PostponeFixedBucketSink extends FlinkWriteSink<InternalRow> {
     @Override
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory() {
         if (overwritePartition == null) {
-            // The table has copied bucket option outside, no need to change anything
-            return super.createCommitterFactory();
+            // The table has copied bucket option outside, no need to change.
+            return context ->
+                    new StoreCommitter(
+                            table,
+                            table.newCommit(context.commitUser())
+                                    .withOverwrite(overwritePartition)
+                                    .ignoreEmptyCommit(!context.streamingCheckpointEnabled())
+                                    // Need to check conflict
+                                    .appendCommitCheckConflict(true),
+                            context);
         } else {
             // When overwriting, the postpone bucket files need to be deleted, so using a postpone
             // bucket table commit here
-            FileStoreTable tableForCommit =
-                    table.copy(
-                            Collections.singletonMap(
-                                    BUCKET.key(), String.valueOf(BucketMode.POSTPONE_BUCKET)));
+            FileStoreTable tableForCommit = PostponeUtils.tableForCommit(table);
             return context ->
                     new StoreCommitter(
                             tableForCommit,

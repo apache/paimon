@@ -140,6 +140,8 @@ public class ManifestListTest {
                             null,
                             null,
                             null,
+                            null,
+                            null,
                             null));
         }
         return result;

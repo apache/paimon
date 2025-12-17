@@ -53,7 +53,7 @@ class WriteBuilder(ABC):
 class BatchWriteBuilder(WriteBuilder):
 
     def new_write(self) -> BatchTableWrite:
-        return BatchTableWrite(self.table)
+        return BatchTableWrite(self.table, self.commit_user)
 
     def new_commit(self) -> BatchTableCommit:
         commit = BatchTableCommit(self.table, self.commit_user, self.static_partition)
@@ -62,7 +62,7 @@ class BatchWriteBuilder(WriteBuilder):
 
 class StreamWriteBuilder(WriteBuilder):
     def new_write(self) -> StreamTableWrite:
-        return StreamTableWrite(self.table)
+        return StreamTableWrite(self.table, self.commit_user)
 
     def new_commit(self) -> StreamTableCommit:
         commit = StreamTableCommit(self.table, self.commit_user, self.static_partition)

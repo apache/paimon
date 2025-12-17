@@ -47,8 +47,6 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.table.system.AllTableOptionsTable;
-import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -85,6 +83,7 @@ import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
+import static org.apache.paimon.table.system.SystemTableLoader.GLOBAL_SYSTEM_TABLES;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -575,6 +574,56 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testFormatTableFileCompression() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        String dbName = "test_format_table_file_compression";
+        catalog.createDatabase(dbName, true);
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.option("type", "format-table");
+        Pair[] format2ExpectDefaultFileCompression = {
+            Pair.of("csv", "none"),
+            Pair.of("parquet", "snappy"),
+            Pair.of("json", "none"),
+            Pair.of("orc", "zstd")
+        };
+        for (Pair<String, String> format2Compression : format2ExpectDefaultFileCompression) {
+            Identifier identifier =
+                    Identifier.create(
+                            dbName,
+                            "partition_table_file_compression_" + format2Compression.getKey());
+            schemaBuilder.option("file.format", format2Compression.getKey());
+            catalog.createTable(identifier, schemaBuilder.build(), true);
+            String fileCompression =
+                    new CoreOptions(catalog.getTable(identifier).options())
+                            .formatTableFileCompression();
+
+            assertEquals(fileCompression, format2Compression.getValue());
+        }
+        // table has option file.compression
+        String expectFileCompression = "gzip";
+        schemaBuilder.option("file.format", "csv");
+        schemaBuilder.option("file.compression", expectFileCompression);
+        Identifier identifier = Identifier.create(dbName, "partition_table_file_compression_a");
+        catalog.createTable(identifier, schemaBuilder.build(), true);
+        String fileCompression =
+                new CoreOptions(catalog.getTable(identifier).options())
+                        .formatTableFileCompression();
+        assertEquals(fileCompression, expectFileCompression);
+
+        // table has option format-table.file.compression
+        schemaBuilder.option("format-table.file.compression", expectFileCompression);
+        identifier = Identifier.create(dbName, "partition_table_file_compression_b");
+        catalog.createTable(identifier, schemaBuilder.build(), true);
+        fileCompression =
+                new CoreOptions(catalog.getTable(identifier).options())
+                        .formatTableFileCompression();
+        assertEquals(fileCompression, expectFileCompression);
+    }
+
+    @Test
     public void testFormatTableOnlyPartitionValueRead() throws Exception {
         if (!supportsFormatTable()) {
             return;
@@ -824,6 +873,48 @@ public abstract class CatalogTestBase {
         catalog.dropTable(pid, true);
     }
 
+    @Test
+    public void testFormatTableSplitRead() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        Pair[] format2Compressions = {
+            Pair.of("csv", HadoopCompressionType.NONE),
+            Pair.of("json", HadoopCompressionType.NONE),
+            Pair.of("csv", HadoopCompressionType.GZIP),
+            Pair.of("json", HadoopCompressionType.GZIP),
+            Pair.of("parquet", HadoopCompressionType.ZSTD)
+        };
+        for (Pair<String, HadoopCompressionType> format2Compression : format2Compressions) {
+            String format = format2Compression.getKey();
+            String compression = format2Compression.getValue().value();
+            String dbName = format + "_split_db_" + compression;
+            catalog.createDatabase(dbName, true);
+
+            Identifier id = Identifier.create(dbName, format + "_split_table_" + compression);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("name", DataTypes.STRING())
+                            .column("score", DataTypes.DOUBLE())
+                            .options(getFormatTableOptions())
+                            .option("file.format", format)
+                            .option("source.split.target-size", "54 B")
+                            .option("file.compression", compression.toString())
+                            .build();
+            catalog.createTable(id, schema, true);
+            FormatTable table = (FormatTable) catalog.getTable(id);
+            int size = 50;
+            InternalRow[] datas = new InternalRow[size];
+            for (int i = 0; i < size; i++) {
+                datas[i] = GenericRow.of(i, BinaryString.fromString("User" + i), 85.5 + (i % 15));
+            }
+            writeAndCheckCommitFormatTable(table, datas, null);
+            List<InternalRow> allRows = read(table, null, null, null, null);
+            assertThat(allRows).containsExactlyInAnyOrder(datas);
+        }
+    }
+
     private void writeAndCheckCommitFormatTable(
             FormatTable table, InternalRow[] datas, InternalRow dataWithDiffPartition)
             throws Exception {
@@ -952,10 +1043,7 @@ public abstract class CatalogTestBase {
                         () -> catalog.getTable(Identifier.create(SYSTEM_DATABASE_NAME, "1111")));
 
         List<String> sysTables = catalog.listTables(SYSTEM_DATABASE_NAME);
-        assertThat(sysTables)
-                .containsExactlyInAnyOrder(
-                        AllTableOptionsTable.ALL_TABLE_OPTIONS,
-                        CatalogOptionsTable.CATALOG_OPTIONS);
+        assertThat(sysTables).containsAll(GLOBAL_SYSTEM_TABLES);
 
         assertThat(catalog.listViews(SYSTEM_DATABASE_NAME)).isEmpty();
     }

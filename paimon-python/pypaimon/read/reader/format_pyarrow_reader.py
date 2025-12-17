@@ -16,8 +16,9 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Optional, Any
+from typing import Any, List, Optional
 
+import pyarrow as pa
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
@@ -33,16 +34,47 @@ class FormatPyArrowReader(RecordBatchReader):
 
     def __init__(self, file_io: FileIO, file_format: str, file_path: str, read_fields: List[str],
                  push_down_predicate: Any, batch_size: int = 4096):
-        self.dataset = ds.dataset(file_path, format=file_format, filesystem=file_io.filesystem)
+        file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
+        self.dataset = ds.dataset(file_path_for_pyarrow, format=file_format, filesystem=file_io.filesystem)
+        self.read_fields = read_fields
+
+        # Identify which fields exist in the file and which are missing
+        file_schema_names = set(self.dataset.schema.names)
+        self.existing_fields = [field for field in read_fields if field in file_schema_names]
+        self.missing_fields = [field for field in read_fields if field not in file_schema_names]
+
+        # Only pass existing fields to PyArrow scanner to avoid errors
         self.reader = self.dataset.scanner(
-            columns=read_fields,
+            columns=self.existing_fields,
             filter=push_down_predicate,
             batch_size=batch_size
         ).to_reader()
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         try:
-            return self.reader.read_next_batch()
+            batch = self.reader.read_next_batch()
+
+            if not self.missing_fields:
+                return batch
+
+            # Create columns for missing fields with null values
+            missing_columns = [pa.nulls(batch.num_rows, type=pa.null()) for _ in self.missing_fields]
+
+            # Reconstruct the batch with all fields in the correct order
+            all_columns = []
+            for field_name in self.read_fields:
+                if field_name in self.existing_fields:
+                    # Get the column from the existing batch
+                    column_idx = self.existing_fields.index(field_name)
+                    all_columns.append(batch.column(column_idx))
+                else:
+                    # Get the column from missing fields
+                    column_idx = self.missing_fields.index(field_name)
+                    all_columns.append(missing_columns[column_idx])
+
+            # Create a new RecordBatch with all columns
+            return pa.RecordBatch.from_arrays(all_columns, names=self.read_fields)
+
         except StopIteration:
             return None
 

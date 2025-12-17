@@ -102,8 +102,13 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
       spark.sql(s"CREATE TABLE T (id INT, name STRING, pt STRING) PARTITIONED BY (pt)")
       spark.sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p1'), (3, 'c', 'p2')")
 
+      // data filter and partition filter
       val sqlText = "SELECT * FROM T WHERE id = 1 AND pt = 'p1' LIMIT 1"
       Assertions.assertEquals(getPaimonScan(sqlText), getPaimonScan(sqlText))
+
+      // topN
+      val sqlText2 = "SELECT id FROM T ORDER BY id ASC NULLS LAST LIMIT 5"
+      Assertions.assertEquals(getPaimonScan(sqlText2), getPaimonScan(sqlText2))
     }
   }
 

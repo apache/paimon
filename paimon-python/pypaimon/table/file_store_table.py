@@ -16,8 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.common.core_options import CoreOptions
@@ -37,7 +36,7 @@ from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
 
 
 class FileStoreTable(Table):
-    def __init__(self, file_io: FileIO, identifier: Identifier, table_path: Path,
+    def __init__(self, file_io: FileIO, identifier: Identifier, table_path: str,
                  table_schema: TableSchema, catalog_environment: Optional[CatalogEnvironment] = None):
         self.file_io = file_io
         self.identifier = identifier
@@ -70,6 +69,32 @@ class FileStoreTable(Table):
         """Get the snapshot manager for this table."""
         from pypaimon.snapshot.snapshot_manager import SnapshotManager
         return SnapshotManager(self)
+
+    def path_factory(self) -> 'FileStorePathFactory':
+        from pypaimon.utils.file_store_path_factory import FileStorePathFactory
+
+        # Get external paths
+        external_paths = self._create_external_paths()
+
+        # Get format identifier
+        format_identifier = CoreOptions.file_format(self.options)
+
+        file_compression = CoreOptions.file_compression(self.options)
+
+        return FileStorePathFactory(
+            root=str(self.table_path),
+            partition_keys=self.partition_keys,
+            default_part_value="__DEFAULT_PARTITION__",
+            format_identifier=format_identifier,
+            data_file_prefix="data-",
+            changelog_file_prefix="changelog-",
+            legacy_partition_name=True,
+            file_suffix_include_compression=False,
+            file_compression=file_compression,
+            data_file_path_directory=None,
+            external_paths=external_paths,
+            index_file_in_data_file_dir=False,
+        )
 
     def new_snapshot_commit(self):
         """Create a new SnapshotCommit instance using the catalog environment."""
@@ -130,3 +155,47 @@ class FileStoreTable(Table):
     def add_options(self, options: dict):
         for key, value in options.items():
             self.options[key] = value
+
+    def _create_external_paths(self) -> List[str]:
+        from urllib.parse import urlparse
+        from pypaimon.common.core_options import ExternalPathStrategy
+
+        external_paths_str = CoreOptions.data_file_external_paths(self.options)
+        if not external_paths_str:
+            return []
+
+        strategy = CoreOptions.external_path_strategy(self.options)
+        if strategy == ExternalPathStrategy.NONE:
+            return []
+
+        specific_fs = CoreOptions.external_specific_fs(self.options)
+
+        paths = []
+        for path_string in external_paths_str:
+            if not path_string:
+                continue
+
+            # Parse and validate path
+            parsed = urlparse(path_string)
+            scheme = parsed.scheme
+            if not scheme:
+                raise ValueError(
+                    f"External path must have a scheme (e.g., oss://, s3://, file://): {path_string}"
+                )
+
+            # Filter by specific filesystem if strategy is specific-fs
+            if strategy == ExternalPathStrategy.SPECIFIC_FS:
+                if not specific_fs:
+                    raise ValueError(
+                        f"data-file.external-paths.specific-fs must be set when "
+                        f"strategy is {ExternalPathStrategy.SPECIFIC_FS}"
+                    )
+                if scheme.lower() != specific_fs.lower():
+                    continue  # Skip paths that don't match the specific filesystem
+
+            paths.append(path_string)
+
+        if not paths:
+            raise ValueError("No valid external paths found after filtering")
+
+        return paths

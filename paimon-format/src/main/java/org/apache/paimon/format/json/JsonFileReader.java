@@ -25,7 +25,7 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.text.BaseTextFileReader;
+import org.apache.paimon.format.text.TextFileReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.ArrayType;
@@ -39,6 +39,8 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -47,15 +49,21 @@ import java.util.List;
 import java.util.Map;
 
 /** JSON file reader. */
-public class JsonFileReader extends BaseTextFileReader {
+public class JsonFileReader extends TextFileReader {
 
     private static final Base64.Decoder BASE64_DECODER = Base64.getDecoder();
 
     private final JsonOptions options;
 
-    public JsonFileReader(FileIO fileIO, Path filePath, RowType rowType, JsonOptions options)
+    public JsonFileReader(
+            FileIO fileIO,
+            Path filePath,
+            RowType rowType,
+            JsonOptions options,
+            long offset,
+            @Nullable Long length)
             throws IOException {
-        super(fileIO, filePath, rowType);
+        super(fileIO, filePath, rowType, options.getLineDelimiter(), offset, length);
         this.options = options;
     }
 

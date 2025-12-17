@@ -37,26 +37,31 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class FormatTableITCase extends RESTCatalogITCaseBase {
 
     @Test
-    public void testParquetFileFormat() {
+    public void testDiffFormat() {
         String bigDecimalStr = "10.001";
         Decimal decimal = Decimal.fromBigDecimal(new BigDecimal(bigDecimalStr), 8, 3);
-        String tableName = "format_table_test";
-        Identifier identifier = Identifier.create("default", tableName);
-        sql(
-                "CREATE TABLE %s (a DECIMAL(8, 3), b INT, c INT) WITH ('file.format'='parquet', 'type'='format-table')",
-                tableName);
-        RESTToken expiredDataToken =
-                new RESTToken(
-                        ImmutableMap.of(
-                                "akId", "akId-expire", "akSecret", UUID.randomUUID().toString()),
-                        System.currentTimeMillis() + 1000_000);
-        restCatalogServer.setDataToken(identifier, expiredDataToken);
-        sql("INSERT INTO %s VALUES (%s, 1, 1), (%s, 2, 2)", tableName, decimal, decimal);
-        assertThat(sql("SELECT a, b FROM %s", tableName))
-                .containsExactlyInAnyOrder(
-                        Row.of(new BigDecimal(bigDecimalStr), 1),
-                        Row.of(new BigDecimal(bigDecimalStr), 2));
-        sql("Drop TABLE %s", tableName);
+        for (String format : new String[] {"parquet", "csv", "json"}) {
+            String tableName = "format_table_parquet_" + format.toLowerCase();
+            Identifier identifier = Identifier.create("default", tableName);
+            sql(
+                    "CREATE TABLE %s (a DECIMAL(8, 3), b INT, c INT) WITH ('file.format'='%s', 'type'='format-table')",
+                    tableName, format);
+            RESTToken expiredDataToken =
+                    new RESTToken(
+                            ImmutableMap.of(
+                                    "akId",
+                                    "akId-expire",
+                                    "akSecret",
+                                    UUID.randomUUID().toString()),
+                            System.currentTimeMillis() + 1000_000);
+            restCatalogServer.setDataToken(identifier, expiredDataToken);
+            sql("INSERT INTO %s VALUES (%s, 1, 1), (%s, 2, 2)", tableName, decimal, decimal);
+            assertThat(sql("SELECT a, b FROM %s", tableName))
+                    .containsExactlyInAnyOrder(
+                            Row.of(new BigDecimal(bigDecimalStr), 1),
+                            Row.of(new BigDecimal(bigDecimalStr), 2));
+            sql("Drop TABLE %s", tableName);
+        }
     }
 
     @Test

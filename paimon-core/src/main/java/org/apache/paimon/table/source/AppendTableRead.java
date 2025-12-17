@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
@@ -48,7 +49,7 @@ public final class AppendTableRead extends AbstractDataTableRead {
     private Predicate predicate = null;
     private TopN topN = null;
     private Integer limit = null;
-    @Nullable private List<Long> indices;
+    @Nullable private VariantAccessInfo[] variantAccess;
 
     public AppendTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
@@ -77,7 +78,7 @@ public final class AppendTableRead extends AbstractDataTableRead {
         read.withFilter(predicate);
         read.withTopN(topN);
         read.withLimit(limit);
-        read.withRowIds(indices);
+        read.withVariantAccess(variantAccess);
     }
 
     @Override
@@ -87,9 +88,9 @@ public final class AppendTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    public void applyRowIds(List<Long> indices) {
-        initialized().forEach(r -> r.withRowIds(indices));
-        this.indices = indices;
+    public void applyVariantAccess(VariantAccessInfo[] variantAccess) {
+        initialized().forEach(r -> r.withVariantAccess(variantAccess));
+        this.variantAccess = variantAccess;
     }
 
     @Override
@@ -115,10 +116,9 @@ public final class AppendTableRead extends AbstractDataTableRead {
 
     @Override
     public RecordReader<InternalRow> reader(Split split) throws IOException {
-        DataSplit dataSplit = (DataSplit) split;
         for (SplitReadProvider readProvider : readProviders) {
-            if (readProvider.match(dataSplit, false)) {
-                return readProvider.get().get().createReader(dataSplit);
+            if (readProvider.match(split, new SplitReadProvider.Context(false))) {
+                return readProvider.get().get().createReader(split);
             }
         }
 

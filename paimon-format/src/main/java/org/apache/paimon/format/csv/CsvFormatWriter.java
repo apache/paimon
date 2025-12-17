@@ -21,7 +21,7 @@ package org.apache.paimon.format.csv;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.text.BaseTextFileWriter;
+import org.apache.paimon.format.text.TextFileWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -33,7 +33,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** CSV format writer implementation. */
-public class CsvFormatWriter extends BaseTextFileWriter {
+public class CsvFormatWriter extends TextFileWriter {
 
     private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
     // Performance optimization: Cache frequently used cast executors

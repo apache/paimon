@@ -113,10 +113,6 @@ public class CacheManager {
         }
     }
 
-    public int fileReadCount() {
-        return fileReadCount;
-    }
-
     /** The container for the segment. */
     public static class SegmentContainer {
 

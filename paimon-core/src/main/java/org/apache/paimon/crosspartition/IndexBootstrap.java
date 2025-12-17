@@ -90,6 +90,8 @@ public class IndexBootstrap implements Serializable {
         List<Split> splits =
                 tableScan
                         .withBucketFilter(bucket -> bucket % numAssigners == assignId)
+                        // deletion vectors table should read all primary keys
+                        .withLevelFilter(level -> true)
                         .plan()
                         .splits();
 

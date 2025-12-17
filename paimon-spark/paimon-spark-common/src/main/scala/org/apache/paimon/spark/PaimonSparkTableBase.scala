@@ -45,7 +45,7 @@ abstract class PaimonSparkTableBase(val table: Table)
 
   lazy val coreOptions = new CoreOptions(table.options())
 
-  private lazy val useV2Write: Boolean = {
+  lazy val useV2Write: Boolean = {
     val v2WriteConfigured = OptionUtils.useV2Write()
     v2WriteConfigured && supportsV2Write
   }
@@ -56,7 +56,8 @@ abstract class PaimonSparkTableBase(val table: Table)
         case storeTable: FileStoreTable =>
           storeTable.bucketMode() match {
             case HASH_FIXED => BucketFunction.supportsTable(storeTable)
-            case BUCKET_UNAWARE | POSTPONE_MODE => true
+            case BUCKET_UNAWARE => true
+            case POSTPONE_MODE if !coreOptions.postponeBatchWriteFixedBucket() => true
             case _ => false
           }
 

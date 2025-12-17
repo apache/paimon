@@ -107,10 +107,14 @@ function collect_checks() {
 function get_all_supported_checks() {
     _OLD_IFS=$IFS
     IFS=$'\n'
-    SUPPORT_CHECKS=()
+    SUPPORT_CHECKS=("flake8_check" "pytest_check" "mixed_check") # control the calling sequence
     for fun in $(declare -F); do
         if [[ `regexp_match "$fun" "_check$"` = true ]]; then
-            SUPPORT_CHECKS+=("${fun:11}")
+            check_name="${fun:11}"
+            # Only add if not already in SUPPORT_CHECKS
+            if [[ ! `contains_element "${SUPPORT_CHECKS[*]}" "$check_name"` = true ]]; then
+                SUPPORT_CHECKS+=("$check_name")
+            fi
         fi
     done
     IFS=$_OLD_IFS
@@ -119,12 +123,11 @@ function get_all_supported_checks() {
 # exec all selected check stages
 function check_stage() {
     print_function "STAGE" "checks starting"
-    for fun in ${SUPPORT_CHECKS[@]}; do
+    for fun in "${SUPPORT_CHECKS[@]}"; do
         $fun
     done
     echo "All the checks are finished, the detailed information can be found in: $LOG_FILE"
 }
-
 
 ###############################################################All Checks Definitions###############################################################
 #########################
@@ -176,7 +179,7 @@ function pytest_check() {
         TEST_DIR="pypaimon/tests/py36"
         echo "Running tests for Python 3.6: $TEST_DIR"
     else
-        TEST_DIR="pypaimon/tests --ignore=pypaimon/tests/py36"
+        TEST_DIR="pypaimon/tests --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e"
         echo "Running tests for Python $PYTHON_VERSION (excluding py36): pypaimon/tests --ignore=pypaimon/tests/py36"
     fi
 
@@ -192,6 +195,43 @@ function pytest_check() {
         exit 1;
     else
         print_function "STAGE" "pytest checks... [SUCCESS]"
+    fi
+}
+
+# Mixed tests check - runs Java-Python interoperability tests
+function mixed_check() {
+    # Get Python version
+    PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    echo "Detected Python version: $PYTHON_VERSION"
+    if [ "$PYTHON_VERSION" = "3.6" ]; then
+        print_function "STAGE" "mixed tests checks... [SKIPPED]"
+        return
+    fi
+    print_function "STAGE" "mixed tests checks"
+
+    # Path to the mixed tests script
+    MIXED_TESTS_SCRIPT="$CURRENT_DIR/dev/run_mixed_tests.sh"
+
+    if [ ! -f "$MIXED_TESTS_SCRIPT" ]; then
+        echo "Mixed tests script not found at: $MIXED_TESTS_SCRIPT"
+        print_function "STAGE" "mixed tests checks... [FAILED]"
+        exit 1
+    fi
+
+    # Make sure the script is executable
+    chmod +x "$MIXED_TESTS_SCRIPT"
+
+    # Run the mixed tests script
+    set -o pipefail
+    ($MIXED_TESTS_SCRIPT) 2>&1 | tee -a $LOG_FILE
+
+    MIXED_TESTS_STATUS=$?
+    if [ $MIXED_TESTS_STATUS -ne 0 ]; then
+        print_function "STAGE" "mixed tests checks... [FAILED]"
+        # Stop the running script.
+        exit 1;
+    else
+        print_function "STAGE" "mixed tests checks... [SUCCESS]"
     fi
 }
 ###############################################################All Checks Definitions###############################################################
@@ -236,15 +276,16 @@ INCLUDE_CHECKS=""
 USAGE="
 usage: $0 [options]
 -h          print this help message and exit
--e [tox,flake8,sphinx,mypy]
+-e [tox,flake8,sphinx,mypy,mixed]
             exclude checks which split by comma(,)
--i [tox,flake8,sphinx,mypy]
+-i [tox,flake8,sphinx,mypy,mixed]
             include checks which split by comma(,)
 -l          list all checks supported.
 Examples:
   ./lint-python.sh                 =>  exec all checks.
   ./lint-python.sh -e tox,flake8   =>  exclude checks tox,flake8.
   ./lint-python.sh -i flake8       =>  include checks flake8.
+  ./lint-python.sh -i mixed        =>  include checks mixed.
   ./lint-python.sh -l              =>  list all checks supported.
 "
 while getopts "hfs:i:e:lr" arg; do
@@ -261,7 +302,7 @@ while getopts "hfs:i:e:lr" arg; do
             ;;
         l)
             printf "current supported checks includes:\n"
-            for fun in ${SUPPORT_CHECKS[@]}; do
+            for fun in "${SUPPORT_CHECKS[@]}"; do
                 echo ${fun%%_check*}
             done
             exit 2

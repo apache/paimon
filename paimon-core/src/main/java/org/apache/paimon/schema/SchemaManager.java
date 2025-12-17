@@ -78,9 +78,13 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
 import static org.apache.paimon.CoreOptions.DISTINCT;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
+import static org.apache.paimon.CoreOptions.IGNORE_DELETE;
 import static org.apache.paimon.CoreOptions.IGNORE_RETRACT;
+import static org.apache.paimon.CoreOptions.IGNORE_UPDATE_BEFORE;
 import static org.apache.paimon.CoreOptions.LIST_AGG_DELIMITER;
 import static org.apache.paimon.CoreOptions.NESTED_KEY;
 import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
@@ -297,7 +301,10 @@ public class SchemaManager implements Serializable {
                 SetOption setOption = (SetOption) change;
                 if (hasSnapshots.get()) {
                     checkAlterTableOption(
-                            setOption.key(), oldOptions.get(setOption.key()), setOption.value());
+                            oldOptions,
+                            setOption.key(),
+                            oldOptions.get(setOption.key()),
+                            setOption.value());
                 }
                 newOptions.put(setOption.key(), setOption.value());
             } else if (change instanceof RemoveOption) {
@@ -1072,7 +1079,7 @@ public class SchemaManager implements Serializable {
     }
 
     public static void checkAlterTableOption(
-            String key, @Nullable String oldValue, String newValue) {
+            Map<String, String> options, String key, @Nullable String oldValue, String newValue) {
         if (CoreOptions.IMMUTABLE_OPTIONS.contains(key)) {
             throw new UnsupportedOperationException(
                     String.format("Change '%s' is not supported yet.", key));
@@ -1090,6 +1097,55 @@ public class SchemaManager implements Serializable {
             }
             if (newBucket == -1) {
                 throw new UnsupportedOperationException("Cannot change bucket to -1.");
+            }
+        }
+
+        if (DELETION_VECTORS_ENABLED.key().equals(key)) {
+            boolean dvModifiable =
+                    Boolean.parseBoolean(
+                            options.getOrDefault(
+                                    DELETION_VECTORS_MODIFIABLE.key(),
+                                    DELETION_VECTORS_MODIFIABLE.defaultValue().toString()));
+            if (!dvModifiable) {
+                boolean oldDv =
+                        oldValue == null
+                                ? DELETION_VECTORS_ENABLED.defaultValue()
+                                : Boolean.parseBoolean(oldValue);
+                boolean newDv = Boolean.parseBoolean(newValue);
+
+                if (oldDv != newDv) {
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Cannot change deletion vectors mode from %s to %s. If modifying table deletion-vectors mode without full-compaction, this may result in data duplication. "
+                                            + "If you are confident, you can set table option '%s' = 'true' to allow deletion vectors modification.",
+                                    oldDv, newDv, DELETION_VECTORS_MODIFIABLE.key()));
+                }
+            }
+        }
+
+        if (IGNORE_DELETE.key().equals(key)) {
+            boolean oldIgnoreDelete =
+                    oldValue == null
+                            ? IGNORE_DELETE.defaultValue()
+                            : Boolean.parseBoolean(oldValue);
+            boolean newIgnoreDelete = Boolean.parseBoolean(newValue);
+            if (oldIgnoreDelete && !newIgnoreDelete) {
+                throw new UnsupportedOperationException(
+                        String.format("Cannot change %s from true to false.", IGNORE_DELETE.key()));
+            }
+        }
+
+        if (IGNORE_UPDATE_BEFORE.key().equals(key)) {
+            boolean oldIgnoreUpdateBefore =
+                    oldValue == null
+                            ? IGNORE_UPDATE_BEFORE.defaultValue()
+                            : Boolean.parseBoolean(oldValue);
+            boolean newIgnoreUpdateBefore = Boolean.parseBoolean(newValue);
+            if (oldIgnoreUpdateBefore && !newIgnoreUpdateBefore) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Cannot change %s from true to false.",
+                                IGNORE_UPDATE_BEFORE.key()));
             }
         }
     }

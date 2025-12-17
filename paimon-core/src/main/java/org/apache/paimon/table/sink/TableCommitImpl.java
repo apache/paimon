@@ -159,6 +159,12 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
+    public TableCommitImpl appendCommitCheckConflict(boolean appendCommitCheckConflict) {
+        commit.appendCommitCheckConflict(appendCommitCheckConflict);
+        return this;
+    }
+
+    @Override
     public InnerTableCommit withMetricRegistry(MetricRegistry registry) {
         commit.withMetrics(new CommitMetrics(registry, tableName));
         return this;
@@ -350,15 +356,19 @@ public class TableCommitImpl implements InnerTableCommit {
             throw new RuntimeException(maintainError.get());
         }
 
-        executor.execute(
-                () -> {
-                    try {
-                        maintain(identifier, doExpire);
-                    } catch (Throwable t) {
-                        LOG.error("Executing maintain encountered an error.", t);
-                        maintainError.compareAndSet(null, t);
-                    }
-                });
+        if (batchCommitted) {
+            maintain(identifier, doExpire);
+        } else {
+            executor.execute(
+                    () -> {
+                        try {
+                            maintain(identifier, doExpire);
+                        } catch (Throwable t) {
+                            LOG.error("Executing maintain encountered an error.", t);
+                            maintainError.compareAndSet(null, t);
+                        }
+                    });
+        }
     }
 
     private void maintain(long identifier, boolean doExpire) {
