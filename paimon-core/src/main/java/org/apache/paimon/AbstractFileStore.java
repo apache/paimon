@@ -170,7 +170,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             }
         }
         if (strategy == ExternalPathStrategy.ENTROPY_INJECT && paths.isEmpty()) {
-                paths.add(options.path());
+            paths.add(options.path());
         }
         checkArgument(!paths.isEmpty(), "External paths should not be empty");
         return paths;

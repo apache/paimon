@@ -238,8 +238,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testBatchReadWriteWithPartitionedRecordsWithPkWithExternalPathEntropyInjectStrategy()
-            throws Exception {
+    public void
+            testBatchReadWriteWithPartitionedRecordsWithPkWithExternalPathEntropyInjectStrategy()
+                    throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(
                 CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "file://" + externalPath1.toString());
