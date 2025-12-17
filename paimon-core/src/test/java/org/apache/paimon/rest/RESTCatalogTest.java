@@ -110,13 +110,13 @@ import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Base test class for {@link RESTCatalog}. */
 public abstract class RESTCatalogTest extends CatalogTestBase {
@@ -544,7 +544,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertNull(pagedTableDetails.getNextPageToken());
 
         pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table_", null);
-        Assertions.assertTrue(pagedTableDetails.getElements().isEmpty());
+        assertTrue(pagedTableDetails.getElements().isEmpty());
         assertNull(pagedTableDetails.getNextPageToken());
 
         pagedTableDetails =
@@ -1283,11 +1283,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .containsExactlyInAnyOrder(Identifier.create(databaseName, "view_name"));
         assertNull(pagedViews.getNextPageToken());
 
-        Assertions.assertThrows(
+        assertThrows(
                 BadRequestException.class,
                 () -> catalog.listViewsPagedGlobally(databaseNamePattern, "vi%ew", null, null));
 
-        Assertions.assertThrows(
+        assertThrows(
                 BadRequestException.class,
                 () -> catalog.listViewsPagedGlobally(databaseNamePattern, "%view", null, null));
     }
@@ -2842,7 +2842,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         DEFAULT_TABLE_SCHEMA.options(),
                         "");
         // schema mismatch should throw an exception
-        Assertions.assertThrows(
+        assertThrows(
                 RuntimeException.class,
                 () -> catalog.createTable(identifier, clientProvidedSchema, false));
         DEFAULT_TABLE_SCHEMA.options().remove(CoreOptions.PATH.key());
