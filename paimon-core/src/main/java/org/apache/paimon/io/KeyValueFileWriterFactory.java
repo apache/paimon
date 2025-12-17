@@ -91,12 +91,17 @@ public class KeyValueFileWriterFactory {
 
     @VisibleForTesting
     public DataFilePathFactory pathFactory(int level) {
-        return formatContext.pathFactory(new WriteFormatKey(level, false));
+        return formatContext.pathFactory(new WriteFormatKey(level, false, null));
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
             int level, FileSource fileSource) {
-        WriteFormatKey key = new WriteFormatKey(level, false);
+        return createRollingMergeTreeFileWriter(level, fileSource, null);
+    }
+
+    public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
+            int level, FileSource fileSource, @Nullable String specifiedFileFormat) {
+        WriteFormatKey key = new WriteFormatKey(level, false, specifiedFileFormat);
         return new RollingFileWriterImpl<>(
                 () -> {
                     DataFilePathFactory pathFactory = formatContext.pathFactory(key);
@@ -107,7 +112,7 @@ public class KeyValueFileWriterFactory {
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
-        WriteFormatKey key = new WriteFormatKey(level, true);
+        WriteFormatKey key = new WriteFormatKey(level, true, null);
         return new RollingFileWriterImpl<>(
                 () -> {
                     DataFilePathFactory pathFactory = formatContext.pathFactory(key);
@@ -152,18 +157,16 @@ public class KeyValueFileWriterFactory {
     }
 
     public void deleteFile(DataFileMeta file) {
-        // this path factory is only for path generation, so we don't care about the true or false
-        // in WriteFormatKey
+        // this path factory is only for path generation, so we don't care about the arguments of
+        // the WriteFormatKey
         fileIO.deleteQuietly(
-                formatContext.pathFactory(new WriteFormatKey(file.level(), false)).toPath(file));
+                formatContext
+                        .pathFactory(new WriteFormatKey(file.level(), false, null))
+                        .toPath(file));
     }
 
     public FileIO getFileIO() {
         return fileIO;
-    }
-
-    public String newChangelogFileName(int level) {
-        return formatContext.pathFactory(new WriteFormatKey(level, true)).newChangelogFileName();
     }
 
     public static Builder builder(
@@ -274,6 +277,9 @@ public class KeyValueFileWriterFactory {
             @Nullable String changelogFormat = options.changelogFileFormat();
             this.key2Format =
                     key -> {
+                        if (key.specifiedFileFormat != null) {
+                            return key.specifiedFileFormat;
+                        }
                         if (key.isChangelog && changelogFormat != null) {
                             return changelogFormat;
                         }
@@ -395,10 +401,13 @@ public class KeyValueFileWriterFactory {
 
         private final int level;
         private final boolean isChangelog;
+        @Nullable private final String specifiedFileFormat;
 
-        private WriteFormatKey(int level, boolean isChangelog) {
+        private WriteFormatKey(
+                int level, boolean isChangelog, @Nullable String specifiedFileFormat) {
             this.level = level;
             this.isChangelog = isChangelog;
+            this.specifiedFileFormat = specifiedFileFormat;
         }
 
         @Override

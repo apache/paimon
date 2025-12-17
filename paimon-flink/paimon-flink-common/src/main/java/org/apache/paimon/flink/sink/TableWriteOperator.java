@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
 import org.apache.paimon.flink.sink.coordinator.CoordinatedWriteRestore;
@@ -41,6 +42,7 @@ import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 
 /** An abstract class for table write operator. */
@@ -52,6 +54,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
 
     protected final StoreSinkWrite.Provider storeSinkWriteProvider;
     protected final String initialCommitUser;
+    private final boolean prepareForMaxLevel;
 
     protected transient @Nullable WriteRestore writeRestore;
     protected transient String commitUser;
@@ -64,11 +67,13 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
-            String initialCommitUser) {
+            String initialCommitUser,
+            boolean prepareForMaxLevel) {
         super(parameters, Options.fromMap(table.options()));
         this.table = table;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
+        this.prepareForMaxLevel = prepareForMaxLevel;
     }
 
     @Override
@@ -98,6 +103,9 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
                         getMetricGroup());
         if (writeRestore != null) {
             write.setWriteRestore(writeRestore);
+        }
+        if (prepareForMaxLevel) {
+            write.specifyDataFileFormat(table.coreOptions().maxLevelFileFormat());
         }
         this.configRefresher = ConfigRefresher.create(write.streamingMode(), table, write::replace);
     }
@@ -171,15 +179,18 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         protected final FileStoreTable table;
         protected final StoreSinkWrite.Provider storeSinkWriteProvider;
         protected final String initialCommitUser;
+        protected final boolean prepareForMaxLevel;
 
         protected Factory(
                 FileStoreTable table,
                 StoreSinkWrite.Provider storeSinkWriteProvider,
-                String initialCommitUser) {
-            super(Options.fromMap(table.options()));
-            this.table = table;
+                String initialCommitUser,
+                boolean prepareForMaxLevel) {
+            super(getOptions(table, prepareForMaxLevel));
+            this.table = getTable(table, prepareForMaxLevel);
             this.storeSinkWriteProvider = storeSinkWriteProvider;
             this.initialCommitUser = initialCommitUser;
+            this.prepareForMaxLevel = prepareForMaxLevel;
         }
     }
 
@@ -193,15 +204,18 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         protected final FileStoreTable table;
         protected final StoreSinkWrite.Provider storeSinkWriteProvider;
         protected final String initialCommitUser;
+        protected final boolean prepareForMaxLevel;
 
         protected CoordinatedFactory(
                 FileStoreTable table,
                 StoreSinkWrite.Provider storeSinkWriteProvider,
-                String initialCommitUser) {
-            super(Options.fromMap(table.options()));
-            this.table = table;
+                String initialCommitUser,
+                boolean prepareForMaxLevel) {
+            super(getOptions(table, prepareForMaxLevel));
+            this.table = getTable(table, prepareForMaxLevel);
             this.storeSinkWriteProvider = storeSinkWriteProvider;
             this.initialCommitUser = initialCommitUser;
+            this.prepareForMaxLevel = prepareForMaxLevel;
         }
 
         @Override
@@ -227,5 +241,22 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
 
         public abstract <T extends TableWriteOperator<IN>> T createStreamOperatorImpl(
                 StreamOperatorParameters<Committable> parameters);
+    }
+
+    private static Options getOptions(FileStoreTable table, boolean prepareForMaxLevel) {
+        Options options = Options.fromMap(table.options());
+        if (prepareForMaxLevel) {
+            options.setString(CoreOptions.WRITE_BUFFER_SPILLABLE.key(), "true");
+        }
+        return options;
+    }
+
+    protected static FileStoreTable getTable(FileStoreTable table, boolean prepareForMaxLevel) {
+        if (prepareForMaxLevel) {
+            return table.copy(
+                    Collections.singletonMap(CoreOptions.WRITE_BUFFER_SPILLABLE.key(), "true"));
+        } else {
+            return table;
+        }
     }
 }

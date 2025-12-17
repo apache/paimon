@@ -82,6 +82,10 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
 
     void withCompactExecutor(ExecutorService compactExecutor);
 
+    default void specifyDataFileFormat(String fileFormat) {
+        throw new UnsupportedOperationException();
+    }
+
     /**
      * Write the data to the store according to the partition and bucket.
      *

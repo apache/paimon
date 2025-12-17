@@ -188,6 +188,11 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         write.restore((List) states);
     }
 
+    @Override
+    public void specifyDataFileFormat(String dataFileFormat) {
+        write.specifyDataFileFormat(dataFileFormat);
+    }
+
     public TableWriteImpl<?> getWrite() {
         return write;
     }

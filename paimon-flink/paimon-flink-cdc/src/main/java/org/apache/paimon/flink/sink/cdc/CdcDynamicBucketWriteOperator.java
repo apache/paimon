@@ -61,7 +61,7 @@ public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<Cdc
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
-        super(parameters, table, storeSinkWriteProvider, initialCommitUser);
+        super(parameters, table, storeSinkWriteProvider, initialCommitUser, false);
         this.retrySleepMillis =
                 table.coreOptions().toConfiguration().get(RETRY_SLEEP_TIME).toMillis();
         this.maxRetryNumTimes = table.coreOptions().toConfiguration().get(MAX_RETRY_NUM_TIMES);
@@ -125,7 +125,7 @@ public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<Cdc
                 FileStoreTable table,
                 StoreSinkWrite.Provider storeSinkWriteProvider,
                 String initialCommitUser) {
-            super(table, storeSinkWriteProvider, initialCommitUser);
+            super(table, storeSinkWriteProvider, initialCommitUser, false);
         }
 
         @Override
@@ -151,7 +151,7 @@ public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<Cdc
                 FileStoreTable table,
                 StoreSinkWrite.Provider storeSinkWriteProvider,
                 String initialCommitUser) {
-            super(table, storeSinkWriteProvider, initialCommitUser);
+            super(table, storeSinkWriteProvider, initialCommitUser, false);
         }
 
         @Override

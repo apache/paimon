@@ -1720,6 +1720,17 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to enable modifying deletion vectors mode.");
 
+    public static final ConfigOption<Boolean> DELETION_VECTORS_OVERWRITE_UPGRADE =
+            key("deletion-vectors.overwrite-upgrade")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to upgrade the data files after overwriting a primary key table when deletion "
+                                    + "vectors enabled and write only is true. Because that batch scan for primary key "
+                                    + "dv table will skip the level 0 files, the batch overwrite data are not available "
+                                    + "if deletion-vectors.enabled and write-only are both set to true. This option will "
+                                    + "upgrade that files to max level so that batch scan can query them.");
+
     public static final ConfigOption<MemorySize> DELETION_VECTOR_INDEX_FILE_TARGET_SIZE =
             key("deletion-vector.index-file.target-size")
                     .memoryType()
@@ -2220,6 +2231,12 @@ public class CoreOptions implements Serializable {
                         Collectors.toMap(
                                 e -> Integer.valueOf(e.getKey()),
                                 e -> normalizeFileFormat(e.getValue())));
+    }
+
+    public String maxLevelFileFormat() {
+        int maxLevel = numLevels() - 1;
+        String format = fileFormatPerLevel().get(maxLevel);
+        return StringUtils.isEmpty(format) ? fileFormatString() : format;
     }
 
     public String statsMode() {
@@ -3098,6 +3115,10 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorsEnabled() {
         return options.get(DELETION_VECTORS_ENABLED);
+    }
+
+    public boolean deletionVectorsOverwriteUpgrade() {
+        return options.get(DELETION_VECTORS_OVERWRITE_UPGRADE);
     }
 
     public boolean forceLookup() {

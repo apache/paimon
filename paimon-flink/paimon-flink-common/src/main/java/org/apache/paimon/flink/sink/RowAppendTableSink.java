@@ -43,7 +43,7 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
         return createNoStateRowWriteOperatorFactory(
-                table, logSinkFunction, writeProvider, commitUser);
+                table, logSinkFunction, writeProvider, commitUser, false);
     }
 
     @Override

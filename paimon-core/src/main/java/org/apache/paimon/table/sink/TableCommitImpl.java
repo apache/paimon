@@ -22,8 +22,10 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
@@ -91,6 +93,8 @@ public class TableCommitImpl implements InnerTableCommit {
     @Nullable private Map<String, String> overwritePartition = null;
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
+    private boolean overwriteUpgrade = false;
+    private int upgradeLevel = -1;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -161,6 +165,12 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl appendCommitCheckConflict(boolean appendCommitCheckConflict) {
         commit.appendCommitCheckConflict(appendCommitCheckConflict);
+        return this;
+    }
+
+    public TableCommitImpl allowOverwriteUpgrade(boolean overwriteUpgrade, int upgradeLevel) {
+        this.overwriteUpgrade = overwriteUpgrade;
+        this.upgradeLevel = upgradeLevel;
         return this;
     }
 
@@ -248,6 +258,7 @@ public class TableCommitImpl implements InnerTableCommit {
                                 + committables);
             } else if (committables.size() == 1) {
                 committable = committables.get(0);
+                tryUpgrade(committable);
             } else {
                 // create an empty committable
                 // identifier is Long.MAX_VALUE, come from batch job
@@ -261,6 +272,45 @@ public class TableCommitImpl implements InnerTableCommit {
                     committable.identifier(),
                     maintainExecutor,
                     newSnapshots > 0 || expireForEmptyCommit);
+        }
+    }
+
+    private void tryUpgrade(ManifestCommittable committable) {
+        if (!overwriteUpgrade) {
+            return;
+        }
+
+        List<CommitMessage> upgradeMessages = new ArrayList<>();
+        for (CommitMessage commitMessage : committable.fileCommittables()) {
+            // upgrade when writing new data only
+            CommitMessageImpl commitMessageImpl = (CommitMessageImpl) commitMessage;
+            if (!commitMessageImpl.compactIncrement().isEmpty()) {
+                return;
+            }
+            DataIncrement dataIncrement = commitMessageImpl.newFilesIncrement();
+            if (!dataIncrement.deletedFiles().isEmpty()
+                    && !dataIncrement.newIndexFiles().isEmpty()
+                    && !dataIncrement.deletedIndexFiles().isEmpty()) {
+                return;
+            }
+
+            List<DataFileMeta> newFiles = new ArrayList<>(dataIncrement.newFiles());
+            List<DataFileMeta> upgrades = new ArrayList<>();
+            for (DataFileMeta file : newFiles) {
+                upgrades.add(file.upgrade(upgradeLevel));
+            }
+
+            upgradeMessages.add(
+                    new CommitMessageImpl(
+                            commitMessageImpl.partition().copy(),
+                            commitMessageImpl.bucket(),
+                            commitMessageImpl.totalBuckets(),
+                            DataIncrement.emptyIncrement(),
+                            new CompactIncrement(newFiles, upgrades, Collections.emptyList())));
+        }
+
+        for (CommitMessage upgradeMessage : upgradeMessages) {
+            committable.addFileCommittable(upgradeMessage);
         }
     }
 

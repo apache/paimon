@@ -541,7 +541,8 @@ public class WriterOperatorTest {
                                 true,
                                 memoryPool,
                                 metricGroup),
-                commitUser);
+                commitUser,
+                false);
     }
 
     private RowDataStoreWriteOperator.Factory getLookupWriteOperatorFactory(
@@ -560,7 +561,8 @@ public class WriterOperatorTest {
                                 true,
                                 memoryPoolFactory,
                                 metricGroup),
-                commitUser);
+                commitUser,
+                false);
     }
 
     @SuppressWarnings("unchecked")

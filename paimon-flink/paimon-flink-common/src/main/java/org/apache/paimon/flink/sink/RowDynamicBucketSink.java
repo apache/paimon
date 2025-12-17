@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
@@ -67,9 +68,20 @@ public class RowDynamicBucketSink extends DynamicBucketSink<InternalRow> {
             createWriteOperatorFactory(StoreSinkWrite.Provider writeProvider, String commitUser) {
         Options options = table.coreOptions().toConfiguration();
         boolean coordinatorEnabled = options.get(SINK_WRITER_COORDINATOR_ENABLED);
+        boolean prepareForMaxLevel = allowOverwriteUpgrade();
         return coordinatorEnabled
                 ? new DynamicBucketRowWriteOperator.CoordinatedFactory(
-                        table, writeProvider, commitUser)
-                : new DynamicBucketRowWriteOperator.Factory(table, writeProvider, commitUser);
+                        table, writeProvider, commitUser, prepareForMaxLevel)
+                : new DynamicBucketRowWriteOperator.Factory(
+                        table, writeProvider, commitUser, prepareForMaxLevel);
+    }
+
+    @Override
+    protected boolean allowOverwriteUpgrade() {
+        CoreOptions options = table.coreOptions();
+        return overwritePartition != null
+                && options.deletionVectorsEnabled()
+                && options.deletionVectorsOverwriteUpgrade()
+                && options.writeOnly();
     }
 }
