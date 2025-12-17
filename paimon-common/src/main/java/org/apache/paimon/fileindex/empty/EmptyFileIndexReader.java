@@ -21,7 +21,7 @@ package org.apache.paimon.fileindex.empty;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.TopKFunction;
+import org.apache.paimon.predicate.VectorSearch;
 
 import java.util.List;
 
@@ -84,7 +84,7 @@ public class EmptyFileIndexReader extends FileIndexReader {
     }
 
     @Override
-    public FileIndexResult visitTopK(TopKFunction.TopK topK, TopKFunction.TopKRowIdFilter filter) {
+    public FileIndexResult visitVectorSearch(VectorSearch vectorSearch) {
         return SKIP;
     }
 }

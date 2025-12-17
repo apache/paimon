@@ -22,8 +22,8 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.TopKFunction;
 import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -209,8 +209,7 @@ public class ParquetFilters {
         }
 
         @Override
-        public FilterPredicate visitTopK(
-                TopKFunction.TopK topK, TopKFunction.TopKRowIdFilter filter) {
+        public FilterPredicate visitVectorSearch(VectorSearch vectorSearch) {
             throw new UnsupportedOperationException();
         }
 

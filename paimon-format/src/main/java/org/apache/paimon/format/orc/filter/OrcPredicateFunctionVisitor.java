@@ -22,8 +22,8 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
-import org.apache.paimon.predicate.TopKFunction;
 import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataType;
 
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
@@ -154,8 +154,7 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
-    public Optional<OrcFilters.Predicate> visitTopK(
-            TopKFunction.TopK topK, TopKFunction.TopKRowIdFilter filter) {
+    public Optional<OrcFilters.Predicate> visitVectorSearch(VectorSearch vectorSearch) {
         return Optional.empty();
     }
 

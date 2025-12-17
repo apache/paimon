@@ -33,11 +33,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.FieldTransform;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.TopKFunction;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -123,17 +119,12 @@ public class LuceneVectorGlobalIndexScanTest {
 
         // 6. Execute TopK query
         float[] queryVector = new float[] {0.85f, 0.15f};
-        TopKFunction.TopK topK = new TopKFunction.TopK(queryVector, similarityMetric, 2);
+        VectorSearch vectorSearch =
+                new VectorSearch(vectorFieldName, queryVector, 2, null, similarityMetric);
 
         // 7. Verify results without filter
-        Predicate topKPredicate =
-                new LeafPredicate(
-                        new FieldTransform(
-                                new FieldRef(1, vectorFieldName, new ArrayType(DataTypes.FLOAT()))),
-                        new TopKFunction(topK, null),
-                        Collections.emptyList());
 
-        TopkGlobalIndexResult result = (TopkGlobalIndexResult) scanner.scan(topKPredicate).get();
+        TopkGlobalIndexResult result = (TopkGlobalIndexResult) scanner.scan(vectorSearch).get();
         List<Long> resultRowIds = new ArrayList<>();
         result.results().iterator().forEachRemaining(resultRowIds::add);
         assertThat(resultRowIds).hasSize(2);
@@ -141,15 +132,14 @@ public class LuceneVectorGlobalIndexScanTest {
         // 8. Verify results with filter
         RoaringNavigableMap64 filterResults = new RoaringNavigableMap64();
         filterResults.add(1L);
-        TopKFunction.TopKRowIdFilter filter =
-                new TopKFunction.TopKRowIdFilter(filterResults.iterator());
-        topKPredicate =
-                new LeafPredicate(
-                        new FieldTransform(
-                                new FieldRef(1, vectorFieldName, new ArrayType(DataTypes.FLOAT()))),
-                        new TopKFunction(topK, filter),
-                        Collections.emptyList());
-        result = (TopkGlobalIndexResult) scanner.scan(topKPredicate).get();
+        vectorSearch =
+                new VectorSearch(
+                        vectorFieldName,
+                        queryVector,
+                        2,
+                        filterResults.iterator(),
+                        similarityMetric);
+        result = (TopkGlobalIndexResult) scanner.scan(vectorSearch).get();
         resultRowIds = new ArrayList<>();
         result.results().iterator().forEachRemaining(resultRowIds::add);
         float score = result.scoreGetter().score(resultRowIds.get(0));

@@ -23,7 +23,7 @@ import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.TopKFunction;
+import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -117,13 +117,12 @@ public class FileIndexReaderWrapper implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitTopK(
-            TopKFunction.TopK topK, TopKFunction.TopKRowIdFilter filter) {
-        return transform.apply(reader.visitTopK(topK, filter));
+    public void close() throws IOException {
+        closeable.close();
     }
 
     @Override
-    public void close() throws IOException {
-        closeable.close();
+    public GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
+        return transform.apply(reader.visitVectorSearch(vectorSearch));
     }
 }

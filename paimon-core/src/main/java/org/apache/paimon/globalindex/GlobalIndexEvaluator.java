@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
@@ -57,6 +58,31 @@ public class GlobalIndexEvaluator
             return Optional.empty();
         }
         return predicate.visit(this);
+    }
+
+    public Optional<GlobalIndexResult> evaluate(@Nullable VectorSearch vectorSearch) {
+        if (vectorSearch == null) {
+            return Optional.empty();
+        }
+        Optional<GlobalIndexResult> compoundResult = Optional.empty();
+        int fieldId = rowType.getField(vectorSearch.fieldName()).id();
+        Collection<GlobalIndexReader> readers =
+                indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
+        for (GlobalIndexReader fileIndexReader : readers) {
+            GlobalIndexResult childResult = vectorSearch.visit(fileIndexReader);
+            // AND Operation
+            if (compoundResult.isPresent()) {
+                GlobalIndexResult r1 = compoundResult.get();
+                compoundResult = Optional.of(r1.and(childResult));
+            } else {
+                compoundResult = Optional.of(childResult);
+            }
+
+            if (compoundResult.get().results().isEmpty()) {
+                return compoundResult;
+            }
+        }
+        return compoundResult;
     }
 
     public void close() {

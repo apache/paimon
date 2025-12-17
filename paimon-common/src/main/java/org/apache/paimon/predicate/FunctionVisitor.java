@@ -74,7 +74,7 @@ public interface FunctionVisitor<T> extends PredicateVisitor<T> {
 
     T visitNotIn(FieldRef fieldRef, List<Object> literals);
 
-    T visitTopK(TopKFunction.TopK topK, TopKFunction.TopKRowIdFilter filter);
+    T visitVectorSearch(VectorSearch vectorSearch);
 
     // ----------------- Compound functions ------------------------
 

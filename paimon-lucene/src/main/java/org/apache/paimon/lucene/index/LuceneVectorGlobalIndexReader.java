@@ -24,7 +24,7 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.TopKFunction;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
@@ -43,12 +43,11 @@ import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TopDocs;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
@@ -94,20 +93,20 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitTopK(
-            TopKFunction.TopK topK, @Nullable TopKFunction.TopKRowIdFilter filter) {
+    public GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
         try {
-            if (LuceneVectorMetric.fromString(topK.similarityFunction())
-                    == vectorIndexOptions.metric()) {
+            if (vectorSearch.similarityFunction().isEmpty()
+                    || LuceneVectorMetric.fromString(vectorSearch.similarityFunction().get())
+                            == vectorIndexOptions.metric()) {
                 ensureLoadIndices(fileReader, ioMetas);
-                Query query = query(topK, fieldType, filter);
-                return search(query, topK.k());
+                Query query = query(vectorSearch, fieldType);
+                return search(query, vectorSearch.limit());
             }
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
-                            "Failed to search vector index for TopK with similarity=%s, k=%d",
-                            topK.similarityFunction(), topK.k()),
+                            "Failed to search vector index for TopK with similarity=%s, limit=%d",
+                            vectorIndexOptions.metric(), vectorSearch.limit()),
                     e);
         }
         return defaultResult;
@@ -157,36 +156,36 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private Query query(
-            TopKFunction.TopK topK, DataType dataType, TopKFunction.TopKRowIdFilter filter) {
+    private Query query(VectorSearch vectorSearch, DataType dataType) {
         Query idFilterQuery = null;
-        if (filter != null && filter.includeRowIds() != null) {
+        Iterator<Long> includeRowIds = vectorSearch.includeRowIds();
+        if (includeRowIds != null) {
             ArrayList<Long> targetIds = new ArrayList<>();
             // todo: whether we need to do it in core
-            filter.includeRowIds().forEachRemaining(id -> targetIds.add(id - offset));
+            includeRowIds.forEachRemaining(id -> targetIds.add(id - offset));
             idFilterQuery = LongPoint.newSetQuery(ROW_ID_FIELD, targetIds);
         }
         if (dataType instanceof ArrayType
                 && ((ArrayType) dataType).getElementType() instanceof FloatType) {
-            if (!(topK.vector() instanceof float[])) {
+            if (!(vectorSearch.vector() instanceof float[])) {
                 throw new IllegalArgumentException(
-                        "Expected float[] vector but got: " + topK.vector().getClass());
+                        "Expected float[] vector but got: " + vectorSearch.vector().getClass());
             }
             return new KnnFloatVectorQuery(
                     LuceneVectorIndex.VECTOR_FIELD,
-                    (float[]) topK.vector(),
-                    topK.k(),
+                    (float[]) vectorSearch.vector(),
+                    vectorSearch.limit(),
                     idFilterQuery);
         } else if (dataType instanceof ArrayType
                 && ((ArrayType) dataType).getElementType() instanceof TinyIntType) {
-            if (!(topK.vector() instanceof byte[])) {
+            if (!(vectorSearch.vector() instanceof byte[])) {
                 throw new IllegalArgumentException(
-                        "Expected byte[] vector but got: " + topK.vector().getClass());
+                        "Expected byte[] vector but got: " + vectorSearch.vector().getClass());
             }
             return new KnnByteVectorQuery(
                     LuceneVectorIndex.VECTOR_FIELD,
-                    (byte[]) topK.vector(),
-                    topK.k(),
+                    (byte[]) vectorSearch.vector(),
+                    vectorSearch.limit(),
                     idFilterQuery);
         } else {
             throw new IllegalArgumentException("Unsupported data type: " + dataType);
