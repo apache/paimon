@@ -122,7 +122,7 @@ paths:
       tags:
         - database
       summary: Get Database
-      operationId: getDatabases
+      operationId: getDatabase
       parameters:
         - name: prefix
           in: path
@@ -3245,6 +3245,20 @@ components:
           format: int64
         done:
           type: boolean
+        createdAt:
+          type: integer
+          format: int64
+        createdBy:
+          type: string
+        updatedAt:
+          type: integer
+          format: int64
+        updatedBy:
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
     PartitionStatistics:
       type: object
       properties:

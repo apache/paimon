@@ -19,13 +19,16 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
 import org.apache.paimon.spark.catalyst.Compatibility
-import org.apache.paimon.spark.commands.SchemaHelper
+import org.apache.paimon.spark.commands.{SchemaHelper, SparkDataFileMeta}
+import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, TableWriteImpl}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, TableWriteImpl}
+import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.PaimonSparkSession
@@ -37,6 +40,8 @@ import org.apache.spark.sql.connector.write._
 import org.apache.spark.sql.execution.SQLExecution
 import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.types.StructType
+
+import java.util.Collections
 
 import scala.collection.JavaConverters._
 
@@ -55,7 +60,17 @@ class PaimonV2Write(
     !(overwriteDynamic && overwritePartitions.exists(_.nonEmpty)),
     "Cannot overwrite dynamically and by filter both")
 
+  private var isOverwriteFiles = false
+
+  private var copyOnWriteScan: Option[PaimonCopyOnWriteScan] = None
+
   private val writeSchema = mergeSchema(dataSchema, options)
+
+  def overwriteFiles(scan: Option[PaimonCopyOnWriteScan]): PaimonV2Write = {
+    this.isOverwriteFiles = true
+    this.copyOnWriteScan = scan
+    this
+  }
 
   updateTableWithOptions(
     Map(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key -> overwriteDynamic.toString))
@@ -74,8 +89,13 @@ class PaimonV2Write(
     ordering
   }
 
-  override def toBatch: BatchWrite =
-    PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions)
+  override def toBatch: BatchWrite = {
+    if (isOverwriteFiles) {
+      CopyOnWriteBatchWrite(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+    } else {
+      PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions)
+    }
+  }
 
   override def supportedCustomMetrics(): Array[CustomMetric] = {
     Array(
@@ -113,12 +133,19 @@ private case class PaimonBatchWrite(
     writeSchema: StructType,
     dataSchema: StructType,
     overwritePartitions: Option[Map[String, String]])
+  extends PaimonBatchWriteBase(table, writeSchema, dataSchema, overwritePartitions) {}
+
+abstract class PaimonBatchWriteBase(
+    table: FileStoreTable,
+    writeSchema: StructType,
+    dataSchema: StructType,
+    overwritePartitions: Option[Map[String, String]])
   extends BatchWrite
   with WriteHelper {
 
-  private val metricRegistry = SparkMetricRegistry()
+  protected val metricRegistry = SparkMetricRegistry()
 
-  private val batchWriteBuilder = {
+  protected val batchWriteBuilder = {
     val builder = table.newBatchWriteBuilder()
     overwritePartitions.foreach(partitions => builder.withOverwrite(partitions.asJava))
     builder
@@ -154,7 +181,7 @@ private case class PaimonBatchWrite(
 
   // Spark support v2 write driver metrics since 4.0, see https://github.com/apache/spark/pull/48573
   // To ensure compatibility with 3.x, manually post driver metrics here instead of using Spark's API.
-  private def postDriverMetrics(): Unit = {
+  protected def postDriverMetrics(): Unit = {
     val spark = PaimonSparkSession.active
     // todo: find a more suitable way to get metrics.
     val commitMetrics = metricRegistry.buildSparkCommitMetrics()
@@ -168,6 +195,76 @@ private case class PaimonBatchWrite(
         }
     }
     SQLMetrics.postDriverMetricsUpdatedByValue(spark.sparkContext, executionId, metricUpdates)
+  }
+}
+
+private case class CopyOnWriteBatchWrite(
+    table: FileStoreTable,
+    writeSchema: StructType,
+    dataSchema: StructType,
+    overwritePartitions: Option[Map[String, String]],
+    scan: Option[PaimonCopyOnWriteScan])
+  extends PaimonBatchWriteBase(table, writeSchema, dataSchema, overwritePartitions) {
+
+  override def commit(messages: Array[WriterCommitMessage]): Unit = {
+    logInfo(s"CopyOnWrite committing to table ${table.name()}")
+
+    val batchTableCommit = batchWriteBuilder.newCommit()
+
+    try {
+      if (scan.isEmpty) {
+        batchTableCommit.truncateTable()
+      } else {
+        val touchedFiles = candidateFiles(scan.get.dataSplits)
+
+        val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)
+
+        val addCommitMessages = WriteTaskResult.merge(messages)
+
+        val commitMessages = addCommitMessages ++ deletedCommitMessage
+
+        batchTableCommit.withMetricRegistry(metricRegistry)
+        val start = System.currentTimeMillis()
+        batchTableCommit.commit(commitMessages.asJava)
+        logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
+        postCommit(commitMessages)
+      }
+    } finally {
+      batchTableCommit.close()
+      postDriverMetrics()
+    }
+  }
+
+  private def candidateFiles(candidateDataSplits: Seq[DataSplit]): Array[SparkDataFileMeta] = {
+    val totalBuckets = coreOptions.bucket()
+    candidateDataSplits
+      .flatMap(dataSplit => convertToSparkDataFileMeta(dataSplit, totalBuckets))
+      .toArray
+  }
+
+  private def buildDeletedCommitMessage(
+      deletedFiles: Array[SparkDataFileMeta]): Seq[CommitMessage] = {
+    deletedFiles
+      .groupBy(f => (f.partition, f.bucket))
+      .map {
+        case ((partition, bucket), files) =>
+          val deletedDataFileMetas = files.map(_.dataFileMeta).toList.asJava
+
+          new CommitMessageImpl(
+            partition,
+            bucket,
+            files.head.totalBuckets,
+            new DataIncrement(
+              Collections.emptyList[DataFileMeta],
+              deletedDataFileMetas,
+              Collections.emptyList[DataFileMeta]),
+            new CompactIncrement(
+              Collections.emptyList[DataFileMeta],
+              Collections.emptyList[DataFileMeta],
+              Collections.emptyList[DataFileMeta])
+          )
+      }
+      .toSeq
   }
 }
 

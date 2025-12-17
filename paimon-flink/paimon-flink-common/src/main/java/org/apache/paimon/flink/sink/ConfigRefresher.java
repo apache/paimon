@@ -42,24 +42,25 @@ import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS
 import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
-/** Writer refresher for refresh write when configs changed. */
-public class WriterRefresher {
+/** refresh write when configs changed. */
+public class ConfigRefresher {
 
-    private static final Logger LOG = LoggerFactory.getLogger(WriterRefresher.class);
+    private static final Logger LOG = LoggerFactory.getLogger(ConfigRefresher.class);
 
     private FileStoreTable table;
-    private final Refresher refresher;
+    private final WriteRefresher refresher;
     private final Set<String> configGroups;
 
-    private WriterRefresher(FileStoreTable table, Refresher refresher, Set<String> configGroups) {
+    private ConfigRefresher(
+            FileStoreTable table, WriteRefresher refresher, Set<String> configGroups) {
         this.table = table;
         this.refresher = refresher;
         this.configGroups = configGroups;
     }
 
     @Nullable
-    public static WriterRefresher create(
-            boolean isStreaming, FileStoreTable table, Refresher refresher) {
+    public static ConfigRefresher create(
+            boolean isStreaming, FileStoreTable table, WriteRefresher refresher) {
         if (!isStreaming) {
             return null;
         }
@@ -74,9 +75,13 @@ public class WriterRefresher {
         if (configGroups == null || configGroups.isEmpty()) {
             return null;
         }
-        return new WriterRefresher(table, refresher, configGroups);
+        return new ConfigRefresher(table, refresher, configGroups);
     }
 
+    /**
+     * Try to refresh write when configs which are expected to be refreshed in streaming mode
+     * changed.
+     */
     public void tryRefresh() {
         Optional<TableSchema> latestSchema = table.schemaManager().latest();
         if (!latestSchema.isPresent()) {
@@ -92,17 +97,12 @@ public class WriterRefresher {
                         configGroups(configGroups, CoreOptions.fromMap(latest.options()));
 
                 if (!Objects.equals(newOptions, currentOptions)) {
-                    if (LOG.isDebugEnabled()) {
-                        LOG.debug(
-                                "table schema has changed, current schema-id:{}, try to update write with new schema-id:{}. "
-                                        + "current options:{}, new options:{}.",
-                                table.schema().id(),
-                                latestSchema.get().id(),
-                                currentOptions,
-                                newOptions);
-                    }
                     table = table.copy(newOptions);
                     refresher.refresh(table);
+                    LOG.info(
+                            "write has been refreshed due to configs changed. old options:{}, new options:{}.",
+                            currentOptions,
+                            newOptions);
                 }
             } catch (Exception e) {
                 throw new RuntimeException("update write failed.", e);
@@ -110,9 +110,12 @@ public class WriterRefresher {
         }
     }
 
-    /** Refresher when configs changed. */
-    public interface Refresher {
-        void refresh(FileStoreTable table) throws Exception;
+    public void updateTable(FileStoreTable table) {
+        this.table = table;
+    }
+
+    public Set<String> configGroups() {
+        return configGroups;
     }
 
     public static Map<String, String> configGroups(Set<String> groups, CoreOptions options) {
