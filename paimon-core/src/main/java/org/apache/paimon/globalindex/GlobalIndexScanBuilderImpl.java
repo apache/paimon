@@ -26,6 +26,7 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
@@ -52,6 +53,7 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
     private Snapshot snapshot;
     private PartitionPredicate partitionPredicate;
     private Range rowRange;
+    private VectorSearch vectorSearch;
 
     public GlobalIndexScanBuilderImpl(
             Options options,

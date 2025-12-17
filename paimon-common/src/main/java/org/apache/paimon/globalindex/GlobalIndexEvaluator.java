@@ -53,34 +53,32 @@ public class GlobalIndexEvaluator
         this.readersFunction = readersFunction;
     }
 
-    public Optional<GlobalIndexResult> evaluate(@Nullable Predicate predicate) {
-        if (predicate == null) {
-            return Optional.empty();
-        }
-        return predicate.visit(this);
-    }
-
     public Optional<GlobalIndexResult> evaluate(
-            FieldRef fieldRef, @Nullable VectorSearch vectorSearch) {
-        if (vectorSearch == null) {
-            return Optional.empty();
-        }
+            @Nullable Predicate predicate, @Nullable VectorSearch vectorSearch) {
         Optional<GlobalIndexResult> compoundResult = Optional.empty();
-        int fieldId = rowType.getField(fieldRef.name()).id();
-        Collection<GlobalIndexReader> readers =
-                indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
-        for (GlobalIndexReader fileIndexReader : readers) {
-            GlobalIndexResult childResult = vectorSearch.visit(fieldRef, fileIndexReader);
-            // AND Operation
+        if (predicate != null) {
+            compoundResult = predicate.visit(this);
+        }
+        if (vectorSearch != null) {
+            int fieldId = rowType.getField(vectorSearch.fieldName()).id();
+            Collection<GlobalIndexReader> readers =
+                    indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
             if (compoundResult.isPresent()) {
-                GlobalIndexResult r1 = compoundResult.get();
-                compoundResult = Optional.of(r1.and(childResult));
-            } else {
-                compoundResult = Optional.of(childResult);
+                vectorSearch.withIncludeRowIds(compoundResult.get().results().iterator());
             }
+            for (GlobalIndexReader fileIndexReader : readers) {
+                GlobalIndexResult childResult = fileIndexReader.visitVectorSearch(vectorSearch);
+                // AND Operation
+                if (compoundResult.isPresent()) {
+                    GlobalIndexResult r1 = compoundResult.get();
+                    compoundResult = Optional.of(r1.and(childResult));
+                } else {
+                    compoundResult = Optional.of(childResult);
+                }
 
-            if (compoundResult.get().results().isEmpty()) {
-                return compoundResult;
+                if (compoundResult.get().results().isEmpty()) {
+                    return compoundResult;
+                }
             }
         }
         return compoundResult;

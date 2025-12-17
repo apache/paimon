@@ -118,7 +118,7 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
     }
 
     @Override
-    public Boolean visitVectorSearch(FieldRef fieldRef, VectorSearch vectorSearch) {
+    public Boolean visitVectorSearch(VectorSearch vectorSearch) {
         return false;
     }
 

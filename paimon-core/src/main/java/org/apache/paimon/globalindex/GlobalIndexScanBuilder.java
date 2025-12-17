@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 
@@ -53,6 +54,7 @@ public interface GlobalIndexScanBuilder {
             final List<Range> ranges,
             final GlobalIndexScanBuilder globalIndexScanBuilder,
             final Predicate filter,
+            final VectorSearch vectorSearch,
             final Integer threadNum) {
         List<RowRangeGlobalIndexScanner> scanners =
                 ranges.stream()
@@ -65,7 +67,8 @@ public interface GlobalIndexScanBuilder {
             Iterator<Optional<GlobalIndexResult>> resultIterators =
                     randomlyExecuteSequentialReturn(
                             scanner -> {
-                                Optional<GlobalIndexResult> result = scanner.scan(filter);
+                                Optional<GlobalIndexResult> result =
+                                        scanner.scan(filter, vectorSearch);
                                 return Collections.singletonList(result);
                             },
                             scanners,

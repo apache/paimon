@@ -86,7 +86,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitVectorSearch(FieldRef fieldRef, VectorSearch vectorSearch) {
+    public GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
         try {
             if (vectorSearch.similarityFunction().isEmpty()
                     || LuceneVectorMetric.fromString(vectorSearch.similarityFunction().get())

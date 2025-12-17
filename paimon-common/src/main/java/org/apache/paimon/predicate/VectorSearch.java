@@ -29,6 +29,7 @@ public class VectorSearch implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private Object search;
+    private String fieldName;
     private Optional<String> similarityFunction;
     private int limit;
     private Iterator<Long> includeRowIds;
@@ -36,6 +37,7 @@ public class VectorSearch implements Serializable {
     public VectorSearch(
             Object search,
             int limit,
+            String fieldName,
             Iterator<Long> includeRowIds,
             @Nullable String similarityFunction) {
         if (search == null) {
@@ -45,37 +47,47 @@ public class VectorSearch implements Serializable {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
         }
         this.search = search;
-        this.similarityFunction = Optional.ofNullable(similarityFunction);
         this.limit = limit;
+        this.fieldName = fieldName;
+        this.similarityFunction = Optional.ofNullable(similarityFunction);
         this.includeRowIds = includeRowIds;
     }
 
-    public VectorSearch(Object search, int limit) {
-        this(search, limit, null, null);
+    public VectorSearch(Object search, int limit, String fieldName) {
+        this(search, limit, fieldName, null, null);
     }
 
-    public VectorSearch(Object search, int limit, Iterator<Long> includeRowIds) {
-        this(search, limit, includeRowIds, null);
+    public VectorSearch(Object search, int limit, String fieldName, Iterator<Long> includeRowIds) {
+        this(search, limit, fieldName, includeRowIds, null);
     }
 
     public Object search() {
         return search;
     }
 
-    public Optional<String> similarityFunction() {
-        return similarityFunction;
-    }
-
     public int limit() {
         return limit;
+    }
+
+    public String fieldName() {
+        return fieldName;
+    }
+
+    public Optional<String> similarityFunction() {
+        return similarityFunction;
     }
 
     public Iterator<Long> includeRowIds() {
         return includeRowIds;
     }
 
+    public VectorSearch withIncludeRowIds(Iterator<Long> includeRowIds) {
+        this.includeRowIds = includeRowIds;
+        return this;
+    }
+
     public <T> T visit(FieldRef fieldRef, FunctionVisitor<T> visitor) {
-        return visitor.visitVectorSearch(fieldRef, this);
+        return visitor.visitVectorSearch(this);
     }
 
     @Override
