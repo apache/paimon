@@ -19,10 +19,8 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.annotation.VisibleForTesting
-import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
-import org.apache.paimon.spark.statistics.StatisticsHelper
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.stats
 import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
@@ -31,24 +29,17 @@ import org.apache.paimon.table.source.{InnerTableScan, Split}
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
-import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 
 import java.util.Optional
 
 import scala.collection.JavaConverters._
 
-abstract class PaimonBaseScan(
-    table: InnerTable,
-    requiredSchema: StructType,
-    filters: Seq[Predicate],
-    reservedFilters: Seq[Filter],
-    pushDownLimit: Option[Int])
+abstract class PaimonBaseScan(table: InnerTable)
   extends Scan
   with SupportsReportStatistics
   with ScanHelper
-  with ColumnPruningAndPushDown
-  with StatisticsHelper {
+  with ColumnPruningAndPushDown {
 
   protected var inputPartitions: Seq[PaimonInputPartition] = _
 
@@ -59,8 +50,7 @@ abstract class PaimonBaseScan(
   private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
   lazy val requiredStatsSchema: StructType = {
-    val fieldNames =
-      readTableRowType.getFields.asScala.map(_.name) ++ reservedFilters.flatMap(_.references)
+    val fieldNames = readTableRowType.getFields.asScala.map(_.name)
     StructType(tableSchema.filter(field => fieldNames.contains(field.name)))
   }
 
@@ -96,13 +86,7 @@ abstract class PaimonBaseScan(
   }
 
   override def estimateStatistics(): Statistics = {
-    val stats = PaimonStatistics(this)
-    // When using paimon stats, we need to perform additional FilterEstimation with reservedFilters on stats.
-    if (stats.paimonStatsEnabled && reservedFilters.nonEmpty) {
-      filterStatistics(stats, reservedFilters)
-    } else {
-      stats
-    }
+    PaimonStatistics(this)
   }
 
   override def supportedCustomMetrics: Array[CustomMetric] = {
@@ -136,29 +120,5 @@ abstract class PaimonBaseScan(
         }
       case _ =>
     }
-  }
-
-  override def description(): String = {
-    val pushedFiltersStr = if (filters.nonEmpty) {
-      ", PushedFilters: [" + filters.mkString(",") + "]"
-    } else {
-      ""
-    }
-
-    val reservedFiltersStr = if (reservedFilters.nonEmpty) {
-      ", ReservedFilters: [" + reservedFilters.mkString(",") + "]"
-    } else {
-      ""
-    }
-
-    val pushedTopNFilterStr = if (pushDownTopN.nonEmpty) {
-      s", PushedTopNFilter: [${pushDownTopN.get.toString}]"
-    } else {
-      ""
-    }
-
-    s"PaimonScan: [${table.name}]" +
-      pushedFiltersStr + reservedFiltersStr + pushedTopNFilterStr +
-      pushDownLimit.map(limit => s", Limit: [$limit]").getOrElse("")
   }
 }

@@ -44,7 +44,9 @@ public class AppendOnlySingleTableCompactionWorkerOperator
 
     @Override
     public void processElement(StreamRecord<AppendCompactTask> element) throws Exception {
-        this.unawareBucketCompactor.processElement(element.getValue());
+        AppendCompactTask task = element.getValue();
+        this.unawareBucketCompactor.tryRefreshWrite(task.compactBefore());
+        this.unawareBucketCompactor.processElement(task);
     }
 
     /** {@link StreamOperatorFactory} of {@link AppendOnlySingleTableCompactionWorkerOperator}. */

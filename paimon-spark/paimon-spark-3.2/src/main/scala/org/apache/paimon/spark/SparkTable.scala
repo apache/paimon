@@ -18,12 +18,7 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.table.KnownSplitsTable
+import org.apache.paimon.table.Table
 
-import org.apache.spark.sql.connector.read.Scan
-
-class PaimonSplitScanBuilder(table: KnownSplitsTable) extends PaimonScanBuilder(table) {
-  override def build(): Scan = {
-    PaimonSplitScan(table, table.splits(), requiredSchema, pushedPaimonPredicates)
-  }
-}
+/** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
+case class SparkTable(override val table: Table) extends PaimonSparkTableBase(table) {}

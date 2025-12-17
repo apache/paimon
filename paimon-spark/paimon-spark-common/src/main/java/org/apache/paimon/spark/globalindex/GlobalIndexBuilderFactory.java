@@ -24,4 +24,8 @@ public interface GlobalIndexBuilderFactory {
     String identifier();
 
     GlobalIndexBuilder create(GlobalIndexBuilderContext context);
+
+    default GlobalIndexTopoBuilder createTopoBulder() {
+        return null;
+    }
 }

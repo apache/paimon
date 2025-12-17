@@ -76,7 +76,7 @@ public class RowRangeGlobalIndexScanner implements Closeable {
         GlobalIndexFileReadWrite indexFileReadWrite =
                 new GlobalIndexFileReadWrite(fileIO, indexPathFactory);
 
-        Map<Integer, Map<String, List<IndexFileMeta>>> indexMetas = new HashMap<>();
+        Map<Integer, Map<String, Map<Range, List<IndexFileMeta>>>> indexMetas = new HashMap<>();
         for (IndexManifestEntry entry : entries) {
             GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
             checkArgument(meta != null, "Global index meta must not be null");
@@ -84,7 +84,10 @@ public class RowRangeGlobalIndexScanner implements Closeable {
             String indexType = entry.indexFile().indexType();
             indexMetas
                     .computeIfAbsent(fieldId, k -> new HashMap<>())
-                    .computeIfAbsent(indexType, k -> new ArrayList<>())
+                    .computeIfAbsent(indexType, k -> new HashMap<>())
+                    .computeIfAbsent(
+                            new Range(meta.rowRangeStart(), meta.rowRangeStart()),
+                            k -> new ArrayList<>())
                     .add(entry.indexFile());
         }
 
@@ -103,7 +106,7 @@ public class RowRangeGlobalIndexScanner implements Closeable {
 
     private Collection<GlobalIndexReader> createReaders(
             GlobalIndexFileReadWrite indexFileReadWrite,
-            Map<String, List<IndexFileMeta>> indexMetas,
+            Map<String, Map<Range, List<IndexFileMeta>>> indexMetas,
             DataField dataField) {
         if (indexMetas == null) {
             return Collections.emptyList();
@@ -111,15 +114,30 @@ public class RowRangeGlobalIndexScanner implements Closeable {
 
         Set<GlobalIndexReader> readers = new HashSet<>();
         try {
-            for (Map.Entry<String, List<IndexFileMeta>> entry : indexMetas.entrySet()) {
+            for (Map.Entry<String, Map<Range, List<IndexFileMeta>>> entry : indexMetas.entrySet()) {
                 String indexType = entry.getKey();
-                List<IndexFileMeta> metas = entry.getValue();
+                Map<Range, List<IndexFileMeta>> metas = entry.getValue();
                 GlobalIndexerFactory globalIndexerFactory =
                         GlobalIndexerFactoryUtils.load(indexType);
                 GlobalIndexer globalIndexer = globalIndexerFactory.create(dataField, options);
-                List<GlobalIndexIOMeta> globalMetas =
-                        metas.stream().map(this::toGlobalMeta).collect(Collectors.toList());
-                readers.add(globalIndexer.createReader(indexFileReadWrite, globalMetas));
+
+                List<GlobalIndexReader> unionReader = new ArrayList<>();
+                for (Map.Entry<Range, List<IndexFileMeta>> rangeMetas : metas.entrySet()) {
+                    Range range = rangeMetas.getKey();
+                    List<IndexFileMeta> indexFileMetas = rangeMetas.getValue();
+
+                    List<GlobalIndexIOMeta> globalMetas =
+                            indexFileMetas.stream()
+                                    .map(this::toGlobalMeta)
+                                    .collect(Collectors.toList());
+                    GlobalIndexReader innerReader =
+                            new OffsetGlobalIndexReader(
+                                    globalIndexer.createReader(indexFileReadWrite, globalMetas),
+                                    range.from);
+                    unionReader.add(innerReader);
+                }
+
+                readers.add(new UnionGlobalIndexReader(unionReader));
             }
         } catch (IOException e) {
             throw new RuntimeException("Failed to create global index reader", e);
@@ -132,10 +150,7 @@ public class RowRangeGlobalIndexScanner implements Closeable {
         GlobalIndexMeta globalIndex = meta.globalIndexMeta();
         checkNotNull(globalIndex);
         return new GlobalIndexIOMeta(
-                meta.fileName(),
-                meta.fileSize(),
-                new Range(globalIndex.rowRangeStart(), globalIndex.rowRangeEnd()),
-                globalIndex.indexMeta());
+                meta.fileName(), meta.fileSize(), meta.rowCount() - 1, globalIndex.indexMeta());
     }
 
     @Override

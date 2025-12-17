@@ -161,11 +161,11 @@ public class RoaringBitmap32 {
         return roaringBitmap.iterator();
     }
 
-    public RoaringNavigableMap64 toNavigable64(long offset) {
+    public RoaringNavigableMap64 toNavigable64() {
         RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
         Iterator<Integer> iterator = iterator();
         while (iterator.hasNext()) {
-            result64.add(iterator.next() + offset);
+            result64.add(iterator.next());
         }
         result64.runOptimize();
         return result64;

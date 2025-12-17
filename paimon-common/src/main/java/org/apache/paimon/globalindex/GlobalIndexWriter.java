@@ -29,6 +29,10 @@ public interface GlobalIndexWriter {
 
     void write(@Nullable Object key);
 
+    default void write(@Nullable Object key, long rowId) {
+        throw new UnsupportedOperationException("Not supported for default.");
+    }
+
     List<ResultEntry> finish();
 
     /** Write result meta. */

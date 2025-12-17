@@ -2342,17 +2342,7 @@ public class RESTCatalogServer {
             if (!tablePartitionsStore.containsKey(identifier.getFullName())) {
                 if (statistics != null) {
                     List<Partition> newPartitions =
-                            statistics.stream()
-                                    .map(
-                                            stats ->
-                                                    new Partition(
-                                                            stats.spec(),
-                                                            stats.recordCount(),
-                                                            stats.fileSizeInBytes(),
-                                                            stats.fileCount(),
-                                                            stats.lastFileCreationTime(),
-                                                            false))
-                                    .collect(Collectors.toList());
+                            statistics.stream().map(this::toPartition).collect(Collectors.toList());
                     tablePartitionsStore.put(identifier.getFullName(), newPartitions);
                 }
             } else {
@@ -2377,7 +2367,7 @@ public class RESTCatalogServer {
                                                                 partitionStatisticsMap.get(
                                                                         oldPartition.spec());
                                                         if (stats == null) {
-                                                            return oldPartition; // 如果没有新的统计信息，保持原样
+                                                            return oldPartition;
                                                         }
                                                         return new Partition(
                                                                 oldPartition.spec(),
@@ -2392,9 +2382,24 @@ public class RESTCatalogServer {
                                                                                 .lastFileCreationTime(),
                                                                         stats
                                                                                 .lastFileCreationTime()),
-                                                                oldPartition.done());
+                                                                oldPartition.done(),
+                                                                oldPartition.createdAt(),
+                                                                oldPartition.createdBy(),
+                                                                oldPartition.updatedAt(),
+                                                                oldPartition.updatedBy(),
+                                                                oldPartition.options());
                                                     })
                                             .collect(Collectors.toList());
+                            Set<Map<String, String>> existingSpecs =
+                                    oldPartitions.stream()
+                                            .map(Partition::spec)
+                                            .collect(Collectors.toSet());
+                            List<Partition> newPartitions =
+                                    statistics.stream()
+                                            .filter(stats -> !existingSpecs.contains(stats.spec()))
+                                            .map(this::toPartition)
+                                            .collect(Collectors.toList());
+                            updatedPartitions.addAll(newPartitions);
                             return updatedPartitions;
                         });
             }
@@ -2593,6 +2598,21 @@ public class RESTCatalogServer {
                                 "Invalid input for queryParameter maxResults: %s", maxResults),
                         400),
                 400);
+    }
+
+    private Partition toPartition(PartitionStatistics stats) {
+        return new Partition(
+                stats.spec(),
+                stats.recordCount(),
+                stats.fileSizeInBytes(),
+                stats.fileCount(),
+                stats.lastFileCreationTime(),
+                false,
+                System.currentTimeMillis(),
+                "created",
+                System.currentTimeMillis(),
+                "updated",
+                new HashMap<>());
     }
 
     public List<Map<String, String>> getReceivedHeaders() {

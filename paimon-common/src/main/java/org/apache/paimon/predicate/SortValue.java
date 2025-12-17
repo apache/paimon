@@ -21,6 +21,7 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.Serializable;
+import java.util.Objects;
 
 /** Represents a sort order. */
 public class SortValue implements Serializable {
@@ -53,6 +54,22 @@ public class SortValue implements Serializable {
     public String toString() {
         return String.format(
                 "%s %s %s", field.name(), direction.toString(), nullOrdering.toString());
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        SortValue sortValue = (SortValue) o;
+        return Objects.equals(field, sortValue.field)
+                && direction == sortValue.direction
+                && nullOrdering == sortValue.nullOrdering;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(field, direction, nullOrdering);
     }
 
     /** A null order used in sorting expressions. */

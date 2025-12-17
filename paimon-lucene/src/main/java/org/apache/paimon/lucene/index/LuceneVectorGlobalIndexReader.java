@@ -52,13 +52,13 @@ import java.util.Set;
  */
 public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
 
+    private final long rangeEnd;
     private final List<IndexSearcher> searchers;
     private final List<LuceneIndexMMapDirectory> directories;
-    private final List<GlobalIndexIOMeta> ioMetas;
 
     public LuceneVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> ioMetas) throws IOException {
-        this.ioMetas = ioMetas;
+        this.rangeEnd = ioMetas.get(0).rangeEnd();
         this.searchers = new ArrayList<>();
         this.directories = new ArrayList<>();
         loadIndices(fileReader, ioMetas);
@@ -205,83 +205,75 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    // Implementation of FunctionVisitor methods
+    // =================== unsupported =====================
+
     @Override
     public GlobalIndexResult visitIsNotNull(FieldRef fieldRef) {
-        Range range =
-                ioMetas.stream()
-                        .map(GlobalIndexIOMeta::rowIdRange)
-                        .reduce(Range::union)
-                        .orElse(null);
-        return GlobalIndexResult.fromRange(range);
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitIsNull(FieldRef fieldRef) {
-        throw new UnsupportedOperationException("Vector index does not support isNull predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support startsWith predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitEndsWith(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support endsWith predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitContains(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support contains predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitLike(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support like predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support lessThan predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support greaterOrEqual predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitNotEqual(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support notEqual predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support lessOrEqual predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitEqual(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException("Vector index does not support equal predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
-        throw new UnsupportedOperationException(
-                "Vector index does not support greaterThan predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
-        throw new UnsupportedOperationException("Vector index does not support in predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 
     @Override
     public GlobalIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        throw new UnsupportedOperationException("Vector index does not support notIn predicate");
+        return GlobalIndexResult.fromRange(new Range(0, rangeEnd));
     }
 }
