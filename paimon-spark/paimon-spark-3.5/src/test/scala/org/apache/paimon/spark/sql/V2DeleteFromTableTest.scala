@@ -16,26 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.write
+package org.apache.paimon.spark.sql
 
-import org.apache.paimon.options.Options
-import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.types.RowType
+import org.apache.spark.SparkConf
 
-import org.apache.spark.sql.types.StructType
-
-class PaimonV2WriteBuilder(table: FileStoreTable, dataSchema: StructType, options: Options)
-  extends BaseV2WriteBuilder(table) {
-
-  override def build = {
-    val paimonV2Write =
-      new PaimonV2Write(table, overwriteDynamic, overwritePartitions, dataSchema, options)
-    if (isOverwriteFiles) {
-      paimonV2Write.overwriteFiles(copyOnWriteScan)
-    } else {
-      paimonV2Write
-    }
+class V2DeleteFromTableTest extends DeleteFromTableTestBase {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf
+      .set("spark.paimon.write.use-v2-write", "true")
   }
-
-  override def partitionRowType(): RowType = table.schema().logicalPartitionType()
 }
