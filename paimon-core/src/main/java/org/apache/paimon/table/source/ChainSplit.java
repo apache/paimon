@@ -27,8 +27,6 @@ import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.utils.SerializationUtils;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -46,28 +44,19 @@ public class ChainSplit implements Split {
 
     private static final long serialVersionUID = 1L;
 
-    private static final long MAGIC = -6740198283268612946L;
     private static final int VERSION = 1;
 
-    /** The logical partition of this split. */
     private BinaryRow logicalPartition;
-
-    private int bucket;
-    private int totalBuckets;
     private List<DataFileMeta> dataFiles;
     private Map<String, String> fileBranchMapping;
     private Map<String, String> fileBucketPathMapping;
 
     public ChainSplit(
             BinaryRow logicalPartition,
-            int bucket,
-            int totalBuckets,
             List<DataFileMeta> dataFiles,
             Map<String, String> fileBranchMapping,
             Map<String, String> fileBucketPathMapping) {
         this.logicalPartition = logicalPartition;
-        this.bucket = bucket;
-        this.totalBuckets = totalBuckets;
         this.dataFiles = dataFiles;
         this.fileBranchMapping = fileBranchMapping;
         this.fileBucketPathMapping = fileBucketPathMapping;
@@ -75,14 +64,6 @@ public class ChainSplit implements Split {
 
     public BinaryRow logicalPartition() {
         return logicalPartition;
-    }
-
-    public int bucket() {
-        return bucket;
-    }
-
-    public @Nullable Integer totalBuckets() {
-        return totalBuckets;
     }
 
     public List<DataFileMeta> dataFiles() {
@@ -115,27 +96,13 @@ public class ChainSplit implements Split {
             return false;
         }
         ChainSplit that = (ChainSplit) o;
-        return bucket == that.bucket
-                && totalBuckets == that.totalBuckets
-                && Objects.equals(logicalPartition, that.logicalPartition)
+        return Objects.equals(logicalPartition, that.logicalPartition)
                 && Objects.equals(dataFiles, that.dataFiles);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(logicalPartition, bucket, totalBuckets, dataFiles);
-    }
-
-    @Override
-    public String toString() {
-        return "{"
-                + "partition=hash-"
-                + (logicalPartition == null ? 0 : logicalPartition.hashCode())
-                + ", bucket="
-                + bucket
-                + '}'
-                + "@"
-                + Integer.toHexString(hashCode());
+        return Objects.hash(logicalPartition, dataFiles);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -148,18 +115,15 @@ public class ChainSplit implements Split {
 
     protected void assign(ChainSplit other) {
         this.logicalPartition = other.logicalPartition;
-        this.bucket = other.bucket;
-        this.totalBuckets = other.totalBuckets;
         this.dataFiles = other.dataFiles;
+        this.fileBranchMapping = other.fileBranchMapping;
+        this.fileBucketPathMapping = other.fileBucketPathMapping;
     }
 
     public void serialize(DataOutputView out) throws IOException {
-        out.writeLong(MAGIC);
         out.writeInt(VERSION);
 
         SerializationUtils.serializeBinaryRow(logicalPartition, out);
-        out.writeInt(bucket);
-        out.writeInt(totalBuckets);
 
         DataFileMetaSerializer dataFileSer = new DataFileMetaSerializer();
         int size = dataFiles == null ? 0 : dataFiles.size();
@@ -183,18 +147,12 @@ public class ChainSplit implements Split {
     }
 
     public static ChainSplit deserialize(DataInputView in) throws IOException {
-        long magic = in.readLong();
-        if (magic != MAGIC) {
-            throw new UnsupportedOperationException("Unsupported magic: " + magic);
-        }
         int version = in.readInt();
         if (version != VERSION) {
             throw new UnsupportedOperationException("Unsupported version: " + version);
         }
 
         BinaryRow logicalPartition = SerializationUtils.deserializeBinaryRow(in);
-        int bucket = in.readInt();
-        int totalBuckets = in.readInt();
 
         int n = in.readInt();
         List<DataFileMeta> dataFiles = new ArrayList<>(n);
@@ -219,11 +177,6 @@ public class ChainSplit implements Split {
         }
 
         return new ChainSplit(
-                logicalPartition,
-                bucket,
-                totalBuckets,
-                dataFiles,
-                fileBucketPathMapping,
-                fileBranchMapping);
+                logicalPartition, dataFiles, fileBucketPathMapping, fileBranchMapping);
     }
 }

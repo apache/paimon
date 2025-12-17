@@ -23,12 +23,10 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileTestDataGenerator;
-import org.apache.paimon.io.DataInputDeserializer;
-import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -41,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ChainSplitTest {
 
     @Test
-    public void testChainSplitSerde() throws IOException {
+    public void testChainSplitSerde() throws IOException, ClassNotFoundException {
         BinaryRow logicalPartition = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(logicalPartition);
         writer.writeString(0, BinaryString.fromString("20251202"));
@@ -58,15 +56,10 @@ public class ChainSplitTest {
         }
         ChainSplit split =
                 new ChainSplit(
-                        logicalPartition,
-                        0,
-                        2,
-                        dataFiles,
-                        fileBucketPathMapping,
-                        fileBranchMapping);
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        split.serialize(new DataOutputViewStreamWrapper(out));
-        ChainSplit newSplit = ChainSplit.deserialize(new DataInputDeserializer(out.toByteArray()));
+                        logicalPartition, dataFiles, fileBucketPathMapping, fileBranchMapping);
+        byte[] bytes = InstantiationUtil.serializeObject(split);
+        ChainSplit newSplit =
+                InstantiationUtil.deserializeObject(bytes, ChainSplit.class.getClassLoader());
         assertThat(fileBucketPathMapping).isEqualTo(newSplit.fileBucketPathMapping());
         assertThat(fileBranchMapping).isEqualTo(newSplit.fileBranchMapping());
         assertThat(newSplit).isEqualTo(split);

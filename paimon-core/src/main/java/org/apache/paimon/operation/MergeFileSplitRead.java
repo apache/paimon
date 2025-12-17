@@ -31,7 +31,6 @@ import org.apache.paimon.io.ChainKeyValueFileReaderFactory;
 import org.apache.paimon.io.ChainReadContext;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
-import org.apache.paimon.io.KeyValueFileReaderFactory.KeyValueFileReaderFactoryType;
 import org.apache.paimon.mergetree.DropDeleteReader;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
@@ -301,28 +300,14 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                         .build();
         DeletionVector.Factory dvFactory =
                 DeletionVector.factory(fileIO, files, chainSplit.deletionFiles().orElse(null));
+        ChainKeyValueFileReaderFactory.Builder builder =
+                ChainKeyValueFileReaderFactory.newBuilder(readerFactoryBuilder);
         ChainKeyValueFileReaderFactory overlappedSectionFactory =
-                (ChainKeyValueFileReaderFactory)
-                        readerFactoryBuilder.build(
-                                null,
-                                chainSplit.bucket(),
-                                dvFactory,
-                                false,
-                                filtersForKeys,
-                                variantAccess,
-                                KeyValueFileReaderFactoryType.CHAIN,
-                                chainReadContext);
+                builder.build(
+                        null, dvFactory, false, filtersForKeys, variantAccess, chainReadContext);
         ChainKeyValueFileReaderFactory nonOverlappedSectionFactory =
-                (ChainKeyValueFileReaderFactory)
-                        readerFactoryBuilder.build(
-                                null,
-                                chainSplit.bucket(),
-                                dvFactory,
-                                false,
-                                filtersForAll,
-                                variantAccess,
-                                KeyValueFileReaderFactoryType.CHAIN,
-                                chainReadContext);
+                builder.build(
+                        null, dvFactory, false, filtersForAll, variantAccess, chainReadContext);
         return createMergeReader(
                 files, overlappedSectionFactory, nonOverlappedSectionFactory, forceKeepDelete);
     }

@@ -20,14 +20,19 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FormatReaderMapping;
 
+import javax.annotation.Nullable;
+
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /** A specific implementation about {@link KeyValueFileReaderFactory} for chain read. */
@@ -84,5 +89,42 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
     @Override
     protected BinaryRow getLogicalPartition() {
         return chainReadContext.logicalPartition();
+    }
+
+    public static Builder newBuilder(KeyValueFileReaderFactory.Builder wrapped) {
+        return new Builder(wrapped);
+    }
+
+    /** Builder to build {@link ChainKeyValueFileReaderFactory}. */
+    public static class Builder {
+
+        private final KeyValueFileReaderFactory.Builder wrapped;
+
+        public Builder(KeyValueFileReaderFactory.Builder wrapped) {
+            this.wrapped = wrapped;
+        }
+
+        public ChainKeyValueFileReaderFactory build(
+                BinaryRow partition,
+                DeletionVector.Factory dvFactory,
+                boolean projectKeys,
+                @Nullable List<Predicate> filters,
+                @Nullable VariantAccessInfo[] variantAccess,
+                @Nullable ChainReadContext chainReadContext) {
+            FormatReaderMapping.Builder builder =
+                    wrapped.formatReaderMappingBuilder(projectKeys, filters, variantAccess);
+            return new ChainKeyValueFileReaderFactory(
+                    wrapped.fileIO,
+                    wrapped.schemaManager,
+                    wrapped.schema,
+                    projectKeys ? wrapped.readKeyType : wrapped.keyType,
+                    wrapped.readValueType,
+                    builder,
+                    wrapped.pathFactory.createChainReadDataFilePathFactory(chainReadContext),
+                    wrapped.options.fileReaderAsyncThreshold().getBytes(),
+                    partition,
+                    dvFactory,
+                    chainReadContext);
+        }
     }
 }
