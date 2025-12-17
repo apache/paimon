@@ -25,11 +25,9 @@ import java.util.Map;
 /** Information to read the file. */
 public class ChainReadContext {
 
-    private BinaryRow logicalPartition;
-
-    private Map<String, String> fileBucketPathMapping;
-
-    private Map<String, String> fileBranchMapping;
+    private final BinaryRow logicalPartition;
+    private final Map<String, String> fileBucketPathMapping;
+    private final Map<String, String> fileBranchMapping;
 
     private ChainReadContext(
             BinaryRow readPartition,

@@ -167,12 +167,6 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         return new KeyValueDataFileRecordReader(fileRecordReader, keyType, valueType, file.level());
     }
 
-    /** Type of {@link KeyValueFileReaderFactory} to create. */
-    public enum KeyValueFileReaderFactoryType {
-        DEFAULT,
-        CHAIN
-    }
-
     public static Builder builder(
             FileIO fileIO,
             SchemaManager schemaManager,
