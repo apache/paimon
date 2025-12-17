@@ -85,6 +85,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         0,
                         fileFormat,
                         10,
+                        10,
                         SCHEMA,
                         null,
                         0,

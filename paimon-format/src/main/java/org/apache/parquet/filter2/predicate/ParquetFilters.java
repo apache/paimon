@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -156,6 +157,11 @@ public class ParquetFilters {
         }
 
         @Override
+        public FilterPredicate visitLike(FieldRef fieldRef, Object literal) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public FilterPredicate visitIn(FieldRef fieldRef, List<Object> literals) {
             Operators.Column<?> column = toParquetColumn(fieldRef);
             if (column instanceof Operators.LongColumn) {
@@ -198,6 +204,11 @@ public class ParquetFilters {
                         (Operators.BinaryColumn) column, convertSets(literals, Binary.class));
             }
 
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public FilterPredicate visit(TransformPredicate predicate) {
             throw new UnsupportedOperationException();
         }
     }

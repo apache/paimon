@@ -20,17 +20,12 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.BinPacking;
+import org.apache.paimon.utils.RangeHelper;
 
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.function.Function;
-import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
-
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Append data evolution table split generator, which implementation of {@link SplitGenerator}. */
 public class DataEvolutionSplitGenerator implements SplitGenerator {
@@ -50,13 +45,17 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
 
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> input) {
-        List<List<DataFileMeta>> files = split(input);
+        RangeHelper<DataFileMeta> rangeHelper =
+                new RangeHelper<>(
+                        DataFileMeta::nonNullFirstRowId,
+                        f -> f.nonNullFirstRowId() + f.rowCount() - 1);
+        List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(input);
         Function<List<DataFileMeta>, Long> weightFunc =
                 file ->
                         Math.max(
                                 file.stream().mapToLong(DataFileMeta::fileSize).sum(),
                                 openFileCost);
-        return BinPacking.packForOrdered(files, weightFunc, targetSplitSize).stream()
+        return BinPacking.packForOrdered(ranges, weightFunc, targetSplitSize).stream()
                 .map(
                         f -> {
                             boolean rawConvertible = f.stream().allMatch(file -> file.size() == 1);
@@ -74,57 +73,5 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
     @Override
     public List<SplitGroup> splitForStreaming(List<DataFileMeta> files) {
         return splitForBatch(files);
-    }
-
-    public static List<List<DataFileMeta>> split(List<DataFileMeta> files) {
-        List<List<DataFileMeta>> splitByRowId = new ArrayList<>();
-        // Sort files by firstRowId and then by maxSequenceNumber
-        files.sort(
-                Comparator.comparingLong(
-                                (ToLongFunction<DataFileMeta>)
-                                        value ->
-                                                value.firstRowId() == null
-                                                        ? Long.MIN_VALUE
-                                                        : value.firstRowId())
-                        .thenComparingInt(f -> f.isBlobFile() ? 1 : 0)
-                        .thenComparing(
-                                (f1, f2) -> {
-                                    // If firstRowId is the same, we should read the file with
-                                    // larger sequence number first. Because larger sequence number
-                                    // file is more fresh
-                                    return Long.compare(
-                                            f2.maxSequenceNumber(), f1.maxSequenceNumber());
-                                }));
-
-        // Split files by firstRowId
-        long lastRowId = -1;
-        long checkRowIdStart = 0;
-        List<DataFileMeta> currentSplit = new ArrayList<>();
-        for (DataFileMeta file : files) {
-            Long firstRowId = file.firstRowId();
-            if (firstRowId == null) {
-                splitByRowId.add(Collections.singletonList(file));
-                continue;
-            }
-            if (!file.isBlobFile() && firstRowId != lastRowId) {
-                if (!currentSplit.isEmpty()) {
-                    splitByRowId.add(currentSplit);
-                }
-                checkArgument(
-                        firstRowId >= checkRowIdStart,
-                        "There are overlapping files in the split: \n %s, the wrong file is: \n %s",
-                        files.stream().map(DataFileMeta::toString).collect(Collectors.joining(",")),
-                        file);
-                currentSplit = new ArrayList<>();
-                lastRowId = firstRowId;
-                checkRowIdStart = firstRowId + file.rowCount();
-            }
-            currentSplit.add(file);
-        }
-        if (!currentSplit.isEmpty()) {
-            splitByRowId.add(currentSplit);
-        }
-
-        return splitByRowId;
     }
 }

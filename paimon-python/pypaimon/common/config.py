@@ -45,8 +45,10 @@ class CatalogOptions:
     DLF_TOKEN_LOADER = "dlf.token-loader"
     DLF_TOKEN_ECS_ROLE_NAME = "dlf.token-ecs-role-name"
     DLF_TOKEN_ECS_METADATA_URL = "dlf.token-ecs-metadata-url"
+    DLF_OSS_ENDPOINT = "dlf.oss-endpoint"
     PREFIX = 'prefix'
     HTTP_USER_AGENT_HEADER = 'header.HTTP_USER_AGENT'
+    BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2**31 - 1
 
 
 class PVFSOptions:

@@ -52,6 +52,7 @@ import org.apache.paimon.utils.DecimalUtils;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
 
@@ -896,6 +897,13 @@ public class CastExecutorTest {
                 CastExecutors.resolve(rowType, DataTypes.STRING()),
                 row,
                 BinaryString.fromString("{1, {2025-01-06, {1 -> [1, null, 2]}, null}}"));
+    }
+
+    @Test
+    public void testSplitMapEntriesWithQuotes() {
+        String content = "1, \"abc\"";
+        List<String> result = StringToMapCastRule.INSTANCE.splitMapEntries(content);
+        assertThat(result).containsExactly("1", "abc");
     }
 
     @SuppressWarnings("rawtypes")

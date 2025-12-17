@@ -30,6 +30,7 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -41,6 +42,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -381,7 +383,7 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotBranch(identifier, "createTable");
         checkNotSystemTable(identifier, "createTable");
-        validateCreateTable(schema);
+        validateCreateTable(schema, false);
         validateCustomTablePath(schema.options());
 
         // check db exists
@@ -475,7 +477,8 @@ public abstract class AbstractCatalog implements Catalog {
                 this::loadTableMetadata,
                 lockFactory().orElse(null),
                 lockContext().orElse(null),
-                context);
+                context,
+                false);
     }
 
     @Override
@@ -496,6 +499,36 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public List<String> listBranches(Identifier identifier) throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public GetTagResponse getTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void createTag(
+            Identifier identifier,
+            String tagName,
+            @Nullable Long snapshotId,
+            @Nullable String timeRetained,
+            boolean ignoreIfExists)
+            throws TableNotExistException, SnapshotNotExistException, TagAlreadyExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public PagedList<String> listTagsPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void deleteTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
         throw new UnsupportedOperationException();
     }
 

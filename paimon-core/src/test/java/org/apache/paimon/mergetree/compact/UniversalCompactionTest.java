@@ -85,8 +85,8 @@ public class UniversalCompactionTest {
     @Test
     public void testOptimizedCompactionInterval() {
         AtomicLong time = new AtomicLong(0);
-        FullCompactTrigger fullCompactTrigger =
-                new FullCompactTrigger(1000L, null) {
+        EarlyFullCompaction fullCompactTrigger =
+                new EarlyFullCompaction(1000L, null, null) {
                     @Override
                     long currentTimeMillis() {
                         return time.get();
@@ -128,7 +128,7 @@ public class UniversalCompactionTest {
 
     @Test
     public void testTotalSizeThreshold() {
-        FullCompactTrigger fullCompactTrigger = new FullCompactTrigger(null, 10L);
+        EarlyFullCompaction fullCompactTrigger = new EarlyFullCompaction(null, 10L, null);
         UniversalCompaction compaction =
                 new UniversalCompaction(100, 1, 3, fullCompactTrigger, null);
 

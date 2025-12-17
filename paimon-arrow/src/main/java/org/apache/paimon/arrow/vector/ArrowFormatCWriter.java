@@ -56,7 +56,7 @@ public class ArrowFormatCWriter implements AutoCloseable {
         this(new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive, allocator, null));
     }
 
-    private ArrowFormatCWriter(ArrowFormatWriter arrowFormatWriter) {
+    public ArrowFormatCWriter(ArrowFormatWriter arrowFormatWriter) {
         this.realWriter = arrowFormatWriter;
         BufferAllocator allocator = realWriter.getAllocator();
         array = ArrowArray.allocateNew(allocator);
@@ -69,7 +69,8 @@ public class ArrowFormatCWriter implements AutoCloseable {
 
     public ArrowCStruct toCStruct() {
         VectorSchemaRoot vectorSchemaRoot = realWriter.getVectorSchemaRoot();
-        return ArrowUtils.serializeToCStruct(vectorSchemaRoot, array, schema);
+        return ArrowUtils.serializeToCStruct(
+                vectorSchemaRoot, array, schema, realWriter.getAllocator());
     }
 
     public void flush() {

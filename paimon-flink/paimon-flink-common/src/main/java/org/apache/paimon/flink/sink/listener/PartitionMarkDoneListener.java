@@ -25,6 +25,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions.PartitionMarkDoneActionMode
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -88,12 +89,18 @@ public class PartitionMarkDoneListener implements CommitListener {
         List<PartitionMarkDoneAction> actions =
                 PartitionMarkDoneAction.createActions(cl, table, coreOptions);
 
-        // if batch read skip level 0 files, we should wait compaction to mark done
-        // otherwise, some data may not be readable, and there might be data delays
-        boolean waitCompaction =
-                !table.primaryKeys().isEmpty()
-                        && (coreOptions.deletionVectorsEnabled()
-                                || coreOptions.mergeEngine() == MergeEngine.FIRST_ROW);
+        boolean waitCompaction = false;
+        if (!table.primaryKeys().isEmpty()) {
+            // some situation should wait compaction to mark done, otherwise, some data may not be
+            // readable, and there might be data delays
+            if (coreOptions.deletionVectorsEnabled()) {
+                waitCompaction = true;
+            } else if (coreOptions.mergeEngine() == MergeEngine.FIRST_ROW) {
+                waitCompaction = true;
+            } else if (table.bucketMode() == BucketMode.POSTPONE_MODE) {
+                waitCompaction = true;
+            }
+        }
 
         return Optional.of(
                 new PartitionMarkDoneListener(

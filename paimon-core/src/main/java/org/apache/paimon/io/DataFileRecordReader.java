@@ -33,6 +33,7 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
@@ -52,6 +53,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
     @Nullable private final Long firstRowId;
     private final long maxSequenceNumber;
     private final Map<String, Integer> systemFields;
+    @Nullable private final RoaringBitmap32 selection;
 
     public DataFileRecordReader(
             RowType tableRowType,
@@ -65,13 +67,32 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             long maxSequenceNumber,
             Map<String, Integer> systemFields)
             throws IOException {
+        this(
+                tableRowType,
+                createReader(readerFactory, context),
+                indexMapping,
+                castMapping,
+                partitionInfo,
+                rowTrackingEnabled,
+                firstRowId,
+                maxSequenceNumber,
+                systemFields,
+                context.selection());
+    }
+
+    public DataFileRecordReader(
+            RowType tableRowType,
+            FileRecordReader<InternalRow> reader,
+            @Nullable int[] indexMapping,
+            @Nullable CastFieldGetter[] castMapping,
+            @Nullable PartitionInfo partitionInfo,
+            boolean rowTrackingEnabled,
+            @Nullable Long firstRowId,
+            long maxSequenceNumber,
+            Map<String, Integer> systemFields,
+            @Nullable RoaringBitmap32 selection) {
         this.tableRowType = tableRowType;
-        try {
-            this.reader = readerFactory.createReader(context);
-        } catch (Exception e) {
-            FileUtils.checkExists(context.fileIO(), context.filePath());
-            throw e;
-        }
+        this.reader = reader;
         this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
@@ -79,6 +100,18 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         this.firstRowId = firstRowId;
         this.maxSequenceNumber = maxSequenceNumber;
         this.systemFields = systemFields;
+        this.selection = selection;
+    }
+
+    private static FileRecordReader<InternalRow> createReader(
+            FormatReaderFactory readerFactory, FormatReaderFactory.Context context)
+            throws IOException {
+        try {
+            return readerFactory.createReader(context);
+        } catch (Exception e) {
+            FileUtils.checkExists(context.fileIO(), context.filePath());
+            throw e;
+        }
     }
 
     @Nullable
@@ -142,6 +175,10 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         if (castMapping != null) {
             final CastedRow castedRow = CastedRow.from(castMapping);
             iterator = iterator.transform(castedRow::replaceRow);
+        }
+
+        if (selection != null) {
+            iterator = iterator.selection(selection);
         }
 
         return iterator;

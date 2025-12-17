@@ -33,8 +33,11 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_STRATEGY;
 
 /**
  * A partition expiration policy that compare the time extracted from the partition with the current
@@ -86,19 +89,17 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
                                 + "  1. Check the expiration configuration.\n"
                                 + "  2. Manually delete the partition using the drop-partition command if the partition"
                                 + " value is non-date formatted.\n"
-                                + "  3. Use '{}' expiration strategy by set '{}', which supports non-date formatted partition.",
+                                + "  3. Use 'update-time' expiration strategy by set '{}', which supports non-date formatted partition.",
                         formatPartitionInfo(array),
-                        CoreOptions.PartitionExpireStrategy.UPDATE_TIME,
-                        CoreOptions.PARTITION_EXPIRATION_STRATEGY.key());
+                        PARTITION_EXPIRATION_STRATEGY.key());
                 return false;
             } catch (NullPointerException e) {
                 // there might exist NULL partition value
                 LOG.warn(
                         "This partition {} cannot be expired because it contains null value. "
-                                + "You can try to drop it manually or use '{}' expiration strategy by set '{}'.",
+                                + "You can try to drop it manually or use 'update-time' expiration strategy by set '{}'.",
                         formatPartitionInfo(array),
-                        CoreOptions.PartitionExpireStrategy.UPDATE_TIME,
-                        CoreOptions.PARTITION_EXPIRATION_STRATEGY.key());
+                        PARTITION_EXPIRATION_STRATEGY.key());
                 return false;
             }
         }
@@ -116,6 +117,21 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
                 InternalRow maxValues,
                 InternalArray nullCounts) {
             return true;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            PartitionValuesTimePredicate that = (PartitionValuesTimePredicate) o;
+            return Objects.equals(expireDateTime, that.expireDateTime);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(expireDateTime);
         }
     }
 }

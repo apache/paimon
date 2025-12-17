@@ -19,6 +19,7 @@
 package org.apache.paimon;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
@@ -41,6 +42,7 @@ import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -66,6 +68,8 @@ public interface FileStore<T> {
     ChangelogManager changelogManager();
 
     RowType partitionType();
+
+    InternalRowPartitionComputer partitionComputer();
 
     CoreOptions options();
 
@@ -121,4 +125,6 @@ public interface FileStore<T> {
     void setManifestCache(SegmentsCache<Path> manifestCache);
 
     void setSnapshotCache(Cache<Path, Snapshot> cache);
+
+    GlobalIndexScanBuilder newGlobalIndexScanBuilder();
 }

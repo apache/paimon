@@ -43,6 +43,7 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
     private final Path filePath;
     private final long[] blobLengths;
     private final long[] blobOffsets;
+    private final int[] returnedPositions;
 
     private boolean returned;
 
@@ -74,8 +75,10 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
                 offset += blobLengths[i];
             }
 
+            int[] returnedPositions = null;
             if (selection != null) {
                 int cardinality = (int) selection.getCardinality();
+                returnedPositions = new int[cardinality];
                 long[] newLengths = new long[cardinality];
                 long[] newOffsets = new long[cardinality];
                 Iterator<Integer> iterator = selection.iterator();
@@ -83,11 +86,13 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
                     Integer next = iterator.next();
                     newLengths[i] = blobLengths[next];
                     newOffsets[i] = blobOffsets[next];
+                    returnedPositions[i] = next;
                 }
                 blobLengths = newLengths;
                 blobOffsets = newOffsets;
             }
 
+            this.returnedPositions = returnedPositions;
             this.blobLengths = blobLengths;
             this.blobOffsets = blobOffsets;
         }
@@ -107,7 +112,9 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
 
             @Override
             public long returnedPosition() {
-                return currentPosition;
+                return returnedPositions == null
+                        ? currentPosition
+                        : returnedPositions[currentPosition - 1];
             }
 
             @Override

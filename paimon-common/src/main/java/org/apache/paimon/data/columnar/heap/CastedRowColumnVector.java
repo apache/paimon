@@ -62,6 +62,10 @@ public class CastedRowColumnVector implements RowColumnVector {
         return heapRowVector.getCapacity();
     }
 
+    public int getElementsAppended() {
+        return heapRowVector.getElementsAppended();
+    }
+
     @Override
     public ColumnVector[] getChildren() {
         return children;

@@ -47,6 +47,10 @@ public class BlobFileFormat extends FileFormat {
         super(BlobFileFormatFactory.IDENTIFIER);
     }
 
+    public static boolean isBlobFile(String fileName) {
+        return fileName.endsWith("." + BlobFileFormatFactory.IDENTIFIER);
+    }
+
     @Override
     public FormatReaderFactory createReaderFactory(
             RowType dataSchemaRowType,

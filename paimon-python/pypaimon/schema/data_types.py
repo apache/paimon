@@ -121,7 +121,8 @@ class MultisetType(DataType):
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "type": "MULTISET{}".format('<' + str(self.element) + '>' if self.element else ''),
+            "type": "MULTISET{}{}".format('<' + str(self.element) + '>' if self.element else '',
+                                          " NOT NULL" if not self.nullable else ""),
             "element": self.element.to_dict() if self.element else None,
             "nullable": self.nullable,
         }
@@ -234,7 +235,10 @@ class RowType(DataType):
         return DataTypeParser.parse_data_type(data)
 
     def __str__(self) -> str:
-        field_strs = ["{}: {}".format(field.name, field.type) for field in self.fields]
+        field_strs = []
+        for field in self.fields:
+            description = " COMMENT {}".format(field.description) if field.description else ""
+            field_strs.append("{}: {}{}".format(field.name, field.type, description))
         null_suffix = "" if self.nullable else " NOT NULL"
         return "ROW<{}>{}".format(', '.join(field_strs), null_suffix)
 
@@ -247,6 +251,7 @@ class Keyword(Enum):
     BINARY = "BINARY"
     VARBINARY = "VARBINARY"
     BYTES = "BYTES"
+    BLOB = "BLOB"
     DECIMAL = "DECIMAL"
     NUMERIC = "NUMERIC"
     DEC = "DEC"
@@ -407,6 +412,8 @@ class PyarrowFieldParser:
                 return pyarrow.string()
             elif type_name == 'BYTES' or type_name.startswith('VARBINARY'):
                 return pyarrow.binary()
+            elif type_name == 'BLOB':
+                return pyarrow.large_binary()
             elif type_name.startswith('BINARY'):
                 if type_name == 'BINARY':
                     return pyarrow.binary(1)
@@ -506,6 +513,8 @@ class PyarrowFieldParser:
             type_name = f'BINARY({pa_type.byte_width})'
         elif types.is_binary(pa_type):
             type_name = 'BYTES'
+        elif types.is_large_binary(pa_type):
+            type_name = 'BLOB'
         elif types.is_decimal(pa_type):
             type_name = f'DECIMAL({pa_type.precision}, {pa_type.scale})'
         elif types.is_timestamp(pa_type) and pa_type.tz is None:
@@ -543,6 +552,7 @@ class PyarrowFieldParser:
 
     @staticmethod
     def to_paimon_schema(pa_schema: pyarrow.Schema) -> List[DataField]:
+        # Convert PyArrow schema to Paimon fields
         fields = []
         for i, pa_field in enumerate(pa_schema):
             pa_field: pyarrow.Field

@@ -60,7 +60,6 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.DEFAULT_AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
-import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
@@ -79,7 +78,6 @@ import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQ
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
-import static org.apache.paimon.types.DataTypeRoot.BLOB;
 import static org.apache.paimon.types.DataTypeRoot.MAP;
 import static org.apache.paimon.types.DataTypeRoot.MULTISET;
 import static org.apache.paimon.types.DataTypeRoot.ROW;
@@ -563,8 +561,7 @@ public class SchemaValidation {
                         "Cannot define 'bucket-key' with bucket = -1, please remove the 'bucket-key' setting or specify a bucket number.");
             }
 
-            if (schema.primaryKeys().isEmpty()
-                    && options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null) {
+            if (schema.primaryKeys().isEmpty() && options.fullCompactionDeltaCommits() != null) {
                 throw new RuntimeException(
                         "AppendOnlyTable of unaware or dynamic bucket does not support 'full-compaction.delta-commits'");
             }
@@ -652,13 +649,21 @@ public class SchemaValidation {
                     "Data evolution config must disabled with deletion-vectors.enabled");
         }
 
-        if (schema.fields().stream().map(DataField::type).anyMatch(t -> t.is(BLOB))) {
+        List<String> blobNames =
+                BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldNames();
+        if (!blobNames.isEmpty()) {
             checkArgument(
                     options.dataEvolutionEnabled(),
                     "Data evolution config must enabled for table with BLOB type column.");
             checkArgument(
-                    BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldCount() == 1,
+                    blobNames.size() == 1,
                     "Table with BLOB type column only support one BLOB column.");
+            checkArgument(
+                    schema.fields().size() > 1,
+                    "Table with BLOB type column must have other normal columns.");
+            checkArgument(
+                    !schema.partitionKeys().contains(blobNames.get(0)),
+                    "The BLOB type column can not be part of partition keys.");
         }
     }
 

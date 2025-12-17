@@ -75,7 +75,7 @@ For HDFS, the most important thing is to be able to read your HDFS configuration
 
 {{< tab "Flink" >}}
 
-You may not have to do anything, if you are in a hadoop environment. Otherwise pick one of the following ways to
+You may not have to do anything, if you are in a hadoop environment. Otherwise, pick one of the following ways to
 configure your HDFS:
 
 1. Set environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR`.
@@ -242,6 +242,7 @@ Place `paimon-oss-{{< version >}}.jar` together with `paimon-spark-{{< version >
 
 ```shell
 spark-sql \
+  --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=oss://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com \
@@ -288,7 +289,7 @@ Please note that:
 {{< /tab >}}
 {{< /tabs >}}
 
-If you environment has jindo sdk dependencies, you can use Jindo Fs to connect OSS. Jindo has better read and write efficiency.
+If your environment has jindo sdk dependencies, you can use Jindo Fs to connect OSS. Jindo has better read and write efficiency.
 
 {{< stable >}}
 Download [paimon-jindo-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-jindo/{{< version >}}/paimon-jindo-{{< version >}}.jar).
@@ -344,6 +345,7 @@ Place `paimon-s3-{{< version >}}.jar` together with `paimon-spark-{{< version >}
 
 ```shell
 spark-sql \
+  --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=s3://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.s3.endpoint=your-endpoint-hostname \
@@ -498,6 +500,7 @@ Place `paimon-azure-{{< version >}}.jar` together with `paimon-spark-{{< version
 
 ```shell
 spark-sql \
+  --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=wasb://,<container>@<account>.blob.core.windows.net/<path> \
   --conf fs.azure.account.key.Account.blob.core.windows.net=yyy \
@@ -554,6 +557,7 @@ Place `paimon-obs-{{< version >}}.jar` together with `paimon-spark-{{< version >
 
 ```shell
 spark-sql \
+  --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=obs://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.fs.obs.endpoint=obs-endpoint-hostname \

@@ -201,7 +201,7 @@ public class TagManager {
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(targetTagName),
                 "New tag name shouldn't be blank.");
-        checkArgument(!tagExists(targetTagName), "Tag '%s' already exists.", tagName);
+        checkArgument(!tagExists(targetTagName), "Tag '%s' already exists.", targetTagName);
 
         try {
             fileIO.rename(tagPath(tagName), tagPath(targetTagName));

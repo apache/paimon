@@ -78,17 +78,11 @@ public class S3MultiPartUpload
 
     @Override
     public PartETag uploadPart(
-            String objectName, String uploadId, int partNumber, File file, long byteLength)
+            String objectName, String uploadId, int partNumber, File file, int byteLength)
             throws IOException {
         final UploadPartRequest uploadRequest =
                 s3accessHelper.newUploadPartRequest(
-                        objectName,
-                        uploadId,
-                        partNumber,
-                        checkedDownCast(byteLength),
-                        null,
-                        file,
-                        0L);
+                        objectName, uploadId, partNumber, byteLength, null, file, 0L);
         return s3accessHelper.uploadPart(uploadRequest).getPartETag();
     }
 
@@ -107,14 +101,5 @@ public class S3MultiPartUpload
                 AuditSpan auditSpan) {
             super(owner, conf, statisticsContext, auditSpanSource, auditSpan);
         }
-    }
-
-    private static int checkedDownCast(long value) {
-        int downCast = (int) value;
-        if (downCast != value) {
-            throw new IllegalArgumentException(
-                    "Cannot downcast long value " + value + " to integer.");
-        }
-        return downCast;
     }
 }

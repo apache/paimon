@@ -164,7 +164,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
                             record.get(fieldName),
                             ZoneOffset.UTC);
             resultMap.put(fieldName, transformed);
-            schemaBuilder.column(fieldName, avroToPaimonDataType(schema));
+            schemaBuilder.column(fieldName, avroToPaimonDataType(schema), field.doc());
         }
 
         evalComputedColumns(resultMap, schemaBuilder);

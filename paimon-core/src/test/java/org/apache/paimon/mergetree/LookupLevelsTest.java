@@ -24,6 +24,7 @@ import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.FileIOFinder;
@@ -33,8 +34,10 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
+import org.apache.paimon.lookup.sort.SortLookupStoreFactory;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.mergetree.lookup.DefaultLookupSerializerFactory;
+import org.apache.paimon.mergetree.lookup.PersistValueProcessor;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -190,7 +193,7 @@ public class LookupLevelsTest {
         }
         Levels levels = new Levels(comparator, files, 1);
         LookupLevels<KeyValue> lookupLevels =
-                createLookupLevels(levels, MemorySize.ofKibiBytes(20));
+                createLookupLevels(levels, MemorySize.ofKibiBytes(10));
 
         for (int i = 0; i < fileNum * recordInFile; i++) {
             KeyValue kv = lookupLevels.lookup(row(i), 1);
@@ -269,16 +272,19 @@ public class LookupLevelsTest {
 
     private LookupLevels<KeyValue> createLookupLevels(Levels levels, MemorySize maxDiskSize) {
         return new LookupLevels<>(
+                schemaId -> rowType,
+                0L,
                 levels,
                 comparator,
                 keyType,
-                new LookupLevels.KeyValueProcessor(rowType),
+                PersistValueProcessor.factory(rowType),
+                new DefaultLookupSerializerFactory(),
                 file -> createReaderFactory().createRecordReader(file),
                 file -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
-                new HashLookupStoreFactory(
+                new SortLookupStoreFactory(
+                        new RowCompactedSerializer(keyType).createSliceComparator(),
                         new CacheManager(MemorySize.ofMebiBytes(1)),
-                        2048,
-                        0.75,
+                        4096,
                         new CompressOptions("none", 1)),
                 rowCount -> BloomFilter.builder(rowCount, 0.05),
                 LookupFile.createCache(Duration.ofHours(1), maxDiskSize));

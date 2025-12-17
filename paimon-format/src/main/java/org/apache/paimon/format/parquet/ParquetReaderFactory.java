@@ -21,6 +21,7 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.VectorizedParquetRecordReader;
 import org.apache.paimon.format.parquet.type.ParquetField;
@@ -35,6 +36,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.parquet.ParquetReadOptions;
+import org.apache.parquet.conf.PlainParquetConfiguration;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetInputFormat;
@@ -48,6 +50,8 @@ import org.apache.parquet.schema.Type;
 import org.apache.parquet.schema.Types;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -73,21 +77,33 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private final Options conf;
     private final DataField[] readFields;
     private final int batchSize;
-    private final FilterCompat.Filter filter;
+    @Nullable private final FilterCompat.Filter filter;
+    @Nullable private final VariantAccessInfo[] variantAccess;
 
     public ParquetReaderFactory(
-            Options conf, RowType readType, int batchSize, FilterCompat.Filter filter) {
+            Options conf, RowType readType, int batchSize, @Nullable FilterCompat.Filter filter) {
+        this(conf, readType, batchSize, filter, null);
+    }
+
+    public ParquetReaderFactory(
+            Options conf,
+            RowType readType,
+            int batchSize,
+            @Nullable FilterCompat.Filter filter,
+            @Nullable VariantAccessInfo[] variantAccess) {
         this.conf = conf;
         this.readFields = readType.getFields().toArray(new DataField[0]);
         this.batchSize = batchSize;
         this.filter = filter;
+        this.variantAccess = variantAccess;
     }
 
     @Override
     public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
         ParquetReadOptions.Builder builder =
-                ParquetReadOptions.builder().withRange(0, context.fileSize());
+                ParquetReadOptions.builder(new PlainParquetConfiguration())
+                        .withRange(0, context.fileSize());
         setReadOptions(builder);
 
         ParquetFileReader reader =
@@ -110,10 +126,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         reader.setRequestedSchema(requestedSchema);
         RowType[] shreddingSchemas =
                 VariantUtils.extractShreddingSchemasFromParquetSchema(readFields, fileSchema);
-        WritableColumnVector[] writableVectors = createWritableVectors();
+        List<List<VariantAccessInfo.VariantField>> variantFields =
+                VariantUtils.buildVariantFields(readFields, variantAccess);
+        WritableColumnVector[] writableVectors = createWritableVectors(variantFields);
 
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
-        List<ParquetField> fields = buildFieldsList(readFields, columnIO, shreddingSchemas);
+        List<ParquetField> fields =
+                buildFieldsList(readFields, columnIO, shreddingSchemas, variantFields);
 
         return new VectorizedParquetRecordReader(
                 context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
@@ -231,10 +250,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
     }
 
-    private WritableColumnVector[] createWritableVectors() {
+    private WritableColumnVector[] createWritableVectors(
+            List<List<VariantAccessInfo.VariantField>> variantFields) {
         WritableColumnVector[] columns = new WritableColumnVector[readFields.length];
         for (int i = 0; i < readFields.length; i++) {
-            columns[i] = createWritableColumnVector(batchSize, readFields[i].type());
+            columns[i] =
+                    createWritableColumnVector(
+                            batchSize, readFields[i].type(), variantFields.get(i));
         }
         return columns;
     }

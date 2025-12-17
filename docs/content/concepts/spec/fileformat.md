@@ -26,10 +26,11 @@ under the License.
 
 # File Format
 
-Currently, supports Parquet, Avro, ORC, CSV, JSON file formats.
+Currently, supports Parquet, Avro, ORC, CSV, JSON, and Lance file formats.
 - Recommended column format is Parquet, which has a high compression rate and fast column projection queries.
 - Recommended row based format is Avro, which has good performance n reading and writing full row (all columns).
 - Recommended testing format is CSV, which has better readability but the worst read-write performance.
+- Recommended format for ML workloads is Lance, which is optimized for vector search and machine learning use cases.
 
 ## PARQUET
 
@@ -419,6 +420,18 @@ Format Options:
       <td>String</td>
       <td>Null literal string that is interpreted as a null value (disabled by default).</td>
     </tr>
+    <tr>
+      <td><h5>csv.mode</h5></td>
+      <td style="word-wrap: break-word;"><code>PERMISSIVE</code></td>
+      <td>String</td>
+      <td>Allows a mode for dealing with corrupt records during reading. Currently supported values are <code>'PERMISSIVE'</code>, <code>'DROPMALFORMED'</code> and <code>'FAILFAST'</code>:
+      <ul>
+      <li>Option <code>'PERMISSIVE'</code> sets malformed fields to null.</li>
+      <li>Option <code>'DROPMALFORMED'</code> ignores the whole corrupted records.</li>
+      <li>Option <code>'FAILFAST'</code> throws an exception when it meets corrupted records.</li>
+      </ul>
+      </td>
+    </tr>
     </tbody>
 </table>
 
@@ -628,3 +641,124 @@ The following table lists the type mapping from Paimon type to JSON type.
     </tr>
     </tbody>
 </table>
+
+## LANCE
+
+Lance is a modern columnar data format optimized for machine learning and vector search workloads. It provides high-performance read and write operations with native support for Apache Arrow.
+
+The following table lists the type mapping from Paimon type to Lance (Arrow) type.
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left">Paimon Type</th>
+        <th class="text-center">Lance (Arrow) type</th>
+      </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td>CHAR / VARCHAR / STRING</td>
+      <td>UTF8</td>
+    </tr>
+    <tr>
+      <td>BOOLEAN</td>
+      <td>BOOL</td>
+    </tr>
+    <tr>
+      <td>BINARY / VARBINARY</td>
+      <td>BINARY</td>
+    </tr>
+    <tr>
+      <td>DECIMAL(P, S)</td>
+      <td>DECIMAL128(P, S)</td>
+    </tr>
+    <tr>
+      <td>TINYINT</td>
+      <td>INT8</td>
+    </tr>
+    <tr>
+      <td>SMALLINT</td>
+      <td>INT16</td>
+    </tr>
+    <tr>
+      <td>INT</td>
+      <td>INT32</td>
+    </tr>
+    <tr>
+      <td>BIGINT</td>
+      <td>INT64</td>
+    </tr>
+    <tr>
+      <td>FLOAT</td>
+      <td>FLOAT</td>
+    </tr>
+    <tr>
+      <td>DOUBLE</td>
+      <td>DOUBLE</td>
+    </tr>
+    <tr>
+      <td>DATE</td>
+      <td>DATE32</td>
+    </tr>
+    <tr>
+      <td>TIME</td>
+      <td>TIME32 / TIME64</td>
+    </tr>
+    <tr>
+      <td>TIMESTAMP(P)</td>
+      <td>TIMESTAMP (unit based on precision)</td>
+    </tr>
+    <tr>
+      <td>ARRAY</td>
+      <td>LIST</td>
+    </tr>
+    <tr>
+      <td>MULTISET</td>
+      <td>LIST</td>
+    </tr>
+    <tr>
+      <td>ROW</td>
+      <td>STRUCT</td>
+    </tr>
+    </tbody>
+</table>
+
+Limitations:
+1. Lance file format does not support `MAP` type.
+2. Lance file format does not support `TIMESTAMP_LOCAL_ZONE` type.
+
+## BLOB
+
+The BLOB format is a specialized format for storing large binary objects such as images, videos, and other multimodal data. Unlike other formats that store data inline, BLOB format stores large binary data in separate files with an optimized layout for random access.
+
+BLOB files use the `.blob` extension and have the following structure:
+
+```
++------------------+
+| Blob Entry 1     |
+|   Magic Number   |  4 bytes (1481511375, Little Endian)
+|   Blob Data      |  Variable length
+|   Length         |  8 bytes (Little Endian)
+|   CRC32          |  4 bytes (Little Endian)
++------------------+
+| Blob Entry 2     |
+|   ...            |
++------------------+
+| Index            |  Variable (Delta-Varint compressed)
++------------------+
+| Index Length     |  4 bytes (Little Endian)
+| Version          |  1 byte
++------------------+
+```
+
+Key features:
+- **CRC32 Checksums**: Each blob entry has a CRC32 checksum for data integrity verification
+- **Indexed Access**: The index at the end enables efficient random access to any blob in the file
+- **Delta-Varint Compression**: The index uses delta-varint compression for space efficiency
+
+Limitations:
+1. BLOB format only supports a single BLOB type column per file.
+2. BLOB format does not support predicate pushdown.
+3. Statistics collection is not supported for BLOB columns.
+
+For usage details, configuration options, and examples, see [Blob Type]({{< ref "concepts/spec/blob" >}}).

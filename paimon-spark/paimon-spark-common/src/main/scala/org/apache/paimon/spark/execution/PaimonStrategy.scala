@@ -18,19 +18,22 @@
 
 package org.apache.paimon.spark.execution
 
-import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkUtils}
-import org.apache.paimon.spark.catalog.SupportView
+import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
+import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
 import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand}
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonDropPartitions
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.analysis.ResolvedNamespace
+import org.apache.spark.sql.catalyst.analysis.{ResolvedNamespace, ResolvedTable}
 import org.apache.spark.sql.catalyst.expressions.{Expression, GenericInternalRow, PredicateHelper}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, ShowCreateTable}
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
-import org.apache.spark.sql.execution.{SparkPlan, SparkStrategy}
+import org.apache.spark.sql.execution.{PaimonDescribeTableExec, SparkPlan, SparkStrategy}
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
 import org.apache.spark.sql.execution.shim.PaimonCreateTableAsSelectStrategy
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 import scala.collection.JavaConverters._
 
@@ -39,6 +42,7 @@ case class PaimonStrategy(spark: SparkSession)
   with PredicateHelper
   with PaimonLookupCatalog {
 
+  import DataSourceV2Implicits._
   protected lazy val catalogManager = spark.sessionState.catalogManager
 
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
@@ -78,7 +82,8 @@ case class PaimonStrategy(spark: SparkSession)
           comment,
           properties,
           allowExisting,
-          replace) =>
+          replace
+        ) =>
       CreatePaimonViewExec(
         viewCatalog,
         ident,
@@ -107,6 +112,31 @@ case class PaimonStrategy(spark: SparkSession)
     case DescribeRelation(ResolvedPaimonView(viewCatalog, ident), _, isExtended, output) =>
       DescribePaimonViewExec(output, viewCatalog, ident, isExtended) :: Nil
 
+    case DescribeRelation(r: ResolvedTable, partitionSpec, isExtended, output) =>
+      (r.table, r.catalog) match {
+        case (sparkTable: SparkTable, sparkCatalog: SparkBaseCatalog) =>
+          PaimonDescribeTableExec(
+            output,
+            sparkCatalog,
+            r.identifier,
+            sparkTable,
+            partitionSpec,
+            isExtended) :: Nil
+        case _ => Nil
+      }
+
+    case d @ PaimonDropPartitions(
+          r @ ResolvedTable(_, _, table: SparkTable, _),
+          parts,
+          ifExists,
+          purge) =>
+      PaimonDropPartitionsExec(
+        table,
+        parts.asResolvedPartitionSpecs,
+        ifExists,
+        purge,
+        recacheTable(r)) :: Nil
+
     case _ => Nil
   }
 
@@ -131,5 +161,10 @@ case class PaimonStrategy(spark: SparkSession)
           None
       }
     }
+  }
+
+  private def recacheTable(r: ResolvedTable)(): Unit = {
+    val v2Relation = DataSourceV2Relation.create(r.table, Some(r.catalog), Some(r.identifier))
+    SparkShimLoader.shim.classicApi.recacheByPlan(spark, v2Relation)
   }
 }

@@ -19,26 +19,36 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.predicate.{Predicate, PredicateBuilder, TopN}
+import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.predicate.{Predicate, TopN}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
+import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.table.{SpecialFields, Table}
 import org.apache.paimon.table.source.ReadBuilder
 import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.Preconditions.checkState
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.types.StructType
 
+import scala.collection.JavaConverters._
+
 trait ColumnPruningAndPushDown extends Scan with Logging {
+
   def table: Table
+
+  // Column pruning
   def requiredSchema: StructType
-  def filters: Seq[Predicate]
-  def pushDownLimit: Option[Int] = None
-  def pushDownTopN: Option[TopN] = None
+
+  // Push down
+  def pushedPartitionFilters: Seq[PartitionPredicate]
+  def pushedDataFilters: Seq[Predicate]
+  def pushedLimit: Option[Int] = None
+  def pushedTopN: Option[TopN] = None
+
+  val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
   lazy val tableRowType: RowType = {
-    val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
     if (coreOptions.rowTrackingEnabled()) {
       SpecialFields.rowTypeWithRowTracking(table.rowType())
     } else {
@@ -53,11 +63,7 @@ trait ColumnPruningAndPushDown extends Scan with Logging {
   }
 
   private[paimon] val (readTableRowType, metadataFields) = {
-    checkState(
-      requiredSchema.fields.forall(
-        field =>
-          tableRowType.containsField(field.name) ||
-            PaimonMetadataColumn.SUPPORTED_METADATA_COLUMNS.contains(field.name)))
+    requiredSchema.fields.foreach(f => checkMetadataColumn(f.name))
     val (_requiredTableFields, _metadataFields) =
       requiredSchema.fields.partition(field => tableRowType.containsField(field.name))
     val _readTableRowType =
@@ -65,14 +71,34 @@ trait ColumnPruningAndPushDown extends Scan with Logging {
     (_readTableRowType, _metadataFields)
   }
 
+  private def checkMetadataColumn(fieldName: String): Unit = {
+    if (PATH_AND_INDEX_META_COLUMNS.contains(fieldName)) {
+      if (!table.primaryKeys().isEmpty && !coreOptions.deletionVectorsEnabled()) {
+        // Here we only issue a warning because after full compaction, primary-key tables can query the
+        // index and file path too.
+        logWarning(
+          s"Only non-primary-key or deletion-vector or full compacted tables support metadata column: $fieldName")
+      }
+    }
+
+    if (ROW_TRACKING_META_COLUMNS.contains(fieldName)) {
+      if (!coreOptions.rowTrackingEnabled()) {
+        throw new UnsupportedOperationException(
+          s"Only row-tracking tables support metadata column: $fieldName")
+      }
+    }
+  }
+
   lazy val readBuilder: ReadBuilder = {
     val _readBuilder = table.newReadBuilder().withReadType(readTableRowType)
-    if (filters.nonEmpty) {
-      val pushedPredicate = PredicateBuilder.and(filters: _*)
-      _readBuilder.withFilter(pushedPredicate)
+    if (pushedPartitionFilters.nonEmpty) {
+      _readBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
     }
-    pushDownLimit.foreach(_readBuilder.withLimit)
-    pushDownTopN.foreach(_readBuilder.withTopN)
+    if (pushedDataFilters.nonEmpty) {
+      _readBuilder.withFilter(pushedDataFilters.asJava)
+    }
+    pushedLimit.foreach(_readBuilder.withLimit)
+    pushedTopN.foreach(_readBuilder.withTopN)
     _readBuilder.dropStats()
   }
 
@@ -88,5 +114,23 @@ trait ColumnPruningAndPushDown extends Scan with Logging {
         s"Actual readSchema: ${_readSchema} is not equal to spark pushed requiredSchema: $requiredSchema")
     }
     _readSchema
+  }
+
+  override def description(): String = {
+    val pushedPartitionFiltersStr = if (pushedPartitionFilters.nonEmpty) {
+      ", PartitionFilters: [" + pushedPartitionFilters.mkString(",") + "]"
+    } else {
+      ""
+    }
+    val pushedDataFiltersStr = if (pushedDataFilters.nonEmpty) {
+      ", DataFilters: [" + pushedDataFilters.mkString(",") + "]"
+    } else {
+      ""
+    }
+    s"${getClass.getSimpleName}: [${table.name}]" +
+      pushedPartitionFiltersStr +
+      pushedDataFiltersStr +
+      pushedTopN.map(topN => s", TopN: [$topN]").getOrElse("") +
+      pushedLimit.map(limit => s", Limit: [$limit]").getOrElse("")
   }
 }

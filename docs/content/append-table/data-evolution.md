@@ -67,7 +67,7 @@ ON t.id = s.id
 WHEN MATCHED THEN UPDATE SET t.b = s.b
 WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 0);
 
-SELECT * FROM my_table;
+SELECT * FROM target_table;
 +----+----+----+
 | id | b  | c  |
 +----+----+----+
@@ -80,7 +80,7 @@ This statement updates only the `b` column in the target table `target_table` ba
 `source_table`. The `id` column and `c` column remain unchanged, and new records are inserted with the specified values. The difference between this and table those are not enabled with data evolution is that only the `b` column data is written to new files.
 
 Note that: 
-* Data Evolution Table does not support 'Delete' statement yet.
+* Data Evolution Table does not support 'Delete', 'Update', or 'Compact' statement yet.
 * Merge Into for Data Evolution Table does not support 'WHEN NOT MATCHED BY SOURCE' clause.
 
 ## Spec

@@ -22,6 +22,7 @@ import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
@@ -227,6 +228,11 @@ public class HiveTypeUtils {
             List<TypeInfo> typeInfos =
                     Arrays.asList(TypeInfoFactory.binaryTypeInfo, TypeInfoFactory.binaryTypeInfo);
             return TypeInfoFactory.getStructTypeInfo(fieldNames, typeInfos);
+        }
+
+        @Override
+        public TypeInfo visit(BlobType blobType) {
+            return TypeInfoFactory.binaryTypeInfo;
         }
 
         @Override

@@ -120,7 +120,7 @@ More options:
             <td><h5>partition.expiration-time</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
-            <td>The expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</td>
+            <td>The expiration interval of a partition. A partition will be expired if it's lifetime is over this value. Partition time is extracted from the partition value.</td>
         </tr>
         <tr>
             <td><h5>partition.timestamp-formatter</h5></td>
@@ -166,5 +166,5 @@ enable this by setting `'partition.mark-done-action.mode' = 'watermark'`.
 
 ### Batch Mark Done
 
-For batch mode, you can trigger partition mark done when end input by setting `'partition.end-input-to-done'='true'`.
-
+For batch mode, you can trigger partition mark done when end input by setting `'partition.end-input-to-done'='true'`,
+and all partitions written in this batch will be marked done.

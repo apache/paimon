@@ -16,9 +16,7 @@
 # limitations under the License.
 #################################################################################
 
-from pathlib import Path
 from typing import List, Optional, Union
-from urllib.parse import urlparse
 
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
@@ -108,18 +106,13 @@ class FileSystemCatalog(Catalog):
             raise TableNotExistException(identifier)
         return table_schema
 
-    def get_database_path(self, name) -> Path:
-        return self._trim_schema(self.warehouse) / f"{name}{Catalog.DB_SUFFIX}"
+    def get_database_path(self, name) -> str:
+        warehouse = self.warehouse.rstrip('/')
+        return f"{warehouse}/{name}{Catalog.DB_SUFFIX}"
 
-    def get_table_path(self, identifier: Identifier) -> Path:
-        return self.get_database_path(identifier.get_database_name()) / identifier.get_table_name()
-
-    @staticmethod
-    def _trim_schema(warehouse_url: str) -> Path:
-        parsed = urlparse(warehouse_url)
-        bucket = parsed.netloc
-        warehouse_dir = parsed.path.lstrip('/')
-        return Path(f"{bucket}/{warehouse_dir}" if warehouse_dir else bucket)
+    def get_table_path(self, identifier: Identifier) -> str:
+        db_path = self.get_database_path(identifier.get_database_name())
+        return f"{db_path}/{identifier.get_table_name()}"
 
     def commit_snapshot(
             self,

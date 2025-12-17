@@ -39,21 +39,19 @@ SELECT * FROM t;
 
 Paimon also supports reading some hidden metadata columns, currently supporting the following columns:
 
-- `__paimon_file_path`: the file path of the record.
-- `__paimon_partition`: the partition of the record.
-- `__paimon_bucket`: the bucket of the record.
-- `__paimon_row_index`: the row index of the record.
-- `_ROW_ID`: the unique row id of the record (valid only when `row-tracking.enabled` is set to true).
-- `_SEQUENCE_NUMBER`: the sequence number of the record (valid only when `row-tracking.enabled` is set to true).
+- `__paimon_partition`: The partition of the record.
+- `__paimon_bucket`: The bucket of the record.
+- `__paimon_row_index`: The row index of the record. (Available only for non-PK or deletion vector or full compacted PK table).
+- `__paimon_file_path`: The file path of the record. (Available only for non-PK or deletion vector or full compacted PK table).
+- `_ROW_ID`: The unique row id of the record (Available only for row-tracking tables).
+- `_SEQUENCE_NUMBER`: The sequence number of the record (Available only for row-tracking tables).
+
+For example:
 
 ```sql
 -- read all columns and the corresponding file path, partition, bucket, rowIndex of the record
 SELECT *, __paimon_file_path, __paimon_partition, __paimon_bucket, __paimon_row_index FROM t;
 ```
-
-{{< hint info >}}
-Note: only append table or deletion vector table support querying metadata columns.
-{{< /hint >}}
 
 ### Batch Time Travel
 

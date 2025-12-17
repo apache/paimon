@@ -20,11 +20,12 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
-import org.apache.paimon.spark.DataEvolutionSparkTableWrite
-import org.apache.paimon.spark.commands.DataEvolutionPaimonWriter.{deserializeCommitMessage, dynamicOp}
-import org.apache.paimon.spark.write.WriteHelper
+import org.apache.paimon.spark.commands.DataEvolutionPaimonWriter.dynamicOp
+import org.apache.paimon.spark.write.{DataEvolutionTableDataWrite, WriteHelper, WriteTaskResult}
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink._
+import org.apache.paimon.types.DataType
+import org.apache.paimon.types.DataTypeRoot.BLOB
 
 import org.apache.spark.sql._
 
@@ -36,14 +37,12 @@ import scala.collection.mutable
 
 case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteHelper {
 
-  private lazy val firstRowIdToPartitionMap: mutable.HashMap[Long, Tuple2[BinaryRow, Long]] =
+  private lazy val firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Long)] =
     initPartitionMap()
   override val table: FileStoreTable = paimonTable.copy(dynamicOp)
 
-  @transient private lazy val serializer = new CommitMessageSerializer
-
-  private def initPartitionMap(): mutable.HashMap[Long, Tuple2[BinaryRow, Long]] = {
-    val firstRowIdToPartitionMap = new mutable.HashMap[Long, Tuple2[BinaryRow, Long]]
+  private def initPartitionMap(): mutable.HashMap[Long, (BinaryRow, Long)] = {
+    val firstRowIdToPartitionMap = new mutable.HashMap[Long, (BinaryRow, Long)]
     table
       .store()
       .newScan()
@@ -51,7 +50,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteH
       .forEachRemaining(
         k =>
           firstRowIdToPartitionMap
-            .put(k.file().firstRowId(), Tuple2.apply(k.partition(), k.file().rowCount())))
+            .put(k.file().firstRowId(), (k.partition(), k.file().rowCount())))
     firstRowIdToPartitionMap
   }
 
@@ -61,27 +60,30 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteH
     assert(data.columns.length == columnNames.size + 2)
     val writeType = table.rowType().project(columnNames.asJava)
 
+    if (writeType.getFieldTypes.stream.anyMatch((t: DataType) => t.is(BLOB))) {
+      throw new UnsupportedOperationException(
+        "DataEvolution does not support writing partial columns mixed with BLOB type.")
+    }
+
     val written =
       data.mapPartitions {
         iter =>
           {
-            val write = DataEvolutionSparkTableWrite(
+            val write = DataEvolutionTableDataWrite(
               table.newBatchWriteBuilder(),
               writeType,
-              firstRowIdToPartitionMap)
+              firstRowIdToPartitionMap,
+              coreOptions.blobAsDescriptor(),
+              table.catalogEnvironment().catalogContext())
             try {
               iter.foreach(row => write.write(row))
-              write.finish()
+              Iterator.apply(write.commit)
             } finally {
               write.close()
             }
           }
       }
-
-    written
-      .collect()
-      .map(deserializeCommitMessage(serializer, _))
-      .toSeq
+    WriteTaskResult.merge(written.collect())
   }
 }
 

@@ -15,12 +15,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
-from urllib.parse import urlparse
-
-import pyarrow
-from packaging.version import parse
 
 from pypaimon.api.api_response import GetTableResponse, PagedList
 from pypaimon.api.options import Options
@@ -225,22 +220,17 @@ class RESTCatalog(Catalog):
             catalog_loader=self.catalog_loader(),
             supports_version_management=True  # REST catalogs support version management
         )
-        path_parsed = urlparse(schema.options.get(CoreOptions.PATH))
-        path = path_parsed.path if path_parsed.scheme is None else schema.options.get(CoreOptions.PATH)
-        if path_parsed.scheme == "file":
-            table_path = path_parsed.path
-        else:
-            table_path = path_parsed.netloc + path_parsed.path \
-                if parse(pyarrow.__version__) >= parse("7.0.0") else path_parsed.path[1:]
-        table = self.create(data_file_io(path),
-                            Path(table_path),
+        # Use the path from server response directly (do not trim scheme)
+        table_path = schema.options.get(CoreOptions.PATH)
+        table = self.create(data_file_io(table_path),
+                            table_path,
                             schema,
                             catalog_env)
         return table
 
     @staticmethod
     def create(file_io: FileIO,
-               table_path: Path,
+               table_path: str,
                table_schema: TableSchema,
                catalog_environment: CatalogEnvironment
                ) -> FileStoreTable:

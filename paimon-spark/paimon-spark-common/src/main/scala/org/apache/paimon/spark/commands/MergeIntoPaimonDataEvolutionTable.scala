@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
@@ -31,7 +32,7 @@ import org.apache.paimon.table.source.DataSplit
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, EqualTo, Expression, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -45,7 +46,7 @@ import scala.collection.Searching.{search, Found, InsertionPoint}
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
-/** Command for Merge Into for Data Evolution paimom table. */
+/** Command for Merge Into for Data Evolution paimon table. */
 case class MergeIntoPaimonDataEvolutionTable(
     v2Table: SparkTable,
     targetTable: LogicalPlan,
@@ -75,16 +76,43 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
   private val firstRowIds: Seq[Long] = table
-    .newSnapshotReader()
-    .withManifestEntryFilter(entry => entry.file().firstRowId() != null)
-    .read()
-    .splits()
+    .store()
+    .newScan()
+    .withManifestEntryFilter(
+      entry =>
+        entry.file().firstRowId() != null && (!isBlobFile(
+          entry
+            .file()
+            .fileName())))
+    .plan()
+    .files()
     .asScala
-    .map(_.asInstanceOf[DataSplit])
-    .flatMap(split => split.dataFiles().asScala.map(s => s.firstRowId().asInstanceOf[Long]))
+    .map(file => file.file().firstRowId().asInstanceOf[Long])
     .distinct
     .sorted
     .toSeq
+
+  private val firstRowIdToBlobFirstRowIds = {
+    val map = new mutable.HashMap[Long, List[Long]]()
+    val files = table
+      .store()
+      .newScan()
+      .withManifestEntryFilter(entry => isBlobFile(entry.file().fileName()))
+      .plan()
+      .files()
+      .asScala
+      .sortBy(f => f.file().firstRowId())
+
+    for (file <- files) {
+      val firstRowId = file.file().firstRowId().asInstanceOf[Long]
+      val firstIdInNormalFile = floorBinarySearch(firstRowIds, firstRowId)
+      map.update(
+        firstIdInNormalFile,
+        map.getOrElseUpdate(firstIdInNormalFile, List.empty[Long]) :+ firstRowId
+      )
+    }
+    map
+  }
 
   lazy val targetRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(targetTable)
   lazy val sourceRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(sourceTable)
@@ -120,18 +148,21 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   private def targetRelatedSplits(sparkSession: SparkSession): Seq[DataSplit] = {
-    val targetDss = createDataset(
-      sparkSession,
-      targetRelation
-    )
     val sourceDss = createDataset(sparkSession, sourceRelation)
 
-    val firstRowIdsTouched = mutable.Set.empty[Long]
+    val firstRowIdsTouched = extractSourceRowIdMapping match {
+      case Some(sourceRowIdAttr) =>
+        // Shortcut: Directly get _FIRST_ROW_IDs from the source table.
+        findRelatedFirstRowIds(sourceDss, sparkSession, sourceRowIdAttr.name).toSet
 
-    firstRowIdsTouched ++= findRelatedFirstRowIds(
-      targetDss.alias("_left").join(sourceDss, toColumn(matchedCondition), "inner"),
-      sparkSession,
-      "_left." + ROW_ID_NAME)
+      case None =>
+        // Perform the full join to find related _FIRST_ROW_IDs.
+        val targetDss = createDataset(sparkSession, targetRelation)
+        findRelatedFirstRowIds(
+          targetDss.alias("_left").join(sourceDss, toColumn(matchedCondition), "inner"),
+          sparkSession,
+          "_left." + ROW_ID_NAME).toSet
+    }
 
     table
       .newSnapshotReader()
@@ -170,8 +201,16 @@ case class MergeIntoPaimonDataEvolutionTable(
     val updateColumnsSorted = updateColumns.toSeq.sortBy(
       s => targetTable.output.map(x => x.toString()).indexOf(s.toString()))
 
-    val assignments = redundantColumns.map(column => Assignment(column, column))
-    val output = updateColumnsSorted ++ redundantColumns
+    // Different Spark versions might produce duplicate attributes between `output` and
+    // `metadataOutput`, so manually deduplicate by `exprId`.
+    val metadataColumns = (targetRelation.output ++ targetRelation.metadataOutput)
+      .filter(attr => attr.name.equals(ROW_ID_NAME))
+      .groupBy(_.exprId)
+      .map { case (_, attrs) => attrs.head }
+      .toSeq
+
+    val assignments = metadataColumns.map(column => Assignment(column, column))
+    val output = updateColumnsSorted ++ metadataColumns
     val realUpdateActions = matchedActions
       .map(s => s.asInstanceOf[UpdateAction])
       .map(
@@ -189,10 +228,9 @@ case class MergeIntoPaimonDataEvolutionTable(
 
     val allReadFieldsOnTarget = allFields.filter(
       field =>
-        targetTable.output.exists(
-          attr => attr.toString().equals(field.toString()))) ++ redundantColumns
-    val allReadFieldsOnSource = allFields.filter(
-      field => sourceTable.output.exists(attr => attr.toString().equals(field.toString())))
+        targetTable.output.exists(attr => attr.exprId.equals(field.exprId))) ++ metadataColumns
+    val allReadFieldsOnSource =
+      allFields.filter(field => sourceTable.output.exists(attr => attr.exprId.equals(field.exprId)))
 
     val targetReadPlan =
       touchedFileTargetRelation.copy(targetRelation.table, allReadFieldsOnTarget.toSeq)
@@ -277,17 +315,63 @@ case class MergeIntoPaimonDataEvolutionTable(
     writer.write(toWrite)
   }
 
+  /**
+   * Attempts to identify a direct mapping from sourceTable's attribute to the target table's
+   * `_ROW_ID`.
+   *
+   * This is a shortcut optimization for `MERGE INTO` to avoid a full, expensive join when the merge
+   * condition is a simple equality on the target's `_ROW_ID`.
+   *
+   * @return
+   *   An `Option` containing the sourceTable's attribute if a pattern like
+   *   `target._ROW_ID = source.col` (or its reverse) is found, otherwise `None`.
+   */
+  private def extractSourceRowIdMapping: Option[AttributeReference] = {
+
+    // Helper to check if an attribute is the target's _ROW_ID
+    def isTargetRowId(attr: AttributeReference): Boolean = {
+      attr.name == ROW_ID_NAME && (targetRelation.output ++ targetRelation.metadataOutput)
+        .exists(_.exprId.equals(attr.exprId))
+    }
+
+    // Helper to check if an attribute belongs to the source table
+    def isSourceAttribute(attr: AttributeReference): Boolean = {
+      (sourceRelation.output ++ sourceRelation.metadataOutput).exists(_.exprId.equals(attr.exprId))
+    }
+
+    matchedCondition match {
+      // Case 1: target._ROW_ID = source.col
+      case EqualTo(left: AttributeReference, right: AttributeReference)
+          if isTargetRowId(left) && isSourceAttribute(right) =>
+        Some(right)
+      // Case 2: source.col = target._ROW_ID
+      case EqualTo(left: AttributeReference, right: AttributeReference)
+          if isSourceAttribute(left) && isTargetRowId(right) =>
+        Some(left)
+      case _ => None
+    }
+  }
+
   private def findRelatedFirstRowIds(
       dataset: Dataset[Row],
       sparkSession: SparkSession,
       identifier: String): Array[Long] = {
     import sparkSession.implicits._
     val firstRowIdsFinal = firstRowIds
+    val firstRowIdToBlobFirstRowIdsFinal = firstRowIdToBlobFirstRowIds
     val firstRowIdUdf = udf((rowId: Long) => floorBinarySearch(firstRowIdsFinal, rowId))
     dataset
       .select(firstRowIdUdf(col(identifier)))
       .distinct()
       .as[Long]
+      .flatMap(
+        f => {
+          if (firstRowIdToBlobFirstRowIdsFinal.contains(f)) {
+            firstRowIdToBlobFirstRowIdsFinal(f)
+          } else {
+            Seq(f)
+          }
+        })
       .collect()
   }
 

@@ -381,6 +381,25 @@ All available procedures are listed below.
         CALL sys.remove_unexisting_files(`table` => 'mydb.myt', `dry_run` = true)
       </td>
    </tr>
+    <tr>
+      <td>remove_unexisting_manifests</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.remove_unexisting_files(`table` => 'identifier') <br/><br/>
+      </td>
+      <td>
+         Procedure to remove unexisting manifest file from manifset-list. for detailed use cases. Arguments:
+            <li>table: the target table identifier. Cannot be empty, you can use database.table$branch_xx to remove branch table unexisting manifest file.</li>
+         <br>
+         Note that user is on his own risk using this procedure, which may cause data loss when used outside from the use cases listed in Java docs.
+      </td>
+      <td>
+        -- remove unexisting manifest file in the table `mydb.myt`<br/>
+        CALL sys.remove_unexisting_manifests(`table` => 'mydb.myt')<br/><br/>
+        -- remove unexisting manifest file in the branch table `mydb.myt$branch_rt`<br/>
+        CALL sys.remove_unexisting_manifests(`table` => 'mydb.myt$branch_rt')
+      </td>
+   </tr>
    <tr>
       <td>reset_consumer</td>
       <td>

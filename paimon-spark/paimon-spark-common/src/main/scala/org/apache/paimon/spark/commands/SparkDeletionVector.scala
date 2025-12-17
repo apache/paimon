@@ -18,9 +18,8 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.fs.Path
 import org.apache.paimon.table.source.DataSplit
-import org.apache.paimon.utils.{FileStorePathFactory, SerializationUtils}
+import org.apache.paimon.utils.SerializationUtils
 
 import scala.collection.JavaConverters._
 
@@ -29,31 +28,21 @@ import scala.collection.JavaConverters._
  * or DeletionVector.
  */
 case class SparkDeletionVector(
-    partitionAndBucket: String,
+    bucketPath: String,
     partition: Array[Byte],
     bucket: Int,
-    dataFileName: String,
+    dataFilePath: String,
     deletionVector: Array[Byte]
-) {
-  def relativePath(pathFactory: FileStorePathFactory): String = {
-    val prefix = pathFactory
-      .relativeBucketPath(SerializationUtils.deserializeBinaryRow(partition), bucket)
-      .toUri
-      .toString + "/"
-    prefix + dataFileName
-  }
-}
+)
 
 object SparkDeletionVector {
   def toDataSplit(
       deletionVector: SparkDeletionVector,
-      root: Path,
-      pathFactory: FileStorePathFactory,
       dataFilePathToMeta: Map[String, SparkDataFileMeta]): DataSplit = {
-    val meta = dataFilePathToMeta(deletionVector.relativePath(pathFactory))
+    val meta = dataFilePathToMeta(deletionVector.dataFilePath)
     DataSplit
       .builder()
-      .withBucketPath(root + "/" + deletionVector.partitionAndBucket)
+      .withBucketPath(deletionVector.bucketPath)
       .withPartition(SerializationUtils.deserializeBinaryRow(deletionVector.partition))
       .withBucket(deletionVector.bucket)
       .withTotalBuckets(meta.totalBuckets)

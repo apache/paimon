@@ -33,7 +33,7 @@ under the License.
     └── manifest-list-51c16f7b-421c-4bc0-80a0-17677f343358-1
 ```
 
-Manifest List includes meta of several manifest files. Its name contains UUID, it is a avro file, the schema is:
+Manifest List includes meta of several manifest files. Its name contains UUID, it is an avro file, the schema is:
 
 1. _FILE_NAME: STRING, manifest file name.
 2. _FILE_SIZE: BIGINT, manifest file size.
@@ -131,5 +131,5 @@ objects.
 
 A Row has two part: Fixed-length part and variable-length part. Fixed-length part contains 1 byte header and null bit
 set and field values. Null bit set is used for null tracking and is aligned to 8-byte word boundaries. `Field values`
-holds fixed-length primitive types and variable-length values which can be stored in 8 bytes inside. If it do not fit
+holds fixed-length primitive types and variable-length values which can be stored in 8 bytes inside. If it does not fit
 the variable-length field, then store the length and offset of variable-length part.

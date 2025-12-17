@@ -39,19 +39,20 @@ import scala.collection.JavaConverters._
 case class PaimonPartitionReader(
     readBuilder: ReadBuilder,
     partition: PaimonInputPartition,
-    metadataColumns: Seq[PaimonMetadataColumn]
+    metadataColumns: Seq[PaimonMetadataColumn],
+    blobAsDescriptor: Boolean
 ) extends PartitionReader[InternalRow] {
 
   private val splits: Iterator[Split] = partition.splits.toIterator
-  @Nullable private var currentRecordReader = readSplit()
   private var advanced = false
   private var currentRow: PaimonInternalRow = _
   private val ioManager: IOManager = createIOManager()
+  @Nullable private var currentRecordReader = readSplit()
   private val sparkRow: SparkInternalRow = {
     val dataFields = new JList(readBuilder.readType().getFields)
     dataFields.addAll(metadataColumns.map(_.toPaimonDataField).asJava)
     val rowType = new RowType(dataFields)
-    SparkInternalRow.create(rowType)
+    SparkInternalRow.create(rowType, blobAsDescriptor)
   }
 
   private lazy val read = readBuilder.newRead().withIOManager(ioManager)
@@ -107,20 +108,23 @@ case class PaimonPartitionReader(
     }
   }
 
-  override def currentMetricsValues(): Array[CustomTaskMetric] = {
+  // Partition metrics need to be computed only once.
+  private lazy val partitionMetrics: Array[CustomTaskMetric] = {
     val dataSplits = partition.splits.collect { case ds: DataSplit => ds }
     val numSplits = dataSplits.length
-    val paimonMetricsValues: Array[CustomTaskMetric] = if (dataSplits.nonEmpty) {
+    if (dataSplits.nonEmpty) {
       val splitSize = dataSplits.map(_.dataFiles().asScala.map(_.fileSize).sum).sum
       Array(
         PaimonNumSplitsTaskMetric(numSplits),
-        PaimonSplitSizeTaskMetric(splitSize),
-        PaimonAvgSplitSizeTaskMetric(splitSize / numSplits)
+        PaimonPartitionSizeTaskMetric(splitSize)
       )
     } else {
       Array.empty[CustomTaskMetric]
     }
-    super.currentMetricsValues() ++ paimonMetricsValues
+  }
+
+  override def currentMetricsValues(): Array[CustomTaskMetric] = {
+    partitionMetrics
   }
 
   override def close(): Unit = {

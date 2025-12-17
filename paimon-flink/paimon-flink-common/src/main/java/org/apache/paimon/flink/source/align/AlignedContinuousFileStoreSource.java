@@ -65,7 +65,14 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
         FileStoreSourceReaderMetrics sourceReaderMetrics =
                 new FileStoreSourceReaderMetrics(context.metricGroup());
         return new AlignedSourceReader(
-                context, readBuilder.newRead(), sourceReaderMetrics, ioManager, limit, rowData);
+                context,
+                readBuilder.newRead(),
+                sourceReaderMetrics,
+                ioManager,
+                limit,
+                rowData,
+                readBuilder.readType(),
+                blobAsDescriptor);
     }
 
     @Override

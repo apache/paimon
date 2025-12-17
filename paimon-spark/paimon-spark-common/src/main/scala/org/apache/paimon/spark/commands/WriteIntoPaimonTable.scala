@@ -36,7 +36,8 @@ case class WriteIntoPaimonTable(
     override val originTable: FileStoreTable,
     saveMode: SaveMode,
     _data: DataFrame,
-    options: Options)
+    options: Options,
+    batchId: Option[Long] = None)
   extends RunnableCommand
   with ExpressionHelper
   with SchemaHelper
@@ -50,7 +51,7 @@ case class WriteIntoPaimonTable(
     updateTableWithOptions(
       Map(DYNAMIC_PARTITION_OVERWRITE.key -> dynamicPartitionOverwriteMode.toString))
 
-    val writer = PaimonSparkWriter(table)
+    val writer = PaimonSparkWriter(table, batchId = batchId)
     if (overwritePartition != null) {
       writer.writeBuilder.withOverwrite(overwritePartition.asJava)
     }

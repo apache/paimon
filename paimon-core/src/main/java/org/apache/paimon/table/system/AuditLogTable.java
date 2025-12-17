@@ -59,11 +59,13 @@ import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -360,6 +362,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withLevelMinMaxFilter(BiFilter<Integer, Integer> minMaxFilter) {
+            wrapped.withLevelMinMaxFilter(minMaxFilter);
+            return this;
+        }
+
+        @Override
         public SnapshotReader enableValueFilter() {
             wrapped.enableValueFilter();
             return this;
@@ -415,6 +423,18 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public SnapshotReader withMetricRegistry(MetricRegistry registry) {
             wrapped.withMetricRegistry(registry);
+            return this;
+        }
+
+        @Override
+        public SnapshotReader withRowRanges(List<Range> rowRanges) {
+            wrapped.withRowRanges(rowRanges);
+            return this;
+        }
+
+        @Override
+        public SnapshotReader withReadType(RowType readType) {
+            wrapped.withReadType(readType);
             return this;
         }
 

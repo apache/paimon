@@ -23,6 +23,7 @@ import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
@@ -50,14 +51,18 @@ public class FileStoreSourceReader
             FileStoreSourceReaderMetrics metrics,
             IOManager ioManager,
             @Nullable Long limit,
-            @Nullable NestedProjectedRowData rowData) {
+            @Nullable NestedProjectedRowData rowData,
+            @Nullable RowType readType,
+            boolean blobAsDescriptor) {
         // limiter is created in SourceReader, it can be shared in all split readers
         super(
                 () ->
                         new FileStoreSourceSplitReader(
                                 tableRead.withIOManager(ioManager),
                                 RecordLimiter.create(limit),
-                                metrics),
+                                metrics,
+                                readType,
+                                blobAsDescriptor),
                 (element, output, state) ->
                         FlinkRecordsWithSplitIds.emitRecord(
                                 readerContext, element, output, state, metrics, rowData),

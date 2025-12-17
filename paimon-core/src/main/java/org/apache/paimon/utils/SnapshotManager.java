@@ -165,19 +165,22 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Snapshot latestSnapshot() {
+        Snapshot snapshot;
         if (snapshotLoader != null) {
             try {
-                Snapshot snapshot = snapshotLoader.load().orElse(null);
-                if (snapshot != null && cache != null) {
-                    cache.put(snapshotPath(snapshot.id()), snapshot);
-                }
-                return snapshot;
+                snapshot = snapshotLoader.load().orElse(null);
             } catch (UnsupportedOperationException ignored) {
+                snapshot = latestSnapshotFromFileSystem();
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
+        } else {
+            snapshot = latestSnapshotFromFileSystem();
         }
-        return latestSnapshotFromFileSystem();
+        if (snapshot != null && cache != null) {
+            cache.put(snapshotPath(snapshot.id()), snapshot);
+        }
+        return snapshot;
     }
 
     public @Nullable Snapshot latestSnapshotFromFileSystem() {
@@ -767,12 +770,31 @@ public class SnapshotManager implements Serializable {
     }
 
     public static Snapshot tryFromPath(FileIO fileIO, Path path) throws FileNotFoundException {
-        try {
-            return Snapshot.fromJson(fileIO.readFileUtf8(path));
-        } catch (FileNotFoundException e) {
-            throw e;
-        } catch (IOException e) {
-            throw new RuntimeException("Fails to read snapshot from path " + path, e);
+        int retryNumber = 0;
+        Exception exception = null;
+        while (retryNumber++ < 10) {
+            String content;
+            try {
+                content = fileIO.readFileUtf8(path);
+            } catch (FileNotFoundException e) {
+                throw e;
+            } catch (IOException e) {
+                throw new RuntimeException("Fails to read snapshot from path " + path, e);
+            }
+
+            try {
+                return Snapshot.fromJson(content);
+            } catch (Exception e) {
+                // retry
+                exception = e;
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(ie);
+                }
+            }
         }
+        throw new RuntimeException("Retry fail after 10 times", exception);
     }
 }

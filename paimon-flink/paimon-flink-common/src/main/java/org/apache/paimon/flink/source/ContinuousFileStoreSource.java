@@ -57,7 +57,12 @@ public class ContinuousFileStoreSource extends FlinkSource {
             @Nullable Long limit,
             boolean unordered,
             @Nullable NestedProjectedRowData rowData) {
-        super(readBuilder, limit, rowData);
+        super(
+                readBuilder,
+                limit,
+                rowData,
+                Boolean.parseBoolean(
+                        options.getOrDefault(CoreOptions.BLOB_AS_DESCRIPTOR.key(), "false")));
         this.options = options;
         this.unordered = unordered;
     }

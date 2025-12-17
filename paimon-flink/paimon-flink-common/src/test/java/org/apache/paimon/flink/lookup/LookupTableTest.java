@@ -78,6 +78,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode.FULL
 import static org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode.MEMORY;
 import static org.apache.paimon.types.DataTypes.INT;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link LookupTable}. */
@@ -115,17 +116,18 @@ public class LookupTableTest extends TableTestBase {
     }
 
     private FileStoreTable createTable(List<String> primaryKeys, Options options) throws Exception {
+        return createTable(emptyList(), primaryKeys, options);
+    }
+
+    private FileStoreTable createTable(
+            List<String> partitionKeys, List<String> primaryKeys, Options options)
+            throws Exception {
         if (inMemory) {
             options.set(LOOKUP_CACHE_MODE, MEMORY);
         }
         Identifier identifier = new Identifier("default", "t");
         Schema schema =
-                new Schema(
-                        rowType.getFields(),
-                        Collections.emptyList(),
-                        primaryKeys,
-                        options.toMap(),
-                        null);
+                new Schema(rowType.getFields(), partitionKeys, primaryKeys, options.toMap(), null);
         catalog.createTable(identifier, schema, false);
         return (FileStoreTable) catalog.getTable(identifier);
     }
@@ -1026,6 +1028,70 @@ public class LookupTableTest extends TableTestBase {
         result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, -1, 111);
+    }
+
+    @TestTemplate
+    public void testLookupDataTableScanHandleOverwrite() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 1);
+        FileStoreTable storeTable =
+                createTable(singletonList("f0"), Arrays.asList("f0", "f1"), options);
+        LookupFileStoreTable lookupFileStoreTable =
+                new LookupFileStoreTable(storeTable, Arrays.asList("f0", "f1"));
+
+        LookupDataTableScan scan = (LookupDataTableScan) lookupFileStoreTable.newStreamScan();
+
+        write(storeTable, (IOManager) null, GenericRow.of(1, 1, 1), GenericRow.of(2, 1, 1));
+
+        BatchWriteBuilder writeBuilder =
+                storeTable
+                        .newBatchWriteBuilder()
+                        .withOverwrite(Collections.singletonMap("f0", "1"));
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 2, 2));
+            commit.commit(write.prepareCommit());
+        }
+
+        // didn't specify partitions
+        assertThatThrownBy(
+                        () ->
+                                scan.handleOverwriteSnapshot(
+                                        storeTable.snapshotManager().latestSnapshot()))
+                .isInstanceOf(ReopenException.class);
+
+        // specify partition f0 = 1
+        scan.setScanPartitions(Collections.singletonList(BinaryRow.singleColumn(1)));
+        assertThatThrownBy(
+                        () ->
+                                scan.handleOverwriteSnapshot(
+                                        storeTable.snapshotManager().latestSnapshot()))
+                .isInstanceOf(ReopenException.class);
+
+        // specify partition f0 = 2
+        scan.setScanPartitions(Collections.singletonList(BinaryRow.singleColumn(2)));
+        assertThatCode(
+                        () ->
+                                scan.handleOverwriteSnapshot(
+                                        storeTable.snapshotManager().latestSnapshot()))
+                .doesNotThrowAnyException();
+
+        // overwrite partition f0 = 3 and reopen
+        scan.setScanPartitions(Collections.singletonList(BinaryRow.singleColumn(3)));
+        writeBuilder =
+                storeTable
+                        .newBatchWriteBuilder()
+                        .withOverwrite(Collections.singletonMap("f0", "3"));
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(3, 1, 1));
+            commit.commit(write.prepareCommit());
+        }
+        assertThatThrownBy(
+                        () ->
+                                scan.handleOverwriteSnapshot(
+                                        storeTable.snapshotManager().latestSnapshot()))
+                .isInstanceOf(ReopenException.class);
     }
 
     private FileStoreTable createDimTable() throws Exception {

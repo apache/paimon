@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from pathlib import Path
 from typing import Optional
 
 from pypaimon.common.file_io import FileIO
@@ -31,8 +30,9 @@ class SnapshotManager:
 
         self.table: FileStoreTable = table
         self.file_io: FileIO = self.table.file_io
-        self.snapshot_dir = self.table.table_path / "snapshot"
-        self.latest_file = self.snapshot_dir / "LATEST"
+        snapshot_path = self.table.table_path.rstrip('/')
+        self.snapshot_dir = f"{snapshot_path}/snapshot"
+        self.latest_file = f"{self.snapshot_dir}/LATEST"
 
     def get_latest_snapshot(self) -> Optional[Snapshot]:
         if not self.file_io.exists(self.latest_file):
@@ -41,14 +41,14 @@ class SnapshotManager:
         latest_content = self.file_io.read_file_utf8(self.latest_file)
         latest_snapshot_id = int(latest_content.strip())
 
-        snapshot_file = self.snapshot_dir / f"snapshot-{latest_snapshot_id}"
+        snapshot_file = f"{self.snapshot_dir}/snapshot-{latest_snapshot_id}"
         if not self.file_io.exists(snapshot_file):
             return None
 
         snapshot_content = self.file_io.read_file_utf8(snapshot_file)
         return JSON.from_json(snapshot_content, Snapshot)
 
-    def get_snapshot_path(self, snapshot_id: int) -> Path:
+    def get_snapshot_path(self, snapshot_id: int) -> str:
         """
         Get the path for a snapshot file.
 
@@ -58,4 +58,60 @@ class SnapshotManager:
         Returns:
             Path to the snapshot file
         """
-        return self.snapshot_dir / f"snapshot-{snapshot_id}"
+        return f"{self.snapshot_dir}/snapshot-{snapshot_id}"
+
+    def try_get_earliest_snapshot(self) -> Optional[Snapshot]:
+        earliest_file = f"{self.snapshot_dir}/EARLIEST"
+        if self.file_io.exists(earliest_file):
+            earliest_content = self.file_io.read_file_utf8(earliest_file)
+            earliest_snapshot_id = int(earliest_content.strip())
+            return self.get_snapshot_by_id(earliest_snapshot_id)
+        else:
+            return self.get_snapshot_by_id(1)
+
+    def earlier_or_equal_time_mills(self, timestamp: int) -> Optional[Snapshot]:
+        """
+        Find the latest snapshot with time_millis <= the given timestamp.
+
+        Args:
+            timestamp: The timestamp to compare against
+
+        Returns:
+            The latest snapshot with time_millis <= timestamp, or None if no such snapshot exists
+        """
+        earliest = 1
+        latest = self.get_latest_snapshot().id
+        final_snapshot = None
+
+        while earliest <= latest:
+            mid = earliest + (latest - earliest) // 2
+            snapshot = self.get_snapshot_by_id(mid)
+            commit_time = snapshot.time_millis
+
+            if commit_time > timestamp:
+                latest = mid - 1
+            elif commit_time < timestamp:
+                earliest = mid + 1
+                final_snapshot = snapshot
+            else:
+                final_snapshot = snapshot
+                break
+
+        return final_snapshot
+
+    def get_snapshot_by_id(self, snapshot_id: int) -> Optional[Snapshot]:
+        """
+        Get a snapshot by its ID.
+
+        Args:
+            snapshot_id: The snapshot ID
+
+        Returns:
+            The snapshot with the specified ID, or None if not found
+        """
+        snapshot_file = self.get_snapshot_path(snapshot_id)
+        if not self.file_io.exists(snapshot_file):
+            return None
+
+        snapshot_content = self.file_io.read_file_utf8(snapshot_file)
+        return JSON.from_json(snapshot_content, Snapshot)

@@ -68,6 +68,11 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
     }
 
     @Override
+    public Boolean visitLike(FieldRef fieldRef, Object literal) {
+        return false;
+    }
+
+    @Override
     public Boolean visitLessThan(FieldRef fieldRef, Object literal) {
         return false;
     }
@@ -119,6 +124,11 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
 
     @Override
     public Boolean visitOr(List<Boolean> children) {
+        return false;
+    }
+
+    @Override
+    public Boolean visit(TransformPredicate predicate) {
         return false;
     }
 }

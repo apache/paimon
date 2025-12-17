@@ -130,7 +130,9 @@ public class FileStoreSourceSplitReaderTest {
         return new FileStoreSourceSplitReader(
                 tableRead,
                 limit == null ? null : new RecordLimiter(limit),
-                new FileStoreSourceReaderMetrics(new DummyMetricGroup()));
+                new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
+                null,
+                false);
     }
 
     private void innerTestOnce(int skip) throws Exception {

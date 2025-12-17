@@ -18,8 +18,9 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{Predicate, TopN}
-import org.apache.paimon.table.{InnerTable, Table}
+import org.apache.paimon.table.InnerTable
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
 import org.apache.spark.sql.connector.expressions.NamedReference
@@ -32,13 +33,12 @@ import scala.collection.JavaConverters._
 case class PaimonScan(
     table: InnerTable,
     requiredSchema: StructType,
-    filters: Seq[Predicate],
-    reservedFilters: Seq[Filter],
-    override val pushDownLimit: Option[Int],
-    // no usage, just for compile compatibility
-    override val pushDownTopN: Option[TopN],
+    pushedPartitionFilters: Seq[PartitionPredicate],
+    pushedDataFilters: Seq[Predicate],
+    override val pushedLimit: Option[Int] = None,
+    override val pushedTopN: Option[TopN] = None,
     bucketedScanDisabled: Boolean = true)
-  extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)
+  extends PaimonBaseScan(table)
   with SupportsRuntimeFiltering {
 
   override def filterAttributes(): Array[NamedReference] = {

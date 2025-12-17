@@ -270,7 +270,7 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>The maximum input file size for this task's compaction.</td>
         </tr>
         <tr>
-            <td>avgCompactionInputSize/td>
+            <td>avgCompactionInputSize</td>
             <td>Gauge</td>
             <td>The average input file size for this task's compaction.</td>
         </tr>

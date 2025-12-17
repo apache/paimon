@@ -374,10 +374,13 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                                         new IcebergSnapshot(
                                                 snapshot.sequenceNumber(),
                                                 snapshot.snapshotId(),
+                                                snapshot.parentSnapshotId(),
                                                 snapshot.timestampMs(),
                                                 snapshot.summary(),
                                                 snapshot.manifestList(),
-                                                snapshot.schemaId() + 1))
+                                                snapshot.schemaId() + 1,
+                                                snapshot.firstRowId(),
+                                                snapshot.addedRows()))
                         .collect(Collectors.toList());
         return new IcebergMetadata(
                 newIcebergMetadata.formatVersion(),

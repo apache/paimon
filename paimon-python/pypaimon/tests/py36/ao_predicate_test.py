@@ -22,12 +22,12 @@ import unittest
 import pandas as pd
 import pyarrow as pa
 
-from pypaimon import CatalogFactory
-from pypaimon import Schema
-from pypaimon.tests.predicates_test import _random_format, _check_filtered_result
+from pypaimon import CatalogFactory, Schema
+from pypaimon.tests.predicates_test import (_check_filtered_result,
+                                            _random_format)
 
 
-class PredicatePy36Test(unittest.TestCase):
+class AOPredicatePy36Test(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):

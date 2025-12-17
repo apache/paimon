@@ -145,28 +145,3 @@ class TableSchema:
             comment=self.comment,
             time_millis=self.time_millis
         )
-
-    def get_primary_key_fields(self) -> List[DataField]:
-        if not self.primary_keys:
-            return []
-        field_map = {field.name: field for field in self.fields}
-        return [field_map[name] for name in self.primary_keys if name in field_map]
-
-    def get_partition_key_fields(self) -> List[DataField]:
-        if not self.partition_keys:
-            return []
-        field_map = {field.name: field for field in self.fields}
-        return [field_map[name] for name in self.partition_keys if name in field_map]
-
-    def get_trimmed_primary_key_fields(self) -> List[DataField]:
-        if not self.primary_keys or not self.partition_keys:
-            return self.get_primary_key_fields()
-        adjusted = [pk for pk in self.primary_keys if pk not in self.partition_keys]
-        # Validate that filtered list is not empty
-        if not adjusted:
-            raise ValueError(
-                f"Primary key constraint {self.primary_keys} "
-                f"should not be same with partition fields {self.partition_keys}, "
-                "this will result in only one record in a partition")
-        field_map = {field.name: field for field in self.fields}
-        return [field_map[name] for name in adjusted if name in field_map]

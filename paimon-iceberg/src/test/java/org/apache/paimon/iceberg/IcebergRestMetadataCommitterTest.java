@@ -29,6 +29,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
+import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
@@ -603,6 +604,70 @@ public class IcebergRestMetadataCommitterTest {
                 .isTrue();
         assertThat(getIcebergResult())
                 .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)", "Record(3, 30)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testParentSnapshotIdTracking() throws Exception {
+        // create and write with paimon client
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        randomFormat(),
+                        Collections.emptyMap());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        // First commit - should have null parent snapshot ID
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        FileIO fileIO = table.fileIO();
+        IcebergMetadata metadata1 =
+                IcebergMetadata.fromPath(
+                        fileIO, new Path(catalogTableMetadataPath(table), "v1.metadata.json"));
+        assertThat(metadata1.snapshots()).hasSize(1);
+        assertThat(metadata1.snapshots().get(0).parentSnapshotId()).isNull();
+        assertThat(metadata1.snapshots().get(0).snapshotId()).isEqualTo(1);
+
+        // Second commit - should have parent snapshot ID pointing to first snapshot
+        write.write(GenericRow.of(1, 11));
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        IcebergMetadata metadata2 =
+                IcebergMetadata.fromPath(
+                        fileIO, new Path(catalogTableMetadataPath(table), "v2.metadata.json"));
+        assertThat(metadata2.snapshots()).hasSize(2);
+        // The last snapshot should have parent pointing to the previous snapshot
+        IcebergSnapshot lastSnapshot = metadata2.snapshots().get(metadata2.snapshots().size() - 1);
+        assertThat(lastSnapshot.parentSnapshotId()).isEqualTo(1L);
+        assertThat(lastSnapshot.snapshotId()).isEqualTo(2);
+
+        // Third commit - should have parent snapshot ID pointing to second snapshot
+        write.write(GenericRow.of(2, 21));
+        write.write(GenericRow.of(4, 40));
+        commit.commit(3, write.prepareCommit(true, 3));
+
+        IcebergMetadata metadata3 =
+                IcebergMetadata.fromPath(
+                        fileIO, new Path(catalogTableMetadataPath(table), "v3.metadata.json"));
+        assertThat(metadata3.snapshots()).hasSize(3);
+        // The last snapshot should have parent pointing to the previous snapshot
+        IcebergSnapshot lastSnapshot3 = metadata3.snapshots().get(metadata3.snapshots().size() - 1);
+        assertThat(lastSnapshot3.parentSnapshotId()).isEqualTo(2L);
+        assertThat(lastSnapshot3.snapshotId()).isEqualTo(3);
 
         write.close();
         commit.close();

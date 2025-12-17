@@ -41,7 +41,6 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.col
 
-import java.net.URI
 import java.util.Collections
 
 import scala.collection.JavaConverters._
@@ -69,12 +68,6 @@ trait PaimonRowLevelCommand
     } else {
       PaimonSparkWriter(table)
     }
-  }
-
-  /** Gets a relative path against the table path. */
-  protected def relativePath(absolutePath: String): String = {
-    val location = table.location().toUri
-    location.relativize(new URI(absolutePath)).toString
   }
 
   protected def findCandidateDataSplits(
@@ -121,7 +114,6 @@ trait PaimonRowLevelCommand
       .distinct()
       .as[String]
       .collect()
-      .map(relativePath)
   }
 
   protected def extractFilesAndCreateNewScan(
@@ -136,15 +128,14 @@ trait PaimonRowLevelCommand
     (files, newRelation)
   }
 
-  /** Notice that, the key is a relative path, not just the file name. */
+  /** Notice that, the key is a file path, not just the file name. */
   protected def candidateFileMap(
       candidateDataSplits: Seq[DataSplit]): Map[String, SparkDataFileMeta] = {
     val totalBuckets = coreOptions.bucket()
     val candidateDataFiles = candidateDataSplits
       .flatMap(dataSplit => convertToSparkDataFileMeta(dataSplit, totalBuckets))
-    val fileStorePathFactory = fileStore.pathFactory()
     candidateDataFiles
-      .map(file => (file.relativePath(fileStorePathFactory), file))
+      .map(file => (file.filePath(), file))
       .toMap
   }
 
@@ -165,14 +156,15 @@ trait PaimonRowLevelCommand
       dataset: Dataset[Row],
       sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
     import sparkSession.implicits._
-    val dataFileToPartitionAndBucket =
-      dataFilePathToMeta.mapValues(meta => (meta.partition, meta.bucket)).toArray
+    // convert to a serializable map
+    val dataFileToPartitionAndBucket = dataFilePathToMeta.map {
+      case (k, v) => k -> (v.bucketPath, v.partition, v.bucket)
+    }
 
     val my_table = table
-    val location = my_table.location
     val dvBitmap64 = my_table.coreOptions().deletionVectorBitmap64()
     dataset
-      .select(DV_META_COLUMNS.map(col): _*)
+      .select(PATH_AND_INDEX_META_COLUMNS.map(col): _*)
       .as[(String, Long)]
       .groupByKey(_._1)
       .mapGroups {
@@ -183,18 +175,12 @@ trait PaimonRowLevelCommand
             dv.delete(iter.next()._2)
           }
 
-          val relativeFilePath = location.toUri.relativize(new URI(filePath)).toString
-          val (partition, bucket) = dataFileToPartitionAndBucket.toMap.apply(relativeFilePath)
-          val pathFactory = my_table.store().pathFactory()
-          val relativeBucketPath = pathFactory
-            .relativeBucketPath(partition, bucket)
-            .toString
-
+          val (bucketPath, partition, bucket) = dataFileToPartitionAndBucket.apply(filePath)
           SparkDeletionVector(
-            relativeBucketPath,
+            bucketPath,
             SerializationUtils.serializeBinaryRow(partition),
             bucket,
-            new Path(filePath).getName,
+            filePath,
             DeletionVector.serializeToBytes(dv)
           )
       }

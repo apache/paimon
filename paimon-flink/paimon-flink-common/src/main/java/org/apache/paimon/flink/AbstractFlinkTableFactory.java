@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
+import org.apache.paimon.flink.sink.FlinkFormatTableSink;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.flink.source.SystemTableSource;
@@ -35,6 +36,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
 
@@ -122,11 +124,17 @@ public abstract class AbstractFlinkTableFactory
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
-        return new FlinkTableSink(
-                context.getObjectIdentifier(),
-                buildPaimonTable(context),
-                context,
-                createOptionalLogStoreFactory(context).orElse(null));
+        Table table = buildPaimonTable(context);
+        if (table instanceof FormatTable) {
+            return new FlinkFormatTableSink(
+                    context.getObjectIdentifier(), (FormatTable) table, context);
+        } else {
+            return new FlinkTableSink(
+                    context.getObjectIdentifier(),
+                    table,
+                    context,
+                    createOptionalLogStoreFactory(context).orElse(null));
+        }
     }
 
     @Override
@@ -198,7 +206,8 @@ public abstract class AbstractFlinkTableFactory
                 (key, newValue) -> {
                     String oldValue = origin.getOptions().get(key);
                     if (!Objects.equals(oldValue, newValue)) {
-                        SchemaManager.checkAlterTableOption(key, oldValue, newValue, true);
+                        SchemaManager.checkAlterTableOption(
+                                origin.getOptions(), key, oldValue, newValue);
                     }
                 });
         Map<String, String> newOptions = new HashMap<>();
