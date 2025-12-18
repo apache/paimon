@@ -122,8 +122,11 @@ case class MergeIntoPaimonDataEvolutionTable(
    * ON t._ROW_ID = s._ROW_ID
    * WHEN MATCHED THEN UPDATE ... SET ...
    * }}}
-   * For this pattern, the execution can be optimized to: Scan -> MergeRows -> Write, without any
-   * extra shuffle, join, or sort.
+   * For this pattern, the execution can be optimized to:
+   *
+   * `Scan -> MergeRows -> Write`
+   *
+   * without any extra shuffle, join, or sort.
    */
   private lazy val isSelfMergeOnRowId: Boolean = {
     if (!targetRelation.name.equals(sourceRelation.name)) {
