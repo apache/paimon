@@ -208,13 +208,6 @@ public class CoreOptions implements Serializable {
                                     + ExternalPathStrategy.SPECIFIC_FS
                                     + ", should be the prefix scheme of the external path, now supported are s3 and oss.");
 
-    public static final ConfigOption<Boolean> ENTROPY_INJECT_ENABLED =
-            key("entropy.inject.enabled")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "enable entropy injection for data files to avoid being throttled by cloud storage services.");
-
     public static final ConfigOption<Boolean> COMPACTION_FORCE_REWRITE_ALL_FILES =
             key("compaction.force-rewrite-all-files")
                     .booleanType()
@@ -2911,10 +2904,6 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String dataFileExternalPaths() {
         return options.get(DATA_FILE_EXTERNAL_PATHS);
-    }
-
-    public Boolean enableEntropyInject() {
-        return options.get(ENTROPY_INJECT_ENABLED);
     }
 
     public ExternalPathStrategy externalPathStrategy() {
