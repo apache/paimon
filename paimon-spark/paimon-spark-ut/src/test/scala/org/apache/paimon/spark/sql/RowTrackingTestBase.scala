@@ -22,10 +22,8 @@ import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan}
-import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
-import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
-import org.apache.spark.sql.execution.joins.BaseJoinExec
+import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan, RepartitionByExpression, Sort}
+import org.apache.spark.sql.execution.QueryExecution
 import org.apache.spark.sql.util.QueryExecutionListener
 
 import scala.collection.mutable
@@ -452,10 +450,10 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       val capturedPlans: mutable.ListBuffer[LogicalPlan] = mutable.ListBuffer.empty
       val listener = new QueryExecutionListener {
         override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
-          capturedPlans += qe.optimizedPlan
+          capturedPlans += qe.analyzed
         }
         override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
-          capturedPlans += qe.optimizedPlan
+          capturedPlans += qe.analyzed
         }
       }
       spark.listenerManager.register(listener)
@@ -470,9 +468,16 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       // Assert that job was triggered by
       // `org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.targetRelatedSplits`
       assert(capturedPlans.length == 2)
-      // Assert no join was used in
+      // Assert no shuffle/join/sort was used in
       // 'org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.updateActionInvoke'
-      assert(capturedPlans.head.collect { case plan: Join => plan }.isEmpty)
+      assert(
+        capturedPlans.head.collectFirst {
+          case p: Join => p
+          case p: Sort => p
+          case p: RepartitionByExpression => p
+        }.isEmpty,
+        s"Found unexpected Join/Sort/Exchange in plan:\n${capturedPlans.head}"
+      )
       spark.listenerManager.unregister(listener)
 
       checkAnswer(

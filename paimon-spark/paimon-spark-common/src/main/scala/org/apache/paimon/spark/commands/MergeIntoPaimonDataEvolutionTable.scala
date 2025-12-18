@@ -122,6 +122,8 @@ case class MergeIntoPaimonDataEvolutionTable(
    * ON t._ROW_ID = s._ROW_ID
    * WHEN MATCHED THEN UPDATE ... SET ...
    * }}}
+   * For this pattern, the execution can be optimized to: Scan -> MergeRows -> Write, without any
+   * extra shuffle, join, or sort.
    */
   private lazy val isSelfMergeOnRowId: Boolean = {
     if (!targetRelation.name.equals(sourceRelation.name)) {
@@ -266,11 +268,13 @@ case class MergeIntoPaimonDataEvolutionTable(
       allFields ++= action.references.flatMap(r => extractFields(r)).seq
     }
 
-    val mergeRows = if (isSelfMergeOnRowId) {
+    val toWrite = if (isSelfMergeOnRowId) {
       // Self-Merge shortcut:
       // - Scan the target table only (no source scan, no join), and read all columns required by
       //   merge condition and update expressions.
       // - Rewrite all source-side AttributeReferences to the corresponding target attributes.
+      // - The scan output already satisfies the required partitioning and ordering for partial
+      //   updates, so no extra shuffle or sort is needed.
 
       val targetAttrsDedup: Seq[AttributeReference] =
         (targetRelation.output ++ targetRelation.metadataOutput)
@@ -309,7 +313,7 @@ case class MergeIntoPaimonDataEvolutionTable(
           ua.copy(condition = newCond, assignments = newAssignments)
       }
 
-      MergeRows(
+      val mergeRows = MergeRows(
         isSourceRowPresent = TrueLiteral,
         isTargetRowPresent = TrueLiteral,
         matchedInstructions = rewrittenUpdateActions
@@ -323,6 +327,10 @@ case class MergeIntoPaimonDataEvolutionTable(
         output = output,
         child = readPlan
       )
+
+      val withFirstRowId = addFirstRowId(sparkSession, mergeRows)
+      assert(withFirstRowId.schema.fields.length == updateColumnsSorted.size + 2)
+      withFirstRowId
     } else {
       val allReadFieldsOnTarget = allFields.filter(
         field =>
@@ -344,7 +352,7 @@ case class MergeIntoPaimonDataEvolutionTable(
         Join(targetTableProj, sourceTableProj, LeftOuter, Some(matchedCondition), JoinHint.NONE)
       val rowFromSourceAttr = attribute(ROW_FROM_SOURCE, joinPlan)
       val rowFromTargetAttr = attribute(ROW_FROM_TARGET, joinPlan)
-      MergeRows(
+      val mergeRows = MergeRows(
         isSourceRowPresent = rowFromSourceAttr,
         isTargetRowPresent = rowFromTargetAttr,
         matchedInstructions = realUpdateActions
@@ -358,18 +366,14 @@ case class MergeIntoPaimonDataEvolutionTable(
         output = output,
         child = joinPlan
       )
+      val withFirstRowId = addFirstRowId(sparkSession, mergeRows)
+      assert(withFirstRowId.schema.fields.length == updateColumnsSorted.size + 2)
+      withFirstRowId
+        .repartitionByRange(col(FIRST_ROW_ID_NAME))
+        .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
     }
 
-    val firstRowIdsFinal = firstRowIds
-    val firstRowIdUdf = udf((rowId: Long) => floorBinarySearch(firstRowIdsFinal, rowId))
-    val firstRowIdColumn = firstRowIdUdf(col(ROW_ID_NAME))
-    val toWrite =
-      createDataset(sparkSession, mergeRows).withColumn(FIRST_ROW_ID_NAME, firstRowIdColumn)
-    assert(toWrite.schema.fields.length == updateColumnsSorted.size + 2)
-    val sortedDs = toWrite
-      .repartitionByRange(firstRowIdColumn)
-      .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
-    partialColumnWriter.writePartialFields(sortedDs, updateColumnsSorted.map(_.name))
+    partialColumnWriter.writePartialFields(toWrite, updateColumnsSorted.map(_.name))
   }
 
   private def insertActionInvoke(
@@ -492,6 +496,13 @@ case class MergeIntoPaimonDataEvolutionTable(
   private def attribute(name: String, plan: LogicalPlan) =
     plan.output.find(attr => resolver(name, attr.name)).get
 
+  private def addFirstRowId(sparkSession: SparkSession, plan: LogicalPlan): Dataset[Row] = {
+    assert(plan.output.exists(_.name.equals(ROW_ID_NAME)))
+    val firstRowIdsFinal = firstRowIds
+    val firstRowIdUdf = udf((rowId: Long) => floorBinarySearch(firstRowIdsFinal, rowId))
+    val firstRowIdColumn = firstRowIdUdf(col(ROW_ID_NAME))
+    createDataset(sparkSession, plan).withColumn(FIRST_ROW_ID_NAME, firstRowIdColumn)
+  }
 }
 
 object MergeIntoPaimonDataEvolutionTable {
