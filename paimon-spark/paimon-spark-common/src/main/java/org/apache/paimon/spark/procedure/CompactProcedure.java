@@ -23,6 +23,9 @@ import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
@@ -187,9 +190,10 @@ public class CompactProcedure extends BaseProcedure {
                     checkArgument(t instanceof FileStoreTable);
                     FileStoreTable table = (FileStoreTable) t;
                     CoreOptions coreOptions = table.coreOptions();
-                    checkArgument(
-                            !coreOptions.dataEvolutionEnabled(),
-                            "Compact operation is not supported when data evolution is enabled yet.");
+                    //                    checkArgument(
+                    //                            !coreOptions.dataEvolutionEnabled(),
+                    //                            "Compact operation is not supported when data
+                    // evolution is enabled yet.");
                     checkArgument(
                             sortColumns.stream().noneMatch(table.partitionKeys()::contains),
                             "order_by should not contain partition cols, because it is meaningless, your order_by cols are %s, and partition cols are %s",
@@ -267,7 +271,10 @@ public class CompactProcedure extends BaseProcedure {
                             javaSparkContext);
                     break;
                 case BUCKET_UNAWARE:
-                    if (clusterIncrementalEnabled) {
+                    if (table.coreOptions().dataEvolutionEnabled()) {
+                        compactDataEvolutionTable(
+                                table, partitionPredicate, partitionIdleTime, javaSparkContext);
+                    } else if (clusterIncrementalEnabled) {
                         clusterIncrementalUnAwareBucketTable(
                                 table, partitionPredicate, fullCompact, relation);
                     } else {
@@ -470,6 +477,99 @@ public class CompactProcedure extends BaseProcedure {
                         messageSerializerser.deserialize(
                                 messageSerializerser.getVersion(), serializedMessage));
             }
+            commit.commit(messages);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void compactDataEvolutionTable(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            @Nullable Duration partitionIdleTime,
+            JavaSparkContext javaSparkContext) {
+        List<DataEvolutionCompactTask> compactionTasks;
+        DataEvolutionCompactCoordinator compactCoordinator =
+                new DataEvolutionCompactCoordinator(table, partitionPredicate, false);
+        CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
+        String commitUser = createCommitUser(table.coreOptions().toConfiguration());
+        List<CommitMessage> messages = new ArrayList<>();
+        while (!(compactionTasks = compactCoordinator.plan()).isEmpty()) {
+            if (partitionIdleTime != null) {
+                SnapshotReader snapshotReader = table.newSnapshotReader();
+                if (partitionPredicate != null) {
+                    snapshotReader.withPartitionFilter(partitionPredicate);
+                }
+                Map<BinaryRow, Long> partitionInfo =
+                        snapshotReader.partitionEntries().stream()
+                                .collect(
+                                        Collectors.toMap(
+                                                PartitionEntry::partition,
+                                                PartitionEntry::lastFileCreationTime));
+                long historyMilli =
+                        LocalDateTime.now()
+                                .minus(partitionIdleTime)
+                                .atZone(ZoneId.systemDefault())
+                                .toInstant()
+                                .toEpochMilli();
+                compactionTasks =
+                        compactionTasks.stream()
+                                .filter(task -> partitionInfo.get(task.partition()) <= historyMilli)
+                                .collect(Collectors.toList());
+            }
+            if (compactionTasks.isEmpty()) {
+                LOG.info("Task plan is empty, no compact job to execute.");
+                continue;
+            }
+
+            DataEvolutionCompactTaskSerializer serializer =
+                    new DataEvolutionCompactTaskSerializer();
+            List<byte[]> serializedTasks = new ArrayList<>();
+            try {
+                for (DataEvolutionCompactTask compactionTask : compactionTasks) {
+                    serializedTasks.add(serializer.serialize(compactionTask));
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("serialize compaction task failed");
+            }
+
+            int readParallelism = readParallelism(serializedTasks, spark());
+            JavaRDD<byte[]> commitMessageJavaRDD =
+                    javaSparkContext
+                            .parallelize(serializedTasks, readParallelism)
+                            .mapPartitions(
+                                    (FlatMapFunction<Iterator<byte[]>, byte[]>)
+                                            taskIterator -> {
+                                                DataEvolutionCompactTaskSerializer ser =
+                                                        new DataEvolutionCompactTaskSerializer();
+                                                List<byte[]> messagesBytes = new ArrayList<>();
+                                                CommitMessageSerializer messageSer =
+                                                        new CommitMessageSerializer();
+                                                while (taskIterator.hasNext()) {
+                                                    DataEvolutionCompactTask task =
+                                                            ser.deserialize(
+                                                                    ser.getVersion(),
+                                                                    taskIterator.next());
+                                                    messagesBytes.add(
+                                                            messageSer.serialize(
+                                                                    task.doCompact(table)));
+                                                }
+                                                return messagesBytes.iterator();
+                                            });
+
+            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
+            try {
+                for (byte[] serializedMessage : serializedMessages) {
+                    messages.add(
+                            messageSerializerser.deserialize(
+                                    messageSerializerser.getVersion(), serializedMessage));
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("Deserialize commit message failed", e);
+            }
+        }
+
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
             commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
