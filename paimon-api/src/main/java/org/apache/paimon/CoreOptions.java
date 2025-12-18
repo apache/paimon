@@ -1744,7 +1744,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<RangeStrategy> SORT_RANG_STRATEGY =
             key("sort-compaction.range-strategy")
                     .enumType(RangeStrategy.class)
-                    .defaultValue(RangeStrategy.QUANTITY)
+                    .defaultValue(RangeStrategy.SIZE)
                     .withDescription(
                             "The range strategy of sort compaction, the default value is quantity.\n"
                                     + "If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, "
