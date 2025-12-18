@@ -1161,5 +1161,9 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         sql("ALTER TABLE test_table SET ('overwrite-upgrade' = 'false')");
         sql("INSERT OVERWRITE test_table VALUES (5, 'E', '2025-12-01')");
         assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql("ALTER TABLE test_table SET ('write-buffer-spillable' = 'false')");
+        sql("INSERT OVERWRITE test_table VALUES (6, 'F', '2025-12-01')");
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
     }
 }

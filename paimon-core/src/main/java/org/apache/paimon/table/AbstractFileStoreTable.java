@@ -472,15 +472,22 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private boolean allowOverwriteUpgrade() {
+        // only for primary key table
         if (tableSchema.primaryKeys().isEmpty()) {
             return false;
         }
 
         CoreOptions options = coreOptions();
-        return options.overwriteUpgrade()
-                && options.writeOnly()
-                && options.writeBufferSpillable()
-                && (tableSchema.numBuckets() != -2 || options.postponeBatchWriteFixedBucket());
+        BucketMode bucketMode = bucketMode();
+        if (bucketMode == BucketMode.KEY_DYNAMIC
+                || (bucketMode == BucketMode.POSTPONE_MODE
+                        && !options.postponeBatchWriteFixedBucket())) {
+            // 1. Cross partition upsert: might produce files for other partition
+            // 2. Don't upgrade files in postpone-bucket
+            return false;
+        }
+
+        return options.overwriteUpgrade() && options.writeOnly() && options.writeBufferSpillable();
     }
 
     @Override
