@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
@@ -44,6 +45,7 @@ public class GlobalIndexFileReadWrite implements GlobalIndexFileReader, GlobalIn
         return prefix + "-" + "global-index-" + UUID.randomUUID() + ".index";
     }
 
+    @Override
     public Path filePath(String fileName) {
         return indexPathFactory.toPath(fileName);
     }
@@ -52,7 +54,7 @@ public class GlobalIndexFileReadWrite implements GlobalIndexFileReader, GlobalIn
         return fileIO.getFileSize(filePath(fileName));
     }
 
-    public OutputStream newOutputStream(String fileName) throws IOException {
+    public PositionOutputStream newOutputStream(String fileName) throws IOException {
         return fileIO.newOutputStream(indexPathFactory.toPath(fileName), true);
     }
 

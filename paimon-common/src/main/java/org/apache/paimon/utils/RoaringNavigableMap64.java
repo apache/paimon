@@ -65,6 +65,10 @@ public class RoaringNavigableMap64 implements Iterable<Long> {
         roaring64NavigableMap.and(other.roaring64NavigableMap);
     }
 
+    public void andNot(RoaringNavigableMap64 other) {
+        roaring64NavigableMap.andNot(other.roaring64NavigableMap);
+    }
+
     public boolean isEmpty() {
         return roaring64NavigableMap.isEmpty();
     }

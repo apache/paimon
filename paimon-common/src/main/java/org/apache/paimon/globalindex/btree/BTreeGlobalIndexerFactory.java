@@ -16,17 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex.io;
+package org.apache.paimon.globalindex.btree;
 
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.GlobalIndexerFactory;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataField;
 
-import java.io.IOException;
+/** The {@link GlobalIndexerFactory} for btree index. */
+public class BTreeGlobalIndexerFactory implements GlobalIndexerFactory {
+    public static final String IDENTIFIER = "btree";
 
-/** File reader for global index. */
-public interface GlobalIndexFileReader {
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
+    }
 
-    SeekableInputStream getInputStream(String fileName) throws IOException;
-
-    Path filePath(String fileName);
+    @Override
+    public GlobalIndexer create(DataField dataField, Options options) {
+        return new BTreeGlobalIndexer(dataField, options);
+    }
 }

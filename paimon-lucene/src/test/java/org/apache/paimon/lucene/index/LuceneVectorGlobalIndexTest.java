@@ -20,6 +20,7 @@ package org.apache.paimon.lucene.index;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -82,7 +83,7 @@ public class LuceneVectorGlobalIndexTest {
             }
 
             @Override
-            public OutputStream newOutputStream(String fileName) throws IOException {
+            public PositionOutputStream newOutputStream(String fileName) throws IOException {
                 return fileIO.newOutputStream(new Path(path, fileName), false);
             }
         };
