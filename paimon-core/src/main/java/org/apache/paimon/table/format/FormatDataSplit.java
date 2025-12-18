@@ -34,6 +34,7 @@ public class FormatDataSplit implements Split {
     private final Path filePath;
     private final long fileSize;
     private final long offset;
+    // If null, means reading the whole file.
     @Nullable private final Long length;
     @Nullable private final BinaryRow partition;
 

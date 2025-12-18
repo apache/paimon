@@ -72,7 +72,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
 
-    private KeyValueFileReaderFactory(
+    protected KeyValueFileReaderFactory(
             FileIO fileIO,
             SchemaManager schemaManager,
             TableSchema schema,
@@ -104,6 +104,15 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         return pathFactory;
     }
 
+    protected TableSchema getDataSchema(DataFileMeta fileMeta) {
+        long schemaId = fileMeta.schemaId();
+        return schemaId == schema.id() ? schema : schemaManager.schema(schemaId);
+    }
+
+    protected BinaryRow getLogicalPartition() {
+        return partition;
+    }
+
     @Override
     public RecordReader<KeyValue> createRecordReader(DataFileMeta file) throws IOException {
         if (file.fileSize() >= asyncThreshold && file.fileName().endsWith(".orc")) {
@@ -121,9 +130,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         Supplier<FormatReaderMapping> formatSupplier =
                 () ->
                         formatReaderMappingBuilder.build(
-                                formatIdentifier,
-                                schema,
-                                schemaId == schema.id() ? schema : schemaManager.schema(schemaId));
+                                formatIdentifier, schema, getDataSchema(file));
 
         FormatReaderMapping formatReaderMapping =
                 reuseFormat
@@ -144,7 +151,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                                         fileIO, filePath, fileSize, orcPoolSize),
                         formatReaderMapping.getIndexMapping(),
                         formatReaderMapping.getCastMapping(),
-                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
+                        PartitionUtils.create(
+                                formatReaderMapping.getPartitionPair(), getLogicalPartition()),
                         false,
                         null,
                         -1,
@@ -184,18 +192,18 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     /** Builder for {@link KeyValueFileReaderFactory}. */
     public static class Builder {
 
-        private final FileIO fileIO;
-        private final SchemaManager schemaManager;
-        private final TableSchema schema;
-        private final RowType keyType;
-        private final RowType valueType;
-        private final FileFormatDiscover formatDiscover;
-        private final FileStorePathFactory pathFactory;
-        private final KeyValueFieldsExtractor extractor;
-        private final CoreOptions options;
+        protected final FileIO fileIO;
+        protected final SchemaManager schemaManager;
+        protected final TableSchema schema;
+        protected final RowType keyType;
+        protected final RowType valueType;
+        protected final FileFormatDiscover formatDiscover;
+        protected final FileStorePathFactory pathFactory;
+        protected final KeyValueFieldsExtractor extractor;
+        protected final CoreOptions options;
 
-        private RowType readKeyType;
-        private RowType readValueType;
+        protected RowType readKeyType;
+        protected RowType readValueType;
 
         private Builder(
                 FileIO fileIO,
@@ -264,35 +272,43 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 boolean projectKeys,
                 @Nullable List<Predicate> filters,
                 @Nullable VariantAccessInfo[] variantAccess) {
+            FormatReaderMapping.Builder builder =
+                    formatReaderMappingBuilder(projectKeys, filters, variantAccess);
+            return new KeyValueFileReaderFactory(
+                    fileIO,
+                    schemaManager,
+                    schema,
+                    projectKeys ? this.readKeyType : keyType,
+                    readValueType,
+                    builder,
+                    pathFactory.createDataFilePathFactory(partition, bucket),
+                    options.fileReaderAsyncThreshold().getBytes(),
+                    partition,
+                    dvFactory);
+        }
+
+        protected FormatReaderMapping.Builder formatReaderMappingBuilder(
+                boolean projectKeys,
+                @Nullable List<Predicate> filters,
+                @Nullable VariantAccessInfo[] variantAccess) {
             RowType finalReadKeyType = projectKeys ? this.readKeyType : keyType;
+            List<DataField> readTableFields =
+                    KeyValue.createKeyValueFields(
+                            finalReadKeyType.getFields(), readValueType.getFields());
             Function<TableSchema, List<DataField>> fieldsExtractor =
                     schema -> {
                         List<DataField> dataKeyFields = extractor.keyFields(schema);
                         List<DataField> dataValueFields = extractor.valueFields(schema);
                         return KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);
                     };
-            List<DataField> readTableFields =
-                    KeyValue.createKeyValueFields(
-                            finalReadKeyType.getFields(), readValueType.getFields());
-
-            return new KeyValueFileReaderFactory(
-                    fileIO,
-                    schemaManager,
-                    schema,
-                    finalReadKeyType,
-                    readValueType,
-                    new FormatReaderMapping.Builder(
-                            formatDiscover,
-                            readTableFields,
-                            fieldsExtractor,
-                            filters,
-                            null,
-                            null,
-                            variantAccess),
-                    pathFactory.createDataFilePathFactory(partition, bucket),
-                    options.fileReaderAsyncThreshold().getBytes(),
-                    partition,
-                    dvFactory);
+            return new FormatReaderMapping.Builder(
+                    formatDiscover,
+                    readTableFields,
+                    fieldsExtractor,
+                    filters,
+                    null,
+                    null,
+                    variantAccess);
         }
 
         public FileIO fileIO() {
