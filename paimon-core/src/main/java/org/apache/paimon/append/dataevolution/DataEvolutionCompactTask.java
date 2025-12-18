@@ -24,6 +24,7 @@ import org.apache.paimon.io.DataFileMeta;
 import java.util.ArrayList;
 import java.util.List;
 
+/** Data evolution table compaction task. */
 public class DataEvolutionCompactTask {
 
     private final BinaryRow partition;
