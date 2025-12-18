@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
@@ -56,6 +57,7 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -104,38 +106,51 @@ public class LuceneVectorGlobalIndexScanTest {
                     new float[] {0.98f, 0.05f}, new float[] {0.0f, 1.0f}, new float[] {0.05f, 0.98f}
                 };
 
-        // 3. Manually build vector index
+        // 2. Manually build vector index
         List<IndexFileMeta> indexFiles = buildIndexManually(vectors);
 
-        // 4. Commit index files to the Table (Update Index Manifest)
+        // 3. Commit index files to the Table (Update Index Manifest)
         commitIndex(indexFiles);
 
-        // 5. Use GlobalIndexScanBuilder to get scanner
-        GlobalIndexScanBuilder scanBuilder = table.store().newGlobalIndexScanBuilder();
-        List<Range> ranges = scanBuilder.shardList();
-        Range range = ranges.get(0);
-        RowRangeGlobalIndexScanner scanner = scanBuilder.withRowRange(range).build();
-
-        // 6. Execute TopK query
+        // 4. Verify results without filter
         float[] queryVector = new float[] {0.85f, 0.15f};
         VectorSearch vectorSearch = new VectorSearch(queryVector, 2, vectorFieldName);
-
-        // 7. Verify results without filter
-
-        VectorSearchGlobalIndexResult result =
-                (VectorSearchGlobalIndexResult) scanner.scan(vectorSearch).get();
+        VectorSearchGlobalIndexResult result = globalIndexScan(table, vectorSearch);
         List<Long> resultRowIds = new ArrayList<>();
         result.results().iterator().forEachRemaining(resultRowIds::add);
         assertThat(resultRowIds).hasSize(2);
 
-        // 8. Verify results with filter
+        // 5. Verify results with filter
         vectorSearch = new VectorSearch(queryVector, 2, vectorFieldName, List.of(1L).iterator());
-        result = (VectorSearchGlobalIndexResult) scanner.scan(vectorSearch).get();
+        result = globalIndexScan(table, vectorSearch);
         resultRowIds = new ArrayList<>();
         result.results().iterator().forEachRemaining(resultRowIds::add);
         float score = result.scoreGetter().score(resultRowIds.get(0));
         assertThat(resultRowIds).contains(1L);
         assertThat(score).isEqualTo(0.98765427f);
+    }
+
+    private VectorSearchGlobalIndexResult globalIndexScan(
+            FileStoreTable table, VectorSearch vectorSearch) throws Exception {
+        GlobalIndexScanBuilder indexScanBuilder = table.store().newGlobalIndexScanBuilder();
+        List<Range> ranges = indexScanBuilder.shardList();
+        GlobalIndexResult globalFileIndexResult = null;
+        for (Range range : ranges) {
+            try (RowRangeGlobalIndexScanner scanner =
+                    indexScanBuilder.withRowRange(range).build()) {
+                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(vectorSearch);
+                if (!globalIndexResult.isPresent()) {
+                    throw new RuntimeException("Can't find index result by scan");
+                }
+
+                globalFileIndexResult =
+                        globalFileIndexResult != null
+                                ? globalFileIndexResult.or(globalIndexResult.get())
+                                : globalIndexResult.get();
+            }
+        }
+
+        return (VectorSearchGlobalIndexResult) globalFileIndexResult;
     }
 
     private List<IndexFileMeta> buildIndexManually(float[][] vectors) throws Exception {

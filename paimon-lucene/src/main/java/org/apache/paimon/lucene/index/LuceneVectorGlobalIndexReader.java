@@ -98,8 +98,10 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
-                            "Failed to search vector index for TopK with similarity=%s, limit=%d",
-                            vectorIndexOptions.metric(), vectorSearch.limit()),
+                            "Failed to search vector index with fieldName=%s, similarity=%s, limit=%d",
+                            vectorSearch.fieldName(),
+                            vectorIndexOptions.metric(),
+                            vectorSearch.limit()),
                     e);
         }
         return defaultResult;
@@ -184,23 +186,23 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private GlobalIndexResult search(Query query, int k) throws IOException {
-        PriorityQueue<ScoredRow> topK =
+    private GlobalIndexResult search(Query query, int limit) throws IOException {
+        PriorityQueue<ScoredRow> result =
                 new PriorityQueue<>(Comparator.comparingDouble(sr -> sr.score));
         for (IndexSearcher searcher : searchers) {
             try {
-                TopDocs topDocs = searcher.search(query, k);
+                TopDocs topDocs = searcher.search(query, limit);
                 StoredFields storedFields = searcher.storedFields();
                 Set<String> fieldsToLoad = Set.of(ROW_ID_FIELD);
                 for (org.apache.lucene.search.ScoreDoc scoreDoc : topDocs.scoreDocs) {
                     Document doc = storedFields.document(scoreDoc.doc, fieldsToLoad);
                     long rowId = doc.getField(ROW_ID_FIELD).numericValue().longValue();
-                    if (topK.size() < k) {
-                        topK.offer(new ScoredRow(rowId, scoreDoc.score));
+                    if (result.size() < limit) {
+                        result.offer(new ScoredRow(rowId, scoreDoc.score));
                     } else {
-                        if (topK.peek() != null && scoreDoc.score > topK.peek().score) {
-                            topK.poll();
-                            topK.offer(new ScoredRow(rowId, scoreDoc.score));
+                        if (result.peek() != null && scoreDoc.score > result.peek().score) {
+                            result.poll();
+                            result.offer(new ScoredRow(rowId, scoreDoc.score));
                         }
                     }
                 }
@@ -209,8 +211,8 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
             }
         }
         RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
-        HashMap<Long, Float> id2scores = new HashMap<>(topK.size());
-        for (ScoredRow scoredRow : topK) {
+        HashMap<Long, Float> id2scores = new HashMap<>(result.size());
+        for (ScoredRow scoredRow : result) {
             long rowId = scoredRow.rowId;
             id2scores.put(rowId, scoredRow.score);
             roaringBitmap64.add(rowId);

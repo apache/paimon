@@ -38,13 +38,16 @@ public class VectorSearch implements Serializable {
             Object search,
             int limit,
             String fieldName,
-            Iterator<Long> includeRowIds,
+            @Nullable Iterator<Long> includeRowIds,
             @Nullable String similarityFunction) {
         if (search == null) {
             throw new IllegalArgumentException("Search cannot be null");
         }
         if (limit <= 0) {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
+        }
+        if (fieldName == null || fieldName.isEmpty()) {
+            throw new IllegalArgumentException("Field name cannot be null or empty");
         }
         this.search = search;
         this.limit = limit;
@@ -92,6 +95,8 @@ public class VectorSearch implements Serializable {
 
     @Override
     public String toString() {
-        return String.format("SimilarityFunction(%s), K(%s)", similarityFunction, limit);
+        return String.format(
+                "FieldName(%s), SimilarityFunction(%s), Limit(%s)",
+                fieldName, similarityFunction, limit);
     }
 }
