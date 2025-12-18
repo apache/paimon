@@ -67,8 +67,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * Every time a file is rolled, the writer will close the current normal data file and blob data files,
  * so one normal data file may correspond to multiple blob data files.
  *
- * Normal file1: f1.parquet may including (b1.blob, b2.blob, b3.blob)
- * Normal file2: f1-2.parquet may including (b4.blob, b5.blob)
+ * Normal file1: f1.parquet may include (b1.blob, b2.blob, b3.blob)
+ * Normal file2: f1-2.parquet may include (b4.blob, b5.blob)
  *
  * </pre>
  */
