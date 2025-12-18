@@ -541,6 +541,11 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(1, 11, 111, 2, 3), Row(2, 22, 2, 0, 3), Row(3, 3, 3, 1, 3))
       )
+
+      checkAnswer(
+        sql("SELECT count(*) FROM `t$files`"),
+        Seq(Row(1))
+      )
     }
   }
 }
