@@ -192,6 +192,8 @@ public class AliyunRecordParser extends AbstractJsonRecordParser {
         }
 
         evalComputedColumns(rowData, schemaBuilder);
+        evalMetadataColumns(rowData, schemaBuilder);
+
         return rowData;
     }
 
