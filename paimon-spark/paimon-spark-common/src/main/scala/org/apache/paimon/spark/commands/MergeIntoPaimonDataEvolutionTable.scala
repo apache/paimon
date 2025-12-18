@@ -136,7 +136,8 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
   }
 
-  assert(!(isSelfMergeOnRowId && (notMatchedActions.nonEmpty || notMatchedBySourceActions.nonEmpty)),
+  assert(
+    !(isSelfMergeOnRowId && (notMatchedActions.nonEmpty || notMatchedBySourceActions.nonEmpty)),
     "Self-Merge on _ROW_ID only supports WHEN MATCHED THEN UPDATE. WHEN NOT MATCHED and WHEN " +
       "NOT MATCHED BY SOURCE are not supported."
   )
@@ -286,23 +287,26 @@ case class MergeIntoPaimonDataEvolutionTable(
       val sourceToTarget = {
         val targetAttrs = targetRelation.output ++ targetRelation.metadataOutput
         val sourceAttrs = sourceRelation.output ++ sourceRelation.metadataOutput
-        sourceAttrs.flatMap { s =>
-          targetAttrs.find(t => resolver(t.name, s.name)).map(t => s.exprId -> t)
+        sourceAttrs.flatMap {
+          s => targetAttrs.find(t => resolver(t.name, s.name)).map(t => s.exprId -> t)
         }.toMap
       }
 
-      def rewriteSourceToTarget(expr: Expression, m: Map[ExprId, AttributeReference]): Expression = {
+      def rewriteSourceToTarget(
+          expr: Expression,
+          m: Map[ExprId, AttributeReference]): Expression = {
         expr.transform {
           case a: AttributeReference if m.contains(a.exprId) => m(a.exprId)
         }
       }
 
-      val rewrittenUpdateActions: Seq[UpdateAction] = realUpdateActions.map { ua =>
-        val newCond = ua.condition.map(c => rewriteSourceToTarget(c, sourceToTarget))
-        val newAssignments = ua.assignments.map { a =>
-          Assignment(a.key, rewriteSourceToTarget(a.value, sourceToTarget))
-        }
-        ua.copy(condition = newCond, assignments = newAssignments)
+      val rewrittenUpdateActions: Seq[UpdateAction] = realUpdateActions.map {
+        ua =>
+          val newCond = ua.condition.map(c => rewriteSourceToTarget(c, sourceToTarget))
+          val newAssignments = ua.assignments.map {
+            a => Assignment(a.key, rewriteSourceToTarget(a.value, sourceToTarget))
+          }
+          ua.copy(condition = newCond, assignments = newAssignments)
       }
 
       MergeRows(
