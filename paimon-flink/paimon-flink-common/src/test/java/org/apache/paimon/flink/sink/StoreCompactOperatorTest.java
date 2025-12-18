@@ -150,8 +150,5 @@ public class StoreCompactOperatorTest extends TableTestBase {
 
         @Override
         public void replace(FileStoreTable newTable) {}
-
-        @Override
-        public void specifyDataFileFormat(String dataFileFormat) {}
     }
 }

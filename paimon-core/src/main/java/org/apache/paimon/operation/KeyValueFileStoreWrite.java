@@ -121,7 +121,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final String commitUser;
     @Nullable private final RecordLevelExpire recordLevelExpire;
     @Nullable private Cache<String, LookupFile> lookupFileCache;
-    @Nullable private String dataFileFormat;
 
     public KeyValueFileStoreWrite(
             FileIO fileIO,
@@ -198,11 +197,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     @Override
-    public void specifyDataFileFormat(String fileFormat) {
-        this.dataFileFormat = fileFormat;
-    }
-
-    @Override
     protected MergeTreeWriter createWriter(
             BinaryRow partition,
             int bucket,
@@ -242,8 +236,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.commitForceCompact(),
                 options.changelogProducer(),
                 restoreIncrement,
-                UserDefinedSeqComparator.create(valueType, options),
-                dataFileFormat);
+                UserDefinedSeqComparator.create(valueType, options));
     }
 
     private CompactStrategy createCompactStrategy(CoreOptions options) {

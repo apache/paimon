@@ -244,10 +244,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         return this;
     }
 
-    public void specifyDataFileFormat(String dataFileFormat) {
-        write.specifyDataFileFormat(dataFileFormat);
-    }
-
     /**
      * Notify that some new files are created at given snapshot in given bucket.
      *

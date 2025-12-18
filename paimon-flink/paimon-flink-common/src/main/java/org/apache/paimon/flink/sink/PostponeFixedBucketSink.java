@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -51,18 +50,12 @@ public class PostponeFixedBucketSink extends FlinkWriteSink<InternalRow> {
     @Override
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new RowDataStoreWriteOperator.Factory(
-                table, null, writeProvider, commitUser, allowOverwriteUpgrade()) {
+        return new RowDataStoreWriteOperator.Factory(table, null, writeProvider, commitUser) {
             @Override
             @SuppressWarnings("unchecked, rawtypes")
             public StreamOperator createStreamOperator(StreamOperatorParameters parameters) {
                 return new PostponeBatchWriteOperator(
-                        parameters,
-                        table,
-                        writeProvider,
-                        commitUser,
-                        knownNumBuckets,
-                        prepareForMaxLevel);
+                        parameters, table, writeProvider, commitUser, knownNumBuckets);
             }
         };
     }
@@ -95,20 +88,8 @@ public class PostponeFixedBucketSink extends FlinkWriteSink<InternalRow> {
                             tableForCommit
                                     .newCommit(context.commitUser())
                                     .withOverwrite(overwritePartition)
-                                    .ignoreEmptyCommit(!context.streamingCheckpointEnabled())
-                                    .allowOverwriteUpgrade(
-                                            allowOverwriteUpgrade(),
-                                            tableForCommit.coreOptions().numLevels() - 1),
+                                    .ignoreEmptyCommit(!context.streamingCheckpointEnabled()),
                             context);
         }
-    }
-
-    @Override
-    protected boolean allowOverwriteUpgrade() {
-        CoreOptions options = table.coreOptions();
-        return overwritePartition != null
-                && options.deletionVectorsEnabled()
-                && options.deletionVectorsOverwriteUpgrade()
-                && options.writeOnly();
     }
 }

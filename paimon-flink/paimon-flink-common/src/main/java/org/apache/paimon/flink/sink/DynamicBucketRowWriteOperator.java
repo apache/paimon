@@ -42,9 +42,8 @@ public class DynamicBucketRowWriteOperator
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
-            String initialCommitUser,
-            boolean prepareForMaxLevel) {
-        super(parameters, table, storeSinkWriteProvider, initialCommitUser, prepareForMaxLevel);
+            String initialCommitUser) {
+        super(parameters, table, storeSinkWriteProvider, initialCommitUser);
     }
 
     @Override
@@ -72,9 +71,8 @@ public class DynamicBucketRowWriteOperator
         public Factory(
                 FileStoreTable table,
                 StoreSinkWrite.Provider storeSinkWriteProvider,
-                String initialCommitUser,
-                boolean prepareForMaxLevel) {
-            super(table, storeSinkWriteProvider, initialCommitUser, prepareForMaxLevel);
+                String initialCommitUser) {
+            super(table, storeSinkWriteProvider, initialCommitUser);
         }
 
         @Override
@@ -83,11 +81,7 @@ public class DynamicBucketRowWriteOperator
                 StreamOperatorParameters<Committable> parameters) {
             return (T)
                     new DynamicBucketRowWriteOperator(
-                            parameters,
-                            table,
-                            storeSinkWriteProvider,
-                            initialCommitUser,
-                            prepareForMaxLevel);
+                            parameters, table, storeSinkWriteProvider, initialCommitUser);
         }
 
         @Override
@@ -104,9 +98,8 @@ public class DynamicBucketRowWriteOperator
         public CoordinatedFactory(
                 FileStoreTable table,
                 StoreSinkWrite.Provider storeSinkWriteProvider,
-                String initialCommitUser,
-                boolean prepareForMaxLevel) {
-            super(table, storeSinkWriteProvider, initialCommitUser, prepareForMaxLevel);
+                String initialCommitUser) {
+            super(table, storeSinkWriteProvider, initialCommitUser);
         }
 
         @Override
@@ -115,11 +108,7 @@ public class DynamicBucketRowWriteOperator
                 T createStreamOperatorImpl(StreamOperatorParameters<Committable> parameters) {
             return (T)
                     new DynamicBucketRowWriteOperator(
-                            parameters,
-                            table,
-                            storeSinkWriteProvider,
-                            initialCommitUser,
-                            prepareForMaxLevel);
+                            parameters, table, storeSinkWriteProvider, initialCommitUser);
         }
 
         @Override

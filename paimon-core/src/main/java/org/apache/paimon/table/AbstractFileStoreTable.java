@@ -466,7 +466,21 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 options.snapshotExpireExecutionMode(),
                 name(),
                 options.forceCreatingSnapshot(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                allowOverwriteUpgrade(),
+                options.numLevels() - 1);
+    }
+
+    private boolean allowOverwriteUpgrade() {
+        if (tableSchema.primaryKeys().isEmpty()) {
+            return false;
+        }
+
+        CoreOptions options = coreOptions();
+        return options.overwriteUpgrade()
+                && options.writeOnly()
+                && options.writeBufferSpillable()
+                && (tableSchema.numBuckets() != -2 || options.postponeBatchWriteFixedBucket());
     }
 
     @Override

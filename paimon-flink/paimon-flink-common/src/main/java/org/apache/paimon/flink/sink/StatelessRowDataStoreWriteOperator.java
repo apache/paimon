@@ -35,15 +35,8 @@ public class StatelessRowDataStoreWriteOperator extends RowDataStoreWriteOperato
             FileStoreTable table,
             @Nullable LogSinkFunction logSinkFunction,
             StoreSinkWrite.Provider storeSinkWriteProvider,
-            String initialCommitUser,
-            boolean prepareForMaxLevel) {
-        super(
-                parameters,
-                table,
-                logSinkFunction,
-                storeSinkWriteProvider,
-                initialCommitUser,
-                prepareForMaxLevel);
+            String initialCommitUser) {
+        super(parameters, table, logSinkFunction, storeSinkWriteProvider, initialCommitUser);
     }
 
     @Override

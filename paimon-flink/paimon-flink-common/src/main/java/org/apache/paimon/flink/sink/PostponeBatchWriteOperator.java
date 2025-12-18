@@ -60,15 +60,8 @@ public class PostponeBatchWriteOperator extends StatelessRowDataStoreWriteOperat
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser,
-            Map<BinaryRow, Integer> knownNumBuckets,
-            boolean prepareForMaxLevel) {
-        super(
-                parameters,
-                table,
-                null,
-                storeSinkWriteProvider,
-                initialCommitUser,
-                prepareForMaxLevel);
+            Map<BinaryRow, Integer> knownNumBuckets) {
+        super(parameters, table, null, storeSinkWriteProvider, initialCommitUser);
         this.knownNumBuckets = new HashMap<>(knownNumBuckets);
         this.bucketFunction =
                 BucketFunction.create(

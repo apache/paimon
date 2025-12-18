@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -51,21 +50,10 @@ public class FixedBucketSink extends FlinkWriteSink<InternalRow> {
             StoreSinkWrite.Provider writeProvider, String commitUser) {
         Options options = table.coreOptions().toConfiguration();
         boolean coordinatorEnabled = options.get(SINK_WRITER_COORDINATOR_ENABLED);
-        boolean prepareForMaxLevel = allowOverwriteUpgrade();
         return coordinatorEnabled
                 ? new RowDataStoreWriteOperator.CoordinatedFactory(
-                        table, logSinkFunction, writeProvider, commitUser, prepareForMaxLevel)
+                        table, logSinkFunction, writeProvider, commitUser)
                 : new RowDataStoreWriteOperator.Factory(
-                        table, logSinkFunction, writeProvider, commitUser, prepareForMaxLevel);
-    }
-
-    @Override
-    protected boolean allowOverwriteUpgrade() {
-        CoreOptions options = table.coreOptions();
-        return overwritePartition != null
-                && !table.primaryKeys().isEmpty()
-                && options.deletionVectorsEnabled()
-                && options.deletionVectorsOverwriteUpgrade()
-                && options.writeOnly();
+                        table, logSinkFunction, writeProvider, commitUser);
     }
 }

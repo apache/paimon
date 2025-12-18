@@ -82,8 +82,6 @@ public interface StoreSinkWrite {
      */
     void replace(FileStoreTable newTable) throws Exception;
 
-    void specifyDataFileFormat(String dataFileFormat);
-
     /** Provider of {@link StoreSinkWrite}. */
     @FunctionalInterface
     interface Provider extends Serializable {

@@ -57,10 +57,7 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
                         table,
                         table.newCommit(context.commitUser())
                                 .withOverwrite(overwritePartition)
-                                .ignoreEmptyCommit(!context.streamingCheckpointEnabled())
-                                .allowOverwriteUpgrade(
-                                        allowOverwriteUpgrade(),
-                                        table.coreOptions().numLevels() - 1),
+                                .ignoreEmptyCommit(!context.streamingCheckpointEnabled()),
                         context);
     }
 
@@ -77,20 +74,14 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
                     FileStoreTable table,
                     LogSinkFunction logSinkFunction,
                     StoreSinkWrite.Provider writeProvider,
-                    String commitUser,
-                    boolean prepareForMaxLevel) {
+                    String commitUser) {
         return new RowDataStoreWriteOperator.Factory(
-                table, logSinkFunction, writeProvider, commitUser, prepareForMaxLevel) {
+                table, logSinkFunction, writeProvider, commitUser) {
             @Override
             @SuppressWarnings("unchecked, rawtypes")
             public StreamOperator createStreamOperator(StreamOperatorParameters parameters) {
                 return new StatelessRowDataStoreWriteOperator(
-                        parameters,
-                        table,
-                        logSinkFunction,
-                        writeProvider,
-                        commitUser,
-                        prepareForMaxLevel);
+                        parameters, table, logSinkFunction, writeProvider, commitUser);
             }
         };
     }
@@ -101,9 +92,5 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
         return new RestoreCommittableStateManager<>(
                 ManifestCommittableSerializer::new,
                 options.get(PARTITION_MARK_DONE_RECOVER_FROM_STATE));
-    }
-
-    protected boolean allowOverwriteUpgrade() {
-        return false;
     }
 }

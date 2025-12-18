@@ -72,7 +72,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final boolean commitForceCompact;
     private final ChangelogProducer changelogProducer;
     @Nullable private final FieldsComparator userDefinedSeqComparator;
-    @Nullable private final String dataFileFormat;
 
     private final LinkedHashSet<DataFileMeta> newFiles;
     private final LinkedHashSet<DataFileMeta> deletedFiles;
@@ -100,8 +99,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             boolean commitForceCompact,
             ChangelogProducer changelogProducer,
             @Nullable CommitIncrement increment,
-            @Nullable FieldsComparator userDefinedSeqComparator,
-            @Nullable String dataFileFormat) {
+            @Nullable FieldsComparator userDefinedSeqComparator) {
         this.writeBufferSpillable = writeBufferSpillable;
         this.maxDiskSize = maxDiskSize;
         this.sortMaxFan = sortMaxFan;
@@ -117,7 +115,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.commitForceCompact = commitForceCompact;
         this.changelogProducer = changelogProducer;
         this.userDefinedSeqComparator = userDefinedSeqComparator;
-        this.dataFileFormat = dataFileFormat;
 
         this.newFiles = new LinkedHashSet<>();
         this.deletedFiles = new LinkedHashSet<>();
@@ -220,10 +217,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                     changelogProducer == ChangelogProducer.INPUT
                             ? writerFactory.createRollingChangelogFileWriter(0)
                             : null;
-
             final RollingFileWriter<KeyValue, DataFileMeta> dataWriter =
-                    writerFactory.createRollingMergeTreeFileWriter(
-                            0, FileSource.APPEND, dataFileFormat);
+                    writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
 
             try {
                 writeBuffer.forEach(

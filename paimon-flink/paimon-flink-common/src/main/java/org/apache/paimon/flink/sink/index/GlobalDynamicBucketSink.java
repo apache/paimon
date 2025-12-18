@@ -72,9 +72,8 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, 
         boolean coordinatorEnabled = options.get(SINK_WRITER_COORDINATOR_ENABLED);
         return coordinatorEnabled
                 ? new DynamicBucketRowWriteOperator.CoordinatedFactory(
-                        table, writeProvider, commitUser, false)
-                : new DynamicBucketRowWriteOperator.Factory(
-                        table, writeProvider, commitUser, false);
+                        table, writeProvider, commitUser)
+                : new DynamicBucketRowWriteOperator.Factory(table, writeProvider, commitUser);
     }
 
     public DataStreamSink<?> build(DataStream<InternalRow> input, @Nullable Integer parallelism) {

@@ -1116,27 +1116,21 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         boolean dynamicBucket = ThreadLocalRandom.current().nextBoolean();
         sql(
                 "CREATE TABLE test_table (a INT, b STRING, pt STRING, PRIMARY KEY (a, pt) NOT ENFORCED) PARTITIONED BY (pt)"
-                        + "WITH ('bucket' = '%s', 'deletion-vectors.enabled' = 'true', 'write-only' = 'true', 'file.format.per.level' = '0:avro')",
+                        + "WITH ('bucket' = '%s', 'deletion-vectors.enabled' = 'true', 'write-only' = 'true')",
                 dynamicBucket ? "-1" : "4");
         SnapshotManager snapshotManager = paimonTable("test_table").snapshotManager();
 
         sql(
                 "INSERT INTO test_table VALUES (1, 'A', '2025-12-01'), (2, 'B', '2025-12-01'), (1, 'A', '2025-12-02')");
         assertThat(sql("SELECT * FROM test_table")).isEmpty();
-        assertThat(sql("SELECT DISTINCT file_format FROM `test_table$files`"))
-                .containsExactly(Row.of("avro"));
 
         sql("INSERT OVERWRITE test_table VALUES (3, 'C', '2025-12-01')");
         assertThat(snapshotManager.latestSnapshot().commitKind())
                 .isEqualTo(Snapshot.CommitKind.COMPACT);
         // didn't write pt 2025-12-02
         assertThat(sql("SELECT * FROM test_table")).containsExactly(Row.of(3, "C", "2025-12-01"));
-        assertThat(
-                        sql(
-                                "SELECT DISTINCT file_format FROM `test_table$files` WHERE `partition` = '{2025-12-01}'"))
-                .containsExactly(Row.of("parquet"));
 
-        sql("ALTER TABLE test_table SET ('deletion-vectors.overwrite-upgrade' = 'false')");
+        sql("ALTER TABLE test_table SET ('overwrite-upgrade' = 'false')");
         sql("INSERT OVERWRITE test_table VALUES (4, 'D', '2025-12-01')");
         assertThat(sql("SELECT * FROM test_table")).isEmpty();
     }
@@ -1145,15 +1139,13 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testOverwriteDvUpgradeForPostpone() throws Exception {
         sql(
                 "CREATE TABLE test_table (a INT, b STRING, pt STRING, PRIMARY KEY (a, pt) NOT ENFORCED) PARTITIONED BY (pt)"
-                        + "WITH ('bucket' = '-2', 'deletion-vectors.enabled' = 'true', 'write-only' = 'true', 'file.format.per.level' = '0:avro')");
+                        + "WITH ('bucket' = '-2', 'deletion-vectors.enabled' = 'true', 'write-only' = 'true')");
         SnapshotManager snapshotManager = paimonTable("test_table").snapshotManager();
 
         sql(
                 "INSERT INTO test_table VALUES (1, 'A', '2025-12-01'), (2, 'B', '2025-12-01'), (1, 'A', '2025-12-02')");
         // the data is batch writing to fixed bucket but skipped because of dv
         assertThat(sql("SELECT * FROM test_table")).isEmpty();
-        assertThat(sql("SELECT DISTINCT file_format FROM `test_table$files`"))
-                .containsExactly(Row.of("avro"));
 
         sql(
                 "INSERT OVERWRITE test_table /*+ OPTIONS('postpone.batch-write-fixed-bucket' = 'false') */ VALUES (3, 'C', '2025-12-01')");
@@ -1165,12 +1157,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                 .isEqualTo(Snapshot.CommitKind.COMPACT);
         // didn't write pt 2025-12-02
         assertThat(sql("SELECT * FROM test_table")).containsExactly(Row.of(4, "D", "2025-12-01"));
-        assertThat(
-                        sql(
-                                "SELECT DISTINCT file_format FROM `test_table$files` WHERE `partition` = '{2025-12-01}'"))
-                .containsExactly(Row.of("parquet"));
 
-        sql("ALTER TABLE test_table SET ('deletion-vectors.overwrite-upgrade' = 'false')");
+        sql("ALTER TABLE test_table SET ('overwrite-upgrade' = 'false')");
         sql("INSERT OVERWRITE test_table VALUES (5, 'E', '2025-12-01')");
         assertThat(sql("SELECT * FROM test_table")).isEmpty();
     }

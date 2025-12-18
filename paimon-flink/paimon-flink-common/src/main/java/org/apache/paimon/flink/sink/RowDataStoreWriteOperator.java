@@ -70,9 +70,8 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
             FileStoreTable table,
             @Nullable LogSinkFunction logSinkFunction,
             StoreSinkWrite.Provider storeSinkWriteProvider,
-            String initialCommitUser,
-            boolean prepareForMaxLevel) {
-        super(parameters, table, storeSinkWriteProvider, initialCommitUser, prepareForMaxLevel);
+            String initialCommitUser) {
+        super(parameters, table, storeSinkWriteProvider, initialCommitUser);
         this.logSinkFunction = logSinkFunction;
         if (logSinkFunction != null) {
             FunctionUtils.setFunctionRuntimeContext(logSinkFunction, getRuntimeContext());
@@ -264,9 +263,8 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
                 FileStoreTable table,
                 @Nullable LogSinkFunction logSinkFunction,
                 StoreSinkWrite.Provider storeSinkWriteProvider,
-                String initialCommitUser,
-                boolean prepareForMaxLevel) {
-            super(table, storeSinkWriteProvider, initialCommitUser, prepareForMaxLevel);
+                String initialCommitUser) {
+            super(table, storeSinkWriteProvider, initialCommitUser);
             this.logSinkFunction = logSinkFunction;
         }
 
@@ -280,8 +278,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
                             table,
                             logSinkFunction,
                             storeSinkWriteProvider,
-                            initialCommitUser,
-                            prepareForMaxLevel);
+                            initialCommitUser);
         }
 
         @Override
@@ -300,10 +297,9 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
         public CoordinatedFactory(
                 FileStoreTable table,
                 @Nullable LogSinkFunction logSinkFunction,
-                @Nullable StoreSinkWrite.Provider storeSinkWriteProvider,
-                String initialCommitUser,
-                boolean prepareForMaxLevel) {
-            super(table, storeSinkWriteProvider, initialCommitUser, prepareForMaxLevel);
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser) {
+            super(table, storeSinkWriteProvider, initialCommitUser);
             this.logSinkFunction = logSinkFunction;
         }
 
@@ -317,8 +313,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
                             table,
                             logSinkFunction,
                             storeSinkWriteProvider,
-                            initialCommitUser,
-                            prepareForMaxLevel);
+                            initialCommitUser);
         }
 
         @Override

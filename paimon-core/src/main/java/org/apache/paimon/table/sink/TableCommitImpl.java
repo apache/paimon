@@ -89,12 +89,12 @@ public class TableCommitImpl implements InnerTableCommit {
     private final String tableName;
     private final boolean forceCreatingSnapshot;
     private final ThreadPoolExecutor fileCheckExecutor;
+    private final boolean allowOverwriteUpgrade;
+    private final int upgradeLevel;
 
     @Nullable private Map<String, String> overwritePartition = null;
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
-    private boolean overwriteUpgrade = false;
-    private int upgradeLevel = -1;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -106,7 +106,9 @@ public class TableCommitImpl implements InnerTableCommit {
             ExpireExecutionMode expireExecutionMode,
             String tableName,
             boolean forceCreatingSnapshot,
-            int threadNum) {
+            int threadNum,
+            boolean allowOverwriteUpgrade,
+            int upgradeLevel) {
         if (partitionExpire != null) {
             commit.withPartitionExpire(partitionExpire);
         }
@@ -130,6 +132,9 @@ public class TableCommitImpl implements InnerTableCommit {
         this.tableName = tableName;
         this.forceCreatingSnapshot = forceCreatingSnapshot;
         this.fileCheckExecutor = FileOperationThreadPool.getExecutorService(threadNum);
+
+        this.allowOverwriteUpgrade = allowOverwriteUpgrade;
+        this.upgradeLevel = upgradeLevel;
     }
 
     public boolean forceCreatingSnapshot() {
@@ -165,12 +170,6 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl appendCommitCheckConflict(boolean appendCommitCheckConflict) {
         commit.appendCommitCheckConflict(appendCommitCheckConflict);
-        return this;
-    }
-
-    public TableCommitImpl allowOverwriteUpgrade(boolean overwriteUpgrade, int upgradeLevel) {
-        this.overwriteUpgrade = overwriteUpgrade;
-        this.upgradeLevel = upgradeLevel;
         return this;
     }
 
@@ -276,7 +275,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     private void tryUpgrade(ManifestCommittable committable) {
-        if (!overwriteUpgrade) {
+        if (!allowOverwriteUpgrade) {
             return;
         }
 
@@ -309,6 +308,7 @@ public class TableCommitImpl implements InnerTableCommit {
                             new CompactIncrement(newFiles, upgrades, Collections.emptyList())));
         }
 
+        LOG.info("Upgraded manifest committable:\n{}", committable);
         for (CommitMessage upgradeMessage : upgradeMessages) {
             committable.addFileCommittable(upgradeMessage);
         }
