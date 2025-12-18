@@ -436,6 +436,57 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test(
+    "Data Evolution: merge into table with data-evolution for Self-Merge with _ROW_ID " +
+      "shortcut") {
+    withTable("target") {
+      sql("CREATE TABLE source (target_ROW_ID BIGINT, b INT, c STRING)")
+      sql(
+        "INSERT INTO source VALUES (0, 100, 'c11'), (2, 300, 'c33'), (4, 500, 'c55'), (6, 700, 'c77'), (8, 900, 'c99')")
+
+      sql(
+        "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql(
+        "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
+
+      val capturedPlans: mutable.ListBuffer[LogicalPlan] = mutable.ListBuffer.empty
+      val listener = new QueryExecutionListener {
+        override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
+          capturedPlans += qe.optimizedPlan
+        }
+        override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
+          capturedPlans += qe.optimizedPlan
+        }
+      }
+      spark.listenerManager.register(listener)
+      sql(s"""
+             |MERGE INTO target
+             |USING target AS source
+             |ON target._ROW_ID = source._ROW_ID
+             |WHEN MATCHED AND target.a = 5 THEN UPDATE SET b = source.b + target.b
+             |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET b = source.b * 3,
+             |c = concat(target.c, source.c)
+             |""".stripMargin)
+      // Assert that job was triggered by
+      // `org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.targetRelatedSplits`
+      assert(capturedPlans.length == 2)
+      // Assert no join was used in
+      // 'org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.updateActionInvoke'
+      assert(capturedPlans.head.collect { case plan: Join => plan }.isEmpty)
+      spark.listenerManager.unregister(listener)
+
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM target ORDER BY a"),
+        Seq(
+          Row(1, 10, "c1", 0, 2),
+          Row(2, 20, "c2", 1, 2),
+          Row(3, 90, "c3c3", 2, 2),
+          Row(4, 120, "c4c4", 3, 2),
+          Row(5, 100, "c5", 4, 2))
+      )
+    }
+  }
+
   test("Data Evolution: update table throws exception") {
     withTable("t") {
       sql(
