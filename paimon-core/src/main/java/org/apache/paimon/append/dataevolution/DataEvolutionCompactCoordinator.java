@@ -51,10 +51,16 @@ public class DataEvolutionCompactCoordinator {
         CoreOptions options = table.coreOptions();
         long targetFileSize = options.targetFileSize(false);
         long openFileCost = options.splitOpenFileCost();
+        long compactMinFileNum = options.compactionMinFileNum();
 
         this.scanner = new CompactScanner(table.newSnapshotReader());
         this.planner =
-                new CompactPlanner(scanner::fetchResult, compactBlob, targetFileSize, openFileCost);
+                new CompactPlanner(
+                        scanner::fetchResult,
+                        compactBlob,
+                        targetFileSize,
+                        openFileCost,
+                        compactMinFileNum);
     }
 
     public List<DataEvolutionCompactTask> plan() {
@@ -121,24 +127,27 @@ public class DataEvolutionCompactCoordinator {
         private final boolean compactBlob;
         private final long targetFileSize;
         private final long openFileCost;
+        private final long compactMinFileNum;
         private long lastRowIdStart = -1;
         private long nextRowIdExpected = -1;
         private long weightSum = 0L;
         private BinaryRow lastPartition = null;
         private boolean skipFile = false;
-        List<DataEvolutionCompactTask> tasks = new ArrayList<>();
-        List<DataFileMeta> groupFiles = new ArrayList<>();
-        List<DataFileMeta> blobFiles = new ArrayList<>();
+        private List<DataEvolutionCompactTask> tasks = new ArrayList<>();
+        private List<DataFileMeta> groupFiles = new ArrayList<>();
+        private List<DataFileMeta> blobFiles = new ArrayList<>();
 
         CompactPlanner(
                 Supplier<List<ManifestEntry>> supplier,
                 boolean compactBlob,
                 long targetFileSize,
-                long openFileCost) {
+                long openFileCost,
+                long compactMinFileNum) {
             this.supplier = supplier;
             this.compactBlob = compactBlob;
             this.targetFileSize = targetFileSize;
             this.openFileCost = openFileCost;
+            this.compactMinFileNum = compactMinFileNum;
         }
 
         List<DataEvolutionCompactTask> compactPlan() {
@@ -183,7 +192,7 @@ public class DataEvolutionCompactCoordinator {
                             || rowId > nextRowIdExpected
                             || !currentPartition.equals(lastPartition)
                             || skipFile) {
-                        compaction();
+                        flushAll();
                     }
 
                     if (!skipFile) {
@@ -196,14 +205,16 @@ public class DataEvolutionCompactCoordinator {
                 }
             }
             // do compaction for the last group
-            compaction();
+            flushAll();
 
-            return tasks;
+            List<DataEvolutionCompactTask> result = new ArrayList<>(tasks);
+            tasks = new ArrayList<>();
+            return result;
         }
 
-        private void compaction() {
+        private void flushAll() {
             if (!groupFiles.isEmpty()) {
-                if (groupFiles.size() > 1) {
+                if (groupFiles.size() > compactMinFileNum) {
                     tasks.add(
                             new DataEvolutionCompactTask(
                                     lastPartition, new ArrayList<>(groupFiles), false));
