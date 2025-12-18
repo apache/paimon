@@ -16,24 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source.splitread;
+package org.apache.paimon.spark
 
-import org.apache.paimon.operation.RawFileSplitRead;
-import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.Table
 
-import java.util.function.Supplier;
+import org.apache.spark.sql.connector.write.{RowLevelOperation, RowLevelOperationBuilder, RowLevelOperationInfo}
 
-/** Raw file split read for all append table. */
-public class AppendTableRawFileSplitReadProvider extends RawFileSplitReadProvider {
+class PaimonSparkRowLevelOperationBuilder(table: Table, info: RowLevelOperationInfo)
+  extends RowLevelOperationBuilder {
 
-    public AppendTableRawFileSplitReadProvider(
-            Supplier<RawFileSplitRead> supplier, SplitReadConfig splitReadConfig) {
-        super(supplier, splitReadConfig);
-    }
-
-    @Override
-    public boolean match(Split split, Context context) {
-        return split instanceof DataSplit;
-    }
+  override def build(): RowLevelOperation = {
+    new PaimonSparkCopyOnWriteOperation(table, info)
+  }
 }

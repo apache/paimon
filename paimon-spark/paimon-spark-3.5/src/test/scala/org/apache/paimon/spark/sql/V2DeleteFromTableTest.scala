@@ -16,24 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source.splitread;
+package org.apache.paimon.spark.sql
 
-import org.apache.paimon.operation.RawFileSplitRead;
-import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.Split;
+import org.apache.spark.SparkConf
 
-import java.util.function.Supplier;
-
-/** Raw file split read for all append table. */
-public class AppendTableRawFileSplitReadProvider extends RawFileSplitReadProvider {
-
-    public AppendTableRawFileSplitReadProvider(
-            Supplier<RawFileSplitRead> supplier, SplitReadConfig splitReadConfig) {
-        super(supplier, splitReadConfig);
-    }
-
-    @Override
-    public boolean match(Split split, Context context) {
-        return split instanceof DataSplit;
-    }
+class V2DeleteFromTableTest extends DeleteFromTableTestBase {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf
+      .set("spark.paimon.write.use-v2-write", "true")
+  }
 }

@@ -16,24 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source.splitread;
+package org.apache.paimon.spark
 
-import org.apache.paimon.operation.RawFileSplitRead;
-import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.Table
 
-import java.util.function.Supplier;
-
-/** Raw file split read for all append table. */
-public class AppendTableRawFileSplitReadProvider extends RawFileSplitReadProvider {
-
-    public AppendTableRawFileSplitReadProvider(
-            Supplier<RawFileSplitRead> supplier, SplitReadConfig splitReadConfig) {
-        super(supplier, splitReadConfig);
-    }
-
-    @Override
-    public boolean match(Split split, Context context) {
-        return split instanceof DataSplit;
-    }
-}
+/** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
+case class SparkTable(override val table: Table) extends PaimonSparkTableBase(table) {}
