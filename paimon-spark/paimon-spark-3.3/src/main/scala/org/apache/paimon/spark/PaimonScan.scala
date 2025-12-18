@@ -81,7 +81,7 @@ case class PaimonScan(
 
   /** Extract the bucket number from the splits only if all splits have the same totalBuckets number. */
   private def extractBucketNumber(): Option[Int] = {
-    val splits = getOriginSplits
+    val splits = inputSplits
     if (splits.exists(!_.isInstanceOf[DataSplit])) {
       None
     } else {
@@ -102,7 +102,7 @@ case class PaimonScan(
   // Since Spark 3.3
   override def outputPartitioning: Partitioning = {
     extractBucketTransform
-      .map(bucket => new KeyGroupedPartitioning(Array(bucket), lazyInputPartitions.size))
+      .map(bucket => new KeyGroupedPartitioning(Array(bucket), inputPartitions.size))
       .getOrElse(new UnknownPartitioning(0))
   }
 
@@ -142,8 +142,8 @@ case class PaimonScan(
     if (partitionFilter.nonEmpty) {
       readBuilder.withFilter(partitionFilter.head)
       // set inputPartitions null to trigger to get the new splits.
-      inputPartitions = null
-      inputSplits = null
+      _inputPartitions = null
+      _inputSplits = null
     }
   }
 }

@@ -16,15 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.statistics
+package org.apache.paimon.spark.util
 
-import org.apache.spark.sql.catalyst.expressions.Attribute
-import org.apache.spark.sql.catalyst.plans.logical
-import org.apache.spark.sql.connector.read.Statistics
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.paimon.table.format.FormatDataSplit
+import org.apache.paimon.table.source.{DataSplit, Split}
 
-trait StatisticsHelper extends StatisticsHelperBase {
-  protected def toV1Stats(v2Stats: Statistics, attrs: Seq[Attribute]): logical.Statistics = {
-    DataSourceV2Relation.transformV2Stats(v2Stats, None, conf.defaultSizeInBytes, attrs)
+import scala.collection.JavaConverters._
+
+object SplitUtils {
+
+  def splitSize(split: Split): Long = {
+    split match {
+      case ds: DataSplit => ds.dataFiles().asScala.map(_.fileSize).sum
+      case fs: FormatDataSplit =>
+        if (fs.length() == null) fs.fileSize() else fs.length().longValue()
+      case _ => 0
+    }
+  }
+
+  def fileCount(split: Split): Long = {
+    split match {
+      case ds: DataSplit => ds.dataFiles().size()
+      case _: FormatDataSplit => 1
+      case _ => 0
+    }
   }
 }

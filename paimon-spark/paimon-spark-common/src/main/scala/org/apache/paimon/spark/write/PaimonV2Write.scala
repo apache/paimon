@@ -26,6 +26,7 @@ import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.commands.{SchemaHelper, SparkDataFileMeta}
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
 import org.apache.paimon.spark.metric.SparkMetricRegistry
+import org.apache.paimon.spark.scan.PaimonCopyOnWriteScan
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, TableWriteImpl}
 import org.apache.paimon.table.source.DataSplit
@@ -216,11 +217,8 @@ private case class CopyOnWriteBatchWrite(
         batchTableCommit.truncateTable()
       } else {
         val touchedFiles = candidateFiles(scan.get.dataSplits)
-
         val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)
-
         val addCommitMessages = WriteTaskResult.merge(messages)
-
         val commitMessages = addCommitMessages ++ deletedCommitMessage
 
         batchTableCommit.withMetricRegistry(metricRegistry)

@@ -16,10 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.scan
 
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.spark.PaimonBatch
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
 import org.apache.paimon.table.{FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
@@ -40,20 +41,14 @@ case class PaimonCopyOnWriteScan(
     table: InnerTable,
     requiredSchema: StructType,
     pushedPartitionFilters: Seq[PartitionPredicate],
-    pushedDataFilters: Seq[Predicate],
-    bucketedScanDisabled: Boolean = false)
-  extends PaimonScanCommon(table, requiredSchema, bucketedScanDisabled)
+    pushedDataFilters: Seq[Predicate])
+  extends BaseScan
   with SupportsRuntimeV2Filtering {
 
-  var filteredLocations: mutable.Set[String] = mutable.Set[String]()
-
-  var filteredFileNames: mutable.Set[String] = mutable.Set[String]()
+  override def inputSplits: Array[Split] = dataSplits.asInstanceOf[Array[Split]]
+  private val filteredFileNames: mutable.Set[String] = mutable.Set[String]()
 
   var dataSplits: Array[DataSplit] = Array()
-
-  def disableBucketedScan(): PaimonCopyOnWriteScan = {
-    copy(bucketedScanDisabled = true)
-  }
 
   override def filterAttributes(): Array[NamedReference] = {
     Array(Expressions.column(FILE_PATH_COLUMN))
@@ -66,7 +61,6 @@ case class PaimonCopyOnWriteScan(
         case in: In if in.attribute.equalsIgnoreCase(FILE_PATH_COLUMN) =>
           for (value <- in.values) {
             val location = value.asInstanceOf[String]
-            filteredLocations.add(location)
             filteredFileNames.add(Paths.get(location).getFileName.toString)
           }
         case _ => logWarning("Unsupported runtime filter")
@@ -79,26 +73,17 @@ case class PaimonCopyOnWriteScan(
         if (fileStoreTable.coreOptions().manifestDeleteFileDropStats()) {
           snapshotReader.dropStats()
         }
-
-        pushedPartitionFilters.foreach(snapshotReader.withPartitionFilter)
-
-        pushedDataFilters.foreach(snapshotReader.withFilter)
-
+        if (pushedPartitionFilters.nonEmpty) {
+          snapshotReader.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
+        }
+        if (pushedDataFilters.nonEmpty) {
+          snapshotReader.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
+        }
         snapshotReader.withDataFileNameFilter(fileName => filteredFileNames.contains(fileName))
-
         dataSplits =
           snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toArray
 
       case _ => throw new RuntimeException("Only FileStoreTable support.")
     }
-
-  }
-
-  override def toBatch: Batch = {
-    PaimonBatch(
-      getInputPartitions(dataSplits.asInstanceOf[Array[Split]]),
-      readBuilder,
-      coreOptions.blobAsDescriptor(),
-      metadataColumns)
   }
 }
