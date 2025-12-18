@@ -24,7 +24,7 @@ import java.io.Serializable;
 import java.util.Iterator;
 import java.util.Optional;
 
-/** VectorSearch. */
+/** VectorSearch to perform vector similarity search. * */
 public class VectorSearch implements Serializable {
     private static final long serialVersionUID = 1L;
 
@@ -86,7 +86,7 @@ public class VectorSearch implements Serializable {
         return this;
     }
 
-    public <T> T visit(FieldRef fieldRef, FunctionVisitor<T> visitor) {
+    public <T> T visit(FunctionVisitor<T> visitor) {
         return visitor.visitVectorSearch(this);
     }
 

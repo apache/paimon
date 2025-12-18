@@ -19,18 +19,18 @@
 package org.apache.paimon.lucene.index;
 
 import org.apache.paimon.globalindex.ScoreGetter;
-import org.apache.paimon.globalindex.TopkGlobalIndexResult;
+import org.apache.paimon.globalindex.VectorSearchGlobalIndexResult;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.util.HashMap;
 
-/** Top-k global index result for Lucene vector index. */
-public class LuceneTopkGlobalIndexResult implements TopkGlobalIndexResult {
+/** Vector search global index result for Lucene vector index. */
+public class LuceneVectorSearchGlobalIndexResult implements VectorSearchGlobalIndexResult {
 
     private final HashMap<Long, Float> id2scores;
     private final RoaringNavigableMap64 results;
 
-    public LuceneTopkGlobalIndexResult(
+    public LuceneVectorSearchGlobalIndexResult(
             RoaringNavigableMap64 results, HashMap<Long, Float> id2scores) {
         this.id2scores = id2scores;
         this.results = results;

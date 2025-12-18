@@ -215,7 +215,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
             id2scores.put(rowId, scoredRow.score);
             roaringBitmap64.add(rowId);
         }
-        return new LuceneTopkGlobalIndexResult(roaringBitmap64, id2scores);
+        return new LuceneVectorSearchGlobalIndexResult(roaringBitmap64, id2scores);
     }
 
     /** Helper class to store row ID with its score. */

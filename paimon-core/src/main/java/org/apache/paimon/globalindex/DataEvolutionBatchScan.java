@@ -188,8 +188,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
                 rowRanges = result.results().toRangeList();
-                if (result instanceof TopkGlobalIndexResult) {
-                    scoreGetter = ((TopkGlobalIndexResult) result).scoreGetter();
+                if (result instanceof VectorSearchGlobalIndexResult) {
+                    scoreGetter = ((VectorSearchGlobalIndexResult) result).scoreGetter();
                 }
             }
         }

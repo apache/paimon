@@ -26,7 +26,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
-import org.apache.paimon.globalindex.TopkGlobalIndexResult;
+import org.apache.paimon.globalindex.VectorSearchGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -122,14 +122,15 @@ public class LuceneVectorGlobalIndexScanTest {
 
         // 7. Verify results without filter
 
-        TopkGlobalIndexResult result = (TopkGlobalIndexResult) scanner.scan(vectorSearch).get();
+        VectorSearchGlobalIndexResult result =
+                (VectorSearchGlobalIndexResult) scanner.scan(vectorSearch).get();
         List<Long> resultRowIds = new ArrayList<>();
         result.results().iterator().forEachRemaining(resultRowIds::add);
         assertThat(resultRowIds).hasSize(2);
 
         // 8. Verify results with filter
         vectorSearch = new VectorSearch(queryVector, 2, vectorFieldName, List.of(1L).iterator());
-        result = (TopkGlobalIndexResult) scanner.scan(vectorSearch).get();
+        result = (VectorSearchGlobalIndexResult) scanner.scan(vectorSearch).get();
         resultRowIds = new ArrayList<>();
         result.results().iterator().forEachRemaining(resultRowIds::add);
         float score = result.scoreGetter().score(resultRowIds.get(0));

@@ -67,7 +67,7 @@ public class GlobalIndexEvaluator
                 vectorSearch.withIncludeRowIds(compoundResult.get().results().iterator());
             }
             for (GlobalIndexReader fileIndexReader : readers) {
-                GlobalIndexResult childResult = fileIndexReader.visitVectorSearch(vectorSearch);
+                GlobalIndexResult childResult = vectorSearch.visit(fileIndexReader);
                 // AND Operation
                 if (compoundResult.isPresent()) {
                     GlobalIndexResult r1 = compoundResult.get();
