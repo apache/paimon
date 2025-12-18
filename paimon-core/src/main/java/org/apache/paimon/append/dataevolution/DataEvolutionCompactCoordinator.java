@@ -214,7 +214,7 @@ public class DataEvolutionCompactCoordinator {
 
         private void flushAll() {
             if (!groupFiles.isEmpty()) {
-                if (groupFiles.size() > compactMinFileNum) {
+                if (groupFiles.size() >= compactMinFileNum) {
                     tasks.add(
                             new DataEvolutionCompactTask(
                                     lastPartition, new ArrayList<>(groupFiles), false));
