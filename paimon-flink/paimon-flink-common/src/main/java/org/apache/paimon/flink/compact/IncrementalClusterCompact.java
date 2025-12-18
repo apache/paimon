@@ -22,16 +22,20 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.cluster.IncrementalClusterSplitSource;
 import org.apache.paimon.flink.cluster.RewriteIncrementalClusterCommittableOperator;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
+import org.apache.paimon.flink.sink.FixedBucketSink;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
+import org.apache.paimon.flink.sink.FlinkWriteSink;
 import org.apache.paimon.flink.sink.RowAppendTableSink;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
@@ -46,12 +50,14 @@ import org.apache.flink.table.data.RowData;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compact for incremental clustering. */
 public class IncrementalClusterCompact {
@@ -61,11 +67,14 @@ public class IncrementalClusterCompact {
     protected final IncrementalClusterManager clusterManager;
     protected final String commitUser;
     protected final InternalRowPartitionComputer partitionComputer;
+    protected final BucketMode bucketMode;
 
     protected final @Nullable Integer parallelism;
     protected final int localSampleMagnification;
-    protected final Map<BinaryRow, CompactUnit> compactUnits;
-    protected final Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> compactSplits;
+    protected final Map<BinaryRow, Map<Integer, CompactUnit>> compactUnits;
+    protected final Map<BinaryRow, Map<Integer, Pair<List<DataSplit>, CommitMessage>>>
+            compactSplits;
+    protected final Map<Pair<BinaryRow, Integer>, Integer> outputLevels;
 
     public IncrementalClusterCompact(
             StreamExecutionEnvironment env,
@@ -78,6 +87,7 @@ public class IncrementalClusterCompact {
         Options options = new Options(table.options());
         this.partitionComputer = table.store().partitionComputer();
         this.commitUser = CoreOptions.createCommitUser(options);
+        this.bucketMode = table.bucketMode();
         this.parallelism = options.get(SCAN_PARALLELISM);
         this.localSampleMagnification = table.coreOptions().getLocalSampleMagnification();
         if (localSampleMagnification < 20) {
@@ -87,10 +97,20 @@ public class IncrementalClusterCompact {
                             CoreOptions.SORT_COMPACTION_SAMPLE_MAGNIFICATION.key(),
                             localSampleMagnification));
         }
+
         // non-full strategy as default for incremental clustering
         this.compactUnits =
                 clusterManager.createCompactUnits(fullCompaction != null && fullCompaction);
-        this.compactSplits = clusterManager.toSplitsAndRewriteDvFiles(compactUnits);
+        this.compactSplits =
+                clusterManager.toSplitsAndRewriteDvFiles(compactUnits, table.bucketMode());
+        this.outputLevels = new HashMap<>();
+        compactUnits.forEach(
+                (partition, bucketMap) -> {
+                    bucketMap.forEach(
+                            (bucket, unit) ->
+                                    outputLevels.put(
+                                            Pair.of(partition, bucket), unit.outputLevel()));
+                });
     }
 
     public void build() throws Exception {
@@ -100,57 +120,82 @@ public class IncrementalClusterCompact {
         }
 
         List<DataStream<Committable>> dataStreams = new ArrayList<>();
-        for (Map.Entry<BinaryRow, Pair<List<DataSplit>, CommitMessage>> entry :
-                compactSplits.entrySet()) {
-            dataStreams.addAll(
-                    buildCompactOperator(
-                            entry.getKey(),
-                            entry.getValue().getKey(),
-                            entry.getValue().getRight(),
-                            parallelism));
+        switch (bucketMode) {
+            case HASH_FIXED:
+                buildForFixedBucket(dataStreams);
+                break;
+            case BUCKET_UNAWARE:
+                buildForUnawareBucket(dataStreams);
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
         }
 
         buildCommitOperator(dataStreams);
     }
 
+    protected void buildForUnawareBucket(List<DataStream<Committable>> dataStreams) {
+        for (Map.Entry<BinaryRow, Map<Integer, Pair<List<DataSplit>, CommitMessage>>> entry :
+                compactSplits.entrySet()) {
+            BinaryRow partition = entry.getKey();
+            checkArgument(
+                    entry.getValue().size() == 1,
+                    "Unaware-bucket table should only have one bucket.");
+            Pair<List<DataSplit>, CommitMessage> pair = entry.getValue().values().iterator().next();
+            dataStreams.addAll(
+                    buildCompactOperator(
+                            partitionComputer.generatePartValues(partition),
+                            pair.getLeft(),
+                            Collections.singletonList(pair.getRight()),
+                            parallelism));
+        }
+    }
+
+    protected void buildForFixedBucket(List<DataStream<Committable>> dataStreams) {
+        // read data of all partitions and shuffle by partition and bucket
+        List<DataSplit> dataSplits = new ArrayList<>();
+        List<CommitMessage> dvCommitMessages = new ArrayList<>();
+        compactSplits.forEach(
+                (partition, bucketEntry) -> {
+                    bucketEntry.forEach(
+                            (bucket, pair) -> {
+                                dataSplits.addAll(pair.getLeft());
+                                dvCommitMessages.add(pair.getRight());
+                            });
+                });
+
+        buildCompactOperator(new LinkedHashMap<>(), dataSplits, dvCommitMessages, parallelism);
+    }
+
     /**
-     * Build for one partition.
+     * Build compact operator for specified splits.
      *
      * @param parallelism Give the caller the opportunity to set parallelism
      */
     protected List<DataStream<Committable>> buildCompactOperator(
-            BinaryRow partition,
+            LinkedHashMap<String, String> partitionSpec,
             List<DataSplit> splits,
-            CommitMessage dvCommitMessage,
+            List<CommitMessage> dvCommitMessages,
             @Nullable Integer parallelism) {
-        LinkedHashMap<String, String> partitionSpec =
-                partitionComputer.generatePartValues(partition);
 
-        // 2.1 generate source for current partition
+        // 2.1 generate source for splits
         Pair<DataStream<RowData>, DataStream<Committable>> sourcePair =
                 IncrementalClusterSplitSource.buildSource(
-                        env, table, partitionSpec, splits, dvCommitMessage, parallelism);
+                        env, table, partitionSpec, splits, dvCommitMessages, parallelism);
 
-        // 2.2 cluster in partition
+        // 2.2 cluster for splits
+        // --- for unaware bucket, need global sort
+        // --- for fixed bucket, just need local sort
         Integer sinkParallelism = parallelism;
         if (sinkParallelism == null) {
             sinkParallelism = sourcePair.getLeft().getParallelism();
         }
-        TableSortInfo sortInfo =
-                new TableSortInfo.Builder()
-                        .setSortColumns(clusterManager.clusterKeys())
-                        .setSortStrategy(clusterManager.clusterCurve())
-                        .setSinkParallelism(sinkParallelism)
-                        .setLocalSampleSize(sinkParallelism * localSampleMagnification)
-                        .setGlobalSampleSize(sinkParallelism * 1000)
-                        .setRangeNumber(sinkParallelism * 10)
-                        .build();
-        DataStream<RowData> sorted =
-                TableSorter.getSorter(env, sourcePair.getLeft(), table, sortInfo).sort();
+
+        DataStream<RowData> sorted = sortDataStream(sourcePair.getLeft(), sinkParallelism);
 
         // 2.3 write and then reorganize the committable
         // set parallelism to null, and it'll forward parallelism when doWrite()
-        RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
+        FlinkWriteSink<InternalRow> sink = getSink();
         boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
         DataStream<Committable> written =
                 sink.doWrite(
@@ -167,14 +212,7 @@ public class IncrementalClusterCompact {
                                 "Rewrite cluster committable",
                                 new CommittableTypeInfo(),
                                 new RewriteIncrementalClusterCommittableOperator(
-                                        table,
-                                        compactUnits.entrySet().stream()
-                                                .collect(
-                                                        Collectors.toMap(
-                                                                Map.Entry::getKey,
-                                                                unit ->
-                                                                        unit.getValue()
-                                                                                .outputLevel()))))
+                                        table, outputLevels))
                         .setParallelism(written.getParallelism());
 
         List<DataStream<Committable>> dataStreams = new ArrayList<>();
@@ -184,11 +222,43 @@ public class IncrementalClusterCompact {
     }
 
     protected void buildCommitOperator(List<DataStream<Committable>> dataStreams) {
-        RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
+        FlinkWriteSink<InternalRow> sink = getSink();
         DataStream<Committable> dataStream = dataStreams.get(0);
         for (int i = 1; i < dataStreams.size(); i++) {
             dataStream = dataStream.union(dataStreams.get(i));
         }
         sink.doCommit(dataStream, commitUser);
+    }
+
+    protected DataStream<RowData> sortDataStream(
+            DataStream<RowData> input, Integer sinkParallelism) {
+        TableSortInfo sortInfo =
+                new TableSortInfo.Builder()
+                        .setSortColumns(clusterManager.clusterKeys())
+                        .setSortStrategy(clusterManager.clusterCurve())
+                        .setSinkParallelism(sinkParallelism)
+                        .setLocalSampleSize(sinkParallelism * localSampleMagnification)
+                        .setGlobalSampleSize(sinkParallelism * 1000)
+                        .setRangeNumber(sinkParallelism * 10)
+                        .build();
+        switch (bucketMode) {
+            case HASH_FIXED:
+                return TableSorter.getSorter(env, input, table, sortInfo).sortInLocal();
+            case BUCKET_UNAWARE:
+                return TableSorter.getSorter(env, input, table, sortInfo).sort();
+            default:
+                throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
+        }
+    }
+
+    protected FlinkWriteSink<InternalRow> getSink() {
+        switch (bucketMode) {
+            case HASH_FIXED:
+                return new FixedBucketSink(table, null, null);
+            case BUCKET_UNAWARE:
+                return new RowAppendTableSink(table, null, null, null);
+            default:
+                throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
+        }
     }
 }

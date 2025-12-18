@@ -80,7 +80,7 @@ public class HistoryPartitionClusterTest {
                                         RowType.of(DataTypes.INT()),
                                         Lists.newArrayList(BinaryRow.singleColumn("pt1"))))
                         .historyPartitionCluster();
-        Map<BinaryRow, List<LevelSortedRun>> partitionLevels =
+        Map<BinaryRow, Map<Integer, List<LevelSortedRun>>> partitionLevels =
                 historyPartitionCluster.constructLevelsForHistoryPartitions();
         assertThat(partitionLevels.size()).isEqualTo(1);
         assertThat(partitionLevels.get(BinaryRow.singleColumn("pt2"))).isNotEmpty();

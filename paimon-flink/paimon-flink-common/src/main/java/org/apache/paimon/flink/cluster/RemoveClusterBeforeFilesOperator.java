@@ -32,15 +32,16 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
+import java.util.List;
 
 /** Operator used with {@link IncrementalClusterSplitSource}, to remove files to be clustered. */
 public class RemoveClusterBeforeFilesOperator extends BoundedOneInputOperator<Split, Committable> {
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 3L;
 
-    private final @Nullable CommitMessage dvCommitMessage;
+    private final @Nullable List<CommitMessage> dvCommitMessage;
 
-    public RemoveClusterBeforeFilesOperator(@Nullable CommitMessage dvCommitMessage) {
+    public RemoveClusterBeforeFilesOperator(@Nullable List<CommitMessage> dvCommitMessage) {
         this.dvCommitMessage = dvCommitMessage;
     }
 

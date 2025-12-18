@@ -27,6 +27,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
@@ -38,23 +39,21 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** Rewrite committable for new files written after clustered. */
 public class RewriteIncrementalClusterCommittableOperator
         extends BoundedOneInputOperator<Committable, Committable> {
 
     protected static final Logger LOG =
             LoggerFactory.getLogger(RewriteIncrementalClusterCommittableOperator.class);
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private final FileStoreTable table;
-    private final Map<BinaryRow, Integer> outputLevels;
+    private final Map<Pair<BinaryRow, Integer>, Integer> outputLevels;
 
-    private transient Map<BinaryRow, List<DataFileMeta>> partitionFiles;
+    private transient Map<BinaryRow, Map<Integer, List<DataFileMeta>>> partitionFiles;
 
     public RewriteIncrementalClusterCommittableOperator(
-            FileStoreTable table, Map<BinaryRow, Integer> outputLevels) {
+            FileStoreTable table, Map<Pair<BinaryRow, Integer>, Integer> outputLevels) {
         this.table = table;
         this.outputLevels = outputLevels;
     }
@@ -72,11 +71,18 @@ public class RewriteIncrementalClusterCommittableOperator
         }
 
         CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
-        checkArgument(message.bucket() == 0);
         BinaryRow partition = message.partition();
-        partitionFiles
-                .computeIfAbsent(partition, file -> new ArrayList<>())
+        int bucket = message.bucket();
+
+        Map<Integer, List<DataFileMeta>> bucketFiles = partitionFiles.get(partition);
+        if (bucketFiles == null) {
+            bucketFiles = new HashMap<>();
+            partitionFiles.put(partition.copy(), bucketFiles);
+        }
+        bucketFiles
+                .computeIfAbsent(bucket, file -> new ArrayList<>())
                 .addAll(message.newFilesIncrement().newFiles());
+        partitionFiles.put(partition, bucketFiles);
     }
 
     @Override
@@ -85,31 +91,38 @@ public class RewriteIncrementalClusterCommittableOperator
     }
 
     protected void emitAll(long checkpointId) {
-        for (Map.Entry<BinaryRow, List<DataFileMeta>> partitionEntry : partitionFiles.entrySet()) {
+        for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> partitionEntry :
+                partitionFiles.entrySet()) {
             BinaryRow partition = partitionEntry.getKey();
-            // upgrade the clustered file to outputLevel
-            List<DataFileMeta> clusterAfter =
-                    IncrementalClusterManager.upgrade(
-                            partitionEntry.getValue(), outputLevels.get(partition));
-            LOG.info(
-                    "Partition {}: upgrade file level to {}",
-                    partition,
-                    outputLevels.get(partition));
-            CompactIncrement compactIncrement =
-                    new CompactIncrement(
-                            Collections.emptyList(), clusterAfter, Collections.emptyList());
-            CommitMessageImpl clusterMessage =
-                    new CommitMessageImpl(
-                            partition,
-                            // bucket 0 is bucket for unaware-bucket table
-                            // for compatibility with the old design
-                            0,
-                            table.coreOptions().bucket(),
-                            DataIncrement.emptyIncrement(),
-                            compactIncrement);
-            output.collect(
-                    new StreamRecord<>(
-                            new Committable(checkpointId, Committable.Kind.FILE, clusterMessage)));
+            Map<Integer, List<DataFileMeta>> bucketFiles = partitionEntry.getValue();
+
+            for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : bucketFiles.entrySet()) {
+                int bucket = bucketEntry.getKey();
+                // upgrade the clustered file to outputLevel
+                List<DataFileMeta> clusterAfter =
+                        IncrementalClusterManager.upgrade(
+                                bucketEntry.getValue(),
+                                outputLevels.get(Pair.of(partition, bucket)));
+                LOG.info(
+                        "Partition {}, bucket {}: upgrade file level to {}",
+                        partition,
+                        bucket,
+                        outputLevels.get(Pair.of(partition, bucket)));
+                CompactIncrement compactIncrement =
+                        new CompactIncrement(
+                                Collections.emptyList(), clusterAfter, Collections.emptyList());
+                CommitMessageImpl clusterMessage =
+                        new CommitMessageImpl(
+                                partition,
+                                bucket,
+                                table.coreOptions().bucket(),
+                                DataIncrement.emptyIncrement(),
+                                compactIncrement);
+                output.collect(
+                        new StreamRecord<>(
+                                new Committable(
+                                        checkpointId, Committable.Kind.FILE, clusterMessage)));
+            }
         }
 
         partitionFiles.clear();

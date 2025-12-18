@@ -38,7 +38,6 @@ import javax.annotation.Nullable;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -46,8 +45,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.append.cluster.IncrementalClusterManager.constructPartitionLevels;
-import static org.apache.paimon.append.cluster.IncrementalClusterManager.logForPartitionLevel;
+import static org.apache.paimon.append.cluster.IncrementalClusterManager.constructBucketLevels;
+import static org.apache.paimon.append.cluster.IncrementalClusterManager.groupByPtAndBucket;
+import static org.apache.paimon.append.cluster.IncrementalClusterManager.logForCompactUnits;
+import static org.apache.paimon.append.cluster.IncrementalClusterManager.logForLevels;
 
 /** Handle historical partition for full clustering. */
 public class HistoryPartitionCluster {
@@ -111,23 +112,39 @@ public class HistoryPartitionCluster {
                 limit);
     }
 
-    public Map<BinaryRow, CompactUnit> pickForHistoryPartitions() {
-        Map<BinaryRow, List<LevelSortedRun>> partitionLevels =
+    public Map<BinaryRow, Map<Integer, CompactUnit>> createHistoryCompactUnits() {
+        Map<BinaryRow, Map<Integer, List<LevelSortedRun>>> partitionLevels =
                 constructLevelsForHistoryPartitions();
-        logForPartitionLevel(partitionLevels, partitionComputer);
+        logForLevels(partitionLevels, partitionComputer);
 
-        Map<BinaryRow, CompactUnit> units = new HashMap<>();
+        Map<BinaryRow, Map<Integer, CompactUnit>> units = new HashMap<>();
         partitionLevels.forEach(
-                (k, v) -> {
-                    Optional<CompactUnit> pick =
-                            incrementalClusterStrategy.pick(maxLevel + 1, v, true);
-                    pick.ifPresent(compactUnit -> units.put(k, compactUnit));
+                (partition, bucketLevels) -> {
+                    Map<Integer, CompactUnit> bucketUnits = new HashMap<>();
+                    bucketLevels.forEach(
+                            (bucket, levels) -> {
+                                Optional<CompactUnit> pick =
+                                        incrementalClusterStrategy.pick(maxLevel + 1, levels, true);
+                                pick.ifPresent(
+                                        compactUnit -> {
+                                            bucketUnits.put(bucket, compactUnit);
+                                            if (LOG.isDebugEnabled()) {
+                                                logForCompactUnits(
+                                                        partitionComputer.generatePartValues(
+                                                                partition),
+                                                        bucket,
+                                                        compactUnit);
+                                            }
+                                        });
+                            });
+                    units.put(partition, bucketUnits);
                 });
         return units;
     }
 
     @VisibleForTesting
-    public Map<BinaryRow, List<LevelSortedRun>> constructLevelsForHistoryPartitions() {
+    public Map<BinaryRow, Map<Integer, List<LevelSortedRun>>>
+            constructLevelsForHistoryPartitions() {
         long historyMilli =
                 LocalDateTime.now()
                         .minus(historyPartitionIdleTime)
@@ -152,23 +169,19 @@ public class HistoryPartitionCluster {
                         .read()
                         .dataSplits();
 
-        Map<BinaryRow, List<DataFileMeta>> historyPartitionFiles = new HashMap<>();
-        for (DataSplit dataSplit : historyDataSplits) {
-            historyPartitionFiles
-                    .computeIfAbsent(dataSplit.partition(), k -> new ArrayList<>())
-                    .addAll(dataSplit.dataFiles());
-        }
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> historyPartitionFiles =
+                groupByPtAndBucket(historyDataSplits);
 
         return filterPartitions(historyPartitionFiles).entrySet().stream()
                 .collect(
                         Collectors.toMap(
                                 Map.Entry::getKey,
-                                entry -> constructPartitionLevels(entry.getValue())));
+                                entry -> constructBucketLevels(entry.getValue())));
     }
 
-    private Map<BinaryRow, List<DataFileMeta>> filterPartitions(
-            Map<BinaryRow, List<DataFileMeta>> partitionFiles) {
-        Map<BinaryRow, List<DataFileMeta>> result = new HashMap<>();
+    private Map<BinaryRow, Map<Integer, List<DataFileMeta>>> filterPartitions(
+            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> partitionFiles) {
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> result = new HashMap<>();
         partitionFiles.forEach(
                 (part, files) -> {
                     if (specifiedPartitions.test(part)) {

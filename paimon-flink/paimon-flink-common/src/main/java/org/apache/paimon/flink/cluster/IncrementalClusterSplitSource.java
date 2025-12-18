@@ -21,12 +21,15 @@ package org.apache.paimon.flink.cluster;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
+import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.operator.ReadOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
@@ -42,6 +45,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
+import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
@@ -89,7 +93,7 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
             FileStoreTable table,
             Map<String, String> partitionSpec,
             List<DataSplit> splits,
-            @Nullable CommitMessage dvCommitMessage,
+            @Nullable List<CommitMessage> dvCommitMessage,
             @Nullable Integer parallelism) {
         DataStream<Split> source =
                 env.fromSource(
@@ -101,9 +105,13 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
                                 new JavaTypeInfo<>(Split.class))
                         .forceNonParallel();
 
+        StreamPartitioner<Split> partitioner =
+                table.bucketMode() == BucketMode.HASH_FIXED
+                        ? new FlinkStreamPartitioner<>(new SplitChannelComputer())
+                        : new RebalancePartitioner<>();
+
         PartitionTransformation<Split> partitioned =
-                new PartitionTransformation<>(
-                        source.getTransformation(), new RebalancePartitioner<>());
+                new PartitionTransformation<>(source.getTransformation(), partitioner);
         if (parallelism != null) {
             partitioned.setParallelism(parallelism);
         }
@@ -124,5 +132,21 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
                                 new CommittableTypeInfo(),
                                 new RemoveClusterBeforeFilesOperator(dvCommitMessage))
                         .forceNonParallel());
+    }
+
+    private static class SplitChannelComputer implements ChannelComputer<Split> {
+
+        private transient int numChannels;
+
+        @Override
+        public void setup(int numChannels) {
+            this.numChannels = numChannels;
+        }
+
+        @Override
+        public int channel(Split record) {
+            DataSplit dataSplit = (DataSplit) record;
+            return ChannelComputer.select(dataSplit.partition(), dataSplit.bucket(), numChannels);
+        }
     }
 }

@@ -78,6 +78,7 @@ public class SortUtils {
      * @param convertor convert the `KEY` to the sort key, then we can sort in
      *     `BinaryExternalSortBuffer`.
      * @param tableSortInfo the necessary info of table sort.
+     * @param isGlobalSort whether to do global sort
      * @return the global sorted data stream
      * @param <KEY> the KEY type in range shuffle
      */
@@ -89,16 +90,47 @@ public class SortUtils {
             final SerializableSupplier<Comparator<KEY>> shuffleKeyComparator,
             final KeyAbstract<KEY> shuffleKeyAbstract,
             final ShuffleKeyConvertor<KEY> convertor,
-            final TableSortInfo tableSortInfo) {
+            final TableSortInfo tableSortInfo,
+            final boolean isGlobalSort) {
+        return isGlobalSort
+                ? sortStreamByKeyInGlobal(
+                        inputStream,
+                        table,
+                        sortKeyType,
+                        keyTypeInformation,
+                        shuffleKeyComparator,
+                        shuffleKeyAbstract,
+                        convertor,
+                        tableSortInfo)
+                : sortStreamByKeyInLocal(
+                        inputStream,
+                        table,
+                        sortKeyType,
+                        keyTypeInformation,
+                        shuffleKeyAbstract,
+                        convertor,
+                        tableSortInfo);
+    }
 
+    public static <KEY> DataStream<RowData> sortStreamByKeyInGlobal(
+            final DataStream<RowData> inputStream,
+            final FileStoreTable table,
+            final RowType sortKeyType,
+            final TypeInformation<KEY> keyTypeInformation,
+            final SerializableSupplier<Comparator<KEY>> shuffleKeyComparator,
+            final KeyAbstract<KEY> shuffleKeyAbstract,
+            final ShuffleKeyConvertor<KEY> convertor,
+            final TableSortInfo tableSortInfo) {
         CoreOptions options = table.coreOptions();
         final RowType valueRowType = table.rowType();
         final int sinkParallelism = tableSortInfo.getSinkParallelism();
 
+        DataStream<Tuple2<KEY, RowData>> inputWithKey =
+                generateSortKey(inputStream, keyTypeInformation, shuffleKeyAbstract);
+
         DataStream<Tuple2<KEY, RowData>> rangeShuffleResult =
                 rangeShuffle(
-                        inputStream,
-                        shuffleKeyAbstract,
+                        inputWithKey,
                         keyTypeInformation,
                         shuffleKeyComparator,
                         tableSortInfo,
@@ -121,9 +153,67 @@ public class SortUtils {
         }
     }
 
-    public static <KEY> DataStream<Tuple2<KEY, RowData>> rangeShuffle(
+    public static <KEY> DataStream<RowData> sortStreamByKeyInLocal(
             final DataStream<RowData> inputStream,
+            final FileStoreTable table,
+            final RowType sortKeyType,
+            final TypeInformation<KEY> keyTypeInformation,
             final KeyAbstract<KEY> shuffleKeyAbstract,
+            final ShuffleKeyConvertor<KEY> convertor,
+            final TableSortInfo tableSortInfo) {
+        CoreOptions options = table.coreOptions();
+        final RowType valueRowType = table.rowType();
+        final int sinkParallelism = tableSortInfo.getSinkParallelism();
+
+        DataStream<Tuple2<KEY, RowData>> inputWithKey =
+                generateSortKey(inputStream, keyTypeInformation, shuffleKeyAbstract);
+
+        return localSort(
+                inputWithKey,
+                convertor,
+                sortKeyType,
+                valueRowType,
+                inputStream.getType(),
+                options,
+                sinkParallelism);
+    }
+
+    public static <KEY> DataStream<Tuple2<KEY, RowData>> generateSortKey(
+            final DataStream<RowData> inputStream,
+            final TypeInformation<KEY> keyTypeInformation,
+            final KeyAbstract<KEY> shuffleKeyAbstract) {
+        // generate the KEY as the key of Pair.
+        return inputStream
+                .map(
+                        new RichMapFunction<RowData, Tuple2<KEY, RowData>>() {
+
+                            /**
+                             * Do not annotate with <code>@override</code> here to maintain
+                             * compatibility with Flink 1.18-.
+                             */
+                            public void open(OpenContext openContext) throws Exception {
+                                open(new Configuration());
+                            }
+
+                            /**
+                             * Do not annotate with <code>@override</code> here to maintain
+                             * compatibility with Flink 2.0+.
+                             */
+                            public void open(Configuration parameters) throws Exception {
+                                shuffleKeyAbstract.open();
+                            }
+
+                            @Override
+                            public Tuple2<KEY, RowData> map(RowData value) {
+                                return Tuple2.of(shuffleKeyAbstract.apply(value), value);
+                            }
+                        },
+                        new TupleTypeInfo<>(keyTypeInformation, inputStream.getType()))
+                .setParallelism(inputStream.getParallelism());
+    }
+
+    public static <KEY> DataStream<Tuple2<KEY, RowData>> rangeShuffle(
+            final DataStream<Tuple2<KEY, RowData>> inputWithKey,
             final TypeInformation<KEY> keyTypeInformation,
             final SerializableSupplier<Comparator<KEY>> shuffleKeyComparator,
             final TableSortInfo tableSortInfo,
@@ -134,36 +224,6 @@ public class SortUtils {
         final int localSampleSize = tableSortInfo.getLocalSampleSize();
         final int globalSampleSize = tableSortInfo.getGlobalSampleSize();
         final int rangeNum = tableSortInfo.getRangeNumber();
-
-        // generate the KEY as the key of Pair.
-        DataStream<Tuple2<KEY, RowData>> inputWithKey =
-                inputStream
-                        .map(
-                                new RichMapFunction<RowData, Tuple2<KEY, RowData>>() {
-
-                                    /**
-                                     * Do not annotate with <code>@override</code> here to maintain
-                                     * compatibility with Flink 1.18-.
-                                     */
-                                    public void open(OpenContext openContext) throws Exception {
-                                        open(new Configuration());
-                                    }
-
-                                    /**
-                                     * Do not annotate with <code>@override</code> here to maintain
-                                     * compatibility with Flink 2.0+.
-                                     */
-                                    public void open(Configuration parameters) throws Exception {
-                                        shuffleKeyAbstract.open();
-                                    }
-
-                                    @Override
-                                    public Tuple2<KEY, RowData> map(RowData value) {
-                                        return Tuple2.of(shuffleKeyAbstract.apply(value), value);
-                                    }
-                                },
-                                new TupleTypeInfo<>(keyTypeInformation, inputStream.getType()))
-                        .setParallelism(inputStream.getParallelism());
 
         // range shuffle by key
         return RangeShuffle.rangeShuffleByKey(
