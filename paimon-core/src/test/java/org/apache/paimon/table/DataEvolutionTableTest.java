@@ -42,6 +42,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -69,6 +70,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -923,6 +925,38 @@ public class DataEvolutionTableTest extends TableTestBase {
         assertThat(allTasks.size()).isEqualTo(1);
         DataEvolutionCompactTask task = allTasks.get(0);
         assertThat(task.compactBefore().size()).isEqualTo(20);
+    }
+
+    @Test
+    public void testCompact() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            write(100000L);
+        }
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        // Create coordinator and call plan multiple times
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false);
+
+        // Each plan() call processes one manifest group
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        List<DataEvolutionCompactTask> tasks;
+        while (!(tasks = coordinator.plan()).isEmpty()) {
+            for (DataEvolutionCompactTask task : tasks) {
+                commitMessages.add(task.doCompact(table));
+            }
+        }
+
+        table.newBatchWriteBuilder().newCommit().commit(commitMessages);
+
+        List<ManifestEntry> entries = new ArrayList<>();
+        Iterator<ManifestEntry> files = table.newSnapshotReader().readFileIterator();
+        while (files.hasNext()) {
+            entries.add(files.next());
+        }
+
+        assertThat(entries.size()).isEqualTo(1);
+        assertThat(entries.get(0).file().nonNullFirstRowId()).isEqualTo(0);
+        assertThat(entries.get(0).file().rowCount()).isEqualTo(500000L);
     }
 
     private void write(long count) throws Exception {

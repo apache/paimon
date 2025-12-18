@@ -18,14 +18,37 @@
 
 package org.apache.paimon.append.dataevolution;
 
+import org.apache.paimon.AppendOnlyFileStore;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.operation.AppendFileStoreWrite;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.RecordWriter;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Data evolution table compaction task. */
 public class DataEvolutionCompactTask {
+
+    private static final Map<String, String> DYNAMIC_WRITE_OPTIONS =
+            Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G");
 
     private final BinaryRow partition;
     private final List<DataFileMeta> compactBefore;
@@ -54,5 +77,64 @@ public class DataEvolutionCompactTask {
 
     public boolean isBlobTask() {
         return blobTask;
+    }
+
+    public CommitMessage doCompact(FileStoreTable table) throws Exception {
+        if (blobTask) {
+            // TODO: support blob file compaction
+            throw new UnsupportedOperationException("Blob task is not supported");
+        }
+
+        table = table.copy(DYNAMIC_WRITE_OPTIONS);
+        long firstRowId = compactBefore.get(0).nonNullFirstRowId();
+
+        RowType readWriteType =
+                new RowType(
+                        table.rowType().getFields().stream()
+                                .filter(f -> f.type().getTypeRoot() != DataTypeRoot.BLOB)
+                                .collect(Collectors.toList()));
+        FileStorePathFactory pathFactory = table.store().pathFactory();
+        AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
+
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withPartition(partition)
+                        .withBucket(0)
+                        .withDataFiles(compactBefore)
+                        .withBucketPath(pathFactory.bucketPath(partition, 0).toString())
+                        .rawConvertible(false)
+                        .build();
+        RecordReader<InternalRow> reader =
+                store.newDataEvolutionRead().withReadType(readWriteType).createReader(dataSplit);
+        AppendFileStoreWrite storeWrite =
+                (AppendFileStoreWrite) store.newWrite("Compact-Data-Evolution");
+        storeWrite.withWriteType(readWriteType);
+        RecordWriter<InternalRow> writer = storeWrite.createWriter(partition, 0);
+
+        reader.forEachRemaining(
+                row -> {
+                    try {
+                        writer.write(row);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+        List<DataFileMeta> writeResult = writer.prepareCommit(false).newFilesIncrement().newFiles();
+        checkArgument(
+                writeResult.size() == 1, "Data evolution compaction should produce one file.");
+
+        DataFileMeta dataFileMeta = writeResult.get(0).assignFirstRowId(firstRowId);
+        compactAfter.add(dataFileMeta);
+
+        CompactIncrement compactIncrement =
+                new CompactIncrement(
+                        compactBefore,
+                        compactAfter,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList());
+        return new CommitMessageImpl(
+                partition, 0, null, DataIncrement.emptyIncrement(), compactIncrement);
     }
 }
