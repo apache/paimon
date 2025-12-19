@@ -438,10 +438,6 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     "Data Evolution: merge into table with data-evolution for Self-Merge with _ROW_ID " +
       "shortcut") {
     withTable("target") {
-      sql("CREATE TABLE source (target_ROW_ID BIGINT, b INT, c STRING)")
-      sql(
-        "INSERT INTO source VALUES (0, 100, 'c11'), (2, 300, 'c33'), (4, 500, 'c55'), (6, 700, 'c77'), (8, 900, 'c99')")
-
       sql(
         "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
       sql(
@@ -471,11 +467,13 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       // Assert no shuffle/join/sort was used in
       // 'org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.updateActionInvoke'
       assert(
-        capturedPlans.head.collectFirst {
-          case p: Join => p
-          case p: Sort => p
-          case p: RepartitionByExpression => p
-        }.isEmpty,
+        capturedPlans.forall(
+          plan =>
+            plan.collectFirst {
+              case p: Join => p
+              case p: Sort => p
+              case p: RepartitionByExpression => p
+            }.isEmpty),
         s"Found unexpected Join/Sort/Exchange in plan:\n${capturedPlans.head}"
       )
       spark.listenerManager.unregister(listener)
