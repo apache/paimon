@@ -22,7 +22,9 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions._
 import org.apache.paimon.io.DataFileMeta
 import org.apache.paimon.spark.PaimonInputPartition
+import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackDataSplit
+import org.apache.paimon.table.format.FormatDataSplit
 import org.apache.paimon.table.source.{DataSplit, DeletionFile, Split}
 
 import org.apache.spark.internal.Logging
@@ -33,7 +35,9 @@ import org.apache.spark.sql.internal.SQLConf
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 
-case class BinPackingSplits(coreOptions: CoreOptions) extends SQLConfHelper with Logging {
+case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double = 1.0)
+  extends SQLConfHelper
+  with Logging {
 
   private val spark = PaimonSparkSession.active
 
@@ -75,6 +79,8 @@ case class BinPackingSplits(coreOptions: CoreOptions) extends SQLConfHelper with
     val (toReshuffle, reserved) = splits.partition {
       case _: FallbackDataSplit => false
       case split: DataSplit => split.beforeFiles().isEmpty && split.rawConvertible()
+      // Currently, format table reader only supports reading one file.
+      case _: FormatDataSplit => false
       case _ => false
     }
     if (toReshuffle.nonEmpty) {
@@ -132,8 +138,9 @@ case class BinPackingSplits(coreOptions: CoreOptions) extends SQLConfHelper with
         val ddFiles = dataFileAndDeletionFiles(split)
         ddFiles.foreach {
           case (dataFile, deletionFile) =>
-            val size = dataFile
-              .fileSize() + openCostInBytes + Option(deletionFile).map(_.length()).getOrElse(0L)
+            val size =
+              (dataFile.fileSize() * readRowSizeRatio).toLong + openCostInBytes + Option(
+                deletionFile).map(_.length()).getOrElse(0L)
             if (currentSize + size > maxSplitBytes) {
               closeInputPartition()
             }
@@ -147,14 +154,6 @@ case class BinPackingSplits(coreOptions: CoreOptions) extends SQLConfHelper with
     closeInputPartition()
 
     partitions.toArray
-  }
-
-  private def unpack(split: Split): Array[DataFileMeta] = {
-    split match {
-      case ds: DataSplit =>
-        ds.dataFiles().asScala.toArray
-      case _ => Array.empty
-    }
   }
 
   private def copyDataSplit(
@@ -190,12 +189,12 @@ case class BinPackingSplits(coreOptions: CoreOptions) extends SQLConfHelper with
   }
 
   private def computeMaxSplitBytes(dataSplits: Seq[DataSplit]): Long = {
-    val dataFiles = dataSplits.flatMap(unpack)
     val defaultMaxSplitBytes = filesMaxPartitionBytes
-    val minPartitionNum = conf.filesMinPartitionNum
-      .getOrElse(leafNodeDefaultParallelism)
-    val totalBytes = dataFiles.map(file => file.fileSize + openCostInBytes).sum
-    val bytesPerCore = totalBytes / minPartitionNum
+    val minPartitionNum = conf.filesMinPartitionNum.getOrElse(leafNodeDefaultParallelism)
+
+    val totalRawBytes =
+      dataSplits.map(s => SplitUtils.splitSize(s) + SplitUtils.fileCount(s) * openCostInBytes).sum
+    val bytesPerCore = totalRawBytes / minPartitionNum
 
     val maxSplitBytes = Math.min(defaultMaxSplitBytes, Math.max(openCostInBytes, bytesPerCore))
     logInfo(

@@ -145,4 +145,35 @@ class BinPackingSplitsTest extends PaimonSparkTestBase {
       }
     }
   }
+
+  test("Paimon: get read splits with column pruning") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (a INT, s1 STRING, s2 STRING, s3 STRING, s4 STRING, s5 STRING, s6 STRING, s7 STRING, s8 STRING, s9 STRING)")
+      sql(
+        "INSERT INTO t SELECT  /*+ REPARTITION(10) */ id, uuid(), uuid(), uuid(), uuid(), uuid(), uuid(), uuid(), uuid(), uuid() FROM range(1000000)")
+
+      withSparkSQLConf(
+        "spark.sql.files.minPartitionNum" -> "1",
+        "spark.sql.files.openCostInBytes" -> "0",
+        "spark.paimon.source.split.target-size" -> "32m") {
+        for (splitSizeWithColumnPruning <- Seq("true", "false")) {
+          withSparkSQLConf(
+            "spark.paimon.source.split.target-size-with-column-pruning" -> splitSizeWithColumnPruning) {
+            // Select one col
+            var partitionCount = getPaimonScan("SELECT s1 FROM t").inputPartitions.length
+            if (splitSizeWithColumnPruning.toBoolean) {
+              assert(partitionCount == 1)
+            } else {
+              assert(partitionCount > 1)
+            }
+
+            // Select all cols
+            partitionCount = getPaimonScan("SELECT * FROM t").inputPartitions.length
+            assert(partitionCount > 1)
+          }
+        }
+      }
+    }
+  }
 }

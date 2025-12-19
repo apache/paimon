@@ -21,23 +21,42 @@ package org.apache.paimon.spark.util
 import org.apache.paimon.table.format.FormatDataSplit
 import org.apache.paimon.table.source.{DataSplit, Split}
 
+import java.util.{Collections => JCollections}
+
 import scala.collection.JavaConverters._
 
 object SplitUtils {
 
   def splitSize(split: Split): Long = {
     split match {
-      case ds: DataSplit => ds.dataFiles().asScala.map(_.fileSize).sum
+      case ds: DataSplit =>
+        ds.dataFiles().asScala.map(_.fileSize).sum
       case fs: FormatDataSplit =>
         if (fs.length() == null) fs.fileSize() else fs.length().longValue()
       case _ => 0
     }
   }
 
-  def fileCount(split: Split): Long = {
+  def fileCount(split: Split): Long = dataFileCount(split) + deleteFileCount(split)
+
+  def dataFileCount(split: Split): Long = {
     split match {
       case ds: DataSplit => ds.dataFiles().size()
       case _: FormatDataSplit => 1
+      case _ => 0
+    }
+  }
+
+  def deleteFileCount(split: Split): Long = {
+    split match {
+      case ds: DataSplit =>
+        ds.deletionFiles()
+          .orElse(JCollections.emptyList())
+          .asScala
+          .filter(_ != null)
+          .map(_.path())
+          .distinct
+          .size
       case _ => 0
     }
   }
