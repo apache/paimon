@@ -40,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -136,5 +137,37 @@ public class DataEvolutionCompactTask {
                         Collections.emptyList());
         return new CommitMessageImpl(
                 partition, 0, null, DataIncrement.emptyIncrement(), compactIncrement);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(partition, compactBefore, compactAfter, blobTask);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        DataEvolutionCompactTask that = (DataEvolutionCompactTask) o;
+        return blobTask == that.blobTask
+                && Objects.equals(partition, that.partition)
+                && Objects.equals(compactBefore, that.compactBefore)
+                && Objects.equals(compactAfter, that.compactAfter);
+    }
+
+    @Override
+    public String toString() {
+        return String.format(
+                "DataEvolutionCompactTask {"
+                        + "partition = %s, "
+                        + "compactBefore = %s, "
+                        + "compactAfter = %s, "
+                        + "blobTask = %s}",
+                partition, compactBefore, compactAfter, blobTask);
     }
 }

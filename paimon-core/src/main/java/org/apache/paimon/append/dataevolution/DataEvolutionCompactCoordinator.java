@@ -25,10 +25,13 @@ import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.RangeHelper;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -49,12 +52,21 @@ public class DataEvolutionCompactCoordinator {
     private final CompactPlanner planner;
 
     public DataEvolutionCompactCoordinator(FileStoreTable table, boolean compactBlob) {
+        this(table, null, compactBlob);
+    }
+
+    public DataEvolutionCompactCoordinator(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            boolean compactBlob) {
         CoreOptions options = table.coreOptions();
         long targetFileSize = options.targetFileSize(false);
         long openFileCost = options.splitOpenFileCost();
         long compactMinFileNum = options.compactionMinFileNum();
 
-        this.scanner = new CompactScanner(table.newSnapshotReader());
+        this.scanner =
+                new CompactScanner(
+                        table.newSnapshotReader().withPartitionFilter(partitionPredicate));
         this.planner =
                 new CompactPlanner(compactBlob, targetFileSize, openFileCost, compactMinFileNum);
     }

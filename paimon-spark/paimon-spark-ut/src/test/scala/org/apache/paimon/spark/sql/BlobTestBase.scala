@@ -127,6 +127,31 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: test compaction") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
+      for (i <- 1 to 10) {
+        sql("INSERT INTO t VALUES (" + i + ", 'paimon', X'48656C6C6F')")
+      }
+      sql("INSERT INTO t VALUES (1, 'paimon', X'48656C6C6F')")
+
+      checkAnswer(
+        sql("SELECT COUNT(*) FROM `t$files`"),
+        Seq(Row(22))
+      )
+      sql("CALL paimon.sys.compact('t')")
+      checkAnswer(
+        sql("SELECT COUNT(*) FROM `t$files`"),
+        Seq(Row(12))
+      )
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t LIMIT 1"),
+        Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), 0, 12))
+      )
+    }
+  }
+
   private val HEX_ARRAY = "0123456789ABCDEF".toCharArray
 
   def bytesToHex(bytes: Array[Byte]): String = {
