@@ -28,7 +28,9 @@ import org.apache.paimon.stats.StatsTestUtils;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -233,5 +235,64 @@ public class DataEvolutionCompactCoordinatorTest {
                 null,
                 firstRowId,
                 null);
+    }
+
+    @Test
+    public void testSerializerBasic() throws IOException {
+        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
+
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        createDataFileMeta("file1.parquet", 0L, 100L, 0, 1024),
+                        createDataFileMeta("file2.parquet", 100L, 100L, 0, 1024));
+
+        DataEvolutionCompactTask task =
+                new DataEvolutionCompactTask(BinaryRow.EMPTY_ROW, files, false);
+
+        byte[] bytes = serializer.serialize(task);
+        DataEvolutionCompactTask deserialized =
+                serializer.deserialize(serializer.getVersion(), bytes);
+
+        assertThat(deserialized).isEqualTo(task);
+    }
+
+    @Test
+    public void testSerializerBlobTask() throws IOException {
+        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
+
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        createDataFileMeta("file1.blob", 0L, 100L, 0, 1024),
+                        createDataFileMeta("file2.blob", 0L, 100L, 0, 1024));
+
+        DataEvolutionCompactTask task =
+                new DataEvolutionCompactTask(BinaryRow.EMPTY_ROW, files, true);
+
+        byte[] bytes = serializer.serialize(task);
+        DataEvolutionCompactTask deserialized =
+                serializer.deserialize(serializer.getVersion(), bytes);
+
+        assertThat(deserialized).isEqualTo(task);
+        assertThat(deserialized.isBlobTask()).isTrue();
+    }
+
+    @Test
+    public void testSerializerWithPartition() throws IOException {
+        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
+
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        createDataFileMeta("file1.parquet", 0L, 100L, 0, 1024),
+                        createDataFileMeta("file2.parquet", 100L, 100L, 0, 1024));
+
+        BinaryRow partition = BinaryRow.singleColumn(42);
+        DataEvolutionCompactTask task = new DataEvolutionCompactTask(partition, files, false);
+
+        byte[] bytes = serializer.serialize(task);
+        DataEvolutionCompactTask deserialized =
+                serializer.deserialize(serializer.getVersion(), bytes);
+
+        assertThat(deserialized).isEqualTo(task);
+        assertThat(deserialized.partition()).isEqualTo(partition);
     }
 }
