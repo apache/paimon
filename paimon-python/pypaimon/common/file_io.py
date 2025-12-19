@@ -281,6 +281,9 @@ class FileIO:
             return success
 
     def write_file(self, path: str, content: str, overwrite: bool = False):
+        if not overwrite and self.exists(path):
+            raise FileExistsError(f"File {path} already exists and overwrite=False")
+
         with self.new_output_stream(path) as output_stream:
             output_stream.write(content.encode('utf-8'))
 

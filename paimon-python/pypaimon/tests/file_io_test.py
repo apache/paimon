@@ -15,6 +15,9 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 ################################################################################
+import os
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -122,6 +125,35 @@ class FileIOTest(unittest.TestCase):
         self.assertEqual(s3_file_io.to_filesystem_path("s3://my-bucket///path///to///file.txt"),
                          "my-bucket/path/to/file.txt")
 
+    def test_write_file_with_overwrite_flag(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_write_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = FileIO(warehouse_path, {})
+
+            test_file_uri = f"file://{temp_dir}/overwrite_test.txt"
+            expected_path = os.path.join(temp_dir, "overwrite_test.txt")
+
+            # 1) Write to a new file with default overwrite=False
+            file_io.write_file(test_file_uri, "first content")
+            self.assertTrue(os.path.exists(expected_path))
+            with open(expected_path, "r", encoding="utf-8") as f:
+                self.assertEqual(f.read(), "first content")
+
+            # 2) Attempt to write again with overwrite=False should raise FileExistsError
+            with self.assertRaises(FileExistsError):
+                file_io.write_file(test_file_uri, "second content", overwrite=False)
+
+            # Ensure content is unchanged
+            with open(expected_path, "r", encoding="utf-8") as f:
+                self.assertEqual(f.read(), "first content")
+
+            # 3) Write with overwrite=True should replace the content
+            file_io.write_file(test_file_uri, "overwritten content", overwrite=True)
+            with open(expected_path, "r", encoding="utf-8") as f:
+                self.assertEqual(f.read(), "overwritten content")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 if __name__ == '__main__':
     unittest.main()
