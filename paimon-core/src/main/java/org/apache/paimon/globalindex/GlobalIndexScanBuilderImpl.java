@@ -102,7 +102,6 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
 
     @Override
     public List<Range> shardList() {
-
         Map<String, List<Range>> indexRanges = new HashMap<>();
         for (IndexManifestEntry entry : scan()) {
             GlobalIndexMeta globalIndexMeta = entry.indexFile().globalIndexMeta();

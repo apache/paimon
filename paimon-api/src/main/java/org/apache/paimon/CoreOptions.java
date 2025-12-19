@@ -1744,7 +1744,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<RangeStrategy> SORT_RANG_STRATEGY =
             key("sort-compaction.range-strategy")
                     .enumType(RangeStrategy.class)
-                    .defaultValue(RangeStrategy.QUANTITY)
+                    .defaultValue(RangeStrategy.SIZE)
                     .withDescription(
                             "The range strategy of sort compaction, the default value is quantity.\n"
                                     + "If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, "
@@ -2109,6 +2109,16 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The maximum number of concurrent scanner for global index."
                                     + "By default is the number of processors available to the Java virtual machine.");
+
+    public static final ConfigOption<Boolean> OVERWRITE_UPGRADE =
+            key("overwrite-upgrade")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to upgrade the data files after overwriting a primary key table when write-only and "
+                                    + "write-buffer-spillable are both true. When write-buffer-spillable is true, the "
+                                    + "batch result files will be sorted without overlapping, so they can be upgraded to  "
+                                    + "max level if there are no previous data (overwrite) and no compaction (write-only).");
 
     private final Options options;
 
@@ -3269,6 +3279,10 @@ public class CoreOptions implements Serializable {
 
     public Integer globalIndexThreadNum() {
         return options.get(GLOBAL_INDEX_THREAD_NUM);
+    }
+
+    public boolean overwriteUpgrade() {
+        return options.get(OVERWRITE_UPGRADE);
     }
 
     /** Specifies the merge engine for table with primary key. */

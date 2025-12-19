@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.catalog.functions.BucketFunction
+import org.apache.paimon.spark.scan.PaimonSplitScanBuilder
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.spark.write.{PaimonV2WriteBuilder, PaimonWriteBuilder}

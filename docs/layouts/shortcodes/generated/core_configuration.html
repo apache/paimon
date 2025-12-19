@@ -864,6 +864,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 3.</td>
         </tr>
         <tr>
+            <td><h5>overwrite-upgrade</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to upgrade the data files after overwriting a primary key table when write-only and write-buffer-spillable are both true. When write-buffer-spillable is true, the batch result files will be sorted without overlapping, so they can be upgraded to  max level if there are no previous data (overwrite) and no compaction (write-only).</td>
+        </tr>
+        <tr>
             <td><h5>page-size</h5></td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
@@ -1195,7 +1201,7 @@ This config option does not affect the default filesystem metastore.</td>
         </tr>
         <tr>
             <td><h5>sort-compaction.range-strategy</h5></td>
-            <td style="word-wrap: break-word;">QUANTITY</td>
+            <td style="word-wrap: break-word;">SIZE</td>
             <td><p>Enum</p></td>
             <td>The range strategy of sort compaction, the default value is quantity.
 If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, the config can be set to size.<br /><br />Possible values:<ul><li>"SIZE"</li><li>"QUANTITY"</li></ul></td>

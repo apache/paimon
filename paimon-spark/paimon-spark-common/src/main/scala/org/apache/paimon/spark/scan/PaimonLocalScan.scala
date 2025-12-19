@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.scan
 
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.table.Table

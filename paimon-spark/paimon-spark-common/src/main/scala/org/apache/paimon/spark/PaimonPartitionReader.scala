@@ -23,7 +23,8 @@ import org.apache.paimon.disk.IOManager
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.source.{DataSplit, ReadBuilder, Split}
+import org.apache.paimon.spark.util.SplitUtils
+import org.apache.paimon.table.source.{ReadBuilder, Split}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -54,6 +55,7 @@ case class PaimonPartitionReader(
     val rowType = new RowType(dataFields)
     SparkInternalRow.create(rowType, blobAsDescriptor)
   }
+  private var totalReadBatchTimeMs: Long = 0L
 
   private lazy val read = readBuilder.newRead().withIOManager(ioManager)
 
@@ -89,6 +91,7 @@ case class PaimonPartitionReader(
         if (currentRow != null) {
           stop = true
         } else {
+          totalReadBatchTimeMs += currentRecordReader.readBatchTimeMs
           currentRecordReader.close()
           currentRecordReader = readSplit()
           if (currentRecordReader == null) {
@@ -101,7 +104,7 @@ case class PaimonPartitionReader(
 
   private def readSplit(): PaimonRecordReaderIterator = {
     if (splits.hasNext) {
-      val split = splits.next();
+      val split = splits.next()
       PaimonRecordReaderIterator(read.createReader(split), metadataColumns, split)
     } else {
       null
@@ -110,26 +113,22 @@ case class PaimonPartitionReader(
 
   // Partition metrics need to be computed only once.
   private lazy val partitionMetrics: Array[CustomTaskMetric] = {
-    val dataSplits = partition.splits.collect { case ds: DataSplit => ds }
-    val numSplits = dataSplits.length
-    if (dataSplits.nonEmpty) {
-      val splitSize = dataSplits.map(_.dataFiles().asScala.map(_.fileSize).sum).sum
-      Array(
-        PaimonNumSplitsTaskMetric(numSplits),
-        PaimonPartitionSizeTaskMetric(splitSize)
-      )
-    } else {
-      Array.empty[CustomTaskMetric]
-    }
+    val numSplits = partition.splits.length
+    val splitSize = partition.splits.map(SplitUtils.splitSize).sum
+    Array(
+      PaimonNumSplitsTaskMetric(numSplits),
+      PaimonPartitionSizeTaskMetric(splitSize)
+    )
   }
 
   override def currentMetricsValues(): Array[CustomTaskMetric] = {
-    partitionMetrics
+    partitionMetrics ++ Array(PaimonReadBatchTimeTaskMetric(totalReadBatchTimeMs))
   }
 
   override def close(): Unit = {
     try {
       if (currentRecordReader != null) {
+        totalReadBatchTimeMs += currentRecordReader.readBatchTimeMs
         currentRecordReader.close()
       }
     } finally {

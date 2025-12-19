@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.write
 
-import org.apache.paimon.spark.PaimonCopyOnWriteScan
+import org.apache.paimon.spark.scan.PaimonCopyOnWriteScan
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.connector.write.{SupportsDynamicOverwrite, SupportsOverwrite, WriteBuilder}
