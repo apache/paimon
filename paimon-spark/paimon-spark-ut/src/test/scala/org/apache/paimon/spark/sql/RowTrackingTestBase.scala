@@ -434,9 +434,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test(
-    "Data Evolution: merge into table with data-evolution for Self-Merge with _ROW_ID " +
-      "shortcut") {
+  test("Data Evolution: merge into table with data-evolution for Self-Merge with _ROW_ID shortcut") {
     withTable("target") {
       sql(
         "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
