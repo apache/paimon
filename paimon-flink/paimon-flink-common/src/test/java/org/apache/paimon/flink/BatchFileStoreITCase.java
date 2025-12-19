@@ -29,7 +29,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.DateTimeUtils;
-import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -1112,21 +1111,17 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testOverwriteDvUpgradeForOrdinaryPk() throws Exception {
+    public void testOverwriteDvUpgradeForOrdinaryPk() {
         boolean dynamicBucket = ThreadLocalRandom.current().nextBoolean();
         sql(
                 "CREATE TABLE test_table (a INT, b STRING, pt STRING, PRIMARY KEY (a, pt) NOT ENFORCED) PARTITIONED BY (pt)"
                         + "WITH ('bucket' = '%s', 'deletion-vectors.enabled' = 'true', 'write-only' = 'true')",
                 dynamicBucket ? "-1" : "4");
-        SnapshotManager snapshotManager = paimonTable("test_table").snapshotManager();
-
         sql(
                 "INSERT INTO test_table VALUES (1, 'A', '2025-12-01'), (2, 'B', '2025-12-01'), (1, 'A', '2025-12-02')");
         assertThat(sql("SELECT * FROM test_table")).isEmpty();
 
         sql("INSERT OVERWRITE test_table VALUES (3, 'C', '2025-12-01')");
-        assertThat(snapshotManager.latestSnapshot().commitKind())
-                .isEqualTo(Snapshot.CommitKind.COMPACT);
         // didn't write pt 2025-12-02
         assertThat(sql("SELECT * FROM test_table")).containsExactly(Row.of(3, "C", "2025-12-01"));
 
@@ -1136,11 +1131,10 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testOverwriteDvUpgradeForPostpone() throws Exception {
+    public void testOverwriteDvUpgradeForPostpone() {
         sql(
                 "CREATE TABLE test_table (a INT, b STRING, pt STRING, PRIMARY KEY (a, pt) NOT ENFORCED) PARTITIONED BY (pt)"
                         + "WITH ('bucket' = '-2', 'deletion-vectors.enabled' = 'true', 'write-only' = 'true')");
-        SnapshotManager snapshotManager = paimonTable("test_table").snapshotManager();
 
         sql(
                 "INSERT INTO test_table VALUES (1, 'A', '2025-12-01'), (2, 'B', '2025-12-01'), (1, 'A', '2025-12-02')");
@@ -1153,8 +1147,6 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM test_table")).isEmpty();
 
         sql("INSERT OVERWRITE test_table VALUES (4, 'D', '2025-12-01')");
-        assertThat(snapshotManager.latestSnapshot().commitKind())
-                .isEqualTo(Snapshot.CommitKind.COMPACT);
         // didn't write pt 2025-12-02
         assertThat(sql("SELECT * FROM test_table")).containsExactly(Row.of(4, "D", "2025-12-01"));
 

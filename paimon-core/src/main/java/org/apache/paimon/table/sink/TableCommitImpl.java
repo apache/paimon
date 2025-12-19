@@ -22,10 +22,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexPathFactory;
-import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
@@ -89,8 +87,6 @@ public class TableCommitImpl implements InnerTableCommit {
     private final String tableName;
     private final boolean forceCreatingSnapshot;
     private final ThreadPoolExecutor fileCheckExecutor;
-    private final boolean allowOverwriteUpgrade;
-    private final int upgradeLevel;
 
     @Nullable private Map<String, String> overwritePartition = null;
     private boolean batchCommitted = false;
@@ -106,9 +102,7 @@ public class TableCommitImpl implements InnerTableCommit {
             ExpireExecutionMode expireExecutionMode,
             String tableName,
             boolean forceCreatingSnapshot,
-            int threadNum,
-            boolean allowOverwriteUpgrade,
-            int upgradeLevel) {
+            int threadNum) {
         if (partitionExpire != null) {
             commit.withPartitionExpire(partitionExpire);
         }
@@ -132,9 +126,6 @@ public class TableCommitImpl implements InnerTableCommit {
         this.tableName = tableName;
         this.forceCreatingSnapshot = forceCreatingSnapshot;
         this.fileCheckExecutor = FileOperationThreadPool.getExecutorService(threadNum);
-
-        this.allowOverwriteUpgrade = allowOverwriteUpgrade;
-        this.upgradeLevel = upgradeLevel;
     }
 
     public boolean forceCreatingSnapshot() {
@@ -257,7 +248,6 @@ public class TableCommitImpl implements InnerTableCommit {
                                 + committables);
             } else if (committables.size() == 1) {
                 committable = committables.get(0);
-                tryUpgrade(committable);
             } else {
                 // create an empty committable
                 // identifier is Long.MAX_VALUE, come from batch job
@@ -271,46 +261,6 @@ public class TableCommitImpl implements InnerTableCommit {
                     committable.identifier(),
                     maintainExecutor,
                     newSnapshots > 0 || expireForEmptyCommit);
-        }
-    }
-
-    private void tryUpgrade(ManifestCommittable committable) {
-        if (!allowOverwriteUpgrade) {
-            return;
-        }
-
-        List<CommitMessage> upgradeMessages = new ArrayList<>();
-        for (CommitMessage commitMessage : committable.fileCommittables()) {
-            // upgrade when writing new data only
-            CommitMessageImpl commitMessageImpl = (CommitMessageImpl) commitMessage;
-            if (!commitMessageImpl.compactIncrement().isEmpty()) {
-                return;
-            }
-            DataIncrement dataIncrement = commitMessageImpl.newFilesIncrement();
-            if (!dataIncrement.deletedFiles().isEmpty()
-                    && !dataIncrement.newIndexFiles().isEmpty()
-                    && !dataIncrement.deletedIndexFiles().isEmpty()) {
-                return;
-            }
-
-            List<DataFileMeta> newFiles = new ArrayList<>(dataIncrement.newFiles());
-            List<DataFileMeta> upgrades = new ArrayList<>();
-            for (DataFileMeta file : newFiles) {
-                upgrades.add(file.upgrade(upgradeLevel));
-            }
-
-            upgradeMessages.add(
-                    new CommitMessageImpl(
-                            commitMessageImpl.partition().copy(),
-                            commitMessageImpl.bucket(),
-                            commitMessageImpl.totalBuckets(),
-                            DataIncrement.emptyIncrement(),
-                            new CompactIncrement(newFiles, upgrades, Collections.emptyList())));
-        }
-
-        LOG.info("Upgraded manifest committable:\n{}", committable);
-        for (CommitMessage upgradeMessage : upgradeMessages) {
-            committable.addFileCommittable(upgradeMessage);
         }
     }
 

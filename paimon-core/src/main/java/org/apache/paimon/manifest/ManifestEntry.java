@@ -62,6 +62,8 @@ public interface ManifestEntry extends FileEntry {
 
     ManifestEntry assignFirstRowId(long firstRowId);
 
+    ManifestEntry upgrade(int newLevel);
+
     static long recordCount(List<ManifestEntry> manifestEntries) {
         return manifestEntries.stream().mapToLong(manifest -> manifest.file().rowCount()).sum();
     }

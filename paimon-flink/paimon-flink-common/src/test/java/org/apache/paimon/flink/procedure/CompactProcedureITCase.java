@@ -309,11 +309,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
         sql(
                 "CALL sys.compact(`table` => 'default.T', order_strategy => 'zorder', order_by => 'f2,f1')");
 
-        if (overwriteUpgrade) {
-            checkLatestSnapshot(table, 22, Snapshot.CommitKind.COMPACT);
-        } else {
-            checkLatestSnapshot(table, 21, Snapshot.CommitKind.OVERWRITE);
-        }
+        checkLatestSnapshot(table, 21, Snapshot.CommitKind.OVERWRITE);
     }
 
     // ----------------------- Minor Compact -----------------------

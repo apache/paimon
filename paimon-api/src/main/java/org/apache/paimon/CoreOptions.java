@@ -2115,10 +2115,7 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "Whether to upgrade the data files after overwriting a primary key table when write-only and "
-                                    + "write-buffer-spillable are both true. When write-buffer-spillable is true, the "
-                                    + "batch result files will be sorted without overlapping, so they can be upgraded to  "
-                                    + "max level if there are no previous data (overwrite) and no compaction (write-only).");
+                            "Whether to try upgrading the data files after overwriting a primary key table.");
 
     private final Options options;
 
