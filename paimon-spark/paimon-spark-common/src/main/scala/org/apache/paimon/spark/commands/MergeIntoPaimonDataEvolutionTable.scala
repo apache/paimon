@@ -28,7 +28,6 @@ import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
-
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
@@ -42,7 +41,7 @@ import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
-import scala.collection.Searching.{Found, InsertionPoint}
+import scala.collection.Searching.{search, Found, InsertionPoint}
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
