@@ -158,7 +158,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         return PROTOCOL_NAME
 
     def sign(self, path, expiration=None, **kwargs):
-        """We do not support to create a signed URL representing the given path in gvfs."""
+        """We do not support to create a signed URL representing the given path in pvfs."""
         raise Exception(
             "Sign is not implemented for Paimon Virtual FileSystem."
         )
