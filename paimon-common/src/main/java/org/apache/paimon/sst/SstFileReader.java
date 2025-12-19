@@ -28,6 +28,7 @@ import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.utils.FileBasedBloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -39,7 +40,10 @@ import static org.apache.paimon.sst.SstFileUtils.crc32c;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * An SST File Reader which only serves point queries now.
+ * An SST File Reader which serves point queries and range queries. On one side, users can call
+ * {@code seekTo} to move current position to the specified key, then repeatedly call {@code
+ * readBatch} to get a batch of records until {@code null} returned. On the other side, lookup
+ * queries can quickly test record existence and won't affect current data position.
  *
  * <p>Note that this class is NOT thread-safe.
  */
@@ -50,6 +54,7 @@ public class SstFileReader implements Closeable {
     private final BlockCache blockCache;
     private final BlockReader indexBlock;
     @Nullable private final FileBasedBloomFilter bloomFilter;
+    @Nullable private BlockIterator seekedDataBlock = null;
 
     public SstFileReader(
             Comparator<MemorySlice> comparator,
@@ -107,6 +112,47 @@ public class SstFileReader implements Closeable {
             }
         }
         return null;
+    }
+
+    /**
+     * Seek to the position of the record whose key is exactly equal to or greater than the
+     * specified key.
+     */
+    public void seekTo(byte[] key) throws IOException {
+        MemorySlice keySlice = MemorySlice.wrap(key);
+
+        indexBlockIterator.seekTo(keySlice);
+        if (indexBlockIterator.hasNext()) {
+            seekedDataBlock = getNextBlock(indexBlockIterator);
+            // The index block entry key is the last key of the corresponding data block.
+            // If there is some index entry key >= targetKey, the related data block must
+            // also contain some key >= target key, which means seekedDataBlock.hasNext()
+            // must be true
+            seekedDataBlock.seekTo(keySlice);
+            Preconditions.checkState(seekedDataBlock.hasNext());
+        } else {
+            seekedDataBlock = null;
+        }
+    }
+
+    /**
+     * Read a batch of records from this SST File and move current record position to the next
+     * batch.
+     *
+     * @return current batch of records, null if reaching file end.
+     */
+    public BlockIterator readBatch() throws IOException {
+        if (seekedDataBlock != null) {
+            BlockIterator result = seekedDataBlock;
+            seekedDataBlock = null;
+            return result;
+        }
+
+        if (!indexBlockIterator.hasNext()) {
+            return null;
+        }
+
+        return getNextBlock(indexBlockIterator);
     }
 
     private BlockIterator getNextBlock(BlockIterator indexBlockIterator) {
