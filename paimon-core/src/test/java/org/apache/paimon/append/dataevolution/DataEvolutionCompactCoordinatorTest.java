@@ -45,9 +45,9 @@ public class DataEvolutionCompactCoordinatorTest {
 
         DataEvolutionCompactCoordinator.CompactPlanner planner =
                 new DataEvolutionCompactCoordinator.CompactPlanner(
-                        () -> entries, false, 128 * 1024 * 1024, 4 * 1024 * 1024, 2);
+                        false, 128 * 1024 * 1024, 4 * 1024 * 1024, 2);
 
-        List<DataEvolutionCompactTask> tasks = planner.compactPlan();
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks).isEmpty();
     }
@@ -62,17 +62,16 @@ public class DataEvolutionCompactCoordinatorTest {
 
         // Use small target file size to trigger compaction
         DataEvolutionCompactCoordinator.CompactPlanner planner =
-                new DataEvolutionCompactCoordinator.CompactPlanner(() -> entries, false, 199, 1, 2);
+                new DataEvolutionCompactCoordinator.CompactPlanner(false, 199, 1, 2);
 
-        List<DataEvolutionCompactTask> tasks = planner.compactPlan();
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks).isNotEmpty();
         assertThat(tasks.get(0).compactBefore())
                 .containsExactly(entries.get(0).file(), entries.get(1).file());
 
-        planner =
-                new DataEvolutionCompactCoordinator.CompactPlanner(() -> entries, false, 200, 1, 2);
-        tasks = planner.compactPlan();
+        planner = new DataEvolutionCompactCoordinator.CompactPlanner(false, 200, 1, 2);
+        tasks = planner.compactPlan(entries);
         assertThat(tasks).isNotEmpty();
         assertThat(tasks.get(0).compactBefore())
                 .containsExactly(
@@ -92,9 +91,9 @@ public class DataEvolutionCompactCoordinatorTest {
         // Use large target file size so compaction is triggered by gap, not size
         DataEvolutionCompactCoordinator.CompactPlanner planner =
                 new DataEvolutionCompactCoordinator.CompactPlanner(
-                        () -> entries, false, 128 * 1024 * 1024, 4 * 1024 * 1024, 2);
+                        false, 128 * 1024 * 1024, 4 * 1024 * 1024, 2);
 
-        List<DataEvolutionCompactTask> tasks = planner.compactPlan();
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         // Gap should trigger compaction of the first group (file1 + file2)
         assertThat(tasks).hasSize(2);
@@ -122,9 +121,9 @@ public class DataEvolutionCompactCoordinatorTest {
 
         DataEvolutionCompactCoordinator.CompactPlanner planner =
                 new DataEvolutionCompactCoordinator.CompactPlanner(
-                        () -> entries, false, 100 * 1024 * 1024, 4 * 1024 * 1024, 2);
+                        false, 100 * 1024 * 1024, 4 * 1024 * 1024, 2);
 
-        List<DataEvolutionCompactTask> tasks = planner.compactPlan();
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks.size()).isEqualTo(4);
         assertThat(tasks.get(0).compactBefore())
@@ -150,10 +149,9 @@ public class DataEvolutionCompactCoordinatorTest {
 
         // Use small target to trigger compaction, with blob compaction enabled
         DataEvolutionCompactCoordinator.CompactPlanner planner =
-                new DataEvolutionCompactCoordinator.CompactPlanner(
-                        () -> entries, true, 1024, 1024, 2);
+                new DataEvolutionCompactCoordinator.CompactPlanner(true, 1024, 1024, 2);
 
-        List<DataEvolutionCompactTask> tasks = planner.compactPlan();
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         // Should have compaction tasks for both data files and blob files
         assertThat(tasks.size()).isEqualTo(2);

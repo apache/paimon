@@ -36,13 +36,14 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Queue;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Compact coordinator to cmpact data evolution table. */
+/** Compact coordinator to compact data evolution table. */
 public class DataEvolutionCompactCoordinator {
+
+    private static final int FILES_BATCH = 100_000;
 
     private final CompactScanner scanner;
     private final CompactPlanner planner;
@@ -55,19 +56,15 @@ public class DataEvolutionCompactCoordinator {
 
         this.scanner = new CompactScanner(table.newSnapshotReader());
         this.planner =
-                new CompactPlanner(
-                        scanner::fetchResult,
-                        compactBlob,
-                        targetFileSize,
-                        openFileCost,
-                        compactMinFileNum);
+                new CompactPlanner(compactBlob, targetFileSize, openFileCost, compactMinFileNum);
     }
 
     public List<DataEvolutionCompactTask> plan() {
         // scan files in snapshot
-        if (scanner.scan()) {
+        List<ManifestEntry> entries = scanner.scan();
+        if (!entries.isEmpty()) {
             // do plan compact tasks
-            return planner.compactPlan();
+            return planner.compactPlan(entries);
         }
 
         return Collections.emptyList();
@@ -79,8 +76,6 @@ public class DataEvolutionCompactCoordinator {
         private final SnapshotReader snapshotReader;
         private final Queue<List<ManifestFileMeta>> metas;
 
-        private List<ManifestEntry> result;
-
         private CompactScanner(SnapshotReader snapshotReader) {
             this.snapshotReader = snapshotReader;
             Snapshot snapshot = snapshotReader.snapshotManager().latestSnapshot();
@@ -90,13 +85,11 @@ public class DataEvolutionCompactCoordinator {
             RangeHelper<ManifestFileMeta> rangeHelper =
                     new RangeHelper<>(ManifestFileMeta::minRowId, ManifestFileMeta::maxRowId);
             this.metas = new ArrayDeque<>(rangeHelper.mergeOverlappingRanges(manifestFileMetas));
-            this.result = new ArrayList<>();
         }
 
-        boolean scan() {
-            boolean scanResult = false;
-            while (metas.peek() != null && result.size() < 1000) {
-                scanResult = true;
+        List<ManifestEntry> scan() {
+            List<ManifestEntry> result = new ArrayList<>();
+            while (metas.peek() != null && result.size() < FILES_BATCH) {
                 List<ManifestFileMeta> currentMetas = metas.poll();
                 List<ManifestEntry> targetEntries =
                         currentMetas.stream()
@@ -110,12 +103,6 @@ public class DataEvolutionCompactCoordinator {
 
                 result.addAll(targetEntries);
             }
-            return scanResult;
-        }
-
-        List<ManifestEntry> fetchResult() {
-            List<ManifestEntry> result = new ArrayList<>(this.result);
-            this.result = new ArrayList<>();
             return result;
         }
     }
@@ -123,7 +110,6 @@ public class DataEvolutionCompactCoordinator {
     /** Generate compaction tasks. */
     static class CompactPlanner {
 
-        private final Supplier<List<ManifestEntry>> supplier;
         private final boolean compactBlob;
         private final long targetFileSize;
         private final long openFileCost;
@@ -138,20 +124,18 @@ public class DataEvolutionCompactCoordinator {
         private List<DataFileMeta> blobFiles = new ArrayList<>();
 
         CompactPlanner(
-                Supplier<List<ManifestEntry>> supplier,
                 boolean compactBlob,
                 long targetFileSize,
                 long openFileCost,
                 long compactMinFileNum) {
-            this.supplier = supplier;
             this.compactBlob = compactBlob;
             this.targetFileSize = targetFileSize;
             this.openFileCost = openFileCost;
             this.compactMinFileNum = compactMinFileNum;
         }
 
-        List<DataEvolutionCompactTask> compactPlan() {
-            for (ManifestEntry entry : supplier.get()) {
+        List<DataEvolutionCompactTask> compactPlan(Iterable<ManifestEntry> entries) {
+            for (ManifestEntry entry : entries) {
                 long rowId = entry.file().nonNullFirstRowId();
                 if (rowId < lastRowIdStart) {
                     throw new IllegalStateException(
