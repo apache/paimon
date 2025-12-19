@@ -867,7 +867,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>overwrite-upgrade</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
-            <td>Whether to upgrade the data files after overwriting a primary key table when write-only and write-buffer-spillable are both true. When write-buffer-spillable is true, the batch result files will be sorted without overlapping, so they can be upgraded to  max level if there are no previous data (overwrite) and no compaction (write-only).</td>
+            <td>Whether to try upgrading the data files after overwriting a primary key table.</td>
         </tr>
         <tr>
             <td><h5>page-size</h5></td>
