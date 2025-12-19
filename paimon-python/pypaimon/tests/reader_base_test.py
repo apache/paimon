@@ -687,7 +687,7 @@ class ReaderBasicTest(unittest.TestCase):
 
     def test_split_target_size(self):
         """Test source.split.target-size configuration effect on split generation."""
-        from pypaimon.common.core_options import CoreOptions
+        from pypaimon.common.options.core_options import CoreOptions
 
         pa_schema = pa.schema([
             ('f0', pa.int64()),
@@ -697,7 +697,7 @@ class ReaderBasicTest(unittest.TestCase):
         # Test with small target_split_size (512B) - should generate more splits
         schema_small = Schema.from_pyarrow_schema(
             pa_schema,
-            options={CoreOptions.SOURCE_SPLIT_TARGET_SIZE: '512b'}
+            options={CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): '512b'}
         )
         self.catalog.create_table('default.test_split_target_size_small', schema_small, False)
         table_small = self.catalog.get_table('default.test_split_target_size_small')
@@ -747,7 +747,7 @@ class ReaderBasicTest(unittest.TestCase):
 
     def test_split_open_file_cost(self):
         """Test source.split.open-file-cost configuration effect on split generation."""
-        from pypaimon.common.core_options import CoreOptions
+        from pypaimon.common.options.core_options import CoreOptions
 
         pa_schema = pa.schema([
             ('f0', pa.int64()),
@@ -758,8 +758,8 @@ class ReaderBasicTest(unittest.TestCase):
         schema_large_cost = Schema.from_pyarrow_schema(
             pa_schema,
             options={
-                CoreOptions.SOURCE_SPLIT_TARGET_SIZE: '128mb',
-                CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST: '64mb'
+                CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): '128mb',
+                CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): '64mb'
             }
         )
         self.catalog.create_table('default.test_split_open_file_cost_large', schema_large_cost, False)
@@ -787,7 +787,7 @@ class ReaderBasicTest(unittest.TestCase):
         # Test with default open_file_cost (4MB) - should generate fewer splits
         schema_default = Schema.from_pyarrow_schema(
             pa_schema,
-            options={CoreOptions.SOURCE_SPLIT_TARGET_SIZE: '128mb'}
+            options={CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): '128mb'}
         )
         self.catalog.create_table('default.test_split_open_file_cost_default', schema_default, False)
         table_default = self.catalog.get_table('default.test_split_open_file_cost_default')
@@ -816,3 +816,25 @@ class ReaderBasicTest(unittest.TestCase):
             f"Large open_file_cost should generate more splits. "
             f"Got {len(splits_large_cost)} splits with 64MB cost vs "
             f"{len(splits_default)} splits with default")
+
+    def test_create_table_with_invalid_type(self):
+        """Test create_table raises ValueError when table type is not 'table'."""
+        from pypaimon.common.options.core_options import CoreOptions
+
+        pa_schema = pa.schema([
+            ('f0', pa.int64()),
+            ('f1', pa.string())
+        ])
+
+        # Create schema with invalid type option (not "table")
+        schema_with_invalid_type = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={CoreOptions.TYPE.key(): 'view'}  # Invalid type, should be "table"
+        )
+
+        # Attempt to create table should raise ValueError
+        with self.assertRaises(ValueError) as context:
+            self.catalog.create_table('default.test_invalid_type', schema_with_invalid_type, False)
+
+        # Verify the error message contains the expected text
+        self.assertIn("Table Type", str(context.exception))

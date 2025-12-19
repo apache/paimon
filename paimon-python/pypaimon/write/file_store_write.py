@@ -20,7 +20,7 @@ from typing import Dict, List, Tuple
 
 import pyarrow as pa
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.data_blob_writer import DataBlobWriter
@@ -40,12 +40,11 @@ class FileStoreWrite:
         self.max_seq_numbers: dict = {}
         self.write_cols = None
         self.commit_identifier = 0
-        self.options = dict(table.options)
-        if (CoreOptions.BUCKET in table.options and
-                self.table.bucket_mode() == BucketMode.POSTPONE_MODE):
-            self.options[CoreOptions.DATA_FILE_PREFIX] = \
-                (f"{CoreOptions.data_file_prefix(table.options)}-u-{commit_user}"
-                 f"-s-{random.randint(0, 2 ** 31 - 2)}-w-")
+        self.options = CoreOptions.copy(table.options)
+        if self.table.bucket_mode() == BucketMode.POSTPONE_MODE:
+            self.options.set(CoreOptions.DATA_FILE_PREFIX,
+                             (f"{self.options.data_file_prefix()}-u-{commit_user}"
+                              f"-s-{random.randint(0, 2 ** 31 - 2)}-w-"))
 
     def write(self, partition: Tuple, bucket: int, data: pa.RecordBatch):
         key = (partition, bucket)
@@ -54,7 +53,7 @@ class FileStoreWrite:
         writer = self.data_writers[key]
         writer.write(data)
 
-    def _create_data_writer(self, partition: Tuple, bucket: int, options: Dict[str, str]) -> DataWriter:
+    def _create_data_writer(self, partition: Tuple, bucket: int, options: CoreOptions) -> DataWriter:
         def max_seq_number():
             return self._seq_number_stats(partition).get(bucket, 1)
 

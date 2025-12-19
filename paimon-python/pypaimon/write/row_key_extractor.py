@@ -23,7 +23,7 @@ from typing import List, Tuple
 
 import pyarrow as pa
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 
@@ -69,12 +69,13 @@ class FixedBucketRowKeyExtractor(RowKeyExtractor):
 
     def __init__(self, table_schema: TableSchema):
         super().__init__(table_schema)
-        self.num_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -1))
+        options = CoreOptions.from_dict(table_schema.options)
+        self.num_buckets = options.bucket()
         if self.num_buckets <= 0:
             raise ValueError(f"Fixed bucket mode requires bucket > 0, got {self.num_buckets}")
 
-        bucket_key_option = table_schema.options.get(CoreOptions.BUCKET_KEY, '')
-        if bucket_key_option.strip():
+        bucket_key_option = options.bucket_key()
+        if bucket_key_option and bucket_key_option.strip():
             self.bucket_keys = [k.strip() for k in bucket_key_option.split(',')]
         else:
             self.bucket_keys = [pk for pk in table_schema.primary_keys
@@ -101,7 +102,7 @@ class UnawareBucketRowKeyExtractor(RowKeyExtractor):
 
     def __init__(self, table_schema: TableSchema):
         super().__init__(table_schema)
-        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -1))
+        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET.key(), -1))
 
         if num_buckets != -1:
             raise ValueError(f"Unaware bucket mode requires bucket = -1, got {num_buckets}")
@@ -118,7 +119,7 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
 
     def __init__(self, table_schema: 'TableSchema'):
         super().__init__(table_schema)
-        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -1))
+        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET.key(), -1))
 
         if num_buckets != -1:
             raise ValueError(
@@ -134,7 +135,7 @@ class PostponeBucketRowKeyExtractor(RowKeyExtractor):
 
     def __init__(self, table_schema: TableSchema):
         super().__init__(table_schema)
-        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -2))
+        num_buckets = int(table_schema.options.get(CoreOptions.BUCKET.key(), -2))
         if num_buckets != BucketMode.POSTPONE_BUCKET.value:
             raise ValueError(f"Postpone bucket mode requires bucket = -2, got {num_buckets}")
 

@@ -21,7 +21,7 @@ from abc import ABC, abstractmethod
 from functools import partial
 from typing import Callable, List, Optional, Tuple
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.deletionvectors import ApplyDeletionVectorReader
 from pypaimon.deletionvectors.deletion_vector import DeletionVector

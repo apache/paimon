@@ -22,7 +22,7 @@ import pandas as pd
 import pyarrow as pa
 import unittest
 
-from pypaimon.api.options import Options
+from pypaimon.common.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon import CatalogFactory
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog

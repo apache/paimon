@@ -20,7 +20,6 @@ import uuid
 from abc import ABC
 from typing import Optional
 
-from pypaimon.common.core_options import CoreOptions
 from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit, TableCommit
 from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite, TableWrite
 
@@ -44,8 +43,9 @@ class WriteBuilder(ABC):
         """Returns a table commit."""
 
     def _create_commit_user(self):
-        if CoreOptions.COMMIT_USER_PREFIX in self.table.options:
-            return f"{self.table.options.get(CoreOptions.COMMIT_USER_PREFIX)}_{uuid.uuid4()}"
+        commit_user_prefix = self.table.options.commit_user_prefix()
+        if commit_user_prefix is not None:
+            return f"{commit_user_prefix}_{uuid.uuid4()}"
         else:
             return str(uuid.uuid4())
 

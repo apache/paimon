@@ -19,8 +19,8 @@
 import os
 from typing import Dict, Optional, Tuple
 
-from pypaimon.common.config import OssOptions
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.options.config import OssOptions
 
 
 def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[Dict[str, str]]]:
@@ -45,12 +45,12 @@ def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[D
                 else:
                     storage_options['endpoint'] = endpoint
 
-            if OssOptions.OSS_ACCESS_KEY_ID in file_io.properties:
-                storage_options['access_key_id'] = file_io.properties[OssOptions.OSS_ACCESS_KEY_ID]
-            if OssOptions.OSS_ACCESS_KEY_SECRET in file_io.properties:
-                storage_options['secret_access_key'] = file_io.properties[OssOptions.OSS_ACCESS_KEY_SECRET]
-            if OssOptions.OSS_SECURITY_TOKEN in file_io.properties:
-                storage_options['session_token'] = file_io.properties[OssOptions.OSS_SECURITY_TOKEN]
+            if file_io.properties.contains(OssOptions.OSS_ACCESS_KEY_ID):
+                storage_options['access_key_id'] = file_io.properties.get(OssOptions.OSS_ACCESS_KEY_ID)
+            if file_io.properties.contains(OssOptions.OSS_ACCESS_KEY_SECRET):
+                storage_options['secret_access_key'] = file_io.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET)
+            if file_io.properties.contains(OssOptions.OSS_SECURITY_TOKEN):
+                storage_options['session_token'] = file_io.properties.get(OssOptions.OSS_SECURITY_TOKEN)
             storage_options['virtual_hosted_style_request'] = 'true'
 
         file_path_for_lance = file_path.replace('oss://', 's3://')
