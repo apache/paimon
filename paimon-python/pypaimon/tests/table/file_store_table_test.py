@@ -44,7 +44,8 @@ class FileStoreTableTest(unittest.TestCase):
             ('behavior', pa.string()),
             ('dt', pa.string())
         ])
-        schema = Schema.from_pyarrow_schema(cls.pa_schema, partition_keys=['dt'])
+        schema = Schema.from_pyarrow_schema(cls.pa_schema, partition_keys=['dt'],
+                                            options={CoreOptions.BUCKET.key(): "2"})
         cls.catalog.create_table('default.test_copy_with_new_options', schema, False)
         cls.table = cls.catalog.get_table('default.test_copy_with_new_options')
 
@@ -54,7 +55,7 @@ class FileStoreTableTest(unittest.TestCase):
 
     def test_copy_with_new_options(self):
         """Test copy method with new options."""
-        new_options = {"new.option": "new_value"}
+        new_options = {"new.option": "new_value", "bucket": "2"}
 
         # Call copy method
         copied_table = self.table.copy(new_options)
