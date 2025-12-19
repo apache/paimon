@@ -42,7 +42,7 @@ import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
-import scala.collection.Searching.{search, Found, InsertionPoint}
+import scala.collection.Searching.{Found, InsertionPoint}
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
