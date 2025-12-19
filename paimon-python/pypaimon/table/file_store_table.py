@@ -153,10 +153,6 @@ class FileStoreTable(Table):
         return FileStoreTable(self.file_io, self.identifier, self.table_path, new_table_schema,
                               self.catalog_environment)
 
-    def add_options(self, options: dict):
-        for key, value in options.items():
-            self.options.options.data[key] = value
-
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse
         from pypaimon.common.options.core_options import ExternalPathStrategy

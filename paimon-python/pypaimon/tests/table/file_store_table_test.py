@@ -67,18 +67,6 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertIn("new.option", copied_table.table_schema.options)
         self.assertEqual(copied_table.table_schema.options["new.option"], "new_value")
 
-    def test_add_options(self):
-        """Test add_options method adds options to the table."""
-        new_options = {
-            "test.new.option": "new_value",
-            "another.option": "another_value"
-        }
-        self.table.add_options(new_options)
-
-        # Verify bucket remains unchanged
-        self.assertEqual(self.table.table_schema.options["test.new.option"], "new_value")
-        self.assertEqual(self.table.table_schema.options["another.option"], "another_value")
-
     def test_copy_raises_error_when_changing_bucket(self):
         """Test copy method raises ValueError when trying to change bucket number."""
         # Get current bucket value
