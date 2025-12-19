@@ -16,14 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.scan
 
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.spark.{PaimonBaseScanBuilder, PaimonBatch}
 import org.apache.paimon.table.{InnerTable, KnownSplitsTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
 
-import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Scan}
 import org.apache.spark.sql.types.StructType
 
@@ -46,30 +46,7 @@ case class PaimonSplitScan(
     requiredSchema: StructType,
     pushedPartitionFilters: Seq[PartitionPredicate],
     pushedDataFilters: Seq[Predicate])
-  extends ColumnPruningAndPushDown
-  with ScanHelper {
+  extends BaseScan {
 
-  override def toBatch: Batch = {
-    PaimonBatch(
-      getInputPartitions(dataSplits.asInstanceOf[Array[Split]]),
-      readBuilder,
-      coreOptions.blobAsDescriptor(),
-      metadataColumns)
-  }
-
-  override def supportedCustomMetrics: Array[CustomMetric] = {
-    Array(
-      PaimonNumSplitMetric(),
-      PaimonPartitionSizeMetric(),
-      PaimonReadBatchTimeMetric(),
-      PaimonResultedTableFilesMetric()
-    )
-  }
-
-  override def reportDriverMetrics(): Array[CustomTaskMetric] = {
-    val filesCount = dataSplits.map(_.dataFiles().size).sum
-    Array(
-      PaimonResultedTableFilesTaskMetric(filesCount)
-    )
-  }
+  override def inputSplits: Array[Split] = dataSplits.asInstanceOf[Array[Split]]
 }

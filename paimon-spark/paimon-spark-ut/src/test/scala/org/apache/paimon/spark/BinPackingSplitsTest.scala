@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.io.DataFileMeta
 import org.apache.paimon.manifest.FileSource
+import org.apache.paimon.spark.scan.BinPackingSplits
 import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.junit.jupiter.api.Assertions
@@ -31,7 +32,7 @@ import java.util.{HashMap => JHashMap}
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
-class ScanHelperTest extends PaimonSparkTestBase {
+class BinPackingSplitsTest extends PaimonSparkTestBase {
 
   test("Paimon: reshuffle splits") {
     withSparkSQLConf(("spark.sql.leafNodeDefaultParallelism", "20")) {
@@ -73,8 +74,8 @@ class ScanHelperTest extends PaimonSparkTestBase {
             .build()
       }
 
-      val fakeScan = new FakeScan()
-      val reshuffled = fakeScan.getInputPartitions(dataSplits.toArray)
+      val binPacking = BinPackingSplits(CoreOptions.fromMap(new JHashMap()))
+      val reshuffled = binPacking.pack(dataSplits.toArray)
       Assertions.assertTrue(reshuffled.length > 5)
     }
   }
@@ -110,8 +111,8 @@ class ScanHelperTest extends PaimonSparkTestBase {
         .build()
     )
 
-    val fakeScan = new FakeScan()
-    val reshuffled = fakeScan.getInputPartitions(dataSplits)
+    val binPacking = BinPackingSplits(CoreOptions.fromMap(new JHashMap()))
+    val reshuffled = binPacking.pack(dataSplits)
     Assertions.assertEquals(1, reshuffled.length)
   }
 
@@ -126,13 +127,13 @@ class ScanHelperTest extends PaimonSparkTestBase {
 
       // default openCostInBytes is 4m, so we will get 400 / 128 = 4 partitions
       withSparkSQLConf("spark.sql.leafNodeDefaultParallelism" -> "1") {
-        assert(paimonScan().lazyInputPartitions.length == 4)
+        assert(paimonScan().inputPartitions.length == 4)
       }
 
       withSparkSQLConf(
         "spark.sql.files.openCostInBytes" -> "0",
         "spark.sql.leafNodeDefaultParallelism" -> "1") {
-        assert(paimonScan().lazyInputPartitions.length == 1)
+        assert(paimonScan().inputPartitions.length == 1)
       }
 
       // Paimon's conf takes precedence over Spark's
@@ -140,13 +141,8 @@ class ScanHelperTest extends PaimonSparkTestBase {
         "spark.sql.files.openCostInBytes" -> "4194304",
         "spark.paimon.source.split.open-file-cost" -> "0",
         "spark.sql.leafNodeDefaultParallelism" -> "1") {
-        assert(paimonScan().lazyInputPartitions.length == 1)
+        assert(paimonScan().inputPartitions.length == 1)
       }
     }
-  }
-
-  class FakeScan extends ScanHelper {
-    override val coreOptions: CoreOptions =
-      CoreOptions.fromMap(new JHashMap[String, String]())
   }
 }

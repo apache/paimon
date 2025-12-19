@@ -61,7 +61,8 @@ case class PaimonScan(
     if (partitionFilter.nonEmpty) {
       readBuilder.withFilter(partitionFilter.head)
       // set inputPartitions null to trigger to get the new splits.
-      inputPartitions = null
+      _inputSplits = null
+      _inputPartitions = null
     }
   }
 }
