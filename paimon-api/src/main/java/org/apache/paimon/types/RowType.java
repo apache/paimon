@@ -295,17 +295,12 @@ public final class RowType extends DataType {
 
     public RowType project(List<String> names) {
         List<DataField> fields = getFields();
-        try {
-            List<String> fieldNames =
-                    fields.stream().map(DataField::name).collect(Collectors.toList());
-            return new RowType(
-                            names.stream()
-                                    .map(k -> fields.get(fieldNames.indexOf(k)))
-                                    .collect(Collectors.toList()))
-                    .copy(isNullable());
-        } catch (Exception e) {
-            throw new RuntimeException("Cannot project fields " + String.join(", ", names), e);
-        }
+        List<String> fieldNames = fields.stream().map(DataField::name).collect(Collectors.toList());
+        return new RowType(
+                        names.stream()
+                                .map(k -> fields.get(fieldNames.indexOf(k)))
+                                .collect(Collectors.toList()))
+                .copy(isNullable());
     }
 
     public int[] projectIndexes(List<String> names) {
