@@ -22,10 +22,8 @@ import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan}
-import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
-import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
-import org.apache.spark.sql.execution.joins.BaseJoinExec
+import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan, RepartitionByExpression, Sort}
+import org.apache.spark.sql.execution.QueryExecution
 import org.apache.spark.sql.util.QueryExecutionListener
 
 import scala.collection.mutable
@@ -432,6 +430,57 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
           Row(5, 550, "c5", 4, 2),
           Row(6, 700, "c77", 5, 2),
           Row(8, 990, "c99", 6, 2))
+      )
+    }
+  }
+
+  test("Data Evolution: merge into table with data-evolution for Self-Merge with _ROW_ID shortcut") {
+    withTable("target") {
+      sql(
+        "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql(
+        "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
+
+      val capturedPlans: mutable.ListBuffer[LogicalPlan] = mutable.ListBuffer.empty
+      val listener = new QueryExecutionListener {
+        override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
+          capturedPlans += qe.analyzed
+        }
+        override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
+          capturedPlans += qe.analyzed
+        }
+      }
+      spark.listenerManager.register(listener)
+      sql(s"""
+             |MERGE INTO target
+             |USING target AS source
+             |ON target._ROW_ID = source._ROW_ID
+             |WHEN MATCHED AND target.a = 5 THEN UPDATE SET b = source.b + target.b
+             |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET b = source.b * 3,
+             |c = concat(target.c, source.c)
+             |""".stripMargin)
+      // Assert no shuffle/join/sort was used in
+      // 'org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.updateActionInvoke'
+      assert(
+        capturedPlans.forall(
+          plan =>
+            plan.collectFirst {
+              case p: Join => p
+              case p: Sort => p
+              case p: RepartitionByExpression => p
+            }.isEmpty),
+        s"Found unexpected Join/Sort/Exchange in plan:\n${capturedPlans.head}"
+      )
+      spark.listenerManager.unregister(listener)
+
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM target ORDER BY a"),
+        Seq(
+          Row(1, 10, "c1", 0, 2),
+          Row(2, 20, "c2", 1, 2),
+          Row(3, 90, "c3c3", 2, 2),
+          Row(4, 120, "c4c4", 3, 2),
+          Row(5, 100, "c5", 4, 2))
       )
     }
   }
