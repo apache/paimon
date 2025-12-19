@@ -655,12 +655,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     continue outer;
                 }
             }
+            LOG.info("Upgraded for overwrite commit.");
             for (ManifestEntry entry : newEntries) {
                 results.add(entry.upgrade(maxLevel));
             }
         }
 
-        LOG.info("Upgraded for overwrite commit.");
         return results;
     }
 
