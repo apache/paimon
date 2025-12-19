@@ -98,4 +98,12 @@ public class SparkConnectorOptions {
                     .defaultValue(true)
                     .withDescription(
                             "Whether to allow full scan when reading a partitioned table.");
+
+    public static final ConfigOption<Boolean> SOURCE_SPLIT_TARGET_SIZE_WITH_COLUMN_PRUNING =
+            key("source.split.target-size-with-column-pruning")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to adjust the target split size based on pruned (projected) columns. "
+                                    + "If enabled, split size estimation uses only the columns actually being read.");
 }

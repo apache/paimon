@@ -75,6 +75,12 @@ under the License.
             <td>Whether to verify SparkSession is initialized with required configurations.</td>
         </tr>
         <tr>
+            <td><h5>source.split.target-size-with-column-pruning</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to adjust the target split size based on pruned (projected) columns. If enabled, split size estimation uses only the columns actually being read.</td>
+        </tr>
+        <tr>
             <td><h5>write.merge-schema</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

@@ -68,7 +68,8 @@ case class PaimonStatistics(
     }
   }
 
-  lazy val readRowSizeRatio: Double = estimateRowSize(readRowType) / estimateRowSize(tableRowType)
+  lazy val readRowSizeRatio: Double =
+    estimateRowSize(readRowType).toDouble / estimateRowSize(tableRowType)
 
   private def estimateRowSize(rowType: RowType): Long = {
     rowType.getFields.asScala.map(estimateFieldSize).sum

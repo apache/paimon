@@ -24,7 +24,7 @@ import org.apache.paimon.predicate.{Predicate, TopN}
 import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonNumSplitMetric, PaimonPartitionSizeMetric, PaimonReadBatchTimeMetric, PaimonResultedTableFilesMetric, PaimonResultedTableFilesTaskMetric, SparkTypeUtils}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
-import org.apache.paimon.spark.util.SplitUtils
+import org.apache.paimon.spark.util.{OptionUtils, SplitUtils}
 import org.apache.paimon.table.{SpecialFields, Table}
 import org.apache.paimon.table.source.{ReadBuilder, Split}
 import org.apache.paimon.types.RowType
@@ -53,8 +53,9 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   // Input splits
   def inputSplits: Array[Split]
   def inputPartitions: Seq[PaimonInputPartition] = getInputPartitions(inputSplits)
-  def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] =
-    BinPackingSplits(coreOptions).pack(splits)
+  def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
+    BinPackingSplits(coreOptions, readRowSizeRatio).pack(splits)
+  }
 
   val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
@@ -130,6 +131,17 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
       table.statistics())
   }
 
+  def readRowSizeRatio: Double = {
+    if (OptionUtils.sourceSplitTargetSizeWithColumnPruning()) {
+      estimateStatistics match {
+        case stats: PaimonStatistics => stats.readRowSizeRatio
+        case _ => 1.0
+      }
+    } else {
+      1.0
+    }
+  }
+
   override def supportedCustomMetrics: Array[CustomMetric] = {
     Array(
       PaimonNumSplitMetric(),
@@ -140,7 +152,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   }
 
   override def reportDriverMetrics(): Array[CustomTaskMetric] = {
-    val filesCount = inputSplits.map(SplitUtils.fileCount).sum
+    val filesCount = inputSplits.map(SplitUtils.dataFileCount).sum
     Array(
       PaimonResultedTableFilesTaskMetric(filesCount)
     )

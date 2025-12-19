@@ -20,7 +20,6 @@ package org.apache.paimon.spark.scan
 
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
-import org.apache.paimon.spark.PaimonBatch
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
 import org.apache.paimon.table.{FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
@@ -28,7 +27,7 @@ import org.apache.paimon.table.source.{DataSplit, Split}
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions.{Expressions, NamedReference}
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
-import org.apache.spark.sql.connector.read.{Batch, SupportsRuntimeV2Filtering}
+import org.apache.spark.sql.connector.read.SupportsRuntimeV2Filtering
 import org.apache.spark.sql.sources.{Filter, In}
 import org.apache.spark.sql.types.StructType
 
