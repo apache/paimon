@@ -816,3 +816,25 @@ class ReaderBasicTest(unittest.TestCase):
             f"Large open_file_cost should generate more splits. "
             f"Got {len(splits_large_cost)} splits with 64MB cost vs "
             f"{len(splits_default)} splits with default")
+
+    def test_create_table_with_invalid_type(self):
+        """Test create_table raises ValueError when table type is not 'table'."""
+        from pypaimon.common.options.core_options import CoreOptions
+
+        pa_schema = pa.schema([
+            ('f0', pa.int64()),
+            ('f1', pa.string())
+        ])
+
+        # Create schema with invalid type option (not "table")
+        schema_with_invalid_type = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={CoreOptions.TYPE.key(): 'view'}  # Invalid type, should be "table"
+        )
+
+        # Attempt to create table should raise ValueError
+        with self.assertRaises(ValueError) as context:
+            self.catalog.create_table('default.test_invalid_type', schema_with_invalid_type, False)
+
+        # Verify the error message contains the expected text
+        self.assertIn("Table Type", str(context.exception))

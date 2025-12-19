@@ -82,8 +82,8 @@ class FileSystemCatalog(Catalog):
         return FileStoreTable(self.file_io, identifier, table_path, table_schema, catalog_environment)
 
     def create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
-        if schema.options and schema.options.get(CoreOptions.AUTO_CREATE):
-            raise ValueError(f"The value of {CoreOptions.AUTO_CREATE} property should be False.")
+        if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
+            raise ValueError(f"The value of {CoreOptions.AUTO_CREATE.key()} property should be False.")
 
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
@@ -93,9 +93,9 @@ class FileSystemCatalog(Catalog):
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier)
         except TableNotExistException:
-            if schema.options and CoreOptions.TYPE in schema.options and schema.options.get(
-                    CoreOptions.TYPE) != "table":
-                raise ValueError(f"Table Type {schema.options.get(CoreOptions.TYPE)}")
+            if schema.options and CoreOptions.TYPE.key() in schema.options and schema.options.get(
+                    CoreOptions.TYPE.key()) != "table":
+                raise ValueError(f"Table Type: {schema.options.get(CoreOptions.TYPE.key())}")
             table_path = self.get_table_path(identifier)
             schema_manager = SchemaManager(self.file_io, table_path)
             schema_manager.create_table(schema)
