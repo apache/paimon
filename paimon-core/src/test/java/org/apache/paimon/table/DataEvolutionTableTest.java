@@ -19,6 +19,8 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -40,6 +42,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -67,6 +70,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -896,6 +900,65 @@ public class DataEvolutionTableTest extends TableTestBase {
         Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400");
     }
 
+    @Test
+    public void testCompactCoordinator() throws Exception {
+        for (int i = 0; i < 10; i++) {
+            write(100000L);
+        }
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        // Create coordinator and call plan multiple times
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false);
+
+        // Each plan() call processes one manifest group
+        List<DataEvolutionCompactTask> allTasks = new ArrayList<>();
+        List<DataEvolutionCompactTask> tasks;
+        while (!(tasks = coordinator.plan()).isEmpty() || allTasks.isEmpty()) {
+            allTasks.addAll(tasks);
+            if (tasks.isEmpty()) {
+                break;
+            }
+        }
+
+        // Verify no exceptions were thrown and tasks list is valid (may be empty)
+        assertThat(allTasks).isNotNull();
+        assertThat(allTasks.size()).isEqualTo(1);
+        DataEvolutionCompactTask task = allTasks.get(0);
+        assertThat(task.compactBefore().size()).isEqualTo(20);
+    }
+
+    @Test
+    public void testCompact() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            write(100000L);
+        }
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        // Create coordinator and call plan multiple times
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false);
+
+        // Each plan() call processes one manifest group
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        List<DataEvolutionCompactTask> tasks;
+        while (!(tasks = coordinator.plan()).isEmpty()) {
+            for (DataEvolutionCompactTask task : tasks) {
+                commitMessages.add(task.doCompact(table));
+            }
+        }
+
+        table.newBatchWriteBuilder().newCommit().commit(commitMessages);
+
+        List<ManifestEntry> entries = new ArrayList<>();
+        Iterator<ManifestEntry> files = table.newSnapshotReader().readFileIterator();
+        while (files.hasNext()) {
+            entries.add(files.next());
+        }
+
+        assertThat(entries.size()).isEqualTo(1);
+        assertThat(entries.get(0).file().nonNullFirstRowId()).isEqualTo(0);
+        assertThat(entries.get(0).file().rowCount()).isEqualTo(500000L);
+    }
+
     private void write(long count) throws Exception {
         createTableDefault();
 
@@ -911,6 +974,7 @@ public class DataEvolutionTableTest extends TableTestBase {
             commit.commit(write0.prepareCommit());
         }
 
+        long rowId = getTableDefault().snapshotManager().latestSnapshot().nextRowId() - count;
         builder = getTableDefault().newBatchWriteBuilder();
         try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
             for (int i = 0; i < count; i++) {
@@ -918,7 +982,7 @@ public class DataEvolutionTableTest extends TableTestBase {
             }
             BatchTableCommit commit = builder.newCommit();
             List<CommitMessage> commitables = write1.prepareCommit();
-            setFirstRowId(commitables, 0L);
+            setFirstRowId(commitables, rowId);
             commit.commit(commitables);
         }
 
