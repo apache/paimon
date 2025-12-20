@@ -380,7 +380,7 @@ class AOSimpleTest(RESTBaseTest):
         try:
             self.rest_catalog.drop_table("db1.tbl1", True)
         except TableNotExistException:
-            self.fail("drop_table with ignore_if_exists=True should not raise TableNotExistException")
+            self.fail("drop_table with ignore_if_not_exists=True should not raise TableNotExistException")
 
         # test drop database
         self.rest_catalog.drop_database("db1", False)
@@ -391,7 +391,7 @@ class AOSimpleTest(RESTBaseTest):
         try:
             self.rest_catalog.drop_database("db1", True)
         except DatabaseNotExistException:
-            self.fail("drop_database with ignore_if_exists=True should not raise DatabaseNotExistException")
+            self.fail("drop_database with ignore_if_not_exists=True should not raise DatabaseNotExistException")
 
     def test_initialize_oss_fs_pyarrow_lt_7(self):
         props = {
