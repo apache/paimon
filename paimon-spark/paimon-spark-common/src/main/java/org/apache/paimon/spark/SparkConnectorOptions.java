@@ -51,7 +51,7 @@ public class SparkConnectorOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE and TableCapability.ACCEPT_ANY_SCHEMA.");
+                            "If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE.");
 
     public static final ConfigOption<Integer> MAX_FILES_PER_TRIGGER =
             key("read.stream.maxFilesPerTrigger")
