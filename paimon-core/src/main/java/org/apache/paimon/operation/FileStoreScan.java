@@ -95,6 +95,8 @@ public interface FileStoreScan {
 
     FileStoreScan withReadType(RowType readType);
 
+    FileStoreScan withLimit(long limit);
+
     @Nullable
     Integer parallelism();
 
