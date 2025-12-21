@@ -31,7 +31,7 @@ import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED, POSTPONE_
 
 import org.apache.spark.sql.connector.catalog._
 import org.apache.spark.sql.connector.read.ScanBuilder
-import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
+import org.apache.spark.sql.connector.write.{LogicalWriteInfo, SupportsTruncate, WriteBuilder}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.{Collections, EnumSet => JEnumSet, HashMap => JHashMap, Map => JMap, Set => JSet}
@@ -42,6 +42,7 @@ abstract class PaimonSparkTableBase(val table: Table)
   extends BaseTable
   with SupportsRead
   with SupportsWrite
+  with TruncatableTable
   with SupportsMetadataColumns {
 
   lazy val coreOptions = new CoreOptions(table.options())
@@ -151,5 +152,11 @@ abstract class PaimonSparkTableBase(val table: Table)
       case _ =>
         throw new RuntimeException("Only FileStoreTable can be written.")
     }
+  }
+
+  def truncateTable: Boolean = {
+    val commit = table.newBatchWriteBuilder().newCommit()
+    commit.truncateTable()
+    true
   }
 }

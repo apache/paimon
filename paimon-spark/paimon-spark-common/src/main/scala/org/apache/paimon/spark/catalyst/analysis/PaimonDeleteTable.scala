@@ -19,11 +19,11 @@
 package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.optimizer.OptimizeMetadataOnlyDeleteFromPaimonTable
 import org.apache.paimon.spark.commands.DeleteFromPaimonTableCommand
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.catalyst.expressions.Expression
-import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{DeleteFromTable, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
 
@@ -39,8 +39,9 @@ object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
     table.coreOptions.deletionVectorsEnabled() ||
     table.coreOptions.rowTrackingEnabled() ||
     table.coreOptions.dataEvolutionEnabled() ||
-    // todo: Optimize v2 delete when conditions are all partition filters
-    condition == null || condition == TrueLiteral
+    OptimizeMetadataOnlyDeleteFromPaimonTable.isMetadataOnlyDelete(
+      baseTable.asInstanceOf[FileStoreTable],
+      condition)
   }
 
   override val operation: RowLevelOp = Delete
