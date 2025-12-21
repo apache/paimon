@@ -92,19 +92,16 @@ case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: Struc
 
 private case class FormatTableBatchWrite(
     table: FormatTable,
-    overwriteDynamic: Boolean,
+    overwriteDynamic: Option[Boolean],
     overwritePartitions: Option[Map[String, String]],
     writeSchema: StructType)
   extends BatchWrite
   with Logging {
 
-  assert(
-    !(overwriteDynamic && overwritePartitions.exists(_.nonEmpty)),
-    "Cannot overwrite dynamically and by filter both")
-
   private val batchWriteBuilder = {
     val builder = table.newBatchWriteBuilder()
-    if (overwriteDynamic) {
+    // todo: add test for static overwrite the whole table
+    if (overwriteDynamic.contains(true)) {
       builder.withOverwrite()
     } else {
       overwritePartitions.foreach(partitions => builder.withOverwrite(partitions.asJava))
@@ -112,8 +109,9 @@ private case class FormatTableBatchWrite(
     builder
   }
 
-  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
-    FormatTableWriterFactory(batchWriteBuilder, writeSchema)
+  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
+    (_: Int, _: Long) => new FormatTableDataWriter(batchWriteBuilder, writeSchema)
+  }
 
   override def useCommitCoordinator(): Boolean = false
 
@@ -137,16 +135,6 @@ private case class FormatTableBatchWrite(
     val batchTableCommit = batchWriteBuilder.newCommit()
     val commitMessages = WriteTaskResult.merge(messages).asJava
     batchTableCommit.abort(commitMessages)
-  }
-}
-
-private case class FormatTableWriterFactory(
-    batchWriteBuilder: BatchWriteBuilder,
-    writeSchema: StructType)
-  extends DataWriterFactory {
-
-  override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
-    new FormatTableDataWriter(batchWriteBuilder, writeSchema)
   }
 }
 
