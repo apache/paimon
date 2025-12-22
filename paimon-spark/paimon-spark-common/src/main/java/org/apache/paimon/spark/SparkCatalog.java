@@ -128,7 +128,8 @@ public class SparkCatalog extends SparkBaseCatalog
         this.catalogName = name;
         CatalogContext catalogContext =
                 CatalogContext.create(
-                        Options.fromMap(options), sparkSession.sessionState().newHadoopConf());
+                        Options.fromMap(options.asCaseSensitiveMap()),
+                        sparkSession.sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
