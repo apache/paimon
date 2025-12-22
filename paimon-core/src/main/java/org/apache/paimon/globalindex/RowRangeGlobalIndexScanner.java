@@ -30,6 +30,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
+import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -105,11 +107,12 @@ public class RowRangeGlobalIndexScanner implements Closeable {
         return globalIndexEvaluator.evaluate(predicate, null);
     }
 
-    public Optional<GlobalIndexResult> scan(VectorSearch vectorSearch) {
+    public Optional<GlobalIndexResult> scan(@Nullable VectorSearch vectorSearch) {
         return globalIndexEvaluator.evaluate(null, vectorSearch);
     }
 
-    public Optional<GlobalIndexResult> scan(Predicate predicate, VectorSearch vectorSearch) {
+    public Optional<GlobalIndexResult> scan(
+            Predicate predicate, @Nullable VectorSearch vectorSearch) {
         return globalIndexEvaluator.evaluate(predicate, vectorSearch);
     }
 

@@ -86,10 +86,11 @@ public class LuceneVectorGlobalIndexScanTest {
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
                         .column(vectorFieldName, new ArrayType(DataTypes.FLOAT()))
-                        .primaryKey("id")
-                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.BUCKET.key(), "-1")
                         .option("vector.dim", "2")
                         .option("vector.metric", similarityMetric)
+                        .option("data-evolution.enabled", "true")
+                        .option("row-tracking.enabled", "true")
                         .build();
 
         TableSchema tableSchema = schemaManager.createTable(schema);

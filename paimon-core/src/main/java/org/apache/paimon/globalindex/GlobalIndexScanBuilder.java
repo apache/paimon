@@ -25,6 +25,8 @@ import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -54,7 +56,7 @@ public interface GlobalIndexScanBuilder {
             final List<Range> ranges,
             final GlobalIndexScanBuilder globalIndexScanBuilder,
             final Predicate filter,
-            final VectorSearch vectorSearch,
+            @Nullable final VectorSearch vectorSearch,
             final Integer threadNum) {
         List<RowRangeGlobalIndexScanner> scanners =
                 ranges.stream()
