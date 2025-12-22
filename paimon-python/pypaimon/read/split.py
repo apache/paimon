@@ -17,7 +17,7 @@
 ################################################################################
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.table.row.generic_row import GenericRow
@@ -33,7 +33,7 @@ class Split:
     _file_paths: List[str]
     _row_count: int
     _file_size: int
-    shard_file_idx_map: dict[str, (int, int)] = field(default_factory=dict)  # file_name -> (start_idx, end_idx)
+    shard_file_idx_map: Dict[str, Tuple[int, int]] = field(default_factory=dict)  # file_name -> (start_idx, end_idx)
     raw_convertible: bool = False
     data_deletion_files: Optional[List[DeletionFile]] = None
 
