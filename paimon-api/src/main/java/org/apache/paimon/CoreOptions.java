@@ -3494,9 +3494,7 @@ public class CoreOptions implements Serializable {
 
         FULL_COMPACTION("full-compaction", "Generate changelog files with each full compaction."),
 
-        LOOKUP(
-                "lookup",
-                "Generate changelog files through 'lookup' before committing the data writing.");
+        LOOKUP("lookup", "Generate changelog files through 'lookup' compaction.");
 
         private final String value;
         private final String description;
