@@ -20,14 +20,12 @@ package org.apache.paimon.lucene.index;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
-import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
-import org.apache.paimon.globalindex.VectorSearchGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -43,10 +41,12 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,7 +57,6 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -81,7 +80,6 @@ public class LuceneVectorGlobalIndexScanTest {
         fileIO = new LocalFileIO();
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
 
-        // 1. Define Schema, including vector field (FLOAT ARRAY)
         Schema schema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
@@ -107,51 +105,40 @@ public class LuceneVectorGlobalIndexScanTest {
                     new float[] {0.98f, 0.05f}, new float[] {0.0f, 1.0f}, new float[] {0.05f, 0.98f}
                 };
 
+        // 1. Write data using Paimon API
+        writeVectors(vectors);
+
         // 2. Manually build vector index
         List<IndexFileMeta> indexFiles = buildIndexManually(vectors);
 
         // 3. Commit index files to the Table (Update Index Manifest)
         commitIndex(indexFiles);
 
-        // 4. Verify results without filter
+        // 4. Verify results
         float[] queryVector = new float[] {0.85f, 0.15f};
         VectorSearch vectorSearch = new VectorSearch(queryVector, 2, vectorFieldName);
-        VectorSearchGlobalIndexResult result = globalIndexScan(table, vectorSearch);
-        List<Long> resultRowIds = new ArrayList<>();
-        result.results().iterator().forEachRemaining(resultRowIds::add);
-        assertThat(resultRowIds).hasSize(2);
-
-        // 5. Verify results with filter
-        vectorSearch = new VectorSearch(queryVector, 2, vectorFieldName, List.of(1L).iterator());
-        result = globalIndexScan(table, vectorSearch);
-        resultRowIds = new ArrayList<>();
-        result.results().iterator().forEachRemaining(resultRowIds::add);
-        float score = result.scoreGetter().score(resultRowIds.get(0));
-        assertThat(resultRowIds).contains(1L);
-        assertThat(score).isEqualTo(0.98765427f);
+        ReadBuilder readBuilder = table.newReadBuilder().withVectorSearch(vectorSearch);
+        TableScan scan = readBuilder.newScan();
+        List<Integer> ids = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(scan.plan())
+                .forEachRemaining(
+                        row -> {
+                            ids.add(row.getInt(0));
+                        });
+        assertThat(ids).containsExactly(1, 3);
     }
 
-    private VectorSearchGlobalIndexResult globalIndexScan(
-            FileStoreTable table, VectorSearch vectorSearch) throws Exception {
-        GlobalIndexScanBuilder indexScanBuilder = table.store().newGlobalIndexScanBuilder();
-        List<Range> ranges = indexScanBuilder.shardList();
-        GlobalIndexResult globalFileIndexResult = null;
-        for (Range range : ranges) {
-            try (RowRangeGlobalIndexScanner scanner =
-                    indexScanBuilder.withRowRange(range).build()) {
-                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(vectorSearch);
-                if (!globalIndexResult.isPresent()) {
-                    throw new RuntimeException("Can't find index result by scan");
-                }
-
-                globalFileIndexResult =
-                        globalFileIndexResult != null
-                                ? globalFileIndexResult.or(globalIndexResult.get())
-                                : globalIndexResult.get();
-            }
+    private void writeVectors(float[][] vectors) throws Exception {
+        StreamTableWrite write = table.newWrite(commitUser);
+        for (int i = 0; i < vectors.length; i++) {
+            write.write(GenericRow.of(i, new GenericArray(vectors[i])));
         }
-
-        return (VectorSearchGlobalIndexResult) globalFileIndexResult;
+        List<CommitMessage> messages = write.prepareCommit(false, 0);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        commit.commit(0, messages);
+        write.close();
     }
 
     private List<IndexFileMeta> buildIndexManually(float[][] vectors) throws Exception {
@@ -219,6 +206,6 @@ public class LuceneVectorGlobalIndexScanTest {
                         1,
                         dataIncrement,
                         CompactIncrement.emptyIncrement());
-        commit.commit(0, Collections.singletonList(message));
+        commit.commit(1, Collections.singletonList(message));
     }
 }

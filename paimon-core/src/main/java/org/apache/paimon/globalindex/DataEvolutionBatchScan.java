@@ -206,7 +206,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (this.globalIndexResult != null) {
             return Optional.of(globalIndexResult);
         }
-        if (filter == null) {
+        if (filter == null && vectorSearch == null) {
             return Optional.empty();
         }
         if (!table.coreOptions().globalIndexEnabled()) {
