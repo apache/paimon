@@ -18,49 +18,95 @@
 
 package org.apache.paimon.spark.catalyst.optimizer
 
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
+import org.apache.paimon.spark.catalyst.plans.logical.TruncatePaimonTableWithFilter
 import org.apache.paimon.spark.commands.DeleteFromPaimonTableCommand
+import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{execution, PaimonSparkSession, SparkSession}
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.expressions.{Expression, In, InSubquery, Literal, ScalarSubquery, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.execution.{ExecSubqueryExpression, QueryExecution}
+import org.apache.spark.sql.execution.ExecSubqueryExpression
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.BooleanType
 
 import scala.collection.JavaConverters._
 
 /**
- * For those delete conditions with subqueries that only contain partition columns, we can eval them
- * in advance. So that when running [[DeleteFromPaimonTableCommand]], we can directly call
- * dropPartitions to achieve fast deletion.
+ * Similar to spark `OptimizeMetadataOnlyDeleteFromTable`. The reasons why Paimon Table does not
+ * inherit `SupportsDeleteV2` are as follows:
  *
- * Note: this rule must be placed before [[MergePaimonScalarSubqueries]], because
+ * <p>1. It needs to support both V1 delete and V2 delete simultaneously.
+ *
+ * <p>2. This rule can optimize partition filters that contain subqueries.
+ *
+ * <p>Note: this rule must be placed before [[MergePaimonScalarSubqueries]], because
  * [[MergePaimonScalarSubqueries]] will merge subqueries.
  */
-object EvalSubqueriesForDeleteTable extends Rule[LogicalPlan] with ExpressionHelper with Logging {
+object OptimizeMetadataOnlyDeleteFromPaimonTable
+  extends Rule[LogicalPlan]
+  with ExpressionHelper
+  with Logging {
 
   lazy val spark: SparkSession = PaimonSparkSession.active
   lazy val resolver: Resolver = spark.sessionState.conf.resolver
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
-    plan.transformDown {
-      case d @ DeleteFromPaimonTableCommand(_, table, condition)
-          if SubqueryExpression.hasSubquery(condition) &&
-            isPredicatePartitionColumnsOnly(
-              condition,
-              table.partitionKeys().asScala.toSeq,
-              resolver) =>
-        try {
-          d.copy(condition = evalSubquery(condition))
-        } catch {
-          case e: Throwable =>
-            logInfo(s"Applying EvalSubqueriesForDeleteTable rule failed for: ${e.getMessage}")
-            d
+    plan.transform {
+      case d @ DeleteFromPaimonTableCommand(r: DataSourceV2Relation, table, condition) =>
+        if (isTruncateTable(condition)) {
+          TruncatePaimonTableWithFilter(table, None)
+        } else if (isTruncatePartition(table, condition)) {
+          tryConvertToPartitionPredicate(r, table, condition) match {
+            case Some(p) => TruncatePaimonTableWithFilter(table, Some(p))
+            case _ => d
+          }
+        } else {
+          d
         }
+    }
+  }
+
+  def isMetadataOnlyDelete(table: FileStoreTable, condition: Expression): Boolean = {
+    isTruncateTable(condition) || isTruncatePartition(table, condition)
+  }
+
+  private def isTruncateTable(condition: Expression): Boolean = {
+    condition == null || condition == TrueLiteral
+  }
+
+  private def isTruncatePartition(table: FileStoreTable, condition: Expression): Boolean = {
+    val partitionKeys = table.partitionKeys().asScala.toSeq
+
+    partitionKeys.nonEmpty &&
+    !table.coreOptions().deleteForceProduceChangelog() &&
+    isPredicatePartitionColumnsOnly(condition, partitionKeys, resolver)
+  }
+
+  private def tryConvertToPartitionPredicate(
+      relation: DataSourceV2Relation,
+      table: FileStoreTable,
+      condition: Expression): Option[PartitionPredicate] = {
+    try {
+      val partitionRowType = table.schema().logicalPartitionType()
+      // For those delete conditions with subqueries that only contain partition columns, we can eval them in advance.
+      val finalCondiction = if (SubqueryExpression.hasSubquery(condition)) {
+        evalSubquery(condition)
+      } else {
+        condition
+      }
+      convertConditionToPaimonPredicate(finalCondiction, relation.output, partitionRowType) match {
+        case Some(p) => Some(PartitionPredicate.fromPredicate(partitionRowType, p))
+        case None => None
+      }
+    } catch {
+      case _: Throwable => None
     }
   }
 
