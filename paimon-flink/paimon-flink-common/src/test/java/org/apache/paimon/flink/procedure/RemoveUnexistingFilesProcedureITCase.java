@@ -43,7 +43,7 @@ public class RemoveUnexistingFilesProcedureITCase extends AbstractTestBase {
         int numFiles = 10;
         int[] numDeletes = new int[numPartitions];
         ListUnexistingFilesTest.prepareRandomlyDeletedTable(
-                warehouse, "mydb", "t", bucket, numFiles, numDeletes);
+                warehouse, "mydb", "t", bucket, numFiles, numDeletes, false);
 
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
