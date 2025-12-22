@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 from collections import defaultdict
-from typing import List
+from typing import List, Optional
 
 import pyarrow as pa
 
@@ -24,6 +24,7 @@ from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
+from pypaimon.write.partial_column_write import PartialColumnWrite
 
 
 class TableWrite:
@@ -83,12 +84,34 @@ class BatchTableWrite(TableWrite):
     def __init__(self, table, commit_user):
         super().__init__(table, commit_user)
         self.batch_committed = False
+        self._partial_column_write: Optional[PartialColumnWrite] = None
+
+    def update_columns(self, data: pa.Table, column_names: List[str]) -> List[CommitMessage]:
+        """
+        Add or update columns in the table.
+
+        Args:
+            data: Input data containing row_id and columns to update
+            column_names: Names of columns to update (excluding row_id)
+
+        Returns:
+            List of commit messages
+        """
+
+        if self._partial_column_write is None:
+            self._partial_column_write = PartialColumnWrite(self.table, self.commit_user)
+
+        return self._partial_column_write.update_columns(data, column_names)
 
     def prepare_commit(self) -> List[CommitMessage]:
         if self.batch_committed:
             raise RuntimeError("BatchTableWrite only supports one-time committing.")
         self.batch_committed = True
-        return self.file_store_write.prepare_commit(BATCH_COMMIT_IDENTIFIER)
+
+        if self._partial_column_write is not None:
+            return self._partial_column_write.commit_messages
+        else:
+            return self.file_store_write.prepare_commit(BATCH_COMMIT_IDENTIFIER)
 
 
 class StreamTableWrite(TableWrite):
