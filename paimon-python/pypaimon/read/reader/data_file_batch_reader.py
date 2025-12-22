@@ -22,6 +22,7 @@ import pyarrow as pa
 from pyarrow import RecordBatch
 
 from pypaimon.read.partition_info import PartitionInfo
+from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
@@ -29,7 +30,7 @@ from pypaimon.table.special_fields import SpecialFields
 
 class DataFileBatchReader(RecordBatchReader):
     """
-    Reads record batch from data files.
+    Reads record batch from files of different formats
     """
 
     def __init__(self, format_reader: RecordBatchReader, index_mapping: List[int], partition_info: PartitionInfo,
@@ -48,8 +49,11 @@ class DataFileBatchReader(RecordBatchReader):
         self.max_sequence_number = max_sequence_number
         self.system_fields = system_fields
 
-    def read_arrow_batch(self) -> Optional[RecordBatch]:
-        record_batch = self.format_reader.read_arrow_batch()
+    def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
+        if isinstance(self.format_reader, FormatBlobReader):
+            record_batch = self.format_reader.read_arrow_batch(start_idx, end_idx)
+        else:
+            record_batch = self.format_reader.read_arrow_batch()
         if record_batch is None:
             return None
 

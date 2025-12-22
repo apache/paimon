@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -33,8 +33,7 @@ class Split:
     _file_paths: List[str]
     _row_count: int
     _file_size: int
-    split_start_row: int = None
-    split_end_row: int = None
+    shard_file_idx_map: dict[str, (int, int)] = field(default_factory=dict)  # file_name -> (start_idx, end_idx)
     raw_convertible: bool = False
     data_deletion_files: Optional[List[DeletionFile]] = None
 

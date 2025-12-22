@@ -125,6 +125,10 @@ class FullStartingScanner(StartingScanner):
         return self
 
     def _append_only_filter_by_shard(self, partitioned_files: defaultdict) -> (defaultdict, int, int):
+        """
+        Filter file entries by shard. Only keep the files within the range, which means
+        that only the starting and ending files need to be further divided subsequently
+        """
         total_row = 0
         # Sort by file creation time to ensure consistent sharding
         for key, file_entries in partitioned_files.items():
@@ -240,31 +244,54 @@ class FullStartingScanner(StartingScanner):
         return filtered_partitioned_files, plan_start_row, plan_end_row
 
     def _compute_split_start_end_row(self, splits: List[Split], plan_start_row, plan_end_row):
-        file_end_row = 0  # end row position of current file in all data
+        """
+        Find files that needs to be divided for each split
+        :param splits: splits
+        :param plan_start_row: plan begin row in all splits data
+        :param plan_end_row: plan end row in all splits data
+        """
+        file_end_row = 0  # end row position of current file in all splits data
 
         for split in splits:
-            row_cnt = 0
-            files = split.files
-            split_start_row = file_end_row
-            # Iterate through all file entries to find files that overlap with current shard range
-            for file in files:
-                if self._is_blob_file(file.file_name):
-                    continue
-                row_cnt += file.row_count
-                file_begin_row = file_end_row  # Starting row position of current file in all data
-                file_end_row += file.row_count  # Update to row position after current file
+            cur_split_end_row = file_end_row
+            # Compute split_file_idx_map for data files
+            file_end_row = self._compute_split_file_idx_map(plan_start_row, plan_end_row,
+                                                            split, cur_split_end_row, False)
+            # Compute split_file_idx_map for blob files
+            if self.data_evolution:
+                self._compute_split_file_idx_map(plan_start_row, plan_end_row,
+                                                 split, cur_split_end_row, True)
 
-                # If shard start position is within current file, record actual start position and relative offset
-                if file_begin_row <= plan_start_row < file_end_row:
-                    split.split_start_row = plan_start_row - file_begin_row
-
-                # If shard end position is within current file, record relative end position
-                if file_begin_row < plan_end_row <= file_end_row:
-                    split.split_end_row = plan_end_row - split_start_row
-            if split.split_start_row is None:
-                split.split_start_row = 0
-            if split.split_end_row is None:
-                split.split_end_row = row_cnt
+    def _compute_split_file_idx_map(self, plan_start_row, plan_end_row, split: Split,
+                                    file_end_row: int, is_blob: bool = False):
+        """
+        Traverse all the files in current split, find the starting shard and ending shard files,
+        and add them to shard_file_idx_map;
+        - for data file, only two data files will be divided in all splits.
+        - for blob file, perhaps there will be some unnecessary files in addition to two files(start and end).
+          Add them to shard_file_idx_map as well, because they need to be removed later.
+        """
+        row_cnt = 0
+        for file in split.files:
+            if not is_blob and self._is_blob_file(file.file_name):
+                continue
+            if is_blob and not self._is_blob_file(file.file_name):
+                continue
+            row_cnt += file.row_count
+            file_begin_row = file_end_row  # Starting row position of current file in all data
+            file_end_row += file.row_count  # Update to row position after current file
+            if file_begin_row <= plan_start_row < plan_end_row <= file_end_row:
+                split.shard_file_idx_map[file.file_name] = (
+                    plan_start_row - file_begin_row, plan_end_row - file_begin_row)
+            # If shard start position is within current file, record actual start position and relative offset
+            elif file_begin_row < plan_start_row < file_end_row:
+                split.shard_file_idx_map[file.file_name] = (plan_start_row - file_begin_row, file.row_count)
+            # If shard end position is within current file, record relative end position
+            elif file_begin_row < plan_end_row < file_end_row:
+                split.shard_file_idx_map[file.file_name] = (0, plan_end_row - file_begin_row)
+            elif file_end_row <= plan_start_row or file_begin_row >= plan_end_row:
+                split.shard_file_idx_map[file.file_name] = (-1, -1)
+        return file_end_row
 
     def _primary_key_filter_by_shard(self, file_entries: List[ManifestEntry]) -> List[ManifestEntry]:
         filtered_entries = []
@@ -440,6 +467,7 @@ class FullStartingScanner(StartingScanner):
                                                                             self.target_split_size)
             splits += self._build_split_from_pack(packed_files, file_entries, False, deletion_files_map)
         if self.idx_of_this_subtask is not None:
+            # When files are combined into splits, it is necessary to find files that needs to be divided for each split
             self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
         return splits
 
@@ -493,6 +521,7 @@ class FullStartingScanner(StartingScanner):
             partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
         if self.idx_of_this_subtask is not None:
+            # shard data range: [plan_start_row, plan_end_row)
             partitioned_files, plan_start_row, plan_end_row = self._data_evolution_filter_by_shard(partitioned_files)
 
         def weight_func(file_list: List[DataFileMeta]) -> int:
