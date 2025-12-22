@@ -45,6 +45,8 @@ public class CsvParser {
     private static final Map<String, CastExecutor<?, ?>> CAST_EXECUTOR_CACHE =
             new ConcurrentHashMap<>();
 
+    private static final Object PARSE_ERROR = new Object();
+
     private final RowType dataSchemaRowType;
     private final int[] projectMapping;
     private final GenericRow emptyRow;
@@ -170,6 +172,10 @@ public class CsvParser {
                         throw e;
                 }
             }
+
+            if (field == PARSE_ERROR) {
+                return null;
+            }
             row.setField(i, field);
         }
         return row;
@@ -196,13 +202,29 @@ public class CsvParser {
         DataTypeRoot typeRoot = dataType.getTypeRoot();
         switch (typeRoot) {
             case TINYINT:
-                return Byte.parseByte(field);
+                Integer intVal = tryParseInt(field);
+                if (intVal == null) {
+                    return handleParseError(field);
+                }
+                return intVal.byteValue();
             case SMALLINT:
-                return Short.parseShort(field);
+                intVal = tryParseInt(field);
+                if (intVal == null) {
+                    return handleParseError(field);
+                }
+                return intVal.shortValue();
             case INTEGER:
-                return Integer.parseInt(field);
+                intVal = tryParseInt(field);
+                if (intVal == null) {
+                    return handleParseError(field);
+                }
+                return intVal;
             case BIGINT:
-                return Long.parseLong(field);
+                Long longVal = tryParseLong(field);
+                if (longVal == null) {
+                    return handleParseError(field);
+                }
+                return longVal;
             case FLOAT:
                 return Float.parseFloat(field);
             case DOUBLE:
@@ -232,5 +254,112 @@ public class CsvParser {
             return cast.cast(BinaryString.fromString(field));
         }
         return BinaryString.fromString(field);
+    }
+
+    private Object handleParseError(String field) {
+        switch (mode) {
+            case PERMISSIVE:
+                return null;
+            case DROPMALFORMED:
+                return PARSE_ERROR;
+            case FAILFAST:
+                throw new NumberFormatException("For input string: \"" + field + "\"");
+            default:
+                throw new RuntimeException("Unknown mode: " + mode);
+        }
+    }
+
+    private static Integer tryParseInt(String s) {
+        if (s == null || s.isEmpty()) {
+            return null;
+        }
+        int len = s.length();
+        int i = 0;
+        char firstChar = s.charAt(0);
+        boolean negative = false;
+        int limit = -Integer.MAX_VALUE;
+
+        if (firstChar < '0') {
+            if (firstChar == '-') {
+                negative = true;
+                limit = Integer.MIN_VALUE;
+            } else if (firstChar != '+') {
+                return null;
+            }
+
+            if (len == 1) {
+                return null;
+            }
+            i++;
+        }
+
+        int multmin = limit / 10;
+        int result = 0;
+
+        while (i < len) {
+            char c = s.charAt(i++);
+            if (c < '0' || c > '9') {
+                return null;
+            }
+            int digit = c - '0';
+
+            if (result < multmin) {
+                return null;
+            }
+            result *= 10;
+            if (result < limit + digit) {
+                return null;
+            }
+            result -= digit;
+        }
+
+        return negative ? result : -result;
+    }
+
+    private static Long tryParseLong(String s) {
+        if (s == null || s.isEmpty()) {
+            return null;
+        }
+        int len = s.length();
+        int i = 0;
+        char firstChar = s.charAt(0);
+        boolean negative = false;
+        long limit = -Long.MAX_VALUE;
+
+        if (firstChar < '0') {
+            if (firstChar == '-') {
+                negative = true;
+                limit = Long.MIN_VALUE;
+            } else if (firstChar != '+') {
+                return null;
+            }
+
+            if (len == 1) {
+                return null;
+            }
+            i++;
+        }
+
+        long multmin = limit / 10;
+        long result = 0;
+
+        while (i < len) {
+            char c = s.charAt(i++);
+            if (c < '0' || c > '9') {
+                return null;
+            }
+            int digit = c - '0';
+
+            if (result < multmin) {
+                return null;
+            }
+            result *= 10;
+            if (result < limit + digit) {
+                return null;
+            }
+            result -= digit;
+        }
+
+        return negative ? result : -result;
     }
 }
