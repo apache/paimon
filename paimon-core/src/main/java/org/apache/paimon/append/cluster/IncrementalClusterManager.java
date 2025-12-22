@@ -84,8 +84,7 @@ public class IncrementalClusterManager {
     public IncrementalClusterManager(
             FileStoreTable table, @Nullable PartitionPredicate specifiedPartitions) {
         checkArgument(
-                table.bucketMode() == BucketMode.BUCKET_UNAWARE,
-                "only append unaware-bucket table support incremental clustering.");
+                table.primaryKeys().isEmpty(), "only append table support incremental clustering.");
         this.table = table;
         CoreOptions options = table.coreOptions();
         checkArgument(
@@ -232,7 +231,7 @@ public class IncrementalClusterManager {
         if (bucketMode == BucketMode.HASH_FIXED) {
             checkArgument(
                     !dvEnabled,
-                    "Deletion vector is not supported for clustering hash fixed bucket table");
+                    "Clustering is not supported for fixed-bucket table enabled deletion-vector currently.");
         }
 
         for (BinaryRow partition : compactUnits.keySet()) {
@@ -241,7 +240,7 @@ public class IncrementalClusterManager {
             for (Integer bucket : bucketUnits.keySet()) {
                 CompactUnit unit = bucketUnits.get(bucket);
                 BaseAppendDeleteFileMaintainer dvMaintainer =
-                        getDvMaintainer(bucketMode, partition, bucket);
+                        dvEnabled ? getDvMaintainer(bucketMode, partition, bucket) : null;
                 List<DataSplit> splits = new ArrayList<>();
 
                 DataSplit.Builder builder =

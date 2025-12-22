@@ -164,7 +164,9 @@ public class IncrementalClusterCompact {
                             });
                 });
 
-        buildCompactOperator(new LinkedHashMap<>(), dataSplits, dvCommitMessages, parallelism);
+        dataStreams.addAll(
+                buildCompactOperator(
+                        new LinkedHashMap<>(), dataSplits, dvCommitMessages, parallelism));
     }
 
     /**

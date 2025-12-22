@@ -93,7 +93,7 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
             FileStoreTable table,
             Map<String, String> partitionSpec,
             List<DataSplit> splits,
-            @Nullable List<CommitMessage> dvCommitMessage,
+            @Nullable List<CommitMessage> dvCommitMessages,
             @Nullable Integer parallelism) {
         DataStream<Split> source =
                 env.fromSource(
@@ -130,7 +130,7 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
                         .transform(
                                 "Remove files to be clustered",
                                 new CommittableTypeInfo(),
-                                new RemoveClusterBeforeFilesOperator(dvCommitMessage))
+                                new RemoveClusterBeforeFilesOperator(dvCommitMessages))
                         .forceNonParallel());
     }
 

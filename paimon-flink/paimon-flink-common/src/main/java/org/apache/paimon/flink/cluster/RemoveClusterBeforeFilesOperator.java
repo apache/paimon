@@ -39,10 +39,10 @@ public class RemoveClusterBeforeFilesOperator extends BoundedOneInputOperator<Sp
 
     private static final long serialVersionUID = 3L;
 
-    private final @Nullable List<CommitMessage> dvCommitMessage;
+    private final @Nullable List<CommitMessage> dvCommitMessages;
 
-    public RemoveClusterBeforeFilesOperator(@Nullable List<CommitMessage> dvCommitMessage) {
-        this.dvCommitMessage = dvCommitMessage;
+    public RemoveClusterBeforeFilesOperator(@Nullable List<CommitMessage> dvCommitMessages) {
+        this.dvCommitMessages = dvCommitMessages;
     }
 
     @Override
@@ -69,10 +69,15 @@ public class RemoveClusterBeforeFilesOperator extends BoundedOneInputOperator<Sp
     }
 
     private void emitDvIndexCommitMessages(long checkpointId) {
-        if (dvCommitMessage != null) {
-            output.collect(
-                    new StreamRecord<>(
-                            new Committable(checkpointId, Committable.Kind.FILE, dvCommitMessage)));
+        if (dvCommitMessages != null) {
+            for (CommitMessage dvCommitMessage : dvCommitMessages) {
+                if (dvCommitMessage != null) {
+                    output.collect(
+                            new StreamRecord<>(
+                                    new Committable(
+                                            checkpointId, Committable.Kind.FILE, dvCommitMessage)));
+                }
+            }
         }
     }
 }

@@ -670,13 +670,14 @@ public class SchemaValidation {
     private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {
         if (options.clusteringIncrementalEnabled()) {
             checkArgument(
-                    options.bucket() == -1,
-                    "Cannot define %s for incremental clustering  table, it only support bucket = -1",
-                    CoreOptions.BUCKET.key());
-            checkArgument(
                     schema.primaryKeys().isEmpty(),
                     "Cannot define %s for incremental clustering table.",
                     PRIMARY_KEY.key());
+            if (options.bucket() != -1) {
+                checkArgument(
+                        !options.deletionVectorsEnabled(),
+                        "Cannot enable deletion-vectors for incremental clustering table which bucket is not -1.");
+            }
         }
     }
 }

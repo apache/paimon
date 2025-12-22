@@ -154,7 +154,16 @@ public class CompactAction extends TableActionBase {
                 buildForAppendTableCompact(env, fileStoreTable, isStreaming);
             }
         } else {
-            buildForBucketedTableCompact(env, fileStoreTable, isStreaming);
+            if (fileStoreTable.primaryKeys().isEmpty()
+                    && fileStoreTable.bucketMode() == BucketMode.HASH_FIXED
+                    && !fileStoreTable.coreOptions().bucketAppendOrdered()
+                    && fileStoreTable.coreOptions().clusteringIncrementalEnabled()) {
+                new IncrementalClusterCompact(
+                                env, fileStoreTable, partitionPredicate, fullCompaction)
+                        .build();
+            } else {
+                buildForBucketedTableCompact(env, fileStoreTable, isStreaming);
+            }
         }
         return true;
     }
