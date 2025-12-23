@@ -44,7 +44,10 @@ class PartialColumnWrite:
         self.commit_user = commit_user
 
         # Load existing first_row_ids and build partition map
-        self.first_row_ids, self.first_row_id_to_partition_map = self._load_existing_files_info()
+        (self.first_row_ids,
+         self.first_row_id_to_partition_map,
+         self.first_row_id_to_row_count_map,
+         self.total_row_count) = self._load_existing_files_info()
 
         # Collect commit messages
         self.commit_messages = []
@@ -53,6 +56,7 @@ class PartialColumnWrite:
         """Load existing first_row_ids and build partition map for efficient lookup."""
         first_row_ids = []
         first_row_id_to_partition_map: Dict[int, GenericRow] = {}
+        first_row_id_to_row_count_map: Dict[int, int] = {}
 
         read_builder = self.table.new_read_builder()
         scan = read_builder.new_scan()
@@ -60,11 +64,16 @@ class PartialColumnWrite:
 
         for split in splits:
             for file in split.files:
-                if file.first_row_id is not None:
-                    first_row_ids.append(file.first_row_id)
-                    first_row_id_to_partition_map[file.first_row_id] = split.partition
+                if file.first_row_id is not None and not file.file_name.endswith('.blob'):
+                    first_row_id = file.first_row_id
+                    first_row_ids.append(first_row_id)
+                    first_row_id_to_partition_map[first_row_id] = split.partition
+                    first_row_id_to_row_count_map[first_row_id] = file.row_count
 
-        return sorted(list(set(first_row_ids))), first_row_id_to_partition_map
+        total_row_count = sum(first_row_id_to_row_count_map.values())
+
+        return sorted(list(set(first_row_ids))
+                      ), first_row_id_to_partition_map, first_row_id_to_row_count_map, total_row_count
 
     def update_columns(self, data: pa.Table, column_names: List[str]) -> List:
         """
@@ -91,6 +100,11 @@ class PartialColumnWrite:
             if col_name not in self.table.field_names:
                 raise ValueError(f"Column {col_name} not found in table schema")
 
+        # Validate data row count matches total row count
+        if data.num_rows != self.total_row_count:
+            raise ValueError(
+                f"Input data row count ({data.num_rows}) does not match table total row count ({self.total_row_count})")
+
         # Sort data by _ROW_ID column
         sorted_data = data.sort_by([(SpecialFields.ROW_ID.name, "ascending")])
 
@@ -105,6 +119,12 @@ class PartialColumnWrite:
     def _calculate_first_row_id(self, data: pa.Table) -> pa.Table:
         """Calculate _first_row_id for each row based on _ROW_ID."""
         row_ids = data[SpecialFields.ROW_ID.name].to_pylist()
+
+        # Validate that row_ids are monotonically increasing starting from 0
+        expected_row_ids = list(range(len(row_ids)))
+        if row_ids != expected_row_ids:
+            raise ValueError(f"Row IDs are not monotonically increasing starting from 0. "
+                             f"Expected: {expected_row_ids}")
 
         # Calculate first_row_id for each row_id
         first_row_id_values = []
@@ -154,6 +174,12 @@ class PartialColumnWrite:
     def _write_group(self, partition: GenericRow, first_row_id: int,
                      data: pa.Table, column_names: List[str]):
         """Write a group of data with the same first_row_id."""
+
+        # Validate data row count matches the first_row_id's row count
+        expected_row_count = self.first_row_id_to_row_count_map.get(first_row_id, 0)
+        if data.num_rows != expected_row_count:
+            raise ValueError(
+                f"Data row count ({data.num_rows}) does not match expected row count ({expected_row_count}) for first_row_id {first_row_id}")
 
         # Create a file store write for this partition
         file_store_write = FileStoreWrite(self.table, self.commit_user)

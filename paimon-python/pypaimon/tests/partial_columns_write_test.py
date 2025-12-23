@@ -328,6 +328,49 @@ class PartialColumnsWriteTest(unittest.TestCase):
         self.assertEqual(ages, expected_ages, "Age column was not updated correctly")
         self.assertEqual(cities, expected_cities, "City column was not updated correctly")
 
+    def test_wrong_total_row_count(self):
+        """Test that wrong total row count raises an error."""
+        # Create table with initial data
+        table = self._create_table()
+
+        # Create data evolution writer using BatchTableWrite
+        write_builder = table.new_batch_write_builder().update_columns_by_row_id()
+        batch_write = write_builder.new_write().with_write_type(['age'])
+
+        # Prepare update data with wrong row count (only 3 rows instead of 5)
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': [0, 1, 2],
+            'age': [26, 31, 36]
+        })
+
+        # Should raise ValueError for total row count mismatch
+        with self.assertRaises(ValueError) as context:
+            batch_write.write_arrow(update_data)
+
+        self.assertIn("does not match table total row count", str(context.exception))
+        batch_write.close()
+
+    def test_wrong_first_row_id_row_count(self):
+        """Test that wrong row count for a first_row_id raises an error."""
+        # Create table with initial data
+        table = self._create_table()
+
+        # Create data evolution writer using BatchTableWrite
+        write_builder = table.new_batch_write_builder().update_columns_by_row_id()
+        batch_write = write_builder.new_write().with_write_type(['age'])
+
+        # Prepare update data with duplicate row_id (violates monotonically increasing)
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': [0, 1, 1, 4, 5],
+            'age': [26, 31, 36, 37, 38]
+        })
+
+        # Should raise ValueError for row ID validation
+        with self.assertRaises(ValueError) as context:
+            batch_write.write_arrow(update_data)
+
+        self.assertIn("Row IDs are not monotonically increasing", str(context.exception))
+        batch_write.close()
 
 if __name__ == '__main__':
     unittest.main()
