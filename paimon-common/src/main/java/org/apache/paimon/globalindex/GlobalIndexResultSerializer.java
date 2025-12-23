@@ -66,10 +66,11 @@ public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult
         dataOutput.writeInt(bytes.length);
         dataOutput.write(bytes);
 
-        if (globalIndexResult instanceof TopkGlobalIndexResult) {
-            TopkGlobalIndexResult topkGlobalIndexResult = (TopkGlobalIndexResult) globalIndexResult;
+        if (globalIndexResult instanceof VectorSearchGlobalIndexResult) {
+            VectorSearchGlobalIndexResult vectorSearchGlobalIndexResult =
+                    (VectorSearchGlobalIndexResult) globalIndexResult;
             dataOutput.writeInt(roaringNavigableMap64.getIntCardinality());
-            ScoreGetter scoreGetter = topkGlobalIndexResult.scoreGetter();
+            ScoreGetter scoreGetter = vectorSearchGlobalIndexResult.scoreGetter();
             for (Long rowId : roaringNavigableMap64) {
                 dataOutput.writeFloat(scoreGetter.score(rowId));
             }
@@ -114,6 +115,6 @@ public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult
             scoreMap.put(rowId, scores[i++]);
         }
 
-        return TopkGlobalIndexResult.create(() -> roaringNavigableMap64, scoreMap::get);
+        return VectorSearchGlobalIndexResult.create(() -> roaringNavigableMap64, scoreMap::get);
     }
 }

@@ -23,8 +23,8 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.util.function.Supplier;
 
-/** Top-k global index result for vector index. */
-public interface TopkGlobalIndexResult extends GlobalIndexResult {
+/** Vector search global index result for vector index. */
+public interface VectorSearchGlobalIndexResult extends GlobalIndexResult {
 
     ScoreGetter scoreGetter();
 
@@ -32,7 +32,7 @@ public interface TopkGlobalIndexResult extends GlobalIndexResult {
         throw new UnsupportedOperationException("Please realize this by specified global index");
     }
 
-    default TopkGlobalIndexResult offset(long offset) {
+    default VectorSearchGlobalIndexResult offset(long offset) {
         if (offset == 0) {
             return this;
         }
@@ -51,17 +51,17 @@ public interface TopkGlobalIndexResult extends GlobalIndexResult {
 
     @Override
     default GlobalIndexResult or(GlobalIndexResult other) {
-        if (!(other instanceof TopkGlobalIndexResult)) {
+        if (!(other instanceof VectorSearchGlobalIndexResult)) {
             return GlobalIndexResult.super.or(other);
         }
         RoaringNavigableMap64 thisRowIds = results();
         ScoreGetter thisScoreGetter = scoreGetter();
 
         RoaringNavigableMap64 otherRowIds = other.results();
-        ScoreGetter otherScoreGetter = ((TopkGlobalIndexResult) other).scoreGetter();
+        ScoreGetter otherScoreGetter = ((VectorSearchGlobalIndexResult) other).scoreGetter();
 
         final RoaringNavigableMap64 resultOr = RoaringNavigableMap64.or(thisRowIds, otherRowIds);
-        return new TopkGlobalIndexResult() {
+        return new VectorSearchGlobalIndexResult() {
             @Override
             public ScoreGetter scoreGetter() {
                 return rowId -> {
@@ -79,11 +79,11 @@ public interface TopkGlobalIndexResult extends GlobalIndexResult {
         };
     }
 
-    /** Returns a new {@link TopkGlobalIndexResult} from supplier. */
-    static TopkGlobalIndexResult create(
+    /** Returns a new {@link VectorSearchGlobalIndexResult} from supplier. */
+    static VectorSearchGlobalIndexResult create(
             Supplier<RoaringNavigableMap64> supplier, ScoreGetter scoreGetter) {
         LazyField<RoaringNavigableMap64> lazyField = new LazyField<>(supplier);
-        return new TopkGlobalIndexResult() {
+        return new VectorSearchGlobalIndexResult() {
             @Override
             public ScoreGetter scoreGetter() {
                 return scoreGetter;

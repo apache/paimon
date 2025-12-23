@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.Closeable;
 import java.util.List;
@@ -39,6 +40,10 @@ public interface GlobalIndexReader extends FunctionVisitor<GlobalIndexResult>, C
 
     @Override
     default GlobalIndexResult visit(TransformPredicate predicate) {
+        throw new UnsupportedOperationException("Should not invoke this");
+    }
+
+    default GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
         throw new UnsupportedOperationException("Should not invoke this");
     }
 }

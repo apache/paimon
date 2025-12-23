@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.IOException;
 import java.util.List;
@@ -105,6 +106,11 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     @Override
     public GlobalIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
         return applyOffset(wrapped.visitNotIn(fieldRef, literals));
+    }
+
+    @Override
+    public GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
+        return applyOffset(wrapped.visitVectorSearch(vectorSearch));
     }
 
     private GlobalIndexResult applyOffset(GlobalIndexResult result) {
