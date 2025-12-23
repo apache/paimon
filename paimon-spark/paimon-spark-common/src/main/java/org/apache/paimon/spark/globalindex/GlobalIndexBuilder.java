@@ -23,7 +23,6 @@ import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.IndexedSplit;
-import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -72,7 +71,7 @@ public abstract class GlobalIndexBuilder {
                             range.from, range.to, context.indexField().id(), null, entry.meta());
             IndexFileMeta indexFileMeta =
                     new IndexFileMeta(
-                            BitmapGlobalIndexerFactory.IDENTIFIER,
+                            context.indexType(),
                             fileName,
                             fileSize,
                             range.to - range.from + 1,

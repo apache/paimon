@@ -372,7 +372,6 @@ under the License.
                         <scalaVersion>${scala.version}</scalaVersion>
                         <checkMultipleScalaVersions>false</checkMultipleScalaVersions>
                         <args>
-                            <arg>-nobootcp</arg>
                             <arg>-target:jvm-${target.java.version}</arg>
                         </args>
                     </configuration>

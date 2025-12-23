@@ -16,3 +16,4 @@
 # limitations under the License.
 
 org.apache.paimon.spark.globalindex.bitmap.BitmapGlobalIndexBuilderFactory
+org.apache.paimon.spark.globalindex.lucene.LuceneGlobalIndexBuilderFactory
