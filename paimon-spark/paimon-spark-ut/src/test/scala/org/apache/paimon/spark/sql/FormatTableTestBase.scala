@@ -195,4 +195,47 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
       assert(df.queryExecution.executedPlan.toString().contains("BroadcastExchange"))
     }
   }
+
+  test("Format table: format table and spark table props recognize") {
+    val paimonFormatTblProps =
+      """
+        |'csv.field-delimiter'=';',
+        |'csv.line-delimiter'='?',
+        |'csv.quote-character'='%',
+        |'csv.include-header'='true',
+        |'csv.null-literal'='null',
+        |'csv.mode'='permissive',
+        |'format-table.file.compression'='gzip'
+        |""".stripMargin
+
+    val sparkTblProps =
+      """
+        |'sep'=';',
+        |'lineSep'='?',
+        |'quote'='%',
+        |'header'='true',
+        |'nullvalue'='null',
+        |'mode'='permissive',
+        |'compression'='gzip'
+        |""".stripMargin
+
+    val defaultProps = "'k'='v'"
+
+    for (tblProps <- Seq(paimonFormatTblProps, sparkTblProps, defaultProps)) {
+      withTable("t") {
+        sql(s"CREATE TABLE t (id INT, v STRING) USING CSV TBLPROPERTIES ($tblProps)")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id + 1 FROM range(2)")
+        sql("INSERT INTO t VALUES (2, null)")
+
+        for (impl <- Seq("engine", "paimon")) {
+          withSparkSQLConf("spark.paimon.format-table.implementation" -> impl) {
+            checkAnswer(
+              sql("SELECT * FROM t ORDER BY id"),
+              Seq(Row(0, "1"), Row(1, "2"), Row(2, null))
+            )
+          }
+        }
+      }
+    }
+  }
 }

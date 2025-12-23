@@ -2368,6 +2368,8 @@ public class CoreOptions implements Serializable {
             return options.get(FILE_COMPRESSION.key());
         } else if (options.containsKey(FORMAT_TABLE_FILE_COMPRESSION.key())) {
             return options.get(FORMAT_TABLE_FILE_COMPRESSION.key());
+        } else if (options.containsKey("compression")) {
+            return options.get("compression");
         } else {
             String format = formatType();
             switch (format) {
