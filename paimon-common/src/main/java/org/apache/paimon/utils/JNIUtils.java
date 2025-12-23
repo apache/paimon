@@ -28,7 +28,7 @@ import java.util.logging.Logger;
 
 /**
  * Utils for loading jni. The jni file is placed at {@code /osName/osArch/jniName.libExtension}.
- * Uses should pass jniName through {@code load}.
+ * User should pass jniName through {@code load}.
  */
 public class JNIUtils {
 
