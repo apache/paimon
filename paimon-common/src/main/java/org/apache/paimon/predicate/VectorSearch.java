@@ -20,30 +20,26 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.Iterator;
-import java.util.Optional;
 
 /** VectorSearch to perform vector similarity search. * */
 public class VectorSearch implements Serializable {
+
     private static final long serialVersionUID = 1L;
 
-    private Object search;
-    private String fieldName;
-    private Optional<String> similarityFunction;
-    private int limit;
-    private Iterator<Long> includeRowIds;
+    // float[] or byte[]
+    private final Object vector;
+    private final String fieldName;
+    private final int limit;
 
-    public VectorSearch(
-            Object search,
-            int limit,
-            String fieldName,
-            @Nullable Iterator<Long> includeRowIds,
-            @Nullable String similarityFunction) {
-        if (search == null) {
+    @Nullable private RoaringNavigableMap64 includeRowIds;
+
+    public VectorSearch(Object vector, int limit, String fieldName) {
+        if (vector == null) {
             throw new IllegalArgumentException("Search cannot be null");
         }
         if (limit <= 0) {
@@ -52,23 +48,14 @@ public class VectorSearch implements Serializable {
         if (fieldName == null || fieldName.isEmpty()) {
             throw new IllegalArgumentException("Field name cannot be null or empty");
         }
-        this.search = search;
+        this.vector = vector;
         this.limit = limit;
         this.fieldName = fieldName;
-        this.similarityFunction = Optional.ofNullable(similarityFunction);
-        this.includeRowIds = includeRowIds;
     }
 
-    public VectorSearch(Object search, int limit, String fieldName) {
-        this(search, limit, fieldName, null, null);
-    }
-
-    public VectorSearch(Object search, int limit, String fieldName, Iterator<Long> includeRowIds) {
-        this(search, limit, fieldName, includeRowIds, null);
-    }
-
-    public Object search() {
-        return search;
+    // float[] or byte[]
+    public Object vector() {
+        return vector;
     }
 
     public int limit() {
@@ -79,15 +66,11 @@ public class VectorSearch implements Serializable {
         return fieldName;
     }
 
-    public Optional<String> similarityFunction() {
-        return similarityFunction;
-    }
-
-    public Iterator<Long> includeRowIds() {
+    public RoaringNavigableMap64 includeRowIds() {
         return includeRowIds;
     }
 
-    public VectorSearch withIncludeRowIds(Iterator<Long> includeRowIds) {
+    public VectorSearch withIncludeRowIds(RoaringNavigableMap64 includeRowIds) {
         this.includeRowIds = includeRowIds;
         return this;
     }
@@ -98,8 +81,6 @@ public class VectorSearch implements Serializable {
 
     @Override
     public String toString() {
-        return String.format(
-                "FieldName(%s), SimilarityFunction(%s), Limit(%s)",
-                fieldName, similarityFunction, limit);
+        return String.format("FieldName(%s), Limit(%s)", fieldName, limit);
     }
 }

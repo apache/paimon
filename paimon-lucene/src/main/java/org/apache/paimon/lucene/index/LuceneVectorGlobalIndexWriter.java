@@ -52,7 +52,7 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
     private final LuceneVectorIndexFactory vectorIndexFactory;
 
     private long count = 0;
-    private final List<LuceneVectorIndex> vectorIndices;
+    private final List<LuceneVectorIndex<?>> vectorIndices;
     private final List<ResultEntry> results;
 
     public LuceneVectorGlobalIndexWriter(
@@ -70,7 +70,7 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
 
     @Override
     public void write(Object key) {
-        LuceneVectorIndex index = vectorIndexFactory.create(count, key);
+        LuceneVectorIndex<?> index = vectorIndexFactory.create(count, key);
         index.checkDimension(vectorIndexOptions.dimension());
         vectorIndices.add(index);
         if (vectorIndices.size() >= sizePerIndex) {
@@ -113,7 +113,7 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
     }
 
     private void buildIndex(
-            List<LuceneVectorIndex> batchVectors,
+            List<LuceneVectorIndex<?>> batchVectors,
             int m,
             int efConstruction,
             int writeBufferSize,
@@ -123,7 +123,7 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
         try (LuceneIndexMMapDirectory luceneIndexMMapDirectory = new LuceneIndexMMapDirectory()) {
             try (IndexWriter writer =
                     new IndexWriter(luceneIndexMMapDirectory.directory(), config)) {
-                for (LuceneVectorIndex luceneVectorIndex : batchVectors) {
+                for (LuceneVectorIndex<?> luceneVectorIndex : batchVectors) {
                     Document doc = new Document();
                     doc.add(luceneVectorIndex.indexableField(similarityFunction));
                     doc.add(luceneVectorIndex.rowIdLongPoint());

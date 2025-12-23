@@ -48,7 +48,7 @@ public class LuceneVectorGlobalIndexer implements GlobalIndexer {
 
     @Override
     public GlobalIndexReader createReader(
-            GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
-        return new LuceneVectorGlobalIndexReader(fileReader, files, options, fieldType);
+            GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) {
+        return new LuceneVectorGlobalIndexReader(fileReader, files, fieldType);
     }
 }

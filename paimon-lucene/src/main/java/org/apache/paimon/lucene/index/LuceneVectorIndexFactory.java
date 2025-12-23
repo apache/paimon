@@ -38,12 +38,12 @@ public abstract class LuceneVectorIndexFactory {
         }
     }
 
-    public abstract LuceneVectorIndex create(long rowId, Object vector);
+    public abstract LuceneVectorIndex<?> create(long rowId, Object vector);
 
     /** Factory for creating LuceneFloatVectorIndex instances. */
     public static class LuceneFloatVectorIndexFactory extends LuceneVectorIndexFactory {
         @Override
-        public LuceneVectorIndex create(long rowId, Object vector) {
+        public LuceneVectorIndex<?> create(long rowId, Object vector) {
             return new LuceneFloatVectorIndex(rowId, (float[]) vector);
         }
     }
@@ -51,7 +51,7 @@ public abstract class LuceneVectorIndexFactory {
     /** Factory for creating LuceneByteVectorIndex instances. */
     public static class LuceneByteVectorIndexFactory extends LuceneVectorIndexFactory {
         @Override
-        public LuceneVectorIndex create(long rowId, Object vector) {
+        public LuceneVectorIndex<?> create(long rowId, Object vector) {
             return new LuceneByteVectorIndex(rowId, (byte[]) vector);
         }
     }

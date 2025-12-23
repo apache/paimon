@@ -38,7 +38,7 @@ public class LuceneVectorSearchGlobalIndexResult implements VectorSearchGlobalIn
 
     @Override
     public ScoreGetter scoreGetter() {
-        return rowId -> id2scores.get(rowId);
+        return id2scores::get;
     }
 
     @Override

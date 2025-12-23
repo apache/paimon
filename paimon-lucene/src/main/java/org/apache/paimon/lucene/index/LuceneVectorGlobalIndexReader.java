@@ -29,6 +29,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -68,17 +69,14 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     private final GlobalIndexFileReader fileReader;
     private final GlobalIndexResult defaultResult;
     private volatile boolean indicesLoaded = false;
-    private final LuceneVectorIndexOptions vectorIndexOptions;
     private final DataType fieldType;
 
     public LuceneVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> ioMetas,
-            LuceneVectorIndexOptions options,
             DataType fieldType) {
         this.fileReader = fileReader;
         this.ioMetas = ioMetas;
-        this.vectorIndexOptions = options;
         this.fieldType = fieldType;
         this.searchers = new ArrayList<>();
         this.directories = new ArrayList<>();
@@ -88,23 +86,17 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     @Override
     public GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
         try {
-            if (vectorSearch.similarityFunction().isEmpty()
-                    || LuceneVectorMetric.fromString(vectorSearch.similarityFunction().get())
-                            == vectorIndexOptions.metric()) {
-                ensureLoadIndices(fileReader, ioMetas);
-                Query query = query(vectorSearch, fieldType);
-                return search(query, vectorSearch.limit());
-            }
+            ensureLoadIndices(fileReader, ioMetas);
+            Query query = query(vectorSearch, fieldType);
+            return search(query, vectorSearch.limit());
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
-                            "Failed to search vector index with fieldName=%s, similarity=%s, limit=%d",
+                            "Failed to search vector index with fieldName=%s, limit=%d",
                             vectorSearch.fieldName(),
-                            vectorIndexOptions.metric(),
                             vectorSearch.limit()),
                     e);
         }
-        return defaultResult;
     }
 
     @Override
@@ -153,32 +145,35 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
 
     private Query query(VectorSearch vectorSearch, DataType dataType) {
         Query idFilterQuery = null;
-        Iterator<Long> includeRowIds = vectorSearch.includeRowIds();
+        RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
         if (includeRowIds != null) {
-            ArrayList<Long> targetIds = new ArrayList<>();
-            includeRowIds.forEachRemaining(id -> targetIds.add(id));
+            long[] targetIds = new long[includeRowIds.getIntCardinality()];
+            Iterator<Long> iterator = includeRowIds.iterator();
+            for (int i = 0; i < targetIds.length; i++) {
+                targetIds[i] = iterator.next();
+            }
             idFilterQuery = LongPoint.newSetQuery(ROW_ID_FIELD, targetIds);
         }
         if (dataType instanceof ArrayType
                 && ((ArrayType) dataType).getElementType() instanceof FloatType) {
-            if (!(vectorSearch.search() instanceof float[])) {
+            if (!(vectorSearch.vector() instanceof float[])) {
                 throw new IllegalArgumentException(
-                        "Expected float[] vector but got: " + vectorSearch.search().getClass());
+                        "Expected float[] vector but got: " + vectorSearch.vector().getClass());
             }
             return new KnnFloatVectorQuery(
                     LuceneVectorIndex.VECTOR_FIELD,
-                    (float[]) vectorSearch.search(),
+                    (float[]) vectorSearch.vector(),
                     vectorSearch.limit(),
                     idFilterQuery);
         } else if (dataType instanceof ArrayType
                 && ((ArrayType) dataType).getElementType() instanceof TinyIntType) {
-            if (!(vectorSearch.search() instanceof byte[])) {
+            if (!(vectorSearch.vector() instanceof byte[])) {
                 throw new IllegalArgumentException(
-                        "Expected byte[] vector but got: " + vectorSearch.search().getClass());
+                        "Expected byte[] vector but got: " + vectorSearch.vector().getClass());
             }
             return new KnnByteVectorQuery(
                     LuceneVectorIndex.VECTOR_FIELD,
-                    (byte[]) vectorSearch.search(),
+                    (byte[]) vectorSearch.vector(),
                     vectorSearch.limit(),
                     idFilterQuery);
         } else {
@@ -249,19 +244,8 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
                                 indicesLoaded = true;
                             } finally {
                                 if (!indicesLoaded) {
-                                    if (reader != null) {
-                                        try {
-                                            reader.close();
-                                        } catch (IOException e) {
-                                        }
-                                    }
-                                    if (directory != null) {
-                                        try {
-                                            directory.close();
-                                        } catch (Exception e) {
-                                            throw new IOException("Failed to close directory", e);
-                                        }
-                                    }
+                                    IOUtils.closeQuietly(reader);
+                                    IOUtils.closeQuietly(directory);
                                 }
                             }
                         }

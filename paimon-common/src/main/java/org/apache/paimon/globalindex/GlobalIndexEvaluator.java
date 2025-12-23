@@ -63,9 +63,9 @@ public class GlobalIndexEvaluator
             int fieldId = rowType.getField(vectorSearch.fieldName()).id();
             Collection<GlobalIndexReader> readers =
                     indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
-            compoundResult.ifPresent(
-                    globalIndexResult ->
-                            vectorSearch.withIncludeRowIds(globalIndexResult.results().iterator()));
+            if (compoundResult.isPresent()) {
+                vectorSearch = vectorSearch.withIncludeRowIds(compoundResult.get().results());
+            }
             for (GlobalIndexReader fileIndexReader : readers) {
                 GlobalIndexResult childResult = vectorSearch.visit(fileIndexReader);
                 // AND Operation

@@ -68,18 +68,17 @@ public class LuceneVectorGlobalIndexScanTest {
 
     private FileStoreTable table;
     private String commitUser;
-    private Path tablePath;
     private FileIO fileIO;
     private RowType rowType;
-    private String similarityMetric = "EUCLIDEAN";
-    private String vectorFieldName = "vec";
+    private final String vectorFieldName = "vec";
 
     @BeforeEach
     public void before() throws Exception {
-        tablePath = new Path(tempDir.toString());
+        Path tablePath = new Path(tempDir.toString());
         fileIO = new LocalFileIO();
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
 
+        String similarityMetric = "EUCLIDEAN";
         Schema schema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())

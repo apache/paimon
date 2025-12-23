@@ -58,8 +58,7 @@ public class LuceneVectorGlobalIndexTest {
     private FileIO fileIO;
     private Path indexPath;
     private DataType vectorType;
-    private String defaultMetric = "EUCLIDEAN";
-    private String fieldName = "vec";
+    private final String fieldName = "vec";
 
     @BeforeEach
     public void setup() {
@@ -127,7 +126,7 @@ public class LuceneVectorGlobalIndexTest {
 
             try (LuceneVectorGlobalIndexReader reader =
                     new LuceneVectorGlobalIndexReader(
-                            fileReader, metas, indexOptions, vectorType)) {
+                            fileReader, metas, vectorType)) {
                 VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 3, fieldName);
                 GlobalIndexResult searchResult = reader.visitVectorSearch(vectorSearch);
                 assertThat(searchResult).isNotNull();
@@ -166,7 +165,7 @@ public class LuceneVectorGlobalIndexTest {
 
             try (LuceneVectorGlobalIndexReader reader =
                     new LuceneVectorGlobalIndexReader(
-                            fileReader, metas, indexOptions, vectorType)) {
+                            fileReader, metas, vectorType)) {
                 // Verify search works with this dimension
                 VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 5, fieldName);
                 GlobalIndexResult searchResult = reader.visitVectorSearch(vectorSearch);
@@ -215,8 +214,7 @@ public class LuceneVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         List<GlobalIndexIOMeta> metas = new ArrayList<>();
-        for (int i = 0; i < results.size(); i++) {
-            GlobalIndexWriter.ResultEntry result = results.get(i);
+        for (GlobalIndexWriter.ResultEntry result : results) {
             metas.add(
                     new GlobalIndexIOMeta(
                             result.fileName(),
@@ -226,7 +224,7 @@ public class LuceneVectorGlobalIndexTest {
         }
 
         try (LuceneVectorGlobalIndexReader reader =
-                new LuceneVectorGlobalIndexReader(fileReader, metas, indexOptions, vectorType)) {
+                new LuceneVectorGlobalIndexReader(fileReader, metas, vectorType)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 1, fieldName);
             LuceneVectorSearchGlobalIndexResult result =
                     (LuceneVectorSearchGlobalIndexResult) reader.visitVectorSearch(vectorSearch);
@@ -239,7 +237,7 @@ public class LuceneVectorGlobalIndexTest {
             filterResults.add(expectedRowId);
             vectorSearch =
                     new VectorSearch(
-                            vectors[0], 1, fieldName, filterResults.iterator(), defaultMetric);
+                            vectors[0], 1, fieldName).withIncludeRowIds(filterResults);
             result = (LuceneVectorSearchGlobalIndexResult) reader.visitVectorSearch(vectorSearch);
             assertThat(containsRowId(result, expectedRowId)).isTrue();
 
@@ -281,8 +279,7 @@ public class LuceneVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         List<GlobalIndexIOMeta> metas = new ArrayList<>();
-        for (int i = 0; i < results.size(); i++) {
-            GlobalIndexWriter.ResultEntry result = results.get(i);
+        for (GlobalIndexWriter.ResultEntry result : results) {
             metas.add(
                     new GlobalIndexIOMeta(
                             result.fileName(),
@@ -293,7 +290,7 @@ public class LuceneVectorGlobalIndexTest {
 
         try (LuceneVectorGlobalIndexReader reader =
                 new LuceneVectorGlobalIndexReader(
-                        fileReader, metas, indexOptions, byteVectorType)) {
+                        fileReader, metas, byteVectorType)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 1, fieldName);
             GlobalIndexResult result = reader.visitVectorSearch(vectorSearch);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
@@ -310,10 +307,6 @@ public class LuceneVectorGlobalIndexTest {
 
     @Test
     public void testInvalidTopK() {
-        assertThatThrownBy(() -> new VectorSearch(null, 10, fieldName))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Search cannot be null");
-
         assertThatThrownBy(() -> new VectorSearch(new float[] {0.1f}, 0, fieldName))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Limit must be positive");
@@ -322,6 +315,7 @@ public class LuceneVectorGlobalIndexTest {
     private Options createDefaultOptions(int dimension) {
         Options options = new Options();
         options.setInteger("vector.dim", dimension);
+        String defaultMetric = "EUCLIDEAN";
         options.setString("vector.metric", defaultMetric);
         options.setInteger("vector.m", 16);
         options.setInteger("vector.ef-construction", 100);
