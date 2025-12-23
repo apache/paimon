@@ -18,29 +18,45 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.WriteRestore;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.system.CompactBucketsTable;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.table.data.RowData;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link StoreCompactOperator}. */
 public class StoreCompactOperatorTest extends TableTestBase {
@@ -84,6 +100,119 @@ public class StoreCompactOperatorTest extends TableTestBase {
         operator.prepareCommit(true, 1);
         assertThat(operator.compactionWaitingSet()).isEmpty();
         assertThat(compactRememberStoreWrite.compactTime).isEqualTo(3);
+    }
+
+    @Test
+    public void testConflictWithOverwrite() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pt", "a")
+                        .option("bucket", "1")
+                        // .option("compaction.force-up-level-0", "true")
+                        .build();
+        Identifier identifier = identifier();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        String writeJobCommitUser = UUID.randomUUID().toString();
+        String compactJobCommitUser = UUID.randomUUID().toString();
+
+        CompactBucketsTable compactBucketsTable = new CompactBucketsTable(table, true);
+        StreamDataTableScan scan = compactBucketsTable.newStreamScan();
+        InnerTableRead read = compactBucketsTable.newRead();
+
+        CheckpointConfig checkpointConfig = new CheckpointConfig();
+        checkpointConfig.setCheckpointInterval(500);
+        StoreCompactOperator.Factory operatorFactory =
+                new StoreCompactOperator.Factory(
+                        table,
+                        StoreSinkWrite.createWriteProvider(
+                                table, checkpointConfig, true, false, false),
+                        compactJobCommitUser,
+                        true);
+
+        TypeSerializer<Committable> serializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        OneInputStreamOperatorTestHarness<RowData, Committable> harness =
+                new OneInputStreamOperatorTestHarness<>(operatorFactory);
+        harness.setup(serializer);
+        harness.initializeEmptyState();
+        harness.open();
+
+        FileStoreTable writeOnlyTable = table.copy(Collections.singletonMap("write-only", "true"));
+
+        // write base data
+        try (TableWriteImpl<?> write = writeOnlyTable.newWrite(writeJobCommitUser);
+                TableCommitImpl commit = writeOnlyTable.newCommit(writeJobCommitUser)) {
+            write.write(GenericRow.of(1, 1, 100));
+            write.write(GenericRow.of(1, 3, 300));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<InternalRow> fileRows = new ArrayList<>();
+        read.createReader(scan.plan()).forEachRemaining(fileRows::add);
+        for (InternalRow fileRow : fileRows) {
+            harness.processElement(new StreamRecord<>(new FlinkRowData(fileRow)));
+        }
+        StoreCompactOperator operator = (StoreCompactOperator) harness.getOperator();
+        List<Committable> committables = operator.prepareCommit(true, 1);
+        try (TableCommitImpl commit = table.newCommit(compactJobCommitUser)) {
+            StoreCommitter committer =
+                    new StoreCommitter(
+                            table,
+                            commit,
+                            Committer.createContext(
+                                    compactJobCommitUser, null, true, false, null, 1, 1));
+            ManifestCommittable manifestCommittable =
+                    committer.combine(1, System.currentTimeMillis(), committables);
+            committer.commit(Collections.singletonList(manifestCommittable));
+        }
+
+        assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+
+        // overwrite and insert
+        try (TableWriteImpl<?> write = writeOnlyTable.newWrite(writeJobCommitUser);
+                TableCommitImpl commit =
+                        writeOnlyTable
+                                .newCommit(writeJobCommitUser)
+                                .withOverwrite(Collections.singletonMap("pt", "1"))) {
+            write.write(GenericRow.of(1, 2, 200));
+            commit.commit(write.prepareCommit());
+        }
+
+        try (TableWriteImpl<?> write = writeOnlyTable.newWrite(writeJobCommitUser);
+                TableCommitImpl commit = writeOnlyTable.newCommit(writeJobCommitUser)) {
+            write.write(GenericRow.of(1, 4, 400));
+            commit.commit(write.prepareCommit());
+        }
+
+        System.out.println(table.snapshotManager().latestSnapshot().id());
+
+        fileRows = new ArrayList<>();
+        read.createReader(scan.plan()).forEachRemaining(fileRows::add);
+        for (InternalRow fileRow : fileRows) {
+            harness.processElement(new StreamRecord<>(new FlinkRowData(fileRow)));
+        }
+        operator = (StoreCompactOperator) harness.getOperator();
+        committables = operator.prepareCommit(true, 2);
+        try (TableCommitImpl commit = table.newCommit(compactJobCommitUser)) {
+            StoreCommitter committer =
+                    new StoreCommitter(
+                            table,
+                            commit,
+                            Committer.createContext(
+                                    compactJobCommitUser, null, true, false, null, 1, 1));
+            ManifestCommittable manifestCommittable =
+                    committer.combine(2, System.currentTimeMillis(), committables);
+            assertThatThrownBy(
+                            () -> committer.commit(Collections.singletonList(manifestCommittable)))
+                    .hasMessageContaining("File deletion conflicts detected! Give up committing.");
+        }
     }
 
     private RowData data(int bucket) {
