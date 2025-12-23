@@ -18,26 +18,35 @@
 
 package org.apache.paimon.sst;
 
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.memory.MemorySlice;
+/** Type of Block. */
+public enum BlockType {
+    DATA((byte) 0),
+    LEAF_INDEX((byte) 1),
+    INTERMEDIATE_INDEX((byte) 2),
+    ROOT_INDEX((byte) 3),
+    BLOOM_FILTER((byte) 4),
+    FILE_INFO((byte) 5);
 
-import java.util.zip.CRC32;
+    private final byte value;
 
-/** Utils for sort lookup store. */
-public class SstFileUtils {
-    public static int crc32c(MemorySlice data, BlockType type, boolean compressed) {
-        CRC32 crc = new CRC32();
-        crc.update(data.getHeapMemory(), data.offset(), data.length());
-        crc.update(type.toByte() & 0xFF);
-        crc.update(compressed ? 1 : 0);
-        return (int) crc.getValue();
+    BlockType(byte value) {
+        this.value = value;
     }
 
-    public static int crc32c(MemorySegment data, BlockType type, boolean compressed) {
-        CRC32 crc = new CRC32();
-        crc.update(data.getHeapMemory(), 0, data.size());
-        crc.update(type.toByte() & 0xFF);
-        crc.update(compressed ? 1 : 0);
-        return (int) crc.getValue();
+    public byte toByte() {
+        return value;
+    }
+
+    public boolean isIndex() {
+        return value >= 1 && value <= 3;
+    }
+
+    public static BlockType fromByte(byte value) {
+        for (BlockType blockType : values()) {
+            if (blockType.value == value) {
+                return blockType;
+            }
+        }
+        throw new IllegalStateException("Illegal block type: " + value);
     }
 }
