@@ -20,8 +20,10 @@ import uuid
 from abc import ABC
 from typing import Optional
 
-from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit, TableCommit
-from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite, TableWrite
+from pypaimon.write.table_commit import (BatchTableCommit, StreamTableCommit,
+                                         TableCommit)
+from pypaimon.write.table_write import (BatchTableWrite, StreamTableWrite,
+                                        TableWrite)
 
 
 class WriteBuilder(ABC):
@@ -31,6 +33,7 @@ class WriteBuilder(ABC):
         self.table: FileStoreTable = table
         self.commit_user = self._create_commit_user()
         self.static_partition = None
+        self._update_columns_by_row_id = False
 
     def overwrite(self, static_partition: Optional[dict] = None):
         self.static_partition = static_partition if static_partition is not None else {}
@@ -49,11 +52,15 @@ class WriteBuilder(ABC):
         else:
             return str(uuid.uuid4())
 
+    def update_columns_by_row_id(self):
+        self._update_columns_by_row_id = True
+        return self
+
 
 class BatchWriteBuilder(WriteBuilder):
 
     def new_write(self) -> BatchTableWrite:
-        return BatchTableWrite(self.table, self.commit_user)
+        return BatchTableWrite(self.table, self.commit_user, self._update_columns_by_row_id)
 
     def new_commit(self) -> BatchTableCommit:
         commit = BatchTableCommit(self.table, self.commit_user, self.static_partition)
