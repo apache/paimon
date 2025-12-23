@@ -92,6 +92,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private ScanMetrics scanMetrics = null;
     private boolean dropStats;
     @Nullable protected List<Range> rowRanges;
+    @Nullable protected Long limit;
 
     public AbstractFileStoreScan(
             ManifestsReader manifestsReader,
@@ -251,6 +252,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return this;
     }
 
+    @Override
+    public FileStoreScan withLimit(long limit) {
+        this.limit = limit;
+        return this;
+    }
+
     @Nullable
     @Override
     public Integer parallelism() {
@@ -379,7 +386,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return readManifestEntries(readManifests().filteredManifests, true);
     }
 
-    private Iterator<ManifestEntry> readManifestEntries(
+    protected Iterator<ManifestEntry> readManifestEntries(
             List<ManifestFileMeta> manifests, boolean useSequential) {
         return scanMode == ScanMode.ALL
                 ? readAndMergeFileEntries(manifests, Function.identity(), useSequential)

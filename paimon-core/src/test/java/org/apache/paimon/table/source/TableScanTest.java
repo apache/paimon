@@ -19,6 +19,8 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.FileStoreTable;
@@ -106,6 +108,167 @@ public class TableScanTest extends ScannerTestBase {
         // with limit4
         TableScan.Plan plan3 = table.newScan().withLimit(4).plan();
         assertThat(plan3.splits().size()).isEqualTo(4);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testLimitPushdownWithFilter() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write 50 files, each with 1 row. Rows 0-24 have 'a' = 10, rows 25-49 have 'a' = 20.
+        for (int i = 0; i < 25; i++) {
+            write.write(rowData(i, 10, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+        for (int i = 25; i < 50; i++) {
+            write.write(rowData(i, 20, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        // Without limit, should read all 50 files
+        TableScan.Plan planWithoutLimit = table.newScan().plan();
+        int totalSplits = planWithoutLimit.splits().size();
+        assertThat(totalSplits).isEqualTo(50);
+
+        // With filter (a = 20) and limit (10)
+        // filterByStats has already been applied in baseIterator, so only files 25-49 will be
+        // returned
+        // To get 10 rows, it should read 10 files (from index 25 to 34)
+        Predicate filter =
+                new PredicateBuilder(table.schema().logicalRowType())
+                        .equal(1, 20); // Filter on 'a' = 20
+        TableScan.Plan planWithFilterAndLimit =
+                table.newScan().withFilter(filter).withLimit(10).plan();
+        int splitsWithFilterAndLimit = planWithFilterAndLimit.splits().size();
+
+        // Should read exactly 10 files (from index 25 to 34) to get 10 rows
+        assertThat(splitsWithFilterAndLimit).isLessThanOrEqualTo(10);
+        assertThat(splitsWithFilterAndLimit).isGreaterThan(0);
+        assertThat(splitsWithFilterAndLimit).isLessThan(totalSplits);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testLimitPushdownWhenDataLessThanLimit() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write only 3 rows
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(2, 20, 200L));
+        write.write(rowData(3, 30, 300L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // With limit 10, but only 3 rows exist
+        // Should return all 3 rows without throwing exception
+        TableScan.Plan plan = table.newScan().withLimit(10).plan();
+        assertThat(plan.splits().size()).isEqualTo(3);
+
+        // Verify we can read all data correctly
+        List<String> result = getResult(table.newRead(), plan.splits());
+        assertThat(result.size()).isEqualTo(3);
+        assertThat(result).containsExactlyInAnyOrder("+I 1|10|100", "+I 2|20|200", "+I 3|30|300");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testLimitPushdownWithFilterWhenDataLessThanLimit() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write 10 rows, but only 3 rows have 'a' = 20
+        for (int i = 0; i < 7; i++) {
+            write.write(rowData(i, 10, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+        for (int i = 7; i < 10; i++) {
+            write.write(rowData(i, 20, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        // With filter (a = 20) and limit (10), but only 3 rows match
+        // Should return all 3 matching rows without throwing exception
+        Predicate filter = new PredicateBuilder(table.schema().logicalRowType()).equal(1, 20);
+        TableScan.Plan plan = table.newScan().withFilter(filter).withLimit(10).plan();
+
+        // Should read all 3 files that match the filter
+        assertThat(plan.splits().size()).isEqualTo(3);
+
+        // Verify we can read all matching data correctly
+        List<String> result = getResult(table.newRead(), plan.splits());
+        assertThat(result.size()).isEqualTo(3);
+        assertThat(result).containsExactlyInAnyOrder("+I 7|20|700", "+I 8|20|800", "+I 9|20|900");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testLimitPushdownEarlyStop() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write 100 files, each with 1 row
+        for (int i = 0; i < 100; i++) {
+            write.write(rowData(i, i, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        // Without limit, should read all 100 files
+        TableScan.Plan planWithoutLimit = table.newScan().plan();
+        assertThat(planWithoutLimit.splits().size()).isEqualTo(100);
+
+        // With limit 10, should only read 10 files (early stop optimization)
+        TableScan.Plan planWithLimit = table.newScan().withLimit(10).plan();
+        assertThat(planWithLimit.splits().size()).isEqualTo(10);
+
+        // Verify the returned data is correct
+        List<String> result = getResult(table.newRead(), planWithLimit.splits());
+        assertThat(result.size()).isEqualTo(10);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testLimitPushdownBoundaryCases() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write 5 rows
+        for (int i = 0; i < 5; i++) {
+            write.write(rowData(i, i, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        // Test limit = 1
+        TableScan.Plan plan1 = table.newScan().withLimit(1).plan();
+        assertThat(plan1.splits().size()).isEqualTo(1);
+
+        // Test limit = 5 (exactly the number of rows)
+        TableScan.Plan plan5 = table.newScan().withLimit(5).plan();
+        assertThat(plan5.splits().size()).isEqualTo(5);
+
+        // Test limit = 10 (more than the number of rows, should return all 5)
+        TableScan.Plan plan10 = table.newScan().withLimit(10).plan();
+        assertThat(plan10.splits().size()).isEqualTo(5);
 
         write.close();
         commit.close();
