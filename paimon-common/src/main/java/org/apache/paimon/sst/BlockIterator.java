@@ -21,33 +21,25 @@ package org.apache.paimon.sst;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 
-import java.util.Comparator;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.NoSuchElementException;
 
-import static java.util.Objects.requireNonNull;
-
 /** An {@link Iterator} for a block. */
-public abstract class BlockIterator implements Iterator<Map.Entry<MemorySlice, MemorySlice>> {
+public class BlockIterator implements Iterator<Map.Entry<MemorySlice, MemorySlice>> {
 
-    protected final MemorySliceInput data;
-
-    private final int recordCount;
-    private final Comparator<MemorySlice> comparator;
-
+    private final BlockReader reader;
+    private final MemorySliceInput input;
     private BlockEntry polled;
 
-    public BlockIterator(
-            MemorySliceInput data, int recordCount, Comparator<MemorySlice> comparator) {
-        this.data = data;
-        this.recordCount = recordCount;
-        this.comparator = comparator;
+    public BlockIterator(BlockReader reader) {
+        this.reader = reader;
+        this.input = reader.blockInput();
     }
 
     @Override
     public boolean hasNext() {
-        return polled != null || data.isReadable();
+        return polled != null || input.isReadable();
     }
 
     @Override
@@ -72,14 +64,14 @@ public abstract class BlockIterator implements Iterator<Map.Entry<MemorySlice, M
 
     public boolean seekTo(MemorySlice targetKey) {
         int left = 0;
-        int right = recordCount - 1;
+        int right = reader.recordCount() - 1;
 
         while (left <= right) {
             int mid = left + (right - left) / 2;
 
-            seekTo(mid);
+            input.setPosition(reader.seekTo(mid));
             BlockEntry midEntry = readEntry();
-            int compare = comparator.compare(midEntry.getKey(), targetKey);
+            int compare = reader.comparator().compare(midEntry.getKey(), targetKey);
 
             if (compare == 0) {
                 polled = midEntry;
@@ -96,18 +88,13 @@ public abstract class BlockIterator implements Iterator<Map.Entry<MemorySlice, M
         return false;
     }
 
-    /** Seek to the specified record position of current block. */
-    public abstract void seekTo(int recordPosition);
-
     private BlockEntry readEntry() {
-        requireNonNull(data, "data is null");
-
         int keyLength;
-        keyLength = data.readVarLenInt();
-        MemorySlice key = data.readSlice(keyLength);
+        keyLength = input.readVarLenInt();
+        MemorySlice key = input.readSlice(keyLength);
 
-        int valueLength = data.readVarLenInt();
-        MemorySlice value = data.readSlice(valueLength);
+        int valueLength = input.readVarLenInt();
+        MemorySlice value = input.readSlice(valueLength);
 
         return new BlockEntry(key, value);
     }
