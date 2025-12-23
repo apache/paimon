@@ -41,6 +41,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
@@ -109,12 +110,16 @@ public class SstFileTest {
 
             // 1. lookup random existing keys
             for (int i = 0; i < 100; i++) {
-                int key = random.nextInt(5000);
+                int key = random.nextInt(5000 * 2 - 1);
                 keyOut.reset();
                 keyOut.writeInt(key);
                 byte[] queried = reader.lookup(keyOut.toSlice().getHeapMemory());
-                Assertions.assertNotNull(queried);
-                Assertions.assertEquals(key, MemorySlice.wrap(queried).readInt(0));
+                if (key % 2 == 0) {
+                    Assertions.assertNotNull(queried);
+                    Assertions.assertEquals(key, MemorySlice.wrap(queried).readInt(0));
+                } else {
+                    Assertions.assertNull(queried);
+                }
             }
 
             // 2. lookup boundaries
@@ -125,16 +130,16 @@ public class SstFileTest {
             Assertions.assertEquals(0, MemorySlice.wrap(queried).readInt(0));
 
             keyOut.reset();
-            keyOut.writeInt(511);
+            keyOut.writeInt(511 * 2);
             byte[] queried1 = reader.lookup(keyOut.toSlice().getHeapMemory());
             Assertions.assertNotNull(queried1);
-            Assertions.assertEquals(511, MemorySlice.wrap(queried1).readInt(0));
+            Assertions.assertEquals(511 * 2, MemorySlice.wrap(queried1).readInt(0));
 
             keyOut.reset();
-            keyOut.writeInt(4999);
+            keyOut.writeInt(4999 * 2);
             byte[] queried2 = reader.lookup(keyOut.toSlice().getHeapMemory());
             Assertions.assertNotNull(queried2);
-            Assertions.assertEquals(4999, MemorySlice.wrap(queried2).readInt(0));
+            Assertions.assertEquals(4999 * 2, MemorySlice.wrap(queried2).readInt(0));
 
             // 2. lookup key smaller than first key
             for (int i = 0; i < 100; i++) {
@@ -146,10 +151,89 @@ public class SstFileTest {
             // 3. lookup key greater than last key
             for (int i = 0; i < 100; i++) {
                 keyOut.reset();
-                keyOut.writeInt(10000 + i);
+                keyOut.writeInt(10001 + i);
                 Assertions.assertNull(reader.lookup(keyOut.toSlice().getHeapMemory()));
             }
         }
+    }
+
+    @TestTemplate
+    public void testScan() throws Exception {
+        int recordNum = 20000;
+        writeData(recordNum, bloomFilterEnabled);
+
+        long fileSize = fileIO.getFileSize(file);
+        try (SeekableInputStream inputStream = fileIO.newInputStream(file);
+                SstFileReader reader =
+                        new SstFileReader(
+                                Comparator.comparingInt(slice -> slice.readInt(0)),
+                                fileSize,
+                                file,
+                                inputStream,
+                                CACHE_MANAGER); ) {
+            SstFileReader.SstFileIterator fileIterator = reader.createIterator();
+
+            MemorySliceOutput keyOut = new MemorySliceOutput(4);
+
+            // 1. test full scan
+            assertScan(0, recordNum - 1, fileIterator);
+
+            // 2. test random seek and scan
+            Random random = new Random();
+            for (int i = 0; i < 1000; i++) {
+                resetIterator(fileIterator, keyOut);
+                int key = random.nextInt(recordNum * 2 - 1);
+                int targetPosition = (key + 1) / 2;
+
+                keyOut.reset();
+                keyOut.writeInt(key);
+                fileIterator.seekTo(keyOut.toSlice().getHeapMemory());
+
+                // lookup should not affect reader position
+                interleaveLookup(reader, keyOut);
+
+                assertScan(targetPosition, recordNum - 1, fileIterator);
+            }
+
+            // 3. test boundaries
+            resetIterator(fileIterator, keyOut);
+            keyOut.reset();
+            keyOut.writeInt(0);
+            fileIterator.seekTo(keyOut.toSlice().getHeapMemory());
+            assertScan(0, recordNum - 1, fileIterator);
+
+            resetIterator(fileIterator, keyOut);
+            keyOut.reset();
+            keyOut.writeInt(recordNum * 2 - 2);
+            fileIterator.seekTo(keyOut.toSlice().getHeapMemory());
+            assertScan(recordNum - 1, recordNum - 1, fileIterator);
+
+            // 4. test out of boundaries
+            resetIterator(fileIterator, keyOut);
+            keyOut.reset();
+            keyOut.writeInt(-10);
+            fileIterator.seekTo(keyOut.toSlice().getHeapMemory());
+            assertScan(0, recordNum - 1, fileIterator);
+
+            resetIterator(fileIterator, keyOut);
+            keyOut.reset();
+            keyOut.writeInt(recordNum * 2 + 10);
+            fileIterator.seekTo(keyOut.toSlice().getHeapMemory());
+            Assertions.assertNull(fileIterator.readBatch());
+        }
+    }
+
+    private void resetIterator(SstFileReader.SstFileIterator iterator, MemorySliceOutput keyOut)
+            throws IOException {
+        keyOut.reset();
+        keyOut.writeInt(-1);
+        iterator.seekTo(keyOut.toSlice().getHeapMemory());
+    }
+
+    private void interleaveLookup(SstFileReader reader, MemorySliceOutput keyOut) throws Exception {
+        keyOut.reset();
+        keyOut.writeInt(0);
+        reader.lookup(keyOut.toSlice().getHeapMemory());
     }
 
     private void writeData(int recordCount, boolean withBloomFilter) throws Exception {
@@ -168,11 +252,27 @@ public class SstFileTest {
             for (int i = 0; i < recordCount; i++) {
                 keyOut.reset();
                 valueOut.reset();
-                keyOut.writeInt(i);
-                valueOut.writeInt(i);
+                keyOut.writeInt(i * 2);
+                valueOut.writeInt(i * 2);
                 writer.put(keyOut.toSlice().getHeapMemory(), valueOut.toSlice().getHeapMemory());
             }
             LOG.info("Write {} data cost {} ms", recordCount, System.currentTimeMillis() - start);
         }
+    }
+
+    private static void assertScan(
+            int startPosition, int lastPosition, SstFileReader.SstFileIterator iterator)
+            throws Exception {
+        int count = startPosition;
+        BlockIterator iter;
+        while ((iter = iterator.readBatch()) != null) {
+            while (iter.hasNext()) {
+                BlockEntry entry = iter.next();
+                Assertions.assertEquals(count * 2, entry.getKey().readInt(0));
+                Assertions.assertEquals(count * 2, entry.getValue().readInt(0));
+                count++;
+            }
+        }
+        Assertions.assertEquals(lastPosition, count - 1);
     }
 }
