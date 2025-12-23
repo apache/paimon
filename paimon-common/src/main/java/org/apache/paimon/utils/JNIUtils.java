@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.arrow;
+package org.apache.paimon.utils;
 
 import java.io.File;
 import java.io.FileOutputStream;
