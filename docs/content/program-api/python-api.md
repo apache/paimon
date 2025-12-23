@@ -320,40 +320,23 @@ actual_data = table_read.to_arrow(table_scan.plan().splits())
 
 ### Update columns
 
-Handle file `first_row_id` manually is inconvenient and error-prone, you can use `update_columns` to write partial columns without handling file `first_row_id`. 
-The input data should include the `_ROW_ID` column, `update_columns` will automatically sorts and matches each `_ROW_ID` to
+Handle file `first_row_id` manually is inconvenient and error-prone. If you don't want to do this, you can enable `update_columns_by_row_id` 
+when create `WriteBuilder` and set write type for `TableWrite`, then you can write partial columns without handling file `first_row_id`.
+The input data should include the `_ROW_ID` column, writing operation will automatically sort and match each `_ROW_ID` to
 its corresponding `first_row_id`, then groups rows with the same `first_row_id` and writes them to a separate file.
 
 ```python
 table = catalog.get_table('default.test_row_tracking')
 
-# write 1
-write_builder = table.new_batch_write_builder()
-table_write = write_builder.new_write()
-table_commit = write_builder.new_commit()
-expect_data = pa.Table.from_pydict({
-  'f0': [-1, 2],
-  'f1': [-1001, 1002]
-}, schema=simple_pa_schema)
-table_write.write_arrow(expect_data)
-table_commit.commit(table_write.prepare_commit())
-table_write.close()
-table_commit.close()
+# write-1
+# same as above
 
-# write 2
-table_write = write_builder.new_write()
-table_commit = write_builder.new_commit()
-expect_data = pa.Table.from_pydict({
-  'f0': [3, 4],
-  'f1': [1003, 1004]
-}, schema=simple_pa_schema)
-table_write.write_arrow(expect_data)
-table_commit.commit(table_write.prepare_commit())
-table_write.close()
-table_commit.close()
+# write-2
+# same as above
 
 # update partial columns
-table_write = write_builder.new_write()
+write_builder = table.new_batch_write_builder().update_columns_by_row_id()
+table_write = write_builder.new_write().with_write_type(['f0'])
 table_commit = write_builder.new_commit()
 data2 = pa.Table.from_pydict({
   '_ROW_ID': [0, 1, 2, 3],
@@ -362,7 +345,7 @@ data2 = pa.Table.from_pydict({
   ('_ROW_ID', pa.int64()),
   ('f0', pa.int8()),
 ]))
-table_write.update_columns(data2, ['f0'])
+table_write.write_arrow(data2)
 cmts = table_write.prepare_commit()
 table_commit.commit(cmts)
 table_write.close()

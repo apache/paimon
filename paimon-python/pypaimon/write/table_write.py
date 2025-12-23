@@ -81,27 +81,32 @@ class TableWrite:
 
 
 class BatchTableWrite(TableWrite):
-    def __init__(self, table, commit_user):
+    def __init__(self, table, commit_user, update_columns_by_row_id=False):
         super().__init__(table, commit_user)
         self.batch_committed = False
         self._partial_column_write: Optional[PartialColumnWrite] = None
-
-    def update_columns(self, data: pa.Table, column_names: List[str]) -> List[CommitMessage]:
-        """
-        Add or update columns in the table.
-
-        Args:
-            data: Input data containing row_id and columns to update
-            column_names: Names of columns to update (excluding row_id)
-
-        Returns:
-            List of commit messages
-        """
-
-        if self._partial_column_write is None:
+        if update_columns_by_row_id:
             self._partial_column_write = PartialColumnWrite(self.table, self.commit_user)
 
-        return self._partial_column_write.update_columns(data, column_names)
+    def write_arrow(self, table: pa.Table):
+        if self._partial_column_write is not None:
+            self._partial_column_write.update_columns(table, self.file_store_write.write_cols)
+        else:
+            super().write_arrow(table)
+
+    def write_arrow_batch(self, data: pa.RecordBatch):
+        if self._partial_column_write is not None:
+            table = pa.Table.from_batches([data])
+            self._partial_column_write.update_columns(table, self.file_store_write.write_cols)
+        else:
+            super().write_arrow_batch(data)
+
+    def write_pandas(self, dataframe):
+        if self._partial_column_write is not None:
+            table = pa.Table.from_pandas(dataframe)
+            self._partial_column_write.update_columns(table, self.file_store_write.write_cols)
+        else:
+            super().write_pandas(dataframe)
 
     def prepare_commit(self) -> List[CommitMessage]:
         if self.batch_committed:

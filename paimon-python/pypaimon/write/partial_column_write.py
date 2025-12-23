@@ -77,6 +77,11 @@ class PartialColumnWrite:
         Returns:
             List of commit messages
         """
+
+        # Validate column_names is not empty
+        if not column_names:
+            raise ValueError("column_names cannot be empty")
+
         # Validate input data has row_id column
         if SpecialFields.ROW_ID.name not in data.column_names:
             raise ValueError(f"Input data must contain {SpecialFields.ROW_ID.name} column")
