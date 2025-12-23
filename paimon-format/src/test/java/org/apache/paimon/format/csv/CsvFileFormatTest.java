@@ -534,6 +534,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                                     rowType,
                                     testFile);
                         })
+                .cause()
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -581,25 +582,27 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         CsvParser parser = new CsvParser(rowType, projection, new CsvOptions(new Options()));
 
         // Test normal cases
-        assertThat(parser.parseField("123", DataTypes.INT())).isEqualTo(123);
-        assertThat(parser.parseField("-0", DataTypes.INT())).isEqualTo(0);
-        assertThat(parser.parseField("0", DataTypes.INT())).isEqualTo(0);
-        assertThat(parser.parseField("123", DataTypes.BIGINT())).isEqualTo(123L);
-        assertThat(parser.parseField("-0", DataTypes.BIGINT())).isEqualTo(0L);
-        assertThat(parser.parseField("0", DataTypes.BIGINT())).isEqualTo(0L);
-        assertThat(parser.parseField("123", DataTypes.TINYINT())).isEqualTo((byte) 123);
-        assertThat(parser.parseField("12345", DataTypes.SMALLINT())).isEqualTo((short) 12345);
+        assertThat(parser.parseField("123", DataTypes.INT()).getValue()).isEqualTo(123);
+        assertThat(parser.parseField("-0", DataTypes.INT()).getValue()).isEqualTo(0);
+        assertThat(parser.parseField("0", DataTypes.INT()).getValue()).isEqualTo(0);
+        assertThat(parser.parseField("123", DataTypes.BIGINT()).getValue()).isEqualTo(123L);
+        assertThat(parser.parseField("-0", DataTypes.BIGINT()).getValue()).isEqualTo(0L);
+        assertThat(parser.parseField("0", DataTypes.BIGINT()).getValue()).isEqualTo(0L);
+        assertThat(parser.parseField("123", DataTypes.TINYINT()).getValue()).isEqualTo((byte) 123);
+        assertThat(parser.parseField("12345", DataTypes.SMALLINT()).getValue())
+                .isEqualTo((short) 12345);
 
         // Test invalid format
-        assertThat(parser.parseField("abc", DataTypes.INT())).isNull();
-        assertThat(parser.parseField("12.3", DataTypes.INT())).isNull();
+        assertThat(parser.parseField("abc", DataTypes.INT()).getValue()).isNull();
+        assertThat(parser.parseField("12.3", DataTypes.INT()).getValue()).isNull();
 
         // Test overflow
-        assertThat(parser.parseField("2147483648", DataTypes.INT())).isNull();
-        assertThat(parser.parseField("-2147483649", DataTypes.INT())).isNull();
-        assertThat(parser.parseField("9223372036854775808", DataTypes.BIGINT())).isNull();
-        assertThat(parser.parseField("128", DataTypes.TINYINT())).isNull();
-        assertThat(parser.parseField("32768", DataTypes.SMALLINT())).isNull();
+        assertThat(parser.parseField("2147483648", DataTypes.INT()).getValue()).isNull();
+        assertThat(parser.parseField("-2147483649", DataTypes.INT()).getValue()).isNull();
+        assertThat(parser.parseField("9223372036854775808", DataTypes.BIGINT()).getValue())
+                .isNull();
+        assertThat(parser.parseField("128", DataTypes.TINYINT()).getValue()).isNull();
+        assertThat(parser.parseField("32768", DataTypes.SMALLINT()).getValue()).isNull();
     }
 
     private List<InternalRow> read(

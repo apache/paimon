@@ -28,6 +28,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
@@ -36,6 +37,8 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static org.apache.paimon.format.csv.CsvOptions.Mode.DROPMALFORMED;
+import static org.apache.paimon.format.csv.CsvOptions.Mode.PERMISSIVE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
@@ -45,8 +48,6 @@ public class CsvParser {
     private static final Base64.Decoder BASE64_DECODER = Base64.getDecoder();
     private static final Map<String, CastExecutor<?, ?>> CAST_EXECUTOR_CACHE =
             new ConcurrentHashMap<>();
-
-    private static final Object PARSE_ERROR = new Object();
     private static final int NUMBER_PARSE_RADIX = 10;
 
     private final RowType dataSchemaRowType;
@@ -161,24 +162,28 @@ public class CsvParser {
         for (int i = 0; i < projectMapping.length; i++) {
             int ordinal = projectMapping[i];
             DataType type = dataSchemaRowType.getTypeAt(ordinal);
-            Object field = null;
+            Pair<Boolean, Object> parseResult = null;
+            Exception exception = null;
+            String parseValue = rowValues[ordinal];
             try {
-                field = parseField(rowValues[ordinal], type);
+                parseResult = parseField(parseValue, type);
             } catch (Exception e) {
-                switch (mode) {
-                    case PERMISSIVE:
-                        break;
-                    case DROPMALFORMED:
-                        return null;
-                    case FAILFAST:
-                        throw e;
-                }
+                exception = e;
             }
-
-            if (field == PARSE_ERROR) {
+            if (parseResult != null && parseResult.getLeft()) {
+                row.setField(i, parseResult.getValue());
+            } else if (mode == PERMISSIVE
+                    && (parseResult == null || !parseResult.getLeft() || exception != null)) {
+                break;
+            } else if (mode == DROPMALFORMED
+                    && (parseResult == null || !parseResult.getLeft() || exception != null)) {
                 return null;
+            } else if (exception != null) {
+                throw new RuntimeException(exception);
+            } else if (parseResult == null
+                    || !parseResult.getLeft() && parseResult.getValue() == null) {
+                throw new NumberFormatException("For input string: \"" + parseValue + "\"");
             }
-            row.setField(i, field);
         }
         return row;
     }
@@ -197,51 +202,45 @@ public class CsvParser {
     }
 
     @VisibleForTesting
-    public Object parseField(String field, DataType dataType) {
+    public Pair<Boolean, Object> parseField(String field, DataType dataType) {
         if (field == null || field.equals(nullLiteral)) {
-            return null;
+            return Pair.of(true, null);
         }
 
         DataTypeRoot typeRoot = dataType.getTypeRoot();
         switch (typeRoot) {
             case TINYINT:
-                Integer intVal = tryParseInt(field);
+                Integer intVal = parseInt(field);
                 if (intVal == null || intVal > Byte.MAX_VALUE || intVal < Byte.MIN_VALUE) {
-                    return handleParseError(field);
+                    return Pair.of(false, null);
                 }
-                return intVal.byteValue();
+                return Pair.of(true, intVal.byteValue());
             case SMALLINT:
-                intVal = tryParseInt(field);
+                intVal = parseInt(field);
                 if (intVal == null || intVal > Short.MAX_VALUE || intVal < Short.MIN_VALUE) {
-                    return handleParseError(field);
+                    return Pair.of(false, null);
                 }
-                return intVal.shortValue();
+                return Pair.of(true, intVal.shortValue());
             case INTEGER:
-                intVal = tryParseInt(field);
-                if (intVal == null) {
-                    return handleParseError(field);
-                }
-                return intVal;
+                intVal = parseInt(field);
+                return Pair.of(intVal != null, intVal);
             case BIGINT:
-                Long longVal = tryParseLong(field);
-                if (longVal == null) {
-                    return handleParseError(field);
-                }
-                return longVal;
+                Long longVal = parseLong(field);
+                return Pair.of(longVal != null, longVal);
             case FLOAT:
-                return Float.parseFloat(field);
+                return Pair.of(true, Float.parseFloat(field));
             case DOUBLE:
-                return Double.parseDouble(field);
+                return Pair.of(true, Double.parseDouble(field));
             case BOOLEAN:
-                return Boolean.parseBoolean(field);
+                return Pair.of(true, Boolean.parseBoolean(field));
             case CHAR:
             case VARCHAR:
-                return BinaryString.fromString(field);
+                return Pair.of(true, BinaryString.fromString(field));
             case BINARY:
             case VARBINARY:
-                return BASE64_DECODER.decode(field);
+                return Pair.of(true, BASE64_DECODER.decode(field));
             default:
-                return parseByCastExecutor(field, dataType);
+                return Pair.of(true, parseByCastExecutor(field, dataType));
         }
     }
 
@@ -259,20 +258,7 @@ public class CsvParser {
         return BinaryString.fromString(field);
     }
 
-    private Object handleParseError(String field) {
-        switch (mode) {
-            case PERMISSIVE:
-                return null;
-            case DROPMALFORMED:
-                return PARSE_ERROR;
-            case FAILFAST:
-                throw new NumberFormatException("For input string: \"" + field + "\"");
-            default:
-                throw new RuntimeException("Unknown mode: " + mode);
-        }
-    }
-
-    private static Integer tryParseInt(String s) {
+    private static Integer parseInt(String s) {
         if (s == null || s.isEmpty()) {
             return null;
         }
@@ -318,7 +304,7 @@ public class CsvParser {
         return negative ? result : -result;
     }
 
-    private static Long tryParseLong(String s) {
+    private static Long parseLong(String s) {
         if (s == null || s.isEmpty()) {
             return null;
         }
