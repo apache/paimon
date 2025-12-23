@@ -85,6 +85,12 @@ public class IncrementalClusterManager {
             FileStoreTable table, @Nullable PartitionPredicate specifiedPartitions) {
         checkArgument(
                 table.primaryKeys().isEmpty(), "only append table support incremental clustering.");
+        if (table.bucketMode() == BucketMode.HASH_FIXED) {
+            checkArgument(
+                    !table.coreOptions().bucketAppendOrdered(),
+                    "%s must be false for incremental clustering table.",
+                    CoreOptions.BUCKET_APPEND_ORDERED.key());
+        }
         this.table = table;
         CoreOptions options = table.coreOptions();
         checkArgument(

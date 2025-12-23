@@ -62,8 +62,13 @@ public class IncrementalClusterManagerTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.BUCKET_KEY.key(), "f0");
-        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        assertThatThrownBy(() -> createTable(options, Collections.emptyList()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "bucket-append-ordered must be false for incremental clustering table.");
 
+        options.put(CoreOptions.BUCKET_APPEND_ORDERED.key(), "false");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         assertThatThrownBy(() -> createTable(options, Collections.emptyList()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(

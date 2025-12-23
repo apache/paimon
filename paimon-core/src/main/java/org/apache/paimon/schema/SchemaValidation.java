@@ -675,6 +675,10 @@ public class SchemaValidation {
                     PRIMARY_KEY.key());
             if (options.bucket() != -1) {
                 checkArgument(
+                        !options.bucketAppendOrdered(),
+                        "%s must be false for incremental clustering table.",
+                        CoreOptions.BUCKET_APPEND_ORDERED.key());
+                checkArgument(
                         !options.deletionVectorsEnabled(),
                         "Cannot enable deletion-vectors for incremental clustering table which bucket is not -1.");
             }
