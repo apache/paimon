@@ -41,8 +41,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * An SST File Reader which serves point queries and range queries. Users can call {@code
- * createIterator} to create a file iterator and then use seek and read methods to complete range
- * queries.
+ * createIterator} to create a file iterator and then use seek and read methods to do range queries.
  *
  * <p>Note that this class is NOT thread-safe.
  */
@@ -112,8 +111,8 @@ public class SstFileReader implements Closeable {
         return null;
     }
 
-    public SstFileIterator createIterator() throws IOException {
-        return new SstFileIterator(indexBlockIterator.detach());
+    public SstFileIterator createIterator() {
+        return new SstFileIterator(indexBlock.iterator());
     }
 
     private BlockIterator getNextBlock(BlockIterator indexBlockIterator) {
@@ -201,7 +200,7 @@ public class SstFileReader implements Closeable {
          * Seek to the position of the record whose key is exactly equal to or greater than the
          * specified key.
          */
-        public void seekTo(byte[] key) throws IOException {
+        public void seekTo(byte[] key) {
             MemorySlice keySlice = MemorySlice.wrap(key);
 
             indexIterator.seekTo(keySlice);
