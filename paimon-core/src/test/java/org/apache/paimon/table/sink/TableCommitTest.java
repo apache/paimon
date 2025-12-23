@@ -869,4 +869,58 @@ public class TableCommitTest {
                     .isEqualTo(Snapshot.CommitKind.APPEND);
         }
     }
+
+    @Test
+    public void testCompactConflictWithUpgrade() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        String user1 = UUID.randomUUID().toString();
+        FileStoreTable overwriteUpgrade =
+                table.copy(Collections.singletonMap("write-only", "true"));
+        TableWriteImpl<?> write1 = overwriteUpgrade.newWrite(user1);
+        TableCommitImpl commit1 =
+                overwriteUpgrade.newCommit(user1).withOverwrite(Collections.emptyMap());
+
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable compactTable =
+                table.copy(Collections.singletonMap("compaction.force-up-level-0", "true"));
+        TableWriteImpl<?> write2 = compactTable.newWrite(user2);
+        TableCommitImpl commit2 = compactTable.newCommit(user2);
+
+        write1.write(GenericRow.of(1, 1));
+        write1.write(GenericRow.of(3, 3));
+
+        write2.write(GenericRow.of(2, 2));
+        write2.write(GenericRow.of(4, 4));
+
+        commit1.commit(1, write1.prepareCommit(false, 1));
+        assertThatThrownBy(() -> commit2.commit(1, write2.prepareCommit(true, 1)))
+                .hasMessageContaining("LSM conflicts detected! Give up committing.");
+
+        write1.close();
+        commit1.close();
+        write2.close();
+        commit2.close();
+    }
 }
