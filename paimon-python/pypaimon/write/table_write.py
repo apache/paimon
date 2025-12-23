@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 from collections import defaultdict
-from typing import List, Optional
+from typing import List
 
 import pyarrow as pa
 
@@ -24,7 +24,6 @@ from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
-from pypaimon.write.partial_column_write import PartialColumnWrite
 
 
 class TableWrite:
@@ -81,39 +80,15 @@ class TableWrite:
 
 
 class BatchTableWrite(TableWrite):
-    def __init__(self, table, commit_user, update_columns_by_row_id=False):
+    def __init__(self, table, commit_user):
         super().__init__(table, commit_user)
         self.batch_committed = False
-        self._partial_column_write: Optional[PartialColumnWrite] = None
-        if update_columns_by_row_id:
-            self._partial_column_write = PartialColumnWrite(self.table, self.commit_user)
-
-    def write_arrow(self, table: pa.Table):
-        if self._partial_column_write is not None:
-            return self._partial_column_write.update_columns(table, self.file_store_write.write_cols)
-        super().write_arrow(table)
-
-    def write_arrow_batch(self, data: pa.RecordBatch):
-        if self._partial_column_write is not None:
-            table = pa.Table.from_batches([data])
-            return self._partial_column_write.update_columns(table, self.file_store_write.write_cols)
-        super().write_arrow_batch(data)
-
-    def write_pandas(self, dataframe):
-        if self._partial_column_write is not None:
-            table = pa.Table.from_pandas(dataframe)
-            return self._partial_column_write.update_columns(table, self.file_store_write.write_cols)
-        super().write_pandas(dataframe)
 
     def prepare_commit(self) -> List[CommitMessage]:
         if self.batch_committed:
             raise RuntimeError("BatchTableWrite only supports one-time committing.")
         self.batch_committed = True
-
-        if self._partial_column_write is not None:
-            return self._partial_column_write.commit_messages
-        else:
-            return self.file_store_write.prepare_commit(BATCH_COMMIT_IDENTIFIER)
+        return self.file_store_write.prepare_commit(BATCH_COMMIT_IDENTIFIER)
 
 
 class StreamTableWrite(TableWrite):

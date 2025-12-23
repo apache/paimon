@@ -25,7 +25,7 @@ import pyarrow as pa
 from pypaimon import CatalogFactory, Schema
 
 
-class PartialColumnsWriteTest(unittest.TestCase):
+class TableUpdateTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tempdir = tempfile.mkdtemp()
@@ -101,7 +101,7 @@ class PartialColumnsWriteTest(unittest.TestCase):
         # Create table with initial data
         table = self._create_table()
 
-        # Create data evolution writer using BatchTableWrite
+        # Create data evolution table update
         write_builder = table.new_batch_write_builder()
         batch_write = write_builder.new_write()
 
@@ -112,10 +112,9 @@ class PartialColumnsWriteTest(unittest.TestCase):
         })
 
         # Update the age column
-        write_builder = table.new_batch_write_builder().update_columns_by_row_id()
-        batch_write = write_builder.new_write().with_write_type(['age'])
-        batch_write.write_arrow(update_data)
-        commit_messages = batch_write.prepare_commit()
+        write_builder = table.new_batch_write_builder()
+        table_update = write_builder.new_update().with_update_type(['age'])
+        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
 
         # Commit the changes
         table_commit = write_builder.new_commit()
@@ -139,7 +138,7 @@ class PartialColumnsWriteTest(unittest.TestCase):
         # Create table with initial data
         table = self._create_table()
 
-        # Create data evolution writer using BatchTableWrite
+        # Create data evolution table update
         write_builder = table.new_batch_write_builder()
         batch_write = write_builder.new_write()
 
@@ -151,10 +150,9 @@ class PartialColumnsWriteTest(unittest.TestCase):
         })
 
         # Update multiple columns
-        write_builder = table.new_batch_write_builder().update_columns_by_row_id()
-        batch_write = write_builder.new_write().with_write_type(['age', 'city'])
-        batch_write.write_arrow(update_data)
-        commit_messages = batch_write.prepare_commit()
+        write_builder = table.new_batch_write_builder()
+        table_update = write_builder.new_update().with_update_type(['age', 'city'])
+        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
 
         # Commit the changes
         table_commit = write_builder.new_commit()
@@ -182,10 +180,6 @@ class PartialColumnsWriteTest(unittest.TestCase):
         """Test that updating a non-existent column raises an error."""
         table = self._create_table()
 
-        # Create data evolution writer using BatchTableWrite
-        write_builder = table.new_batch_write_builder()
-        batch_write = write_builder.new_write()
-
         # Try to update a non-existent column
         update_data = pa.Table.from_pydict({
             '_ROW_ID': [0, 1, 2, 3, 4],
@@ -194,18 +188,17 @@ class PartialColumnsWriteTest(unittest.TestCase):
 
         # Should raise ValueError
         with self.assertRaises(ValueError) as context:
-            write_builder = table.new_batch_write_builder().update_columns_by_row_id()
-            batch_write = write_builder.new_write().with_write_type(['nonexistent_column'])
-            batch_write.write_arrow(update_data)
+            write_builder = table.new_batch_write_builder()
+            table_update = write_builder.new_update().with_update_type(['nonexistent_column'])
+            table_update.update_by_arrow_with_row_id(update_data)
 
         self.assertIn('not in table schema', str(context.exception))
-        batch_write.close()
 
     def test_missing_row_id_column(self):
         """Test that missing row_id column raises an error."""
         table = self._create_table()
 
-        # Create data evolution writer using BatchTableWrite
+        # Create data evolution table update
         write_builder = table.new_batch_write_builder()
         batch_write = write_builder.new_write()
 
@@ -216,9 +209,9 @@ class PartialColumnsWriteTest(unittest.TestCase):
 
         # Should raise ValueError
         with self.assertRaises(ValueError) as context:
-            write_builder = table.new_batch_write_builder().update_columns_by_row_id()
-            batch_write = write_builder.new_write().with_write_type(['age'])
-            batch_write.write_arrow(update_data)
+            write_builder = table.new_batch_write_builder()
+            table_update = write_builder.new_update().with_update_type(['age'])
+            table_update.update_by_arrow_with_row_id(update_data)
 
         self.assertIn("Input data must contain _ROW_ID column", str(context.exception))
         batch_write.close()
@@ -247,9 +240,9 @@ class PartialColumnsWriteTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
-        # Create data evolution writer using BatchTableWrite
-        write_builder = table.new_batch_write_builder().update_columns_by_row_id()
-        batch_write = write_builder.new_write().with_write_type(['age'])
+        # Create data evolution table update
+        write_builder = table.new_batch_write_builder()
+        table_update = write_builder.new_update().with_update_type(['age'])
 
         # Update ages
         update_data = pa.Table.from_pydict({
@@ -257,14 +250,12 @@ class PartialColumnsWriteTest(unittest.TestCase):
             'age': [31, 26, 36, 41, 46]
         })
 
-        batch_write.write_arrow(update_data)
-        commit_messages = batch_write.prepare_commit()
+        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
 
         # Commit the changes
         table_commit = write_builder.new_commit()
         table_commit.commit(commit_messages)
         table_commit.close()
-        batch_write.close()
 
         # Verify the updated data
         read_builder = table.new_read_builder()
@@ -283,16 +274,15 @@ class PartialColumnsWriteTest(unittest.TestCase):
         table = self._create_table()
 
         # First update: Update age column
-        write_builder = table.new_batch_write_builder().update_columns_by_row_id()
-        batch_write = write_builder.new_write().with_write_type(['age'])
+        write_builder = table.new_batch_write_builder()
+        table_update = write_builder.new_update().with_update_type(['age'])
 
         update_age_data = pa.Table.from_pydict({
             '_ROW_ID': [1, 0, 2, 3, 4],
             'age': [31, 26, 36, 41, 46]
         })
 
-        batch_write.write_arrow(update_age_data)
-        commit_messages = batch_write.prepare_commit()
+        commit_messages = table_update.update_by_arrow_with_row_id(update_age_data)
         table_commit = write_builder.new_commit()
         table_commit.commit(commit_messages)
         table_commit.close()
@@ -302,16 +292,11 @@ class PartialColumnsWriteTest(unittest.TestCase):
             '_ROW_ID': [1, 0, 2, 3, 4],
             'city': ['Los Angeles', 'New York', 'Chicago', 'Phoenix', 'Houston']
         })
-        write_builder = table.new_batch_write_builder().update_columns_by_row_id()
-        batch_write = write_builder.new_write().with_write_type(['city'])
-        batch_write.write_arrow(update_city_data)
-        commit_messages = batch_write.prepare_commit()
+        table_update.with_update_type(['city'])
+        commit_messages = table_update.update_by_arrow_with_row_id(update_city_data)
         table_commit = write_builder.new_commit()
         table_commit.commit(commit_messages)
         table_commit.close()
-
-        # Close the batch write
-        batch_write.close()
 
         # Verify both columns were updated correctly
         read_builder = table.new_read_builder()
@@ -333,9 +318,9 @@ class PartialColumnsWriteTest(unittest.TestCase):
         # Create table with initial data
         table = self._create_table()
 
-        # Create data evolution writer using BatchTableWrite
-        write_builder = table.new_batch_write_builder().update_columns_by_row_id()
-        batch_write = write_builder.new_write().with_write_type(['age'])
+        # Create data evolution table update
+        write_builder = table.new_batch_write_builder()
+        table_update = write_builder.new_update().with_update_type(['age'])
 
         # Prepare update data with wrong row count (only 3 rows instead of 5)
         update_data = pa.Table.from_pydict({
@@ -345,19 +330,18 @@ class PartialColumnsWriteTest(unittest.TestCase):
 
         # Should raise ValueError for total row count mismatch
         with self.assertRaises(ValueError) as context:
-            batch_write.write_arrow(update_data)
+            table_update.update_by_arrow_with_row_id(update_data)
 
         self.assertIn("does not match table total row count", str(context.exception))
-        batch_write.close()
 
     def test_wrong_first_row_id_row_count(self):
         """Test that wrong row count for a first_row_id raises an error."""
         # Create table with initial data
         table = self._create_table()
 
-        # Create data evolution writer using BatchTableWrite
-        write_builder = table.new_batch_write_builder().update_columns_by_row_id()
-        batch_write = write_builder.new_write().with_write_type(['age'])
+        # Create data evolution table update
+        write_builder = table.new_batch_write_builder()
+        table_update = write_builder.new_update().with_update_type(['age'])
 
         # Prepare update data with duplicate row_id (violates monotonically increasing)
         update_data = pa.Table.from_pydict({
@@ -367,10 +351,9 @@ class PartialColumnsWriteTest(unittest.TestCase):
 
         # Should raise ValueError for row ID validation
         with self.assertRaises(ValueError) as context:
-            batch_write.write_arrow(update_data)
+            table_update.update_by_arrow_with_row_id(update_data)
 
         self.assertIn("Row IDs are not monotonically increasing", str(context.exception))
-        batch_write.close()
 
 if __name__ == '__main__':
     unittest.main()

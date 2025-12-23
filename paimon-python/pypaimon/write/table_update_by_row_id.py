@@ -27,11 +27,11 @@ from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.file_store_write import FileStoreWrite
 
 
-class PartialColumnWrite:
+class TableUpdateByRowId:
     """
-    Table write for partial column updates (data evolution).
+    Table update for partial column updates (data evolution).
 
-    This writer is designed for adding/updating specific columns in existing tables.
+    This update is designed for adding/updating specific columns in existing tables.
     Input data should contain _ROW_ID column.
     """
 
