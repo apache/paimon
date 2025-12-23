@@ -18,6 +18,9 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.globalindex.GlobalIndexReader;
+import org.apache.paimon.globalindex.GlobalIndexResult;
+
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
@@ -89,7 +92,7 @@ public class VectorSearch implements Serializable {
         return this;
     }
 
-    public <T> T visit(FunctionVisitor<T> visitor) {
+    public GlobalIndexResult visit(GlobalIndexReader visitor) {
         return visitor.visitVectorSearch(this);
     }
 

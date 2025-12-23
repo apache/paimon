@@ -21,7 +21,6 @@ package org.apache.paimon.fileindex.empty;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.VectorSearch;
 
 import java.util.List;
 
@@ -80,11 +79,6 @@ public class EmptyFileIndexReader extends FileIndexReader {
 
     @Override
     public FileIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
-        return SKIP;
-    }
-
-    @Override
-    public FileIndexResult visitVectorSearch(VectorSearch vectorSearch) {
         return SKIP;
     }
 }

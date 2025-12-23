@@ -74,8 +74,6 @@ public interface FunctionVisitor<T> extends PredicateVisitor<T> {
 
     T visitNotIn(FieldRef fieldRef, List<Object> literals);
 
-    T visitVectorSearch(VectorSearch vectorSearch);
-
     // ----------------- Compound functions ------------------------
 
     T visitAnd(List<T> children);
