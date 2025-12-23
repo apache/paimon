@@ -20,7 +20,7 @@ from typing import Dict, List, Optional
 
 import pyarrow as pa
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.json_util import json_field
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
@@ -67,8 +67,8 @@ class Schema:
                 options = {}
 
             required_options = {
-                CoreOptions.ROW_TRACKING_ENABLED: 'true',
-                CoreOptions.DATA_EVOLUTION_ENABLED: 'true'
+                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
             }
 
             missing_options = []

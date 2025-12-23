@@ -23,8 +23,8 @@ import org.apache.paimon.disk.IOManager
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.format.FormatDataSplit
-import org.apache.paimon.table.source.{DataSplit, ReadBuilder, Split}
+import org.apache.paimon.spark.util.SplitUtils
+import org.apache.paimon.table.source.{ReadBuilder, Split}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -114,13 +114,7 @@ case class PaimonPartitionReader(
   // Partition metrics need to be computed only once.
   private lazy val partitionMetrics: Array[CustomTaskMetric] = {
     val numSplits = partition.splits.length
-    val splitSize = partition.splits.map {
-      case ds: DataSplit => ds.dataFiles().asScala.map(_.fileSize).sum
-      case fs: FormatDataSplit =>
-        if (fs.length() == null) fs.fileSize() else fs.length().longValue()
-      case _ => 0
-    }.sum
-
+    val splitSize = partition.splits.map(SplitUtils.splitSize).sum
     Array(
       PaimonNumSplitsTaskMetric(numSplits),
       PaimonPartitionSizeTaskMetric(splitSize)

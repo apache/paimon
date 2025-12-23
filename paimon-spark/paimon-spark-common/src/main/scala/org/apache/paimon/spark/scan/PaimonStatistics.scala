@@ -16,11 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.scan
 
+import org.apache.paimon.spark.DataConverter
+import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.stats
 import org.apache.paimon.stats.ColStats
-import org.apache.paimon.types.{DataField, DataType}
+import org.apache.paimon.table.source.Split
+import org.apache.paimon.types.{DataField, DataType, RowType}
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
@@ -32,48 +35,65 @@ import java.util.{Optional, OptionalLong}
 
 import scala.collection.JavaConverters._
 
-case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
+case class PaimonStatistics(
+    splits: Array[Split],
+    readRowType: RowType,
+    tableRowType: RowType,
+    paimonStats: Optional[stats.Statistics]
+) extends Statistics {
 
-  import PaimonImplicits._
-
-  private lazy val paimonStats: Option[stats.Statistics] = scan.statistics
-
-  private lazy val rowCount: Long = scan.lazyInputPartitions.map(_.rowCount()).sum
-
-  private lazy val scannedTotalSize: Long = {
-    val readSchemaSize =
-      SparkTypeUtils.toPaimonRowType(scan.readSchema()).getFields.asScala.map(getSizeForField).sum
-    val sizeInBytes = rowCount * readSchemaSize
-    // Avoid return 0 bytes if there are some valid rows.
-    // Avoid return too small size in bytes which may less than row count,
-    // note the compression ratio on disk is usually bigger than memory.
-    Math.max(sizeInBytes, rowCount)
-  }
-
-  private def getSizeForField(field: DataField): Long = {
-    paimonStats match {
-      case Some(stats) =>
-        val colStat = stats.colStats().get(field.name())
-        if (colStat != null && colStat.avgLen().isPresent) {
-          colStat.avgLen().getAsLong
-        } else {
-          field.`type`().defaultSize().toLong
-        }
-      case _ =>
-        field.`type`().defaultSize().toLong
+  lazy val numRows: OptionalLong = {
+    if (splits.exists(_.rowCount() == -1)) {
+      OptionalLong.empty()
+    } else {
+      OptionalLong.of(splits.map(_.rowCount()).sum)
     }
   }
 
-  override def numRows(): OptionalLong = OptionalLong.of(rowCount)
+  lazy val sizeInBytes: OptionalLong = {
+    if (numRows.isPresent) {
+      val sizeInBytes = numRows.getAsLong * estimateRowSize(readRowType)
+      // Avoid return 0 bytes if there are some valid rows.
+      // Avoid return too small size in bytes which may less than row count,
+      // note the compression ratio on disk is usually bigger than memory.
+      OptionalLong.of(Math.max(sizeInBytes, numRows.getAsLong))
+    } else {
+      val fileTotalSize = splits.map(SplitUtils.splitSize).sum
+      if (fileTotalSize == 0) {
+        OptionalLong.empty()
+      } else {
+        val size = (fileTotalSize * readRowSizeRatio).toLong
+        OptionalLong.of(size)
+      }
+    }
+  }
 
-  override def sizeInBytes(): OptionalLong = OptionalLong.of(scannedTotalSize)
+  lazy val readRowSizeRatio: Double =
+    estimateRowSize(readRowType).toDouble / estimateRowSize(tableRowType)
 
-  override def columnStats(): java.util.Map[NamedReference, ColumnStatistics] = {
-    val requiredFields = scan.requiredStatsSchema.fieldNames
+  private def estimateRowSize(rowType: RowType): Long = {
+    rowType.getFields.asScala.map(estimateFieldSize).sum
+  }
+
+  private def estimateFieldSize(field: DataField): Long = {
+    if (paimonStats.isPresent) {
+      val colStat = paimonStats.get.colStats().get(field.name())
+      if (colStat != null && colStat.avgLen().isPresent) {
+        colStat.avgLen().getAsLong
+      } else {
+        field.`type`().defaultSize().toLong
+      }
+    } else {
+      field.`type`().defaultSize().toLong
+    }
+  }
+
+  override lazy val columnStats: java.util.Map[NamedReference, ColumnStatistics] = {
+    val requiredFields = readRowType.getFieldNames.asScala
     val resultMap = new java.util.HashMap[NamedReference, ColumnStatistics]()
-    if (paimonStats.isDefined) {
+    if (paimonStats.isPresent) {
       val paimonColStats = paimonStats.get.colStats()
-      scan.tableRowType.getFields.asScala
+      tableRowType.getFields.asScala
         .filter {
           field => requiredFields.contains(field.name) && paimonColStats.containsKey(field.name())
         }
@@ -113,7 +133,7 @@ object PaimonColumnStats {
   }
 
   def apply(v1ColStats: ColumnStat): PaimonColumnStats = {
-    import PaimonImplicits._
+    import org.apache.paimon.spark.PaimonImplicits._
     PaimonColumnStats(
       if (v1ColStats.nullCount.isDefined) OptionalLong.of(v1ColStats.nullCount.get.longValue)
       else OptionalLong.empty(),

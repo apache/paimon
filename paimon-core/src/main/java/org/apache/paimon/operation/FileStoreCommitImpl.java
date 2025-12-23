@@ -24,6 +24,7 @@ import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -71,6 +72,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -125,6 +127,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final String tableName;
     private final String commitUser;
     private final RowType partitionType;
+    private final CoreOptions options;
     private final String partitionDefaultName;
     private final FileStorePathFactory pathFactory;
     private final SnapshotManager snapshotManager;
@@ -195,6 +198,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.tableName = tableName;
         this.commitUser = commitUser;
         this.partitionType = partitionType;
+        this.options = options;
         this.partitionDefaultName = partitionDefaultName;
         this.pathFactory = pathFactory;
         this.snapshotManager = snapshotManager;
@@ -565,6 +569,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 }
             }
 
+            boolean withCompact = !compactTableFiles.isEmpty() || !compactIndexFiles.isEmpty();
+
+            if (!withCompact) {
+                // try upgrade
+                appendTableFiles = tryUpgrade(appendTableFiles);
+            }
+
             // overwrite new files
             if (!skipOverwrite) {
                 attempts +=
@@ -579,7 +590,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 generatedSnapshot += 1;
             }
 
-            if (!compactTableFiles.isEmpty() || !compactIndexFiles.isEmpty()) {
+            if (withCompact) {
                 attempts +=
                         tryCommit(
                                 provider(compactTableFiles, emptyList(), compactIndexFiles),
@@ -607,6 +618,50 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
         return generatedSnapshot;
+    }
+
+    private List<ManifestEntry> tryUpgrade(List<ManifestEntry> appendFiles) {
+        if (!options.overwriteUpgrade()) {
+            return appendFiles;
+        }
+        Comparator<InternalRow> keyComparator = conflictDetection.keyComparator();
+        if (keyComparator == null) {
+            return appendFiles;
+        }
+        for (ManifestEntry entry : appendFiles) {
+            if (entry.level() > 0 || entry.bucket() < 0) {
+                return appendFiles;
+            }
+        }
+
+        Map<Pair<BinaryRow, Integer>, List<ManifestEntry>> buckets = new HashMap<>();
+        for (ManifestEntry entry : appendFiles) {
+            buckets.computeIfAbsent(
+                            Pair.of(entry.partition(), entry.bucket()), k -> new ArrayList<>())
+                    .add(entry);
+        }
+
+        List<ManifestEntry> results = new ArrayList<>();
+        int maxLevel = options.numLevels() - 1;
+        outer:
+        for (List<ManifestEntry> entries : buckets.values()) {
+            List<ManifestEntry> newEntries = new ArrayList<>(entries);
+            newEntries.sort((a, b) -> keyComparator.compare(a.minKey(), b.minKey()));
+            for (int i = 0; i + 1 < newEntries.size(); i++) {
+                ManifestEntry a = newEntries.get(i);
+                ManifestEntry b = newEntries.get(i + 1);
+                if (keyComparator.compare(a.maxKey(), b.minKey()) >= 0) {
+                    results.addAll(entries);
+                    continue outer;
+                }
+            }
+            LOG.info("Upgraded for overwrite commit.");
+            for (ManifestEntry entry : newEntries) {
+                results.add(entry.upgrade(maxLevel));
+            }
+        }
+
+        return results;
     }
 
     @Override

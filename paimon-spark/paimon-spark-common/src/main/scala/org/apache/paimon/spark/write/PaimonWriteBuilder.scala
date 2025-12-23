@@ -46,5 +46,4 @@ class PaimonWriteBuilder(table: FileStoreTable, options: Options)
     this.saveMode = Overwrite(conjunctiveFilters)
     this
   }
-
 }

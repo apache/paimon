@@ -18,7 +18,9 @@
 
 package org.apache.paimon.utils;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -35,5 +37,13 @@ public class ListUtils {
 
     public static <T> boolean isNullOrEmpty(Collection<T> list) {
         return list == null || list.isEmpty();
+    }
+
+    public static <T> List<T> toList(Iterator<T> iterator) {
+        List<T> result = new ArrayList<>();
+        while (iterator.hasNext()) {
+            result.add(iterator.next());
+        }
+        return result;
     }
 }

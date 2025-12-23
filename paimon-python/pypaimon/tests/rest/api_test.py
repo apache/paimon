@@ -25,7 +25,8 @@ from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.token_loader import DLFToken, DLFTokenLoaderFactory
 from pypaimon.catalog.rest.table_metadata import TableMetadata
-from pypaimon.common.config import CatalogOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType,
@@ -204,21 +205,21 @@ class ApiTest(unittest.TestCase):
             server.start()
             ecs_metadata_url = f"http://localhost:{server.port}/ram/security-credential/"
             options = {
-                CatalogOptions.DLF_TOKEN_LOADER: 'ecs',
-                CatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url
+                CatalogOptions.DLF_TOKEN_LOADER.key(): 'ecs',
+                CatalogOptions.DLF_TOKEN_ECS_METADATA_URL.key(): ecs_metadata_url
             }
-            loader = DLFTokenLoaderFactory.create_token_loader(options)
+            loader = DLFTokenLoaderFactory.create_token_loader(Options(options))
             load_token = loader.load_token()
             self.assertEqual(load_token.access_key_id, token.access_key_id)
             self.assertEqual(load_token.access_key_secret, token.access_key_secret)
             self.assertEqual(load_token.security_token, token.security_token)
             self.assertEqual(load_token.expiration, token.expiration)
             options_with_role = {
-                CatalogOptions.DLF_TOKEN_LOADER: 'ecs',
-                CatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url,
-                CatalogOptions.DLF_TOKEN_ECS_ROLE_NAME: role_name,
+                CatalogOptions.DLF_TOKEN_LOADER.key(): 'ecs',
+                CatalogOptions.DLF_TOKEN_ECS_METADATA_URL.key(): ecs_metadata_url,
+                CatalogOptions.DLF_TOKEN_ECS_ROLE_NAME.key(): role_name,
             }
-            loader = DLFTokenLoaderFactory.create_token_loader(options_with_role)
+            loader = DLFTokenLoaderFactory.create_token_loader(Options(options_with_role))
             token = loader.load_token()
             self.assertEqual(load_token.access_key_id, token.access_key_id)
             self.assertEqual(load_token.access_key_secret, token.access_key_secret)
@@ -238,7 +239,7 @@ class ApiTest(unittest.TestCase):
 
         # Test __init__ with empty URI
         with self.assertRaises(ValueError) as context:
-            RESTApi({CatalogOptions.URI: "   "}, config_required=False)
+            RESTApi({CatalogOptions.URI.key(): "   "}, config_required=False)
         self.assertIn("URI cannot be empty", str(context.exception))
 
         # Test create_database with empty name

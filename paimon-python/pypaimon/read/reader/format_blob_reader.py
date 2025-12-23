@@ -63,7 +63,11 @@ class FormatBlobReader(RecordBatchReader):
         self._blob_iterator = None
         self._current_batch = None
 
-    def read_arrow_batch(self) -> Optional[RecordBatch]:
+    def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
+        """
+         start_idx: start index record of the blob file
+         end_idx: end index record of the blob file
+        """
         if self._blob_iterator is None:
             if self.returned:
                 return None
@@ -73,7 +77,13 @@ class FormatBlobReader(RecordBatchReader):
                 self.blob_offsets, self._fields[0]
             )
             self._blob_iterator = iter(batch_iterator)
-
+        read_size = self._batch_size
+        if start_idx is not None and end_idx is not None:
+            if self._blob_iterator.current_position >= end_idx:
+                return None
+            if self._blob_iterator.current_position < start_idx:
+                self._blob_iterator.current_position = start_idx
+            read_size = min(end_idx - self._blob_iterator.current_position, self._batch_size)
         # Collect records for this batch
         pydict_data = {name: [] for name in self._fields}
         records_in_batch = 0
@@ -93,7 +103,7 @@ class FormatBlobReader(RecordBatchReader):
                     pydict_data[field_name].append(blob_data)
 
                 records_in_batch += 1
-                if records_in_batch >= self._batch_size:
+                if records_in_batch >= read_size:
                     break
 
         except StopIteration:

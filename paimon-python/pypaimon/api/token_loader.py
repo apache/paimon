@@ -18,7 +18,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Optional
 from urllib.parse import urljoin
 
 import requests
@@ -26,7 +26,8 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 
 from pypaimon.api.client import ExponentialRetry
-from pypaimon.common.config import CatalogOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.json_util import JSON, json_field
 
 
@@ -59,8 +60,8 @@ class DLFToken:
             self.expiration_at_millis = self.parse_expiration_to_millis(expiration)
 
     @classmethod
-    def from_options(cls, options: Dict[str, str]) -> Optional['DLFToken']:
-        from pypaimon.common.config import CatalogOptions
+    def from_options(cls, options: Options) -> Optional['DLFToken']:
+        from pypaimon.common.options.config import CatalogOptions
         if (options.get(CatalogOptions.DLF_ACCESS_KEY_ID) is None
                 or options.get(CatalogOptions.DLF_ACCESS_KEY_SECRET) is None):
             return None
@@ -205,7 +206,7 @@ class DLFTokenLoaderFactory:
     """Factory for creating DLF token loaders"""
 
     @staticmethod
-    def create_token_loader(options: Dict[str, str]) -> Optional['DLFTokenLoader']:
+    def create_token_loader(options: Options) -> Optional['DLFTokenLoader']:
         """Create ECS token loader"""
         loader = options.get(CatalogOptions.DLF_TOKEN_LOADER)
         if loader == 'ecs':

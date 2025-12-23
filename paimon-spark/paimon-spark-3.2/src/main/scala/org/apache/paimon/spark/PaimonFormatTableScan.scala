@@ -38,8 +38,7 @@ case class PaimonFormatTableScan(
     pushedDataFilters: Seq[Predicate],
     override val pushedLimit: Option[Int] = None)
   extends PaimonFormatTableBaseScan
-  with SupportsRuntimeFiltering
-  with ScanHelper {
+  with SupportsRuntimeFiltering {
 
   override def filterAttributes(): Array[NamedReference] = {
     val requiredFields = readBuilder.readType().getFieldNames.asScala
@@ -61,7 +60,8 @@ case class PaimonFormatTableScan(
     if (partitionFilter.nonEmpty) {
       readBuilder.withFilter(partitionFilter.head)
       // set inputPartitions null to trigger to get the new splits.
-      inputPartitions = null
+      _inputSplits = null
+      _inputPartitions = null
     }
   }
 }

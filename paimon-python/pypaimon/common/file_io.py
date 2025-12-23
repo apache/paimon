@@ -25,7 +25,9 @@ from urllib.parse import splitport, urlparse
 import pyarrow
 from packaging.version import parse
 from pyarrow._fs import FileSystem
-from pypaimon.common.config import OssOptions, S3Options
+
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
 from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
@@ -35,7 +37,7 @@ from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 class FileIO:
-    def __init__(self, path: str, catalog_options: dict):
+    def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
         scheme, netloc, _ = self.parse_location(path)
@@ -281,6 +283,9 @@ class FileIO:
             return success
 
     def write_file(self, path: str, content: str, overwrite: bool = False):
+        if not overwrite and self.exists(path):
+            raise FileExistsError(f"File {path} already exists and overwrite=False")
+
         with self.new_output_stream(path) as output_stream:
             output_stream.write(content.encode('utf-8'))
 

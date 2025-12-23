@@ -16,16 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.catalyst.plans.logical
 
+import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.spark.leafnode.PaimonLeafCommand
 import org.apache.paimon.table.Table
 
-import org.apache.spark.sql.connector.write.{RowLevelOperation, RowLevelOperationBuilder, RowLevelOperationInfo}
+/**
+ * Truncate paimon table with partition predicate.
+ *
+ * @param partitionPredicate
+ *   when it is none means truncate table
+ */
+case class TruncatePaimonTableWithFilter(
+    table: Table,
+    partitionPredicate: Option[PartitionPredicate])
+  extends PaimonLeafCommand {
 
-class PaimonSparkRowLevelOperationBuilder(table: Table, info: RowLevelOperationInfo)
-  extends RowLevelOperationBuilder {
-
-  override def build(): RowLevelOperation = {
-    new PaimonSparkCopyOnWriteOperation(table, info)
+  override def simpleString(maxFields: Int): String = {
+    s"Truncate table $table with filter"
   }
 }

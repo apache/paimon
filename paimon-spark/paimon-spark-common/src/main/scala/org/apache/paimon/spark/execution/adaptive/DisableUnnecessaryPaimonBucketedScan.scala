@@ -153,7 +153,7 @@ object DisableUnnecessaryPaimonBucketedScan extends Rule[SparkPlan] {
     plan match {
       case batch: BatchScanExec =>
         batch.scan match {
-          case scan: PaimonScan if scan.lazyInputPartitions.forall(_.bucketed) =>
+          case scan: PaimonScan if scan.inputPartitions.forall(_.bucketed) =>
             Some((batch, scan))
           case _ => None
         }

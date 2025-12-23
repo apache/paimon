@@ -879,7 +879,9 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + "  pt STRING,"
                         + "  PRIMARY KEY (k, pt) NOT ENFORCED\n"
                         + ") PARTITIONED BY (pt) WITH (\n"
-                        + "  'bucket' = '-2'\n"
+                        + "  'bucket' = '-2',\n"
+                        // upgrade will affect rescale job and the validation
+                        + "  'overwrite-upgrade' = 'false'\n"
                         + ")");
 
         // use sink.parallelism

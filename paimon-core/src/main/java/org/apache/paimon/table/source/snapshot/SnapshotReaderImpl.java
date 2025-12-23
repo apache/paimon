@@ -323,6 +323,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader withLimit(int limit) {
+        scan.withLimit(limit);
+        return this;
+    }
+
+    @Override
     public SnapshotReader dropStats() {
         scan.dropStats();
         return this;

@@ -19,6 +19,7 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.iceberg.IcebergOptions
 import org.apache.paimon.spark.catalog.FormatTableCatalog
 
 import org.apache.spark.sql.{SparkSession, Strategy}
@@ -39,10 +40,16 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession) extends Strate
           throw new RuntimeException("Paimon can't extend StagingTableCatalog for now.")
         case _ =>
           val coreOptionKeys = CoreOptions.getOptions.asScala.map(_.key()).toSeq
-          val (coreOptions, writeOptions) = options.partition {
-            case (key, _) => coreOptionKeys.contains(key)
+
+          // Include Iceberg compatibility options in table properties (fix for DataFrame writer options)
+          val icebergOptionKeys = IcebergOptions.getOptions.asScala.map(_.key()).toSeq
+
+          val allTableOptionKeys = coreOptionKeys ++ icebergOptionKeys
+
+          val (tableOptions, writeOptions) = options.partition {
+            case (key, _) => allTableOptionKeys.contains(key)
           }
-          val newProps = CatalogV2Util.withDefaultOwnership(props) ++ coreOptions
+          val newProps = CatalogV2Util.withDefaultOwnership(props) ++ tableOptions
 
           val isPartitionedFormatTable = {
             catalog match {

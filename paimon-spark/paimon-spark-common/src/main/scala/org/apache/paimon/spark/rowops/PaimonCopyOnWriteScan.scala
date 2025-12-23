@@ -16,18 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.rowops
 
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.spark.commands.SparkDataFileMeta
+import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
+import org.apache.paimon.spark.scan.BaseScan
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
-import org.apache.paimon.table.{FileStoreTable, InnerTable}
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions.{Expressions, NamedReference}
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
-import org.apache.spark.sql.connector.read.{Batch, SupportsRuntimeV2Filtering}
+import org.apache.spark.sql.connector.read.SupportsRuntimeV2Filtering
 import org.apache.spark.sql.sources.{Filter, In}
 import org.apache.spark.sql.types.StructType
 
@@ -37,22 +40,21 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 case class PaimonCopyOnWriteScan(
-    table: InnerTable,
+    table: FileStoreTable,
     requiredSchema: StructType,
     pushedPartitionFilters: Seq[PartitionPredicate],
-    pushedDataFilters: Seq[Predicate],
-    bucketedScanDisabled: Boolean = false)
-  extends PaimonScanCommon(table, requiredSchema, bucketedScanDisabled)
+    pushedDataFilters: Seq[Predicate])
+  extends BaseScan
   with SupportsRuntimeV2Filtering {
 
-  var filteredLocations: mutable.Set[String] = mutable.Set[String]()
-
-  var filteredFileNames: mutable.Set[String] = mutable.Set[String]()
+  override def inputSplits: Array[Split] = dataSplits.asInstanceOf[Array[Split]]
 
   var dataSplits: Array[DataSplit] = Array()
 
-  def disableBucketedScan(): PaimonCopyOnWriteScan = {
-    copy(bucketedScanDisabled = true)
+  def scannedFiles: Seq[SparkDataFileMeta] = {
+    dataSplits
+      .flatMap(dataSplit => convertToSparkDataFileMeta(dataSplit, dataSplit.totalBuckets()))
+      .toSeq
   }
 
   override def filterAttributes(): Array[NamedReference] = {
@@ -60,45 +62,30 @@ case class PaimonCopyOnWriteScan(
   }
 
   override def filter(predicates: Array[SparkPredicate]): Unit = {
+    val filteredFileNames: mutable.Set[String] = mutable.Set[String]()
     val runtimefilters: Array[Filter] = predicates.flatMap(PaimonUtils.filterV2ToV1)
     for (filter <- runtimefilters) {
       filter match {
         case in: In if in.attribute.equalsIgnoreCase(FILE_PATH_COLUMN) =>
           for (value <- in.values) {
             val location = value.asInstanceOf[String]
-            filteredLocations.add(location)
             filteredFileNames.add(Paths.get(location).getFileName.toString)
           }
         case _ => logWarning("Unsupported runtime filter")
       }
     }
 
-    table match {
-      case fileStoreTable: FileStoreTable =>
-        val snapshotReader = fileStoreTable.newSnapshotReader()
-        if (fileStoreTable.coreOptions().manifestDeleteFileDropStats()) {
-          snapshotReader.dropStats()
-        }
-
-        pushedPartitionFilters.foreach(snapshotReader.withPartitionFilter)
-
-        pushedDataFilters.foreach(snapshotReader.withFilter)
-
-        snapshotReader.withDataFileNameFilter(fileName => filteredFileNames.contains(fileName))
-
-        dataSplits =
-          snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toArray
-
-      case _ => throw new RuntimeException("Only FileStoreTable support.")
+    val snapshotReader = table.newSnapshotReader()
+    if (table.coreOptions().manifestDeleteFileDropStats()) {
+      snapshotReader.dropStats()
     }
-
-  }
-
-  override def toBatch: Batch = {
-    PaimonBatch(
-      getInputPartitions(dataSplits.asInstanceOf[Array[Split]]),
-      readBuilder,
-      coreOptions.blobAsDescriptor(),
-      metadataColumns)
+    if (pushedPartitionFilters.nonEmpty) {
+      snapshotReader.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
+    }
+    if (pushedDataFilters.nonEmpty) {
+      snapshotReader.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
+    }
+    snapshotReader.withDataFileNameFilter(fileName => filteredFileNames.contains(fileName))
+    dataSplits = snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toArray
   }
 }

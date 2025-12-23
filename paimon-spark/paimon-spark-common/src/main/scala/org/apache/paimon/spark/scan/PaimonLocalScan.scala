@@ -16,13 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.sql
+package org.apache.paimon.spark.scan
 
-import org.apache.spark.SparkConf
+import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.table.Table
 
-class V2DeleteFromTableTest extends DeleteFromTableTestBase {
-  override protected def sparkConf: SparkConf = {
-    super.sparkConf
-      .set("spark.paimon.write.use-v2-write", "true")
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.connector.read.LocalScan
+import org.apache.spark.sql.types.StructType
+
+/** A scan does not require [[RDD]] to execute */
+case class PaimonLocalScan(
+    rows: Array[InternalRow],
+    readSchema: StructType,
+    table: Table,
+    pushedPartitionFilters: Seq[PartitionPredicate])
+  extends LocalScan {
+
+  override def description(): String = {
+    val pushedPartitionFiltersStr = if (pushedPartitionFilters.nonEmpty) {
+      ", PartitionFilters: [" + pushedPartitionFilters.mkString(",") + "]"
+    } else {
+      ""
+    }
+    s"PaimonLocalScan: [${table.name}]" + pushedPartitionFiltersStr
   }
 }

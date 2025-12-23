@@ -102,6 +102,11 @@ public class ConflictDetection {
         this.scan = scan;
     }
 
+    @Nullable
+    public Comparator<InternalRow> keyComparator() {
+        return keyComparator;
+    }
+
     public void withPartitionExpire(PartitionExpire partitionExpire) {
         this.partitionExpire = partitionExpire;
     }

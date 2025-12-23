@@ -16,12 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.scan
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions._
 import org.apache.paimon.io.DataFileMeta
+import org.apache.paimon.spark.PaimonInputPartition
+import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackDataSplit
+import org.apache.paimon.table.format.FormatDataSplit
 import org.apache.paimon.table.source.{DataSplit, DeletionFile, Split}
 
 import org.apache.spark.internal.Logging
@@ -32,11 +35,11 @@ import org.apache.spark.sql.internal.SQLConf
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 
-trait ScanHelper extends SQLConfHelper with Logging {
+case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double = 1.0)
+  extends SQLConfHelper
+  with Logging {
 
   private val spark = PaimonSparkSession.active
-
-  val coreOptions: CoreOptions
 
   private lazy val deletionVectors: Boolean = coreOptions.deletionVectorsEnabled()
 
@@ -72,15 +75,17 @@ trait ScanHelper extends SQLConfHelper with Logging {
       .getOrElse(spark.sparkContext.defaultParallelism)
   }
 
-  def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
+  def pack(splits: Array[Split]): Seq[PaimonInputPartition] = {
     val (toReshuffle, reserved) = splits.partition {
       case _: FallbackDataSplit => false
       case split: DataSplit => split.beforeFiles().isEmpty && split.rawConvertible()
+      // Currently, format table reader only supports reading one file.
+      case _: FormatDataSplit => false
       case _ => false
     }
     if (toReshuffle.nonEmpty) {
       val startTS = System.currentTimeMillis()
-      val reshuffled = getInputPartitions(toReshuffle.collect { case ds: DataSplit => ds })
+      val reshuffled = packDataSplit(toReshuffle.collect { case ds: DataSplit => ds })
       val all = reserved.map(PaimonInputPartition.apply) ++ reshuffled
       val duration = System.currentTimeMillis() - startTS
       logInfo(
@@ -92,7 +97,7 @@ trait ScanHelper extends SQLConfHelper with Logging {
     }
   }
 
-  private def getInputPartitions(splits: Array[DataSplit]): Array[PaimonInputPartition] = {
+  private def packDataSplit(splits: Array[DataSplit]): Array[PaimonInputPartition] = {
     val maxSplitBytes = computeMaxSplitBytes(splits)
 
     var currentSize = 0L
@@ -133,8 +138,9 @@ trait ScanHelper extends SQLConfHelper with Logging {
         val ddFiles = dataFileAndDeletionFiles(split)
         ddFiles.foreach {
           case (dataFile, deletionFile) =>
-            val size = dataFile
-              .fileSize() + openCostInBytes + Option(deletionFile).map(_.length()).getOrElse(0L)
+            val size =
+              (dataFile.fileSize() * readRowSizeRatio).toLong + openCostInBytes + Option(
+                deletionFile).map(_.length()).getOrElse(0L)
             if (currentSize + size > maxSplitBytes) {
               closeInputPartition()
             }
@@ -148,14 +154,6 @@ trait ScanHelper extends SQLConfHelper with Logging {
     closeInputPartition()
 
     partitions.toArray
-  }
-
-  private def unpack(split: Split): Array[DataFileMeta] = {
-    split match {
-      case ds: DataSplit =>
-        ds.dataFiles().asScala.toArray
-      case _ => Array.empty
-    }
   }
 
   private def copyDataSplit(
@@ -191,12 +189,12 @@ trait ScanHelper extends SQLConfHelper with Logging {
   }
 
   private def computeMaxSplitBytes(dataSplits: Seq[DataSplit]): Long = {
-    val dataFiles = dataSplits.flatMap(unpack)
     val defaultMaxSplitBytes = filesMaxPartitionBytes
-    val minPartitionNum = conf.filesMinPartitionNum
-      .getOrElse(leafNodeDefaultParallelism)
-    val totalBytes = dataFiles.map(file => file.fileSize + openCostInBytes).sum
-    val bytesPerCore = totalBytes / minPartitionNum
+    val minPartitionNum = conf.filesMinPartitionNum.getOrElse(leafNodeDefaultParallelism)
+
+    val totalRawBytes =
+      dataSplits.map(s => SplitUtils.splitSize(s) + SplitUtils.fileCount(s) * openCostInBytes).sum
+    val bytesPerCore = totalRawBytes / minPartitionNum
 
     val maxSplitBytes = Math.min(defaultMaxSplitBytes, Math.max(openCostInBytes, bytesPerCore))
     logInfo(

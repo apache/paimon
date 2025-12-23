@@ -21,7 +21,7 @@ import time
 from abc import ABC
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 import fsspec
 from cachetools import LRUCache, TTLCache
@@ -32,7 +32,8 @@ from readerwriterlock import rwlock
 from pypaimon.api.api_response import GetTableResponse, GetTableTokenResponse
 from pypaimon.api.client import AlreadyExistsException, NoSuchResourceException
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.common.config import CatalogOptions, OssOptions, PVFSOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions, OssOptions, PVFSOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
 
@@ -127,12 +128,14 @@ class TableStore:
 
 
 class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
-    options: Dict[str, Any]
+    options: Options
 
     protocol = PROTOCOL_NAME
 
-    def __init__(self, options: Dict = None, **kwargs):
-        options.update({CatalogOptions.HTTP_USER_AGENT_HEADER: 'PythonPVFS'})
+    def __init__(self, options: Union[Options, Dict[str, str]] = None, **kwargs):
+        if isinstance(options, dict):
+            options = Options(options)
+        options.set(CatalogOptions.HTTP_USER_AGENT_HEADER, 'PythonPVFS')
         self.options = options
         self.warehouse = options.get(CatalogOptions.WAREHOUSE)
         cache_expired_time = (
@@ -158,7 +161,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         return PROTOCOL_NAME
 
     def sign(self, path, expiration=None, **kwargs):
-        """We do not support to create a signed URL representing the given path in gvfs."""
+        """We do not support to create a signed URL representing the given path in pvfs."""
         raise Exception(
             "Sign is not implemented for Paimon Virtual FileSystem."
         )
@@ -794,7 +797,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             rest_api = self._rest_api_cache.get(key)
             if rest_api is None:
                 options = self.options.copy()
-                options.update({CatalogOptions.WAREHOUSE: catalog, CatalogOptions.URI: pvfs_identifier.endpoint})
+                options.data.update(
+                    {CatalogOptions.WAREHOUSE.key(): catalog, CatalogOptions.URI.key(): pvfs_identifier.endpoint})
                 rest_api = RESTApi(options)
                 self._rest_api_cache[catalog] = rest_api
             return rest_api
@@ -851,7 +855,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         )
 
     @staticmethod
-    def _get_oss_filesystem(options: Dict[str, str]) -> AbstractFileSystem:
+    def _get_oss_filesystem(options: Options) -> AbstractFileSystem:
         access_key_id = options.get(OssOptions.OSS_ACCESS_KEY_ID)
         if access_key_id is None:
             raise Exception(

@@ -1109,4 +1109,79 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         sql("INSERT INTO test_table VALUES (1, 'A', '2024-12-01')");
         assertThat(sql("SELECT * FROM `test_table$partitions`")).isNotEmpty();
     }
+
+    @Test
+    public void testOverwriteUpgradeForOrdinaryPk() {
+        boolean dynamicBucket = ThreadLocalRandom.current().nextBoolean();
+        sql(
+                "CREATE TABLE test_table (a INT, b STRING, pt STRING, PRIMARY KEY (a, pt) NOT ENFORCED) PARTITIONED BY (pt)"
+                        + "WITH ('bucket' = '%s', 'deletion-vectors.enabled' = 'true', 'write-only' = 'true')",
+                dynamicBucket ? "-1" : "4");
+        sql(
+                "INSERT INTO test_table VALUES (1, 'A', '2025-12-01'), (2, 'B', '2025-12-01'), (1, 'A', '2025-12-02')");
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql("INSERT OVERWRITE test_table VALUES (3, 'C', '2025-12-01')");
+        // didn't write pt 2025-12-02
+        assertThat(sql("SELECT * FROM test_table")).containsExactly(Row.of(3, "C", "2025-12-01"));
+
+        sql("ALTER TABLE test_table SET ('overwrite-upgrade' = 'false')");
+        sql("INSERT OVERWRITE test_table VALUES (4, 'D', '2025-12-01')");
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+    }
+
+    @Test
+    public void testOverwriteUpgradeForPostpone() {
+        sql(
+                "CREATE TABLE test_table (a INT, b STRING, pt STRING, PRIMARY KEY (a, pt) NOT ENFORCED) PARTITIONED BY (pt)"
+                        + "WITH ('bucket' = '-2', 'deletion-vectors.enabled' = 'true', 'write-only' = 'true')");
+
+        sql(
+                "INSERT INTO test_table VALUES (1, 'A', '2025-12-01'), (2, 'B', '2025-12-01'), (1, 'A', '2025-12-02')");
+        // the data is batch writing to fixed bucket but skipped because of dv
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql(
+                "INSERT OVERWRITE test_table /*+ OPTIONS('postpone.batch-write-fixed-bucket' = 'false') */ VALUES (3, 'C', '2025-12-01')");
+        // doesn't concern data in bucket -2
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql("INSERT OVERWRITE test_table VALUES (4, 'D', '2025-12-01')");
+        // didn't write pt 2025-12-02
+        assertThat(sql("SELECT * FROM test_table")).containsExactly(Row.of(4, "D", "2025-12-01"));
+
+        sql("ALTER TABLE test_table SET ('overwrite-upgrade' = 'false')");
+        sql("INSERT OVERWRITE test_table VALUES (5, 'E', '2025-12-01')");
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql("ALTER TABLE test_table SET ('write-buffer-spillable' = 'false')");
+        sql("INSERT OVERWRITE test_table VALUES (6, 'F', '2025-12-01')");
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+    }
+
+    @Test
+    public void testNoOverwriteUpgradeWhenFilesOverlapped() {
+        sql(
+                "CREATE TABLE test_table (a INT, b STRING, pt STRING, PRIMARY KEY (a, pt) NOT ENFORCED) "
+                        + "PARTITIONED BY (pt) WITH ('bucket' = '4', 'deletion-vectors.enabled' = 'true', "
+                        + "'write-only' = 'true', 'write-buffer-spillable' = 'false', 'page-size' = '64 b', "
+                        + "'write-buffer-size' = '1 kb')");
+        sql("INSERT INTO test_table VALUES (1, 'A', '2025-12-01')");
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql(
+                "CREATE TEMPORARY TABLE gen (a INT, b STRING) "
+                        + "WITH ('connector' = 'datagen', 'fields.a.kind' = 'sequence', 'fields.a.start' = '1', "
+                        + "'fields.a.end' = '500', 'number-of-rows' = '500')");
+
+        sql("INSERT OVERWRITE test_table SELECT a, b, '2025-12-01' FROM gen");
+
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql(
+                "ALTER TABLE test_table RESET ('write-buffer-spillable', 'page-size', 'write-buffer-size')");
+        sql("CALL sys.compact(`table` => 'default.test_table')");
+
+        assertThat(sql("SELECT SUM(a) FROM test_table")).containsExactly(Row.of(125250));
+    }
 }
