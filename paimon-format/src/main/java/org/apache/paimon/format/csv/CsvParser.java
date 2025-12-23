@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.csv;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
@@ -46,6 +47,7 @@ public class CsvParser {
             new ConcurrentHashMap<>();
 
     private static final Object PARSE_ERROR = new Object();
+    private static final int NUMBER_PARSE_RADIX = 10;
 
     private final RowType dataSchemaRowType;
     private final int[] projectMapping;
@@ -194,7 +196,8 @@ public class CsvParser {
         return true;
     }
 
-    private Object parseField(String field, DataType dataType) {
+    @VisibleForTesting
+    public Object parseField(String field, DataType dataType) {
         if (field == null || field.equals(nullLiteral)) {
             return null;
         }
@@ -203,13 +206,13 @@ public class CsvParser {
         switch (typeRoot) {
             case TINYINT:
                 Integer intVal = tryParseInt(field);
-                if (intVal == null) {
+                if (intVal == null || intVal > Byte.MAX_VALUE || intVal < Byte.MIN_VALUE) {
                     return handleParseError(field);
                 }
                 return intVal.byteValue();
             case SMALLINT:
                 intVal = tryParseInt(field);
-                if (intVal == null) {
+                if (intVal == null || intVal > Short.MAX_VALUE || intVal < Short.MIN_VALUE) {
                     return handleParseError(field);
                 }
                 return intVal.shortValue();
@@ -293,20 +296,19 @@ public class CsvParser {
             i++;
         }
 
-        int multmin = limit / 10;
+        int multmin = limit / NUMBER_PARSE_RADIX;
         int result = 0;
+        int digit;
 
         while (i < len) {
-            char c = s.charAt(i++);
-            if (c < '0' || c > '9') {
+            digit = Character.digit(s.charAt(i++), NUMBER_PARSE_RADIX);
+            if (digit < 0) {
                 return null;
             }
-            int digit = c - '0';
-
             if (result < multmin) {
                 return null;
             }
-            result *= 10;
+            result *= NUMBER_PARSE_RADIX;
             if (result < limit + digit) {
                 return null;
             }
@@ -340,20 +342,20 @@ public class CsvParser {
             i++;
         }
 
-        long multmin = limit / 10;
+        long multmin = limit / NUMBER_PARSE_RADIX;
         long result = 0;
+        int digit;
 
         while (i < len) {
-            char c = s.charAt(i++);
-            if (c < '0' || c > '9') {
+            digit = Character.digit(s.charAt(i++), NUMBER_PARSE_RADIX);
+            if (digit < 0) {
                 return null;
             }
-            int digit = c - '0';
 
             if (result < multmin) {
                 return null;
             }
-            result *= 10;
+            result *= NUMBER_PARSE_RADIX;
             if (result < limit + digit) {
                 return null;
             }
