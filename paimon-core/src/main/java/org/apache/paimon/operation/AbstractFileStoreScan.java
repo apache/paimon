@@ -41,6 +41,7 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
@@ -48,10 +49,8 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -278,31 +277,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         manifests = postFilterManifests(manifests);
 
         Iterator<ManifestEntry> iterator = readManifestEntries(manifests, false);
-        List<ManifestEntry> files = new ArrayList<>();
-        while (iterator.hasNext()) {
-            files.add(iterator.next());
+        if (supportsLimitPushManifestEntries()) {
+            iterator = limitPushManifestEntries(iterator);
         }
 
-        files = postFilterManifestEntries(files);
-
-        if (wholeBucketFilterEnabled()) {
-            // We group files by bucket here, and filter them by the whole bucket filter.
-            // Why do this: because in primary key table, we can't just filter the value
-            // by the stat in files (see `PrimaryKeyFileStoreTable.nonPartitionFilterConsumer`),
-            // but we can do this by filter the whole bucket files
-            files =
-                    files.stream()
-                            .collect(
-                                    Collectors.groupingBy(
-                                            // we use LinkedHashMap to avoid disorder
-                                            file -> Pair.of(file.partition(), file.bucket()),
-                                            LinkedHashMap::new,
-                                            Collectors.toList()))
-                            .values()
-                            .stream()
-                            .map(this::filterWholeBucketByStats)
-                            .flatMap(Collection::stream)
-                            .collect(Collectors.toList());
+        List<ManifestEntry> files = ListUtils.toList(iterator);
+        if (postFilterManifestEntriesEnabled()) {
+            files = postFilterManifestEntries(files);
         }
 
         List<ManifestEntry> result = files;
@@ -457,16 +438,20 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return manifests;
     }
 
-    protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
-        return entries;
-    }
-
-    protected boolean wholeBucketFilterEnabled() {
+    protected boolean postFilterManifestEntriesEnabled() {
         return false;
     }
 
-    protected List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries) {
-        return entries;
+    protected boolean supportsLimitPushManifestEntries() {
+        return false;
+    }
+
+    protected Iterator<ManifestEntry> limitPushManifestEntries(Iterator<ManifestEntry> entries) {
+        throw new UnsupportedOperationException();
+    }
+
+    protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
+        throw new UnsupportedOperationException();
     }
 
     /** Note: Keep this thread-safe. */

@@ -50,6 +50,7 @@ import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
@@ -64,7 +65,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             SchemaManager schemaManager,
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
-            Integer scanManifestParallelism) {
+            Integer scanManifestParallelism,
+            boolean deletionVectorsEnabled) {
         super(
                 manifestsReader,
                 bucketSelectConverter,
@@ -73,7 +75,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 schema,
                 manifestFileFactory,
                 scanManifestParallelism,
-                false);
+                false,
+                deletionVectorsEnabled);
     }
 
     @Override
@@ -145,10 +148,18 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     }
 
     @Override
+    public boolean supportsLimitPushManifestEntries() {
+        return false;
+    }
+
+    @Override
+    protected boolean postFilterManifestEntriesEnabled() {
+        return inputFilter != null;
+    }
+
+    @Override
     protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
-        if (inputFilter == null) {
-            return entries;
-        }
+        checkNotNull(inputFilter);
 
         // group by row id range
         RangeHelper<ManifestEntry> rangeHelper =

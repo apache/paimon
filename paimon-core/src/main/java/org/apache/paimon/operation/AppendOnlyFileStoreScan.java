@@ -22,7 +22,6 @@ import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -35,9 +34,10 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
@@ -46,6 +46,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     private final SimpleStatsEvolutions simpleStatsEvolutions;
 
     private final boolean fileIndexReadEnabled;
+    private final boolean deletionVectorsEnabled;
 
     protected Predicate inputFilter;
 
@@ -63,7 +64,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
             Integer scanManifestParallelism,
-            boolean fileIndexReadEnabled) {
+            boolean fileIndexReadEnabled,
+            boolean deletionVectorsEnabled) {
         super(
                 manifestsReader,
                 snapshotManager,
@@ -75,6 +77,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         this.simpleStatsEvolutions =
                 new SimpleStatsEvolutions(sid -> scanTableSchema(sid).fields(), schema.id());
         this.fileIndexReadEnabled = fileIndexReadEnabled;
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
@@ -84,15 +87,14 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     }
 
     @Override
-    protected Iterator<ManifestEntry> readManifestEntries(
-            List<ManifestFileMeta> manifests, boolean useSequential) {
-        Iterator<ManifestEntry> baseIterator = super.readManifestEntries(manifests, useSequential);
+    public boolean supportsLimitPushManifestEntries() {
+        return limit != null && limit > 0 && !deletionVectorsEnabled;
+    }
 
-        if (limit != null && limit > 0) {
-            return new LimitAwareManifestEntryIterator(baseIterator, limit);
-        }
-
-        return baseIterator;
+    @Override
+    protected Iterator<ManifestEntry> limitPushManifestEntries(Iterator<ManifestEntry> entries) {
+        checkArgument(limit != null && limit > 0 && !deletionVectorsEnabled);
+        return new LimitAwareManifestEntryIterator(entries, limit);
     }
 
     /** Note: Keep this thread-safe. */
