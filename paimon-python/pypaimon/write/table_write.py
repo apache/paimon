@@ -90,23 +90,20 @@ class BatchTableWrite(TableWrite):
 
     def write_arrow(self, table: pa.Table):
         if self._partial_column_write is not None:
-            self._partial_column_write.update_columns(table, self.file_store_write.write_cols)
-        else:
-            super().write_arrow(table)
+            return self._partial_column_write.update_columns(table, self.file_store_write.write_cols)
+        super().write_arrow(table)
 
     def write_arrow_batch(self, data: pa.RecordBatch):
         if self._partial_column_write is not None:
             table = pa.Table.from_batches([data])
-            self._partial_column_write.update_columns(table, self.file_store_write.write_cols)
-        else:
-            super().write_arrow_batch(data)
+            return self._partial_column_write.update_columns(table, self.file_store_write.write_cols)
+        super().write_arrow_batch(data)
 
     def write_pandas(self, dataframe):
         if self._partial_column_write is not None:
             table = pa.Table.from_pandas(dataframe)
-            self._partial_column_write.update_columns(table, self.file_store_write.write_cols)
-        else:
-            super().write_pandas(dataframe)
+            return self._partial_column_write.update_columns(table, self.file_store_write.write_cols)
+        super().write_pandas(dataframe)
 
     def prepare_commit(self) -> List[CommitMessage]:
         if self.batch_committed:
