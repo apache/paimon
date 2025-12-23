@@ -48,7 +48,7 @@ public class SstFileReader implements Closeable {
     private final Comparator<MemorySlice> comparator;
     private final Path filePath;
     private final BlockCache blockCache;
-    private final BlockIterator indexBlockIterator;
+    private final BlockReader indexBlock;
     @Nullable private final FileBasedBloomFilter bloomFilter;
 
     public SstFileReader(
@@ -65,7 +65,7 @@ public class SstFileReader implements Closeable {
                 blockCache.getBlock(
                         fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH, b -> b, true);
         Footer footer = Footer.readFooter(MemorySlice.wrap(footerData).toInput());
-        this.indexBlockIterator = readBlock(footer.getIndexBlockHandle(), true).iterator();
+        this.indexBlock = readBlock(footer.getIndexBlockHandle(), true);
         BloomFilterHandle handle = footer.getBloomFilterHandle();
         if (handle == null) {
             this.bloomFilter = null;
@@ -95,12 +95,13 @@ public class SstFileReader implements Closeable {
 
         MemorySlice keySlice = MemorySlice.wrap(key);
         // seek the index to the block containing the key
+        BlockIterator indexBlockIterator = indexBlock.iterator();
         indexBlockIterator.seekTo(keySlice);
 
         // if indexIterator does not have a next, it means the key does not exist in this iterator
         if (indexBlockIterator.hasNext()) {
             // seek the current iterator to the key
-            BlockIterator current = getNextBlock();
+            BlockIterator current = getNextBlock(indexBlockIterator);
             if (current.seekTo(keySlice)) {
                 return current.next().getValue().copyBytes();
             }
@@ -108,7 +109,7 @@ public class SstFileReader implements Closeable {
         return null;
     }
 
-    private BlockIterator getNextBlock() {
+    private BlockIterator getNextBlock(BlockIterator indexBlockIterator) {
         // index block handle, point to the key, value position.
         MemorySlice blockHandle = indexBlockIterator.next().getValue();
         BlockReader dataBlock =
@@ -138,7 +139,7 @@ public class SstFileReader implements Closeable {
                         blockHandle.size(),
                         bytes -> decompressBlock(bytes, blockTrailer),
                         index);
-        return new BlockReader(MemorySlice.wrap(unCompressedBlock), comparator);
+        return BlockReader.create(MemorySlice.wrap(unCompressedBlock), comparator);
     }
 
     private byte[] decompressBlock(byte[] compressedBytes, BlockTrailer blockTrailer) {
