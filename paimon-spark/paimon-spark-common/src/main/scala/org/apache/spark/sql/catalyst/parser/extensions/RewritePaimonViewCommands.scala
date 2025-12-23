@@ -62,8 +62,8 @@ case class RewritePaimonViewCommands(spark: SparkSession)
     case ShowViews(namespace, pattern, output)
         if catalogManager.currentCatalog.isInstanceOf[SupportView] =>
       val resolvedNamespace = new ResolveCatalogs(catalogManager)(namespace).transform {
-        case ResolvedNamespace(catalog, ns) if ns.isEmpty =>
-          ResolvedNamespace(catalog, catalogManager.currentNamespace)
+        case r: ResolvedNamespace if r.namespace.isEmpty =>
+          r.copy(namespace = catalogManager.currentNamespace)
       }
       ShowPaimonViews(resolvedNamespace, pattern, output)
   }
