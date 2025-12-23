@@ -58,15 +58,16 @@ public class IncrementalClusterManagerTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testNonUnAwareBucketTable() {
+    public void testCreateClusterTable() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.BUCKET_KEY.key(), "f0");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
 
         assertThatThrownBy(() -> createTable(options, Collections.emptyList()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
-                        "Cannot define bucket for incremental clustering  table, it only support bucket = -1");
+                        "Cannot enable deletion-vectors for incremental clustering table which bucket is not -1.");
     }
 
     @Test
