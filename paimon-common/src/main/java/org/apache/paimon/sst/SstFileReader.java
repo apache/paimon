@@ -40,10 +40,9 @@ import static org.apache.paimon.sst.SstFileUtils.crc32c;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * An SST File Reader which serves point queries and range queries. On one side, users can call
- * {@code seekTo} to move current position to the specified key, then repeatedly call {@code
- * readBatch} to get a batch of records until {@code null} returned. On the other side, lookup
- * queries can quickly test record existence and won't affect current data position.
+ * An SST File Reader which serves point queries and range queries. Users can call {@code
+ * createIterator} to create a file iterator and then use seek and read methods to complete range
+ * queries.
  *
  * <p>Note that this class is NOT thread-safe.
  */
