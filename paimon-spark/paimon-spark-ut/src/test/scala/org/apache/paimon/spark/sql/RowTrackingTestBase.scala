@@ -458,7 +458,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
              |WHEN MATCHED AND target.a = 5 THEN UPDATE SET b = source.b + target.b
              |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET b = source.b * 3,
              |c = concat(target.c, source.c)
-             |""".stripMargin)
+             |""".stripMargin).collect()
       // Assert no shuffle/join/sort was used in
       // 'org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.updateActionInvoke'
       assert(
