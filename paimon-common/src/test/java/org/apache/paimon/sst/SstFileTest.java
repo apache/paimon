@@ -171,60 +171,63 @@ public class SstFileTest {
                                 file,
                                 inputStream,
                                 CACHE_MANAGER); ) {
+            SstFileReader.SstFileIterator fileIterator = reader.createIterator();
+
             MemorySliceOutput keyOut = new MemorySliceOutput(4);
 
             // 1. test full scan
-            assertScan(0, recordNum - 1, reader);
+            assertScan(0, recordNum - 1, fileIterator);
 
             // 2. test random seek and scan
             Random random = new Random();
             for (int i = 0; i < 1000; i++) {
-                resetReader(reader, keyOut);
+                resetIterator(fileIterator, keyOut);
                 int key = random.nextInt(recordNum * 2 - 1);
                 int targetPosition = (key + 1) / 2;
 
                 keyOut.reset();
                 keyOut.writeInt(key);
-                reader.seekTo(keyOut.toSlice().getHeapMemory());
+                fileIterator.seekTo(keyOut.toSlice().getHeapMemory());
 
                 // lookup should not affect reader position
                 interleaveLookup(reader, keyOut);
 
-                assertScan(targetPosition, recordNum - 1, reader);
+                assertScan(targetPosition, recordNum - 1, fileIterator);
             }
 
             // 3. test boundaries
-            resetReader(reader, keyOut);
+            resetIterator(fileIterator, keyOut);
             keyOut.reset();
             keyOut.writeInt(0);
-            reader.seekTo(keyOut.toSlice().getHeapMemory());
-            assertScan(0, recordNum - 1, reader);
+            fileIterator.seekTo(keyOut.toSlice().getHeapMemory());
+            assertScan(0, recordNum - 1, fileIterator);
 
-            resetReader(reader, keyOut);
+            resetIterator(fileIterator, keyOut);
             keyOut.reset();
             keyOut.writeInt(recordNum * 2 - 2);
-            reader.seekTo(keyOut.toSlice().getHeapMemory());
-            assertScan(recordNum - 1, recordNum - 1, reader);
+            fileIterator.seekTo(keyOut.toSlice().getHeapMemory());
+            assertScan(recordNum - 1, recordNum - 1, fileIterator);
 
             // 4. test out of boundaries
-            resetReader(reader, keyOut);
+            resetIterator(fileIterator, keyOut);
             keyOut.reset();
             keyOut.writeInt(-10);
-            reader.seekTo(keyOut.toSlice().getHeapMemory());
-            assertScan(0, recordNum - 1, reader);
+            fileIterator.seekTo(keyOut.toSlice().getHeapMemory());
+            assertScan(0, recordNum - 1, fileIterator);
 
-            resetReader(reader, keyOut);
+            resetIterator(fileIterator, keyOut);
             keyOut.reset();
             keyOut.writeInt(recordNum * 2 + 10);
-            reader.seekTo(keyOut.toSlice().getHeapMemory());
-            Assertions.assertNull(reader.readBatch());
+            fileIterator.seekTo(keyOut.toSlice().getHeapMemory());
+            Assertions.assertNull(fileIterator.readBatch());
         }
     }
 
-    private void resetReader(SstFileReader reader, MemorySliceOutput keyOut) throws IOException {
+    private void resetIterator(SstFileReader.SstFileIterator iterator, MemorySliceOutput keyOut)
+            throws IOException {
         keyOut.reset();
         keyOut.writeInt(-1);
-        reader.seekTo(keyOut.toSlice().getHeapMemory());
+        iterator.seekTo(keyOut.toSlice().getHeapMemory());
     }
 
     private void interleaveLookup(SstFileReader reader, MemorySliceOutput keyOut) throws Exception {
@@ -257,11 +260,12 @@ public class SstFileTest {
         }
     }
 
-    private static void assertScan(int startPosition, int lastPosition, SstFileReader reader)
+    private static void assertScan(
+            int startPosition, int lastPosition, SstFileReader.SstFileIterator iterator)
             throws Exception {
         int count = startPosition;
         BlockIterator iter;
-        while ((iter = reader.readBatch()) != null) {
+        while ((iter = iterator.readBatch()) != null) {
             while (iter.hasNext()) {
                 BlockEntry entry = iter.next();
                 Assertions.assertEquals(count * 2, entry.getKey().readInt(0));

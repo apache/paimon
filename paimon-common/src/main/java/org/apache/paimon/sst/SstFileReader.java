@@ -54,7 +54,6 @@ public class SstFileReader implements Closeable {
     private final BlockCache blockCache;
     private final BlockReader indexBlock;
     @Nullable private final FileBasedBloomFilter bloomFilter;
-    @Nullable private BlockIterator seekedDataBlock = null;
 
     public SstFileReader(
             Comparator<MemorySlice> comparator,
@@ -114,45 +113,8 @@ public class SstFileReader implements Closeable {
         return null;
     }
 
-    /**
-     * Seek to the position of the record whose key is exactly equal to or greater than the
-     * specified key.
-     */
-    public void seekTo(byte[] key) throws IOException {
-        MemorySlice keySlice = MemorySlice.wrap(key);
-
-        indexBlockIterator.seekTo(keySlice);
-        if (indexBlockIterator.hasNext()) {
-            seekedDataBlock = getNextBlock(indexBlockIterator);
-            // The index block entry key is the last key of the corresponding data block.
-            // If there is some index entry key >= targetKey, the related data block must
-            // also contain some key >= target key, which means seekedDataBlock.hasNext()
-            // must be true
-            seekedDataBlock.seekTo(keySlice);
-            Preconditions.checkState(seekedDataBlock.hasNext());
-        } else {
-            seekedDataBlock = null;
-        }
-    }
-
-    /**
-     * Read a batch of records from this SST File and move current record position to the next
-     * batch.
-     *
-     * @return current batch of records, null if reaching file end.
-     */
-    public BlockIterator readBatch() throws IOException {
-        if (seekedDataBlock != null) {
-            BlockIterator result = seekedDataBlock;
-            seekedDataBlock = null;
-            return result;
-        }
-
-        if (!indexBlockIterator.hasNext()) {
-            return null;
-        }
-
-        return getNextBlock(indexBlockIterator);
+    public SstFileIterator createIterator() throws IOException {
+        return new SstFileIterator(indexBlockIterator.detach());
     }
 
     private BlockIterator getNextBlock(BlockIterator indexBlockIterator) {
@@ -225,5 +187,56 @@ public class SstFileReader implements Closeable {
         }
         blockCache.close();
         // do not need to close input, since it will be closed by outer classes
+    }
+
+    /** An Iterator for range queries. */
+    public class SstFileIterator {
+        private final BlockIterator indexIterator;
+        private @Nullable BlockIterator seekedDataBlock = null;
+
+        SstFileIterator(BlockIterator indexBlockIterator) {
+            this.indexIterator = indexBlockIterator;
+        }
+
+        /**
+         * Seek to the position of the record whose key is exactly equal to or greater than the
+         * specified key.
+         */
+        public void seekTo(byte[] key) throws IOException {
+            MemorySlice keySlice = MemorySlice.wrap(key);
+
+            indexIterator.seekTo(keySlice);
+            if (indexIterator.hasNext()) {
+                seekedDataBlock = getNextBlock(indexIterator);
+                // The index block entry key is the last key of the corresponding data block.
+                // If there is some index entry key >= targetKey, the related data block must
+                // also contain some key >= target key, which means seekedDataBlock.hasNext()
+                // must be true
+                seekedDataBlock.seekTo(keySlice);
+                Preconditions.checkState(seekedDataBlock.hasNext());
+            } else {
+                seekedDataBlock = null;
+            }
+        }
+
+        /**
+         * Read a batch of records from this SST File and move current record position to the next
+         * batch.
+         *
+         * @return current batch of records, null if reaching file end.
+         */
+        public BlockIterator readBatch() throws IOException {
+            if (seekedDataBlock != null) {
+                BlockIterator result = seekedDataBlock;
+                seekedDataBlock = null;
+                return result;
+            }
+
+            if (!indexIterator.hasNext()) {
+                return null;
+            }
+
+            return getNextBlock(indexIterator);
+        }
     }
 }
