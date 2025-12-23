@@ -179,7 +179,8 @@ class PartialColumnWrite:
         expected_row_count = self.first_row_id_to_row_count_map.get(first_row_id, 0)
         if data.num_rows != expected_row_count:
             raise ValueError(
-                f"Data row count ({data.num_rows}) does not match expected row count ({expected_row_count}) for first_row_id {first_row_id}")
+                f"Data row count ({data.num_rows}) does not match expected row count ({expected_row_count}) "
+                f"for first_row_id {first_row_id}")
 
         # Create a file store write for this partition
         file_store_write = FileStoreWrite(self.table, self.commit_user)
