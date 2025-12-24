@@ -27,11 +27,14 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.CommonTestUtils;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -51,8 +54,10 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.utils.CommonTestUtils.waitUtil;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CompactAction}. */
@@ -208,7 +213,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         // assert dedicated compact job will expire snapshots
         SnapshotManager snapshotManager = table.snapshotManager();
-        CommonTestUtils.waitUtil(
+        waitUtil(
                 () ->
                         snapshotManager.latestSnapshotId() - 2
                                 == snapshotManager.earliestSnapshotId(),
@@ -733,6 +738,91 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                                         "--order_by",
                                         "dt,hh"))
                 .hasMessage("sort compact do not support 'partition_idle_time'.");
+    }
+
+    @Test
+    public void testStreamingCompactWithEmptyOverwriteUpgrade() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        tableOptions.put(CoreOptions.COMPACTION_FORCE_UP_LEVEL_0.key(), "true");
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        DataType[] fieldTypes = new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()};
+        RowType rowType = RowType.of(fieldTypes, new String[] {"k", "v", "pt"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("k", "pt"),
+                        Collections.emptyList(),
+                        tableOptions);
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().checkpointIntervalMs(500).build();
+        createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--catalog_conf",
+                        "warehouse=" + warehouse)
+                .withStreamExecutionEnvironment(env)
+                .build();
+        env.executeAsync();
+
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
+
+        writeData(rowData(1, 100, 1), rowData(2, 200, 1), rowData(1, 100, 2));
+
+        waitUtil(
+                () -> {
+                    Snapshot latest = snapshotManager.latestSnapshot();
+                    return latest != null && latest.commitKind() == Snapshot.CommitKind.COMPACT;
+                },
+                Duration.ofSeconds(10),
+                Duration.ofMillis(100));
+
+        long snapshotId1 = snapshotManager.latestSnapshotId();
+
+        // overwrite empty partition and let it upgrade
+        String newCommitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> newWrite = table.newWrite(newCommitUser);
+                TableCommitImpl newCommit =
+                        table.newCommit(newCommitUser)
+                                .withOverwrite(Collections.singletonMap("pt", "3"))) {
+            newWrite.write(rowData(1, 100, 3));
+            newWrite.write(rowData(2, 200, 3));
+            newCommit.commit(newWrite.prepareCommit(false, 1));
+        }
+        // write level 0 file to trigger compaction
+        writeData(rowData(1, 101, 3));
+
+        waitUtil(
+                () -> {
+                    Snapshot latest = snapshotManager.latestSnapshot();
+                    return latest.id() > snapshotId1
+                            && latest.commitKind() == Snapshot.CommitKind.COMPACT;
+                },
+                Duration.ofSeconds(10),
+                Duration.ofMillis(100));
+
+        validateResult(
+                table,
+                rowType,
+                table.newStreamScan(),
+                Arrays.asList(
+                        "+I[1, 100, 1]",
+                        "+I[1, 100, 2]",
+                        "+I[1, 101, 3]",
+                        "+I[2, 200, 1]",
+                        "+I[2, 200, 3]"),
+                60_000);
     }
 
     private void runAction(boolean isStreaming) throws Exception {
