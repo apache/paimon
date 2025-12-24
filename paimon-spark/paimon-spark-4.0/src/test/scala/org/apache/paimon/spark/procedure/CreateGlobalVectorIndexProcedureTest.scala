@@ -18,15 +18,12 @@
 
 package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.utils.Range
-
-import org.apache.spark.sql.streaming.StreamTest
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable
 
-class CreateGlobalVectorIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
+class CreateGlobalVectorIndexProcedureTest extends CreateGlobalIndexProcedureTest {
   test("create lucene-vector-knn global index") {
     import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory
     import java.util.ServiceLoader

@@ -137,47 +137,4 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
       assert(totalRowCount == 189088L)
     }
   }
-
-  test("create lucene-vector-knn global index") {
-    import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory
-    import java.util.ServiceLoader
-    import scala.collection.JavaConverters._
-
-    withTable("T") {
-      spark.sql("""
-                  |CREATE TABLE T (id INT, v ARRAY<FLOAT>)
-                  |TBLPROPERTIES (
-                  |  'bucket' = '-1',
-                  |  'global-index.row-count-per-shard' = '10000',
-                  |  'row-tracking.enabled' = 'true',
-                  |  'data-evolution.enabled' = 'true')
-                  |""".stripMargin)
-
-      val values = (0 until 100)
-        .map(
-          i => s"($i, array(cast($i as float), cast(${i + 1} as float), cast(${i + 2} as float)))")
-        .mkString(",")
-      spark.sql(s"INSERT INTO T VALUES $values")
-
-      val output =
-        spark
-          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => 'lucene-vector-knn', options => 'vector.dim=3')")
-          .collect()
-          .head
-
-      assert(output.getBoolean(0))
-
-      val table = loadTable("T")
-      val indexEntries = table
-        .store()
-        .newIndexFileHandler()
-        .scanEntries()
-        .asScala
-        .filter(_.indexFile().indexType() == "lucene-vector-knn")
-
-      assert(indexEntries.nonEmpty)
-      val totalRowCount = indexEntries.map(_.indexFile().rowCount()).sum
-      assert(totalRowCount == 100L)
-    }
-  }
 }
