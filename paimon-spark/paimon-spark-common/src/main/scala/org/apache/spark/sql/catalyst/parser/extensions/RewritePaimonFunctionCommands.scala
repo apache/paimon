@@ -103,7 +103,7 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
     plan.resolveOperatorsUp {
       case u: UnresolvedWith =>
         u.copy(cteRelations = u.cteRelations.map(
-          t => (t._1, transformPaimonV1Function(t._2).asInstanceOf[SubqueryAlias])))
+          t => t.copy(_1 = t._1, _2 = transformPaimonV1Function(t._2).asInstanceOf[SubqueryAlias])))
       case l: LogicalPlan =>
         l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
           case u: UnresolvedFunction =>
