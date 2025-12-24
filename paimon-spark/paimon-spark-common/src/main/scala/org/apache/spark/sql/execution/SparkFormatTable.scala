@@ -20,7 +20,6 @@ package org.apache.spark.sql.execution
 
 import org.apache.paimon.utils.StringUtils
 
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
@@ -32,7 +31,6 @@ import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable
 import org.apache.spark.sql.execution.datasources.v2.text.{TextScanBuilder, TextTable}
-import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
