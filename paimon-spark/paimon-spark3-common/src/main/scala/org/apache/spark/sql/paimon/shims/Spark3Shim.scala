@@ -18,19 +18,20 @@
 
 package org.apache.spark.sql.paimon.shims
 
-import org.apache.hadoop.fs.Path
 import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.spark.catalyst.analysis.Spark3ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark3SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark3ArrayData, Spark3InternalRow, Spark3InternalRowWithBlob, SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
+
+import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
 import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
@@ -136,29 +137,29 @@ class Spark3Shim extends SparkShim {
     throw new UnsupportedOperationException()
 
   def createFileIndex(
-                       options: CaseInsensitiveStringMap,
-                       sparkSession: SparkSession,
-                       paths: Seq[String],
-                       userSpecifiedSchema: Option[StructType],
-                       partitionSchema: StructType): PartitioningAwareFileIndex = {
+      options: CaseInsensitiveStringMap,
+      sparkSession: SparkSession,
+      paths: Seq[String],
+      userSpecifiedSchema: Option[StructType],
+      partitionSchema: StructType): PartitioningAwareFileIndex = {
 
     class PartitionedMetadataLogFileIndex(
-                                           sparkSession: SparkSession,
-                                           path: Path,
-                                           parameters: Map[String, String],
-                                           userSpecifiedSchema: Option[StructType],
-                                           override val partitionSchema: StructType)
+        sparkSession: SparkSession,
+        path: Path,
+        parameters: Map[String, String],
+        userSpecifiedSchema: Option[StructType],
+        override val partitionSchema: StructType)
       extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema)
 
     class PartitionedInMemoryFileIndex(
-                                        sparkSession: SparkSession,
-                                        rootPathsSpecified: Seq[Path],
-                                        parameters: Map[String, String],
-                                        userSpecifiedSchema: Option[StructType],
-                                        fileStatusCache: FileStatusCache = NoopCache,
-                                        userSpecifiedPartitionSpec: Option[PartitionSpec] = None,
-                                        metadataOpsTimeNs: Option[Long] = None,
-                                        override val partitionSchema: StructType)
+        sparkSession: SparkSession,
+        rootPathsSpecified: Seq[Path],
+        parameters: Map[String, String],
+        userSpecifiedSchema: Option[StructType],
+        fileStatusCache: FileStatusCache = NoopCache,
+        userSpecifiedPartitionSpec: Option[PartitionSpec] = None,
+        metadataOpsTimeNs: Option[Long] = None,
+        override val partitionSchema: StructType)
       extends InMemoryFileIndex(
         sparkSession,
         rootPathsSpecified,
