@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.RangeHelper;
@@ -110,6 +111,9 @@ public class DataEvolutionCompactCoordinator {
                                 .flatMap(meta -> snapshotReader.readManifest(meta).stream())
                                 .collect(Collectors.toList());
                 result.addAll(targetEntries);
+            }
+            if (result.isEmpty()) {
+                throw new EndOfScanException();
             }
             return result;
         }

@@ -548,7 +548,8 @@ public class CompactProcedure extends BaseProcedure {
                                                                     taskIterator.next());
                                                     messagesBytes.add(
                                                             messageSer.serialize(
-                                                                    task.doCompact(table)));
+                                                                    task.doCompact(
+                                                                            table, commitUser)));
                                                 }
                                                 return messagesBytes.iterator();
                                             });

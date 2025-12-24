@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.compact.AppendTableCompact;
+import org.apache.paimon.flink.compact.DataEvolutionTableCompact;
 import org.apache.paimon.flink.compact.IncrementalClusterCompact;
 import org.apache.paimon.flink.postpone.PostponeBucketCompactSplitSource;
 import org.apache.paimon.flink.postpone.RewritePostponeBucketCommittableOperator;
@@ -100,9 +101,6 @@ public class CompactAction extends TableActionBase {
                             "Only FileStoreTable supports compact action. The table type is '%s'.",
                             table.getClass().getName()));
         }
-        checkArgument(
-                !((FileStoreTable) table).coreOptions().dataEvolutionEnabled(),
-                "Compact action does not support data evolution table yet. ");
         HashMap<String, String> dynamicOptions = new HashMap<>(tableConf);
         dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
         table = table.copy(dynamicOptions);
@@ -146,7 +144,10 @@ public class CompactAction extends TableActionBase {
         if (fileStoreTable.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
             buildForPostponeBucketCompaction(env, fileStoreTable, isStreaming);
         } else if (fileStoreTable.bucketMode() == BucketMode.BUCKET_UNAWARE) {
-            if (fileStoreTable.coreOptions().clusteringIncrementalEnabled()) {
+
+            if (fileStoreTable.coreOptions().dataEvolutionEnabled()) {
+                buildForDataEvolutionTableCompact(env, fileStoreTable, isStreaming);
+            } else if (fileStoreTable.coreOptions().clusteringIncrementalEnabled()) {
                 new IncrementalClusterCompact(
                                 env, fileStoreTable, partitionPredicate, fullCompaction)
                         .build();
@@ -202,6 +203,16 @@ public class CompactAction extends TableActionBase {
         builder.withPartitionPredicate(getPartitionPredicate());
         builder.withContinuousMode(isStreaming);
         builder.withPartitionIdleTime(partitionIdleTime);
+        builder.build();
+    }
+
+    protected void buildForDataEvolutionTableCompact(
+            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
+            throws Exception {
+        checkArgument(!isStreaming, "Data evolution table compact only supports batch mode yet.");
+        DataEvolutionTableCompact builder =
+                new DataEvolutionTableCompact(env, identifier.getFullName(), table);
+        builder.withPartitionPredicate(getPartitionPredicate());
         builder.build();
     }
 

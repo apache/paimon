@@ -942,7 +942,7 @@ public class DataEvolutionTableTest extends TableTestBase {
         List<DataEvolutionCompactTask> tasks;
         while (!(tasks = coordinator.plan()).isEmpty()) {
             for (DataEvolutionCompactTask task : tasks) {
-                commitMessages.add(task.doCompact(table));
+                commitMessages.add(task.doCompact(table, "test-commit"));
             }
         }
 
