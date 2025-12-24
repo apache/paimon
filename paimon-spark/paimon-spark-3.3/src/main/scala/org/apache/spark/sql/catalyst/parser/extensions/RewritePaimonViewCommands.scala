@@ -22,7 +22,8 @@ import org.apache.paimon.spark.catalog.SupportView
 import org.apache.paimon.spark.catalyst.plans.logical.{CreatePaimonView, DropPaimonView, ResolvedIdentifier, ShowPaimonViews}
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, ResolveCatalogs, ResolvedNamespace, UnresolvedDBObjectName, UnresolvedView}
+import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, ResolvedNamespace, UnresolvedView}
+import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.ResolveNamespace
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.connector.catalog.{CatalogManager, LookupCatalog}
@@ -61,9 +62,9 @@ case class RewritePaimonViewCommands(spark: SparkSession)
 
     case ShowViews(namespace, pattern, output)
         if catalogManager.currentCatalog.isInstanceOf[SupportView] =>
-      val resolvedNamespace = new ResolveCatalogs(catalogManager)(namespace).transform {
-        case ResolvedNamespace(catalog, ns) if ns.isEmpty =>
-          ResolvedNamespace(catalog, catalogManager.currentNamespace)
+      val resolvedNamespace = ResolveNamespace(catalogManager)(namespace).transform {
+        case r: ResolvedNamespace if r.namespace.isEmpty =>
+          r.copy(namespace = catalogManager.currentNamespace)
       }
       ShowPaimonViews(resolvedNamespace, pattern, output)
   }
