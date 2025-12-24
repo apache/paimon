@@ -120,11 +120,11 @@ class RESTCatalog(Catalog):
         if response is not None:
             return Database(name, options)
 
-    def drop_database(self, name: str, ignore_if_exists: bool = False):
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False):
         try:
             self.rest_api.drop_database(name)
         except NoSuchResourceException as e:
-            if not ignore_if_exists:
+            if not ignore_if_not_exists:
                 # Convert REST API exception to catalog exception
                 raise DatabaseNotExistException(name) from e
 
@@ -168,13 +168,13 @@ class RESTCatalog(Catalog):
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier) from e
 
-    def drop_table(self, identifier: Union[str, Identifier], ignore_if_exists: bool = False):
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
             self.rest_api.drop_table(identifier)
         except NoSuchResourceException as e:
-            if not ignore_if_exists:
+            if not ignore_if_not_exists:
                 raise TableNotExistException(identifier) from e
 
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
