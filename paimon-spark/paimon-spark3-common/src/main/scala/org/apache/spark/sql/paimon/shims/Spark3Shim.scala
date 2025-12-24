@@ -37,8 +37,7 @@ import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.datasources._
-import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
-import org.apache.spark.sql.execution.streaming.sinks.FileStreamSink
+import org.apache.spark.sql.execution.streaming.{FileStreamSink,MetadataLogFileIndex}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
