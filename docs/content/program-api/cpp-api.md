@@ -178,7 +178,7 @@ PAIMON_RETURN_NOT_OK(committer->Commit(commit_message));
 
 ### Predicate pushdown
 
-A `ReadContextBuilder` is used to build reading utils and perform filter and projection pushdown.
+A `ReadContextBuilder` is used to pass context to reader, push down and filter is done by reader.
 
 ```c++
 ReadContextBuilder read_context_builder(table_path);
