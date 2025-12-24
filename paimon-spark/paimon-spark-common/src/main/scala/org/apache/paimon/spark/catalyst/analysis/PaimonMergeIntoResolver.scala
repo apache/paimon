@@ -33,7 +33,9 @@ object PaimonMergeIntoResolver extends PaimonMergeIntoResolverBase {
         // The condition must be from the target table
         val resolvedCond = condition.map(resolveCondition(resolve, _, merge, TARGET_ONLY))
         DeleteAction(resolvedCond)
-      case UpdateAction(condition, assignments) =>
+      case u: UpdateAction =>
+        val condition = u.condition
+        val assignments = u.assignments
         // The condition and value must be from the target table
         val resolvedCond = condition.map(resolveCondition(resolve, _, merge, TARGET_ONLY))
         val resolvedAssignments = resolveAssignments(resolve, assignments, merge, TARGET_ONLY)
