@@ -130,6 +130,59 @@ class RayDataTest(unittest.TestCase):
             ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
             "Name column should match"
         )
+        
+    def test_basic_ray_data_write(self):
+        """Test basic Ray Data write from PyPaimon table."""
+        # Create schema
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('value', pa.int64()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table('default.test_ray_basic', schema, False)
+        table = self.catalog.get_table('default.test_ray_basic')
+
+        # Write test data
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            'value': [100, 200, 300, 400, 500],
+        }, schema=pa_schema)
+        
+        from ray.data.read_api import from_arrow
+        ds = from_arrow(test_data)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_raydata(ds, parallelism=2)
+        # Read using Ray Data
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        arrow_result = table_read.to_arrow(splits)
+
+        # Verify Ray dataset
+        self.assertIsNotNone(arrow_result, "Ray dataset should not be None")
+        self.assertEqual(arrow_result.count(), 5, "Should have 5 rows")
+
+        # Test basic operations
+        sample_data = arrow_result.take(3)
+        self.assertEqual(len(sample_data), 3, "Should have 3 sample rows")
+
+        # Convert to pandas for verification
+        df = arrow_result.to_pandas()
+        self.assertEqual(len(df), 5, "DataFrame should have 5 rows")
+        # Sort by id to ensure order-independent comparison
+        df_sorted = df.sort_values(by='id').reset_index(drop=True)
+        self.assertEqual(list(df_sorted['id']), [1, 2, 3, 4, 5], "ID column should match")
+        self.assertEqual(
+            list(df_sorted['name']),
+            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            "Name column should match"
+        )
 
     def test_ray_data_with_predicate(self):
         """Test Ray Data read with predicate filtering."""
