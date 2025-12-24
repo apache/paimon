@@ -84,6 +84,17 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
                     Row("test_db", "va", false),
                     Row("test_db", "vab", false),
                     Row("test_db", "vc", false)))
+
+                // show views from database
+                sql(s"USE $hiveDbName")
+                checkAnswer(
+                  sql("SHOW VIEWS FROM test_db"),
+                  Seq(
+                    Row("test_db", "va", false),
+                    Row("test_db", "vab", false),
+                    Row("test_db", "vc", false)))
+                sql("USE test_db")
+
                 checkAnswer(
                   sql("SHOW VIEWS LIKE 'va*'"),
                   Seq(Row("test_db", "va", false), Row("test_db", "vab", false)))
