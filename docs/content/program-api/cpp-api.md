@@ -1,6 +1,6 @@
 ---
 title: "Cpp API"
-weight: 5
+weight: 6
 type: docs
 aliases:
   - /api/cpp-api.html
@@ -75,7 +75,7 @@ PAIMON_RETURN_NOT_OK(catalog->CreateDatabase('database_name', options, /*ignore_
 
 ## Create Table
 
-Table schema contains fields definition, partition keys, primary keys, table options
+Table schema contains fields definition, partition keys, primary keys, table options.
 The field definition is described by `Arrow::Schema`. All arguments except fields definition are optional.
 
 for example:
@@ -203,7 +203,7 @@ You can also pushdown projection by `ReadContextBuilder`:
 
 ```c++
 # select f3 and f2 columns
-read_context_builder.SetReadSchema({"f3", "f2"});
+read_context_builder.SetReadSchema({"f3", "f1", "f2"});
 ```
 
 ### Generate Splits
@@ -221,7 +221,7 @@ PAIMON_ASSIGN_OR_RAISE(std::shared_ptr<paimon::Plan> plan, scanner->CreatePlan()
 auto splits = plan->Splits();
 ```
 
-Finally, you can read data from the `splits` to various data format.
+Finally, you can read data from the `splits` to arrow format.
 
 ### Read Apache Arrow
 
