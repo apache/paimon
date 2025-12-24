@@ -36,9 +36,9 @@ import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, Equ
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
-import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Keep
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
@@ -316,16 +316,20 @@ case class MergeIntoPaimonDataEvolutionTable(
           ua.copy(condition = newCond, assignments = newAssignments)
       }
 
+      val shim = SparkShimLoader.shim
       val mergeRows = MergeRows(
         isSourceRowPresent = TrueLiteral,
         isTargetRowPresent = TrueLiteral,
         matchedInstructions = rewrittenUpdateActions
           .map(
             action => {
-              Keep(action.condition.getOrElse(TrueLiteral), action.assignments.map(a => a.value))
-            }) ++ Seq(Keep(TrueLiteral, output)),
+              shim.createKeep(
+                "COPY",
+                action.condition.getOrElse(TrueLiteral),
+                action.assignments.map(a => a.value))
+            }) ++ Seq(shim.createKeep("COPY", TrueLiteral, output)),
         notMatchedInstructions = Nil,
-        notMatchedBySourceInstructions = Seq(Keep(TrueLiteral, output)),
+        notMatchedBySourceInstructions = Seq(shim.createKeep("COPY", TrueLiteral, output)),
         checkCardinality = false,
         output = output,
         child = readPlan
@@ -355,16 +359,20 @@ case class MergeIntoPaimonDataEvolutionTable(
         Join(targetTableProj, sourceTableProj, LeftOuter, Some(matchedCondition), JoinHint.NONE)
       val rowFromSourceAttr = attribute(ROW_FROM_SOURCE, joinPlan)
       val rowFromTargetAttr = attribute(ROW_FROM_TARGET, joinPlan)
+      val shim = SparkShimLoader.shim
       val mergeRows = MergeRows(
         isSourceRowPresent = rowFromSourceAttr,
         isTargetRowPresent = rowFromTargetAttr,
         matchedInstructions = realUpdateActions
           .map(
             action => {
-              Keep(action.condition.getOrElse(TrueLiteral), action.assignments.map(a => a.value))
-            }) ++ Seq(Keep(TrueLiteral, output)),
+              shim.createKeep(
+                "COPY",
+                action.condition.getOrElse(TrueLiteral),
+                action.assignments.map(a => a.value))
+            }) ++ Seq(shim.createKeep("COPY", TrueLiteral, output)),
         notMatchedInstructions = Nil,
-        notMatchedBySourceInstructions = Seq(Keep(TrueLiteral, output)).toSeq,
+        notMatchedBySourceInstructions = Seq(shim.createKeep("COPY", TrueLiteral, output)).toSeq,
         checkCardinality = false,
         output = output,
         child = joinPlan
@@ -393,13 +401,15 @@ case class MergeIntoPaimonDataEvolutionTable(
       Join(sourceRelation, targetReadPlan, LeftAnti, Some(matchedCondition), JoinHint.NONE)
 
     // merge rows as there are multiple not matched actions
+    val shim = SparkShimLoader.shim
     val mergeRows = MergeRows(
       isSourceRowPresent = TrueLiteral,
       isTargetRowPresent = FalseLiteral,
       matchedInstructions = Nil,
       notMatchedInstructions = notMatchedActions.map {
         case insertAction: InsertAction =>
-          Keep(
+          shim.createKeep(
+            "COPY",
             insertAction.condition.getOrElse(TrueLiteral),
             insertAction.assignments.map(
               a =>

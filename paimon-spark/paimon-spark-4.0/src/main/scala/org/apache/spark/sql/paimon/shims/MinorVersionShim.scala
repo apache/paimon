@@ -24,8 +24,7 @@ import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
 import org.apache.spark.sql.execution.datasources._
-import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
-import org.apache.spark.sql.execution.streaming.sinks.FileStreamSink
+import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -34,15 +33,7 @@ import scala.collection.JavaConverters._
 object MinorVersionShim {
 
   def createKeep(context: String, condition: Expression, output: Seq[Expression]): Instruction = {
-    val ctx = context match {
-      case "COPY" => MergeRows.Copy
-      case "DELETE" => MergeRows.Delete
-      case "INSERT" => MergeRows.Insert
-      case "UPDATE" => MergeRows.Update
-      case _ => MergeRows.Copy
-    }
-
-    MergeRows.Keep(ctx, condition, output)
+    MergeRows.Keep(condition, output)
   }
 
   def createFileIndex(
