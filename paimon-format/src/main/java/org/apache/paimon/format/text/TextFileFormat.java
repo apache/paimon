@@ -65,9 +65,10 @@ public class TextFileFormat extends FileFormat {
 
     @Override
     public void validateDataFields(RowType rowType) {
-        // Text format only supports a single string column
-        assert (rowType.getFieldCount() == 1);
-        assert (rowType.getFieldTypes().get(0).equals(DataTypes.STRING()));
+        if (rowType.getFieldCount() != 1
+                && !rowType.getFieldTypes().get(0).equals(DataTypes.STRING())) {
+            throw new IllegalArgumentException("Text format only supports a single string column");
+        }
     }
 
     /** TEXT {@link FormatReaderFactory} implementation. */
