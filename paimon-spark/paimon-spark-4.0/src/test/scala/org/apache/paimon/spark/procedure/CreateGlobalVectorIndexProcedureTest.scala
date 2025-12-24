@@ -66,4 +66,59 @@ class CreateGlobalVectorIndexProcedureTest extends CreateGlobalIndexProcedureTes
       assert(totalRowCount == 100L)
     }
   }
+
+  test("create lucene-vector-knn global index with partition") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, v ARRAY<FLOAT>, pt STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |  PARTITIONED BY (pt)
+                  |""".stripMargin)
+
+      var values = (0 until 65000)
+        .map(
+          i =>
+            s"($i, array(cast($i as float), cast(${i + 1} as float), cast(${i + 2} as float)), 'p0')")
+        .mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      values = (0 until 35000)
+        .map(
+          i =>
+            s"($i, array(cast($i as float), cast(${i + 1} as float), cast(${i + 2} as float)), 'p1')")
+        .mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      values = (0 until 22222)
+        .map(
+          i =>
+            s"($i, array(cast($i as float), cast(${i + 1} as float), cast(${i + 2} as float)), 'p0')")
+        .mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      val output =
+        spark
+          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => 'lucene-vector-knn', options => 'vector.dim=3')")
+          .collect()
+          .head
+
+      assert(output.getBoolean(0))
+
+      val table = loadTable("T")
+      val indexEntries = table
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(_.indexFile().indexType() == "lucene-vector-knn")
+
+      assert(indexEntries.nonEmpty)
+      val totalRowCount = indexEntries.map(_.indexFile().rowCount()).sum
+      assert(totalRowCount == 122222L)
+    }
+  }
 }
