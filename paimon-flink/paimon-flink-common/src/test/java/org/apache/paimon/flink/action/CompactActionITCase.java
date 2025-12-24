@@ -29,6 +29,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -39,11 +40,13 @@ import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -907,6 +910,20 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         assertThat(fileMetas.size()).isEqualTo(1);
         assertThat(fileMetas.get(0).nonNullFirstRowId()).isEqualTo(0);
         assertThat(fileMetas.get(0).rowCount()).isEqualTo(10000);
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+
+        int value = 20000;
+        try (CloseableIterator<InternalRow> iterator = reader.toCloseableIterator()) {
+            while (iterator.hasNext()) {
+                InternalRow row = iterator.next();
+                assertThat(row.getInt(1)).isEqualTo(value++);
+            }
+        }
+
+        assertThat(value).isEqualTo(30000);
     }
 
     private void setFirstRowId(List<CommitMessage> commitables, long firstRowId) {

@@ -94,11 +94,11 @@ public class DataEvolutionTableCompactSource
         public InputStatus pollNext(ReaderOutput<DataEvolutionCompactTask> readerOutput)
                 throws Exception {
             try {
-                // do scan and plan action, emit append-only compaction tasks.
+                // do scan and plan action, emit data-evolution compaction tasks.
                 List<DataEvolutionCompactTask> tasks = compactionCoordinator.plan();
                 tasks.forEach(readerOutput::collect);
             } catch (EndOfScanException esf) {
-                LOG.info("Catching EndOfStreamException, the stream is finished.");
+                LOG.info("Catching EndOfScanException, the job is finished.");
                 return InputStatus.END_OF_INPUT;
             }
 
