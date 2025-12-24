@@ -226,6 +226,28 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<String> BRANCH =
             key("branch").stringType().defaultValue("main").withDescription("Specify branch name.");
 
+    public static final ConfigOption<Boolean> CHAIN_TABLE_ENABLED =
+            key("chain-table.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether enabled chain table.");
+
+    public static final ConfigOption<String> SCAN_FALLBACK_SNAPSHOT_BRANCH =
+            key("scan.fallback-snapshot-branch")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "When a batch job queries from a chain table, if a partition does not exist in the main branch, "
+                                    + "the reader will try to get this partition from chain snapshot branch.");
+
+    public static final ConfigOption<String> SCAN_FALLBACK_DELTA_BRANCH =
+            key("scan.fallback-delta-branch")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "When a batch job queries from a chain table, if a partition does not exist in either main or snapshot branch, "
+                                    + "the reader will try to get this partition from chain snapshot and delta branch together.");
+
     public static final String FILE_FORMAT_ORC = "orc";
     public static final String FILE_FORMAT_AVRO = "avro";
     public static final String FILE_FORMAT_PARQUET = "parquet";
@@ -3252,6 +3274,18 @@ public class CoreOptions implements Serializable {
 
     public int lookupMergeRecordsThreshold() {
         return options.get(LOOKUP_MERGE_RECORDS_THRESHOLD);
+    }
+
+    public boolean isChainTable() {
+        return options.get(CHAIN_TABLE_ENABLED);
+    }
+
+    public String scanFallbackSnapshotBranch() {
+        return options.get(SCAN_FALLBACK_SNAPSHOT_BRANCH);
+    }
+
+    public String scanFallbackDeltaBranch() {
+        return options.get(SCAN_FALLBACK_DELTA_BRANCH);
     }
 
     public boolean formatTableImplementationIsPaimon() {
