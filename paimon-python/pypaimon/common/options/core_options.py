@@ -33,6 +33,16 @@ class ExternalPathStrategy(str, Enum):
     SPECIFIC_FS = "specific-fs"
 
 
+class MergeEngine(str, Enum):
+    """
+    Specifies the merge engine for table with primary key.
+    """
+    DEDUPLICATE = "deduplicate"
+    PARTIAL_UPDATE = "partial-update"
+    AGGREGATE = "aggregation"
+    FIRST_ROW = "first-row"
+
+
 class CoreOptions:
     """Core options for Paimon tables."""
     # File format constants
@@ -206,6 +216,14 @@ class CoreOptions:
         .default_value(False)
         .with_description("Whether to enable deletion vectors.")
     )
+
+    MERGE_ENGINE: ConfigOption[MergeEngine] = (
+        ConfigOptions.key("merge-engine")
+        .enum_type(MergeEngine)
+        .default_value(MergeEngine.DEDUPLICATE)
+        .with_description("Specify the merge engine for table with primary key. "
+                          "Options: deduplicate, partial-update, aggregation, first-row.")
+    )
     # Commit options
     COMMIT_USER_PREFIX: ConfigOption[str] = (
         ConfigOptions.key("commit.user-prefix")
@@ -347,6 +365,9 @@ class CoreOptions:
 
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
+
+    def merge_engine(self, default=None):
+        return self.options.get(CoreOptions.MERGE_ENGINE, default)
 
     def data_file_external_paths(self, default=None):
         external_paths_str = self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS, default)
