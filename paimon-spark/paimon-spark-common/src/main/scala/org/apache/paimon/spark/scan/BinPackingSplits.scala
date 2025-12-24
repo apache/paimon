@@ -23,7 +23,7 @@ import org.apache.paimon.CoreOptions._
 import org.apache.paimon.io.DataFileMeta
 import org.apache.paimon.spark.PaimonInputPartition
 import org.apache.paimon.spark.util.SplitUtils
-import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackDataSplit
+import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackSplit
 import org.apache.paimon.table.format.FormatDataSplit
 import org.apache.paimon.table.source.{DataSplit, DeletionFile, Split}
 
@@ -77,7 +77,7 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
 
   def pack(splits: Array[Split]): Seq[PaimonInputPartition] = {
     val (toReshuffle, reserved) = splits.partition {
-      case _: FallbackDataSplit => false
+      case _: FallbackSplit => false
       case split: DataSplit => split.beforeFiles().isEmpty && split.rawConvertible()
       // Currently, format table reader only supports reading one file.
       case _: FormatDataSplit => false

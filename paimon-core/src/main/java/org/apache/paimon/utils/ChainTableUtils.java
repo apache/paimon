@@ -89,9 +89,9 @@ public class ChainTableUtils {
         LocalDateTime candidateTime = stratPartitionTime;
         LocalDateTime endPartitionTime =
                 timeExtractor.extract(partitionColumns, endPartitionValues);
-        while (candidateTime.compareTo(endPartitionTime) <= 0) {
+        while (!candidateTime.isAfter(endPartitionTime)) {
             if (isDailyPartition) {
-                if (candidateTime.compareTo(stratPartitionTime) > 0) {
+                if (candidateTime.isAfter(stratPartitionTime)) {
                     deltaPartitions.add(
                             serializer
                                     .toBinaryRow(

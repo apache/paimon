@@ -40,12 +40,11 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -54,17 +53,19 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
 /**
  * Chain table which mainly read from the snapshot branch. However, if the snapshot branch does not
  * have a partition, it will fall back to chain read.
  */
 public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
-    public ChainGroupReadTable(
-            AbstractFileStoreTable snapshotStoreTable, AbstractFileStoreTable deltaStoreTable) {
+    public ChainGroupReadTable(FileStoreTable snapshotStoreTable, FileStoreTable deltaStoreTable) {
         super(snapshotStoreTable, deltaStoreTable);
-        Preconditions.checkArgument(snapshotStoreTable instanceof PrimaryKeyFileStoreTable);
-        Preconditions.checkArgument(deltaStoreTable instanceof PrimaryKeyFileStoreTable);
+        checkArgument(snapshotStoreTable instanceof PrimaryKeyFileStoreTable);
+        checkArgument(deltaStoreTable instanceof PrimaryKeyFileStoreTable);
     }
 
     @Override
@@ -187,20 +188,20 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                 List<BinaryRow> deltaPartitions = fallbackScan.listPartitions();
                 deltaPartitions =
                         deltaPartitions.stream()
-                                .sorted((o1, o2) -> partitionComparator.compare(o1, o2))
+                                .sorted(partitionComparator)
                                 .collect(Collectors.toList());
                 BinaryRow maxPartition = deltaPartitions.get(deltaPartitions.size() - 1);
                 Predicate snapshotPredicate =
                         ChainTableUtils.createTriangularPredicate(
                                 maxPartition,
                                 partitionConverter,
-                                (Integer i, Object j) -> builder.equal(i, j),
-                                (Integer i, Object j) -> builder.lessThan(i, j));
+                                builder::equal,
+                                builder::lessThan);
                 mainScan.withPartitionFilter(snapshotPredicate);
                 List<BinaryRow> candidateSnapshotPartitions = mainScan.listPartitions();
                 candidateSnapshotPartitions =
                         candidateSnapshotPartitions.stream()
-                                .sorted((o1, o2) -> partitionComparator.compare(o1, o2))
+                                .sorted(partitionComparator)
                                 .collect(Collectors.toList());
                 Map<BinaryRow, BinaryRow> partitionMapping =
                         ChainTableUtils.findFirstLatestPartitions(
@@ -214,13 +215,13 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                                 ChainTableUtils.createTriangularPredicate(
                                         partitionParis.getKey(),
                                         partitionConverter,
-                                        (Integer i, Object j) -> builder.equal(i, j),
-                                        (Integer i, Object j) -> builder.lessThan(i, j)));
+                                        builder::equal,
+                                        builder::lessThan));
                         predicates.add(
                                 ChainTableUtils.createLinearPredicate(
                                         partitionParis.getKey(),
                                         partitionConverter,
-                                        (Integer i, Object j) -> builder.equal(i, j)));
+                                        builder::equal));
                         deltaScan.withPartitionFilter(PredicateBuilder.or(predicates));
                     } else {
                         List<BinaryRow> selectedDeltaPartitions =
@@ -237,7 +238,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     List<Split> subSplits = deltaScan.plan().splits();
                     Set<String> snapshotFileNames = new HashSet<>();
                     if (partitionParis.getValue() != null) {
-                        snapshotScan.withPartitionFilter(Arrays.asList(partitionParis.getValue()));
+                        snapshotScan.withPartitionFilter(
+                                Collections.singletonList(partitionParis.getValue()));
                         List<Split> mainSubSplits = snapshotScan.plan().splits();
                         snapshotFileNames =
                                 mainSubSplits.stream()
@@ -254,8 +256,10 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     Map<Integer, List<DataSplit>> bucketSplits = new LinkedHashMap<>();
                     for (Split split : subSplits) {
                         DataSplit dataSplit = (DataSplit) split;
-                        Preconditions.checkArgument(
-                                dataSplit.totalBuckets() == options.bucket(),
+                        Integer totalBuckets = dataSplit.totalBuckets();
+                        checkNotNull(totalBuckets);
+                        checkArgument(
+                                totalBuckets == options.bucket(),
                                 "Inconsistent bucket num " + dataSplit.bucket());
                         bucketSplits
                                 .computeIfAbsent(dataSplit.bucket(), k -> new ArrayList<>())
@@ -288,7 +292,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     }
                 }
             }
-            return new DataFilePlan(splits);
+            return new DataFilePlan<>(splits);
         }
 
         @Override
@@ -349,7 +353,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            Preconditions.checkArgument(split instanceof ChainSplit);
+            checkArgument(split instanceof ChainSplit);
             return fallbackRead.createReader(split);
         }
     }

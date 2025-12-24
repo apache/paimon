@@ -24,7 +24,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
@@ -37,7 +36,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
@@ -83,12 +81,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         this.fallback = fallback;
 
         Preconditions.checkArgument(!(wrapped instanceof FallbackReadFileStoreTable));
-        Preconditions.checkArgument(isValidFallbackTable());
-    }
-
-    private boolean isValidFallbackTable() {
-        return fallback instanceof ChainGroupReadTable
-                || !(fallback instanceof FallbackReadFileStoreTable);
+        if (fallback instanceof FallbackReadFileStoreTable) {
+            // ChainGroupReadTable need to be wrapped again
+            if (!(fallback instanceof ChainGroupReadTable)) {
+                throw new IllegalArgumentException(
+                        "This is a bug, perhaps there is a recursive call.");
+            }
+        }
     }
 
     public FileStoreTable fallback() {
@@ -248,8 +247,42 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         return true;
     }
 
-    /** DataSplit for fallback read. */
-    public static class FallbackDataSplit extends DataSplit {
+    /** Split for fallback read. */
+    public interface FallbackSplit extends Split {
+        boolean isFallback();
+
+        Split wrapped();
+    }
+
+    private static class FallbackSplitImpl implements FallbackSplit {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Split split;
+        private final boolean isFallback;
+
+        public FallbackSplitImpl(Split split, boolean isFallback) {
+            this.split = split;
+            this.isFallback = isFallback;
+        }
+
+        @Override
+        public boolean isFallback() {
+            return isFallback;
+        }
+
+        @Override
+        public Split wrapped() {
+            return split;
+        }
+
+        @Override
+        public long rowCount() {
+            return split.rowCount();
+        }
+    }
+
+    private static class FallbackDataSplit extends DataSplit implements FallbackSplit {
 
         private static final long serialVersionUID = 1L;
 
@@ -290,6 +323,23 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             DataSplit dataSplit = DataSplit.deserialize(in);
             return new FallbackDataSplit(dataSplit, in.readBoolean());
         }
+
+        @Override
+        public boolean isFallback() {
+            return isFallback;
+        }
+
+        @Override
+        public Split wrapped() {
+            return this;
+        }
+    }
+
+    public static FallbackSplit toFallbackSplit(Split split, boolean fallback) {
+        if (split instanceof DataSplit) {
+            return new FallbackDataSplit((DataSplit) split, fallback);
+        }
+        return new FallbackSplitImpl(split, fallback);
     }
 
     /** Scan implementation for {@link FallbackReadFileStoreTable}. */
@@ -393,7 +443,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             Set<BinaryRow> completePartitions = new HashSet<>();
             for (Split split : mainScan.plan().splits()) {
                 DataSplit dataSplit = (DataSplit) split;
-                splits.add(new FallbackDataSplit(dataSplit, false));
+                splits.add(toFallbackSplit(dataSplit, false));
                 completePartitions.add(dataSplit.partition());
             }
 
@@ -404,15 +454,10 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             if (!remainingPartitions.isEmpty()) {
                 fallbackScan.withPartitionFilter(remainingPartitions);
                 for (Split split : fallbackScan.plan().splits()) {
-                    if (split instanceof DataSplit) {
-                        splits.add(new FallbackDataSplit((DataSplit) split, true));
-                    } else {
-                        Preconditions.checkArgument(split instanceof ChainSplit);
-                        splits.add(split);
-                    }
+                    splits.add(toFallbackSplit(split, true));
                 }
             }
-            return new DataFilePlan(splits);
+            return new DataFilePlan<>(splits);
         }
 
         @Override
@@ -483,29 +528,19 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            if (wrapped.coreOptions().isChainTable()) {
-                if (split instanceof ChainSplit) {
-                    return fallbackRead.createReader(split);
-                } else {
-                    return mainRead.createReader(split);
-                }
-            }
-            if (split instanceof FallbackDataSplit) {
-                FallbackDataSplit fallbackDataSplit = (FallbackDataSplit) split;
-                if (fallbackDataSplit.isFallback) {
+            if (split instanceof FallbackSplit) {
+                FallbackSplit fallbackSplit = (FallbackSplit) split;
+                if (fallbackSplit.isFallback()) {
                     try {
-                        return fallbackRead.createReader(fallbackDataSplit);
+                        return fallbackRead.createReader(fallbackSplit.wrapped());
                     } catch (Exception ignored) {
                         LOG.error(
-                                "Reading from fallback branch has problems for files: {}",
-                                fallbackDataSplit.dataFiles().stream()
-                                        .map(DataFileMeta::fileName)
-                                        .collect(Collectors.joining(", ")));
+                                "Reading from fallback branch has problems: {}",
+                                fallbackSplit.wrapped());
                     }
                 }
             }
-            DataSplit dataSplit = (DataSplit) split;
-            return mainRead.createReader(dataSplit);
+            return mainRead.createReader(split);
         }
     }
 }
