@@ -22,62 +22,47 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable}
-import org.apache.spark.sql.execution.datasources.{DataSource, FileStatusCache, InMemoryFileIndex, NoopCache, PartitioningAwareFileIndex, PartitionSpec}
+import org.apache.spark.sql.execution.datasources.{DataSource, FileStatusCache, InMemoryFileIndex, NoopCache, PartitionSpec, PartitioningAwareFileIndex}
 import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
 import org.apache.spark.sql.execution.streaming.sinks.FileStreamSink
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
+
+import org.apache.hadoop.fs.Path
+
+import java.util.{Map => JMap}
+
 import scala.collection.JavaConverters._
 
 object MinorVersionShim {
 
-  def createCTERelationRef(
-      cteId: Long,
-      resolved: Boolean,
-      output: Seq[Attribute],
-      isStreaming: Boolean): CTERelationRef = CTERelationRef(cteId, resolved, output, isStreaming)
-
-  def createMergeIntoTable(
-      targetTable: LogicalPlan,
-      sourceTable: LogicalPlan,
-      mergeCondition: Expression,
-      matchedActions: Seq[MergeAction],
-      notMatchedActions: Seq[MergeAction],
-      notMatchedBySourceActions: Seq[MergeAction]): MergeIntoTable = {
-    MergeIntoTable(
-      targetTable,
-      sourceTable,
-      mergeCondition,
-      matchedActions,
-      notMatchedActions,
-      notMatchedBySourceActions)
-  }
 
   def createFileIndex(
-      options: CaseInsensitiveStringMap,
-      sparkSession: SparkSession,
-      paths: Seq[String],
-      userSpecifiedSchema: Option[StructType],
-      partitionSchema: StructType): PartitioningAwareFileIndex = {
+                       options: CaseInsensitiveStringMap,
+                       sparkSession: SparkSession,
+                       paths: Seq[String],
+                       userSpecifiedSchema: Option[StructType],
+                       partitionSchema: StructType): PartitioningAwareFileIndex ={
+
 
     class PartitionedMetadataLogFileIndex(
-        sparkSession: SparkSession,
-        path: Path,
-        parameters: Map[String, String],
-        userSpecifiedSchema: Option[StructType],
-        override val partitionSchema: StructType)
+                                           sparkSession: SparkSession,
+                                           path: Path,
+                                           parameters: Map[String, String],
+                                           userSpecifiedSchema: Option[StructType],
+                                           override val partitionSchema: StructType)
       extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema)
 
     class PartitionedInMemoryFileIndex(
-        sparkSession: SparkSession,
-        rootPathsSpecified: Seq[Path],
-        parameters: Map[String, String],
-        userSpecifiedSchema: Option[StructType],
-        fileStatusCache: FileStatusCache = NoopCache,
-        userSpecifiedPartitionSpec: Option[PartitionSpec] = None,
-        metadataOpsTimeNs: Option[Long] = None,
-        override val partitionSchema: StructType)
+                                        sparkSession: SparkSession,
+                                        rootPathsSpecified: Seq[Path],
+                                        parameters: Map[String, String],
+                                        userSpecifiedSchema: Option[StructType],
+                                        fileStatusCache: FileStatusCache = NoopCache,
+                                        userSpecifiedPartitionSpec: Option[PartitionSpec] = None,
+                                        metadataOpsTimeNs: Option[Long] = None,
+                                        override val partitionSchema: StructType)
       extends InMemoryFileIndex(
         sparkSession,
         rootPathsSpecified,
@@ -86,6 +71,7 @@ object MinorVersionShim {
         fileStatusCache,
         userSpecifiedPartitionSpec,
         metadataOpsTimeNs)
+
 
     def globPaths: Boolean = {
       val entry = options.get(DataSource.GLOB_PATHS_KEY)

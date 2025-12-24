@@ -34,10 +34,17 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.execution.datasources._
+import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
 import org.apache.spark.sql.types.{DataTypes, StructType, VariantType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.unsafe.types.VariantVal
 
+import org.apache.hadoop.fs.Path
+
 import java.util.{Map => JMap}
+
+import scala.jdk.CollectionConverters._
 
 class Spark4Shim extends SparkShim {
 
@@ -56,9 +63,9 @@ class Spark4Shim extends SparkShim {
   }
 
   override def createSparkInternalRowWithBlob(
-      rowType: RowType,
-      blobFieldIndex: Int,
-      blobAsDescriptor: Boolean): SparkInternalRow = {
+                                               rowType: RowType,
+                                               blobFieldIndex: Int,
+                                               blobAsDescriptor: Boolean): SparkInternalRow = {
     new Spark4InternalRowWithBlob(rowType, blobFieldIndex, blobAsDescriptor)
   }
 
@@ -67,42 +74,42 @@ class Spark4Shim extends SparkShim {
   }
 
   override def createTable(
-      tableCatalog: TableCatalog,
-      ident: Identifier,
-      schema: StructType,
-      partitions: Array[Transform],
-      properties: JMap[String, String]): Table = {
+                            tableCatalog: TableCatalog,
+                            ident: Identifier,
+                            schema: StructType,
+                            partitions: Array[Transform],
+                            properties: JMap[String, String]): Table = {
     val columns = CatalogV2Util.structTypeToV2Columns(schema)
     tableCatalog.createTable(ident, columns, partitions, properties)
   }
 
   override def createCTERelationRef(
-      cteId: Long,
-      resolved: Boolean,
-      output: Seq[Attribute],
-      isStreaming: Boolean): CTERelationRef = {
+                                     cteId: Long,
+                                     resolved: Boolean,
+                                     output: Seq[Attribute],
+                                     isStreaming: Boolean): CTERelationRef = {
     CTERelationRef(cteId, resolved, output.toSeq, isStreaming)
   }
 
   override def supportsHashAggregate(
-      aggregateBufferAttributes: Seq[Attribute],
-      groupingExpression: Seq[Expression]): Boolean = {
+                                      aggregateBufferAttributes: Seq[Attribute],
+                                      groupingExpression: Seq[Expression]): Boolean = {
     Aggregate.supportsHashAggregate(aggregateBufferAttributes.toSeq, groupingExpression.toSeq)
   }
 
   override def supportsObjectHashAggregate(
-      aggregateExpressions: Seq[AggregateExpression],
-      groupByExpressions: Seq[Expression]): Boolean =
+                                            aggregateExpressions: Seq[AggregateExpression],
+                                            groupByExpressions: Seq[Expression]): Boolean =
     Aggregate.supportsObjectHashAggregate(aggregateExpressions.toSeq, groupByExpressions.toSeq)
 
   override def createMergeIntoTable(
-      targetTable: LogicalPlan,
-      sourceTable: LogicalPlan,
-      mergeCondition: Expression,
-      matchedActions: Seq[MergeAction],
-      notMatchedActions: Seq[MergeAction],
-      notMatchedBySourceActions: Seq[MergeAction],
-      withSchemaEvolution: Boolean): MergeIntoTable = {
+                                     targetTable: LogicalPlan,
+                                     sourceTable: LogicalPlan,
+                                     mergeCondition: Expression,
+                                     matchedActions: Seq[MergeAction],
+                                     notMatchedActions: Seq[MergeAction],
+                                     notMatchedBySourceActions: Seq[MergeAction],
+                                     withSchemaEvolution: Boolean): MergeIntoTable = {
     MergeIntoTable(
       targetTable,
       sourceTable,
@@ -132,4 +139,19 @@ class Spark4Shim extends SparkShim {
     dataType.isInstanceOf[VariantType]
 
   override def SparkVariantType(): org.apache.spark.sql.types.DataType = DataTypes.VariantType
+
+  override def createFileIndex(
+                                options: CaseInsensitiveStringMap,
+                                sparkSession: SparkSession,
+                                paths: Seq[String],
+                                userSpecifiedSchema: Option[StructType],
+                                partitionSchema: StructType): PartitioningAwareFileIndex = {
+    MinorVersionShim.createFileIndex(
+      options,
+      sparkSession,
+      paths,
+      userSpecifiedSchema,
+      partitionSchema)
+  }
 }
+
