@@ -41,15 +41,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
-/**
- * Source for unaware-bucket Compaction.
- *
- * <p>Note: The function is the source of unaware-bucket compactor coordinator. It will read the
- * latest snapshot continuously by compactionCoordinator, and generate new compaction tasks. The
- * source is used in unaware-bucket compaction job (both stand-alone and write-combined). Besides,
- * we don't need to save state in this source, it will invoke a full scan when starting up, and scan
- * continuously for the following snapshot.
- */
+/** Source for data-evolution table Compaction. */
 public class DataEvolutionTableCompactSource
         extends AbstractNonCoordinatedSource<DataEvolutionCompactTask> {
 
