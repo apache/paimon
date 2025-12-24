@@ -27,7 +27,6 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
-import java.io.IOException;
 import java.util.List;
 
 /** Lucene vector global indexer. */

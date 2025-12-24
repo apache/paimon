@@ -125,8 +125,7 @@ public class LuceneVectorGlobalIndexTest {
                             result.meta()));
 
             try (LuceneVectorGlobalIndexReader reader =
-                    new LuceneVectorGlobalIndexReader(
-                            fileReader, metas, vectorType)) {
+                    new LuceneVectorGlobalIndexReader(fileReader, metas, vectorType)) {
                 VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 3, fieldName);
                 GlobalIndexResult searchResult = reader.visitVectorSearch(vectorSearch);
                 assertThat(searchResult).isNotNull();
@@ -164,8 +163,7 @@ public class LuceneVectorGlobalIndexTest {
                             result.meta()));
 
             try (LuceneVectorGlobalIndexReader reader =
-                    new LuceneVectorGlobalIndexReader(
-                            fileReader, metas, vectorType)) {
+                    new LuceneVectorGlobalIndexReader(fileReader, metas, vectorType)) {
                 // Verify search works with this dimension
                 VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 5, fieldName);
                 GlobalIndexResult searchResult = reader.visitVectorSearch(vectorSearch);
@@ -236,8 +234,7 @@ public class LuceneVectorGlobalIndexTest {
             RoaringNavigableMap64 filterResults = new RoaringNavigableMap64();
             filterResults.add(expectedRowId);
             vectorSearch =
-                    new VectorSearch(
-                            vectors[0], 1, fieldName).withIncludeRowIds(filterResults);
+                    new VectorSearch(vectors[0], 1, fieldName).withIncludeRowIds(filterResults);
             result = (LuceneVectorSearchGlobalIndexResult) reader.visitVectorSearch(vectorSearch);
             assertThat(containsRowId(result, expectedRowId)).isTrue();
 
@@ -289,8 +286,7 @@ public class LuceneVectorGlobalIndexTest {
         }
 
         try (LuceneVectorGlobalIndexReader reader =
-                new LuceneVectorGlobalIndexReader(
-                        fileReader, metas, byteVectorType)) {
+                new LuceneVectorGlobalIndexReader(fileReader, metas, byteVectorType)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 1, fieldName);
             GlobalIndexResult result = reader.visitVectorSearch(vectorSearch);
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
