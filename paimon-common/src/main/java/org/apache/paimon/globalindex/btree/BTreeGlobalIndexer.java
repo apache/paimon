@@ -94,7 +94,7 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
     @Override
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
-        // Single file reader only supports
+        // Single reader only supports read one index file
         Preconditions.checkState(files.size() == 1);
         return new BTreeIndexReader(keySerializer, fileReader, files.get(0), cacheManager.get());
     }

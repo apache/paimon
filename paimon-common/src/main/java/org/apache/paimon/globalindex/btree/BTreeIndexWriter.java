@@ -22,6 +22,7 @@ import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.sst.SstFileWriter;
 import org.apache.paimon.utils.LazyField;
@@ -91,13 +92,6 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
 
         byte[] keyBytes = keySerializer.serialize(key);
 
-        if (firstKeyBytes == null) {
-            firstKeyBytes = keyBytes;
-        }
-        lastKeyBytes = keyBytes;
-        minRowId = Math.min(minRowId, rowId);
-        maxRowId = Math.max(maxRowId, rowId);
-
         if (lastKey != null && comparator.compare(key, lastKey) != 0) {
             try {
                 flush();
@@ -105,9 +99,16 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
                 throw new RuntimeException("Error in writing btree index files.", e);
             }
         }
-
         lastKey = key;
         currentRowIds.add(rowId);
+
+        // update stats
+        if (firstKeyBytes == null) {
+            firstKeyBytes = keyBytes;
+        }
+        lastKeyBytes = keyBytes;
+        minRowId = Math.min(minRowId, rowId);
+        maxRowId = Math.max(maxRowId, rowId);
     }
 
     private void flush() throws IOException {
@@ -157,18 +158,27 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
     }
 
     private int writeNullBitmap() throws IOException {
+        MemorySliceOutput sliceOutput;
         CRC32 crc32 = new CRC32();
+
         if (!nullBitmap.initialized()) {
+            sliceOutput = new MemorySliceOutput(4);
             crc32.update(0);
-            out.write(0);
+            sliceOutput.writeInt(0);
         } else {
             byte[] serializedBitmap = nullBitmap.get().serialize();
             int length = serializedBitmap.length;
             crc32.update(length);
             crc32.update(serializedBitmap, 0, length);
-            out.write(length);
-            out.write(serializedBitmap);
+
+            sliceOutput = new MemorySliceOutput(length + 4);
+            sliceOutput.writeInt(length);
+            sliceOutput.writeBytes(serializedBitmap);
         }
+
+        MemorySlice slice = sliceOutput.toSlice();
+        out.write(slice.getHeapMemory(), slice.offset(), slice.length());
+
         return (int) crc32.getValue();
     }
 

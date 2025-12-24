@@ -27,7 +27,6 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.IndexPathFactory;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.util.UUID;
 
 /** Helper class for managing global index files. */

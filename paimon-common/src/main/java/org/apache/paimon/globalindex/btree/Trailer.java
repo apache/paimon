@@ -59,4 +59,9 @@ public class Trailer {
         output.writeInt(trailer.crc32c);
         output.writeInt(BTreeIndexWriter.MAGIC_NUMBER);
     }
+
+    @Override
+    public String toString() {
+        return "Trailer{" + "nullBitmapOffset=" + nullBitmapOffset + ", crc32c=" + crc32c + '}';
+    }
 }

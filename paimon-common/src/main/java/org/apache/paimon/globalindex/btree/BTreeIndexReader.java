@@ -64,36 +64,42 @@ public class BTreeIndexReader implements GlobalIndexReader {
         this.input = fileReader.getInputStream(globalIndexIOMeta.fileName());
         long fileSize = globalIndexIOMeta.fileSize();
         Trailer trailer = readTrailer(fileSize - Trailer.TRAILER_LENGTH);
-        this.nullBitmap = readNullBitmap(trailer);
+        this.nullBitmap = readNullBitmap(trailer, fileSize);
 
         this.reader =
                 new SstFileReader(
                         createSliceComparator(keySerializer),
-                        fileSize - Trailer.TRAILER_LENGTH,
+                        trailer.getNullBitmapOffset(),
                         fileReader.filePath(globalIndexIOMeta.fileName()),
                         input,
                         cacheManager);
     }
 
     private Trailer readTrailer(long offset) throws IOException {
-        byte[] trailerEncodings = new byte[Trailer.TRAILER_LENGTH];
-        input.seek(offset);
-        IOUtils.readFully(input, trailerEncodings);
+        byte[] trailerEncodings = readSlice(offset, Trailer.TRAILER_LENGTH);
         return Trailer.readTrailer(MemorySlice.wrap(trailerEncodings));
     }
 
-    private RoaringNavigableMap64 readNullBitmap(Trailer trailer) throws IOException {
+    private RoaringNavigableMap64 readNullBitmap(Trailer trailer, long fileSize)
+            throws IOException {
         CRC32 crc32c = new CRC32();
-        input.seek(trailer.getNullBitmapOffset());
-        int length = input.read();
+        MemorySliceInput sliceInput =
+                MemorySlice.wrap(
+                                readSlice(
+                                        trailer.getNullBitmapOffset(),
+                                        (int)
+                                                (fileSize
+                                                        - trailer.getNullBitmapOffset()
+                                                        - Trailer.TRAILER_LENGTH)))
+                        .toInput();
+
+        int length = sliceInput.readInt();
         Preconditions.checkState(length >= 0);
         crc32c.update(length);
 
         RoaringNavigableMap64 nullBitmap = new RoaringNavigableMap64();
         if (length != 0) {
-            byte[] nullBitmapEncodings = new byte[length];
-            IOUtils.readFully(input, nullBitmapEncodings);
-
+            byte[] nullBitmapEncodings = sliceInput.readSlice(length).copyBytes();
             crc32c.update(nullBitmapEncodings, 0, length);
             Preconditions.checkState(
                     (int) crc32c.getValue() == trailer.getCrc32c(),
@@ -107,6 +113,13 @@ public class BTreeIndexReader implements GlobalIndexReader {
         }
 
         return nullBitmap;
+    }
+
+    private byte[] readSlice(long offset, int size) throws IOException {
+        byte[] data = new byte[size];
+        input.seek(offset);
+        IOUtils.readFully(input, data);
+        return data;
     }
 
     private Comparator<MemorySlice> createSliceComparator(KeySerializer keySerializer) {
@@ -123,6 +136,7 @@ public class BTreeIndexReader implements GlobalIndexReader {
 
     @Override
     public GlobalIndexResult visitIsNotNull(FieldRef fieldRef) {
+        // nulls are stored separately in null bitmap.
         return GlobalIndexResult.create(
                 () -> {
                     try {
@@ -135,6 +149,7 @@ public class BTreeIndexReader implements GlobalIndexReader {
 
     @Override
     public GlobalIndexResult visitIsNull(FieldRef fieldRef) {
+        // nulls are stored separately in null bitmap.
         return GlobalIndexResult.create(() -> nullBitmap);
     }
 
@@ -313,16 +328,20 @@ public class BTreeIndexReader implements GlobalIndexReader {
         BlockIterator dataIter;
         Map.Entry<MemorySlice, MemorySlice> entry;
         while ((dataIter = fileIter.readBatch()) != null) {
-            while ((entry = dataIter.next()) != null) {
+            while (dataIter.hasNext()) {
+                entry = dataIter.next();
+
                 if (!fromInclusive && !skipped) {
                     // this is correct only if the underlying file do not have duplicated keys.
                     skipped = true;
                     continue;
                 }
+
                 int difference = comparator.compare(keySerializer.deserialize(entry.getKey()), to);
                 if (difference > 0 || !toInclusive && difference == 0) {
                     return result;
                 }
+
                 for (long rowId : deserializeRowIds(entry.getValue())) {
                     result.add(rowId);
                 }
