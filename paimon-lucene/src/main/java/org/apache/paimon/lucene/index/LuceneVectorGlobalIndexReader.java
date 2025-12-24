@@ -72,9 +72,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     private final DataType fieldType;
 
     public LuceneVectorGlobalIndexReader(
-            GlobalIndexFileReader fileReader,
-            List<GlobalIndexIOMeta> ioMetas,
-            DataType fieldType) {
+            GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> ioMetas, DataType fieldType) {
         this.fileReader = fileReader;
         this.ioMetas = ioMetas;
         this.fieldType = fieldType;
@@ -93,8 +91,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
             throw new RuntimeException(
                     String.format(
                             "Failed to search vector index with fieldName=%s, limit=%d",
-                            vectorSearch.fieldName(),
-                            vectorSearch.limit()),
+                            vectorSearch.fieldName(), vectorSearch.limit()),
                     e);
         }
     }
