@@ -18,17 +18,8 @@
 
 package org.apache.spark.sql.paimon.shims
 
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable}
-import org.apache.spark.sql.execution.datasources.{DataSource, FileStatusCache, InMemoryFileIndex, NoopCache, PartitioningAwareFileIndex, PartitionSpec}
-import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
-import org.apache.spark.sql.execution.streaming.sinks.FileStreamSink
-import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-
-import scala.collection.JavaConverters._
 
 object MinorVersionShim {
 
@@ -52,72 +43,6 @@ object MinorVersionShim {
       matchedActions,
       notMatchedActions,
       notMatchedBySourceActions)
-  }
-
-  def createFileIndex(
-      options: CaseInsensitiveStringMap,
-      sparkSession: SparkSession,
-      paths: Seq[String],
-      userSpecifiedSchema: Option[StructType],
-      partitionSchema: StructType): PartitioningAwareFileIndex = {
-
-    class PartitionedMetadataLogFileIndex(
-        sparkSession: SparkSession,
-        path: Path,
-        parameters: Map[String, String],
-        userSpecifiedSchema: Option[StructType],
-        override val partitionSchema: StructType)
-      extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema)
-
-    class PartitionedInMemoryFileIndex(
-        sparkSession: SparkSession,
-        rootPathsSpecified: Seq[Path],
-        parameters: Map[String, String],
-        userSpecifiedSchema: Option[StructType],
-        fileStatusCache: FileStatusCache = NoopCache,
-        userSpecifiedPartitionSpec: Option[PartitionSpec] = None,
-        metadataOpsTimeNs: Option[Long] = None,
-        override val partitionSchema: StructType)
-      extends InMemoryFileIndex(
-        sparkSession,
-        rootPathsSpecified,
-        parameters,
-        userSpecifiedSchema,
-        fileStatusCache,
-        userSpecifiedPartitionSpec,
-        metadataOpsTimeNs)
-
-    def globPaths: Boolean = {
-      val entry = options.get(DataSource.GLOB_PATHS_KEY)
-      Option(entry).forall(_ == "true")
-    }
-
-    val caseSensitiveMap = options.asCaseSensitiveMap.asScala.toMap
-    val hadoopConf = sparkSession.sessionState.newHadoopConfWithOptions(caseSensitiveMap)
-    if (FileStreamSink.hasMetadata(paths, hadoopConf, sparkSession.sessionState.conf)) {
-      new PartitionedMetadataLogFileIndex(
-        sparkSession,
-        new Path(paths.head),
-        options.asScala.toMap,
-        userSpecifiedSchema,
-        partitionSchema = partitionSchema)
-    } else {
-      val rootPathsSpecified = DataSource.checkAndGlobPathIfNecessary(
-        paths,
-        hadoopConf,
-        checkEmptyGlobPath = true,
-        checkFilesExist = true,
-        enableGlobbing = globPaths)
-      val fileStatusCache = FileStatusCache.getOrCreate(sparkSession)
-
-      new PartitionedInMemoryFileIndex(
-        sparkSession,
-        rootPathsSpecified,
-        caseSensitiveMap,
-        userSpecifiedSchema,
-        fileStatusCache,
-        partitionSchema = partitionSchema)
-    }
   }
 
 }

@@ -90,4 +90,3 @@ object MergePaimonScalarSubqueries extends MergePaimonScalarSubqueriesBase {
     ScalarSubquery(plan, exprId = exprId)
   }
 }
-
