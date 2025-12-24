@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
@@ -53,7 +54,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -157,7 +157,8 @@ public class LuceneVectorGlobalIndexScanTest {
                     }
 
                     @Override
-                    public OutputStream newOutputStream(String fileName) throws IOException {
+                    public PositionOutputStream newOutputStream(String fileName)
+                            throws IOException {
                         return fileIO.newOutputStream(new Path(indexDir, fileName), false);
                     }
                 };

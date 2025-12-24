@@ -25,6 +25,7 @@ import org.apache.paimon.utils.Preconditions;
 
 /** Trailer of a BTree index file. */
 public class Trailer {
+    // offset (8) + crc (4) + magic number (4)
     public static final int TRAILER_LENGTH = 16;
 
     private final long nullBitmapOffset;
@@ -49,7 +50,8 @@ public class Trailer {
         int crc32c = input.readInt();
 
         int magicNumber = input.readInt();
-        Preconditions.checkState(magicNumber == BTreeIndexWriter.MAGIC_NUMBER);
+        Preconditions.checkState(
+                magicNumber == BTreeIndexWriter.MAGIC_NUMBER, "Trailer magic number not matches.");
 
         return new Trailer(nullBitmapOffset, crc32c);
     }

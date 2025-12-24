@@ -42,6 +42,9 @@ import java.util.zip.CRC32;
  * The {@link GlobalIndexWriter} implementation for BTree index. Note that users must keep written
  * keys monotonically incremental. All null keys are stored in a separate bitmap, which will be
  * serialized and appended to the file end on close.
+ *
+ * <p>For efficiency, we combine entries with the same keys and store a compact list of row ids for
+ * each key.
  */
 public class BTreeIndexWriter implements GlobalIndexWriter {
     public static final int MAGIC_NUMBER = 198732882;
@@ -49,8 +52,6 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
     private final String fileName;
     private final PositionOutputStream out;
 
-    private byte[] firstKeyBytes;
-    private byte[] lastKeyBytes;
     private long maxRowId = Long.MIN_VALUE;
     private long minRowId = Long.MAX_VALUE;
 
@@ -58,6 +59,7 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
     private final KeySerializer keySerializer;
     private final Comparator<Object> comparator;
 
+    private Object firstKey = null;
     private Object lastKey = null;
     private final List<Long> currentRowIds = new ArrayList<>();
 
@@ -90,8 +92,6 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
             return;
         }
 
-        byte[] keyBytes = keySerializer.serialize(key);
-
         if (lastKey != null && comparator.compare(key, lastKey) != 0) {
             try {
                 flush();
@@ -103,10 +103,9 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
         currentRowIds.add(rowId);
 
         // update stats
-        if (firstKeyBytes == null) {
-            firstKeyBytes = keyBytes;
+        if (firstKey == null) {
+            firstKey = key;
         }
-        lastKeyBytes = keyBytes;
         minRowId = Math.min(minRowId, rowId);
         maxRowId = Math.max(maxRowId, rowId);
     }
@@ -116,6 +115,7 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
             return;
         }
 
+        // serialize row id list
         MemorySliceOutput sliceOutput = new MemorySliceOutput(currentRowIds.size() * 9 + 5);
         sliceOutput.writeVarLenInt(currentRowIds.size());
         for (long currentRowId : currentRowIds) {
@@ -123,7 +123,7 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
         }
         currentRowIds.clear();
 
-        writer.put(lastKeyBytes, sliceOutput.toSlice().copyBytes());
+        writer.put(keySerializer.serialize(lastKey), sliceOutput.toSlice().copyBytes());
     }
 
     @Override
@@ -145,14 +145,17 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
             throw new RuntimeException("Error in closing BTree index writer", e);
         }
 
-        if (firstKeyBytes == null) {
+        if (firstKey == null) {
             throw new RuntimeException("Should never write an empty btree index file.");
         }
 
         return Collections.singletonList(
                 ResultEntry.of(
                         fileName,
-                        new BTreeIndexMeta(firstKeyBytes, lastKeyBytes, nullBitmap.initialized())
+                        new BTreeIndexMeta(
+                                        keySerializer.serialize(firstKey),
+                                        keySerializer.serialize(lastKey),
+                                        nullBitmap.initialized())
                                 .serialize(),
                         new Range(minRowId, maxRowId)));
     }

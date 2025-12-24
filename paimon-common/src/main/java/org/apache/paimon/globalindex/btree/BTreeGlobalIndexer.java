@@ -67,6 +67,7 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
     public BTreeGlobalIndexer(DataField dataField, Options options) {
         this.keySerializer = KeySerializer.create(dataField.type());
         this.options = options;
+        // todo: cacheManager can be null to disallow data cache.
         this.cacheManager =
                 new LazyField<>(
                         () ->

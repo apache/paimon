@@ -50,7 +50,7 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitIsNotNull(FieldRef fieldRef) {
-        return Optional.of(filter(meta -> !meta.hasNulls()));
+        return Optional.of(filter(meta -> true));
     }
 
     @Override
@@ -82,13 +82,7 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
     public Optional<List<GlobalIndexIOMeta>> visitLessThan(FieldRef fieldRef, Object literal) {
         // `<` means file.minKey < literal
         return Optional.of(
-                filter(
-                        meta ->
-                                comparator.compare(
-                                                keySerializer.deserialize(
-                                                        MemorySlice.wrap(meta.getFirstKey())),
-                                                literal)
-                                        < 0));
+                filter(meta -> comparator.compare(deserialize(meta.getFirstKey()), literal) < 0));
     }
 
     @Override
@@ -96,40 +90,19 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
             FieldRef fieldRef, Object literal) {
         // `>=` means file.maxKey >= literal
         return Optional.of(
-                filter(
-                        meta ->
-                                comparator.compare(
-                                                keySerializer.deserialize(
-                                                        MemorySlice.wrap(meta.getLastKey())),
-                                                literal)
-                                        >= 0));
+                filter(meta -> comparator.compare(deserialize(meta.getLastKey()), literal) >= 0));
     }
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitNotEqual(FieldRef fieldRef, Object literal) {
-        return Optional.of(
-                filter(
-                        meta -> {
-                            Object minKey =
-                                    keySerializer.deserialize(MemorySlice.wrap(meta.getFirstKey()));
-                            Object maxKey =
-                                    keySerializer.deserialize(MemorySlice.wrap(meta.getLastKey()));
-                            return comparator.compare(literal, minKey) < 0
-                                    || comparator.compare(literal, maxKey) > 0;
-                        }));
+        return Optional.of(filter(meta -> true));
     }
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitLessOrEqual(FieldRef fieldRef, Object literal) {
         // `<=` means file.minKey <= literal
         return Optional.of(
-                filter(
-                        meta ->
-                                comparator.compare(
-                                                keySerializer.deserialize(
-                                                        MemorySlice.wrap(meta.getFirstKey())),
-                                                literal)
-                                        <= 0));
+                filter(meta -> comparator.compare(deserialize(meta.getFirstKey()), literal) <= 0));
     }
 
     @Override
@@ -137,10 +110,8 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
         return Optional.of(
                 filter(
                         meta -> {
-                            Object minKey =
-                                    keySerializer.deserialize(MemorySlice.wrap(meta.getFirstKey()));
-                            Object maxKey =
-                                    keySerializer.deserialize(MemorySlice.wrap(meta.getLastKey()));
+                            Object minKey = deserialize(meta.getFirstKey());
+                            Object maxKey = deserialize(meta.getLastKey());
                             return comparator.compare(literal, minKey) >= 0
                                     && comparator.compare(literal, maxKey) <= 0;
                         }));
@@ -150,13 +121,7 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
     public Optional<List<GlobalIndexIOMeta>> visitGreaterThan(FieldRef fieldRef, Object literal) {
         // `>` means file.maxKey > literal
         return Optional.of(
-                filter(
-                        meta ->
-                                comparator.compare(
-                                                keySerializer.deserialize(
-                                                        MemorySlice.wrap(meta.getLastKey())),
-                                                literal)
-                                        > 0));
+                filter(meta -> comparator.compare(deserialize(meta.getLastKey()), literal) > 0));
     }
 
     @Override
@@ -164,10 +129,8 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
         return Optional.of(
                 filter(
                         meta -> {
-                            Object minKey =
-                                    keySerializer.deserialize(MemorySlice.wrap(meta.getFirstKey()));
-                            Object maxKey =
-                                    keySerializer.deserialize(MemorySlice.wrap(meta.getLastKey()));
+                            Object minKey = deserialize(meta.getFirstKey());
+                            Object maxKey = deserialize(meta.getLastKey());
                             for (Object literal : literals) {
                                 if (comparator.compare(literal, minKey) >= 0
                                         && comparator.compare(literal, maxKey) <= 0) {
@@ -217,6 +180,10 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
     @Override
     public Optional<List<GlobalIndexIOMeta>> visit(TransformPredicate predicate) {
         return Optional.empty();
+    }
+
+    private Object deserialize(byte[] valueBytes) {
+        return keySerializer.deserialize(MemorySlice.wrap(valueBytes));
     }
 
     private List<GlobalIndexIOMeta> filter(Predicate<BTreeIndexMeta> predicate) {
