@@ -45,6 +45,7 @@ import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compact coordinator to compact data evolution table. */
 public class DataEvolutionCompactCoordinator {
@@ -205,6 +206,10 @@ public class DataEvolutionCompactCoordinator {
 
                     long weightSum = 0L;
                     for (List<DataFileMeta> fileGroup : groupedFiles) {
+                        checkArgument(
+                                rangeHelper.areAllRangesSame(fileGroup),
+                                "Data files %s should be all row id ranges same.",
+                                dataFiles);
                         long currentGroupWeight =
                                 fileGroup.stream()
                                         .mapToLong(d -> Math.max(d.fileSize(), openFileCost))
