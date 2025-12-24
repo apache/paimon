@@ -30,9 +30,11 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.KeyValueTableRead;
+import org.apache.paimon.table.source.KeyValueSystemFieldsRecordReader;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FieldsComparator;
@@ -55,7 +57,9 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     private final MergeFileSplitRead mergeRead;
 
     private boolean forceKeepDelete = false;
+
     @Nullable private RowType readType;
+    @Nullable private RowType mergeReadType;
 
     public IncrementalDiffSplitRead(MergeFileSplitRead mergeRead) {
         this.mergeRead = mergeRead;
@@ -76,6 +80,17 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     @Override
     public SplitRead<InternalRow> withReadType(RowType readType) {
         this.readType = readType;
+
+        List<DataField> fieldsWithAllSchema = new ArrayList<>();
+        for (DataField field : readType.getFields()) {
+            if (SpecialFields.isSystemField(field.name())) {
+                fieldsWithAllSchema.add(field);
+            }
+        }
+        fieldsWithAllSchema.addAll(mergeRead.tableSchema().fields());
+
+        this.mergeReadType = new RowType(fieldsWithAllSchema);
+        mergeRead.withReadType(mergeReadType);
         return this;
     }
 
@@ -112,12 +127,19 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                         mergeRead.createUdsComparator(),
                         mergeRead.mergeSorter(),
                         forceKeepDelete);
+        return KeyValueSystemFieldsRecordReader.wrap(
+                        reader, mergeRead.getSystemFieldExtractors(), mergeRead.getProjection())
+                .transform(this::convertRow);
+    }
+
+    private InternalRow convertRow(InternalRow data) {
         if (readType != null) {
-            ProjectedRow projectedRow =
-                    ProjectedRow.from(readType, mergeRead.tableSchema().logicalRowType());
-            reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
+            ProjectedRow projectedRow = ProjectedRow.from(readType, mergeReadType);
+            projectedRow.replaceRow(data);
+            return projectedRow;
+        } else {
+            return data;
         }
-        return KeyValueTableRead.unwrap(reader);
     }
 
     private static RecordReader<KeyValue> readDiff(

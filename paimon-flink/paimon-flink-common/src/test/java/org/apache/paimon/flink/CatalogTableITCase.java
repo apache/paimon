@@ -1167,9 +1167,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         List<Row> rows = iterator.collect(3);
         assertThat(rows)
                 .containsExactly(
-                        Row.of("+I", new Integer[] {1}, new Integer[] {2}),
-                        Row.of("+U", new Integer[] {1, 1}, new Integer[] {2, 3}),
-                        Row.of("+I", new Integer[] {2}, new Integer[] {2}));
+                        Row.of("+I", 0L, new Integer[] {1}, new Integer[] {2}),
+                        Row.of("+U", 1L, new Integer[] {1, 1}, new Integer[] {2, 3}),
+                        Row.of("+I", 2L, new Integer[] {2}, new Integer[] {2}));
         iterator.close();
     }
 
@@ -1204,8 +1204,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         List<Row> rows = sql("SELECT * FROM T$binlog /*+ OPTIONS('scan.mode' = 'latest') */");
         assertThat(rows)
                 .containsExactly(
-                        Row.of("+I", new Integer[] {1}, new Integer[] {3}),
-                        Row.of("+I", new Integer[] {2}, new Integer[] {2}));
+                        Row.of("+I", 1L, new Integer[] {1}, new Integer[] {3}),
+                        Row.of("+I", 2L, new Integer[] {2}, new Integer[] {2}));
     }
 
     @Test

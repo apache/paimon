@@ -50,6 +50,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.KeyValueSystemFieldsRecordReader;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -62,6 +63,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
@@ -96,6 +98,11 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Nullable private int[][] pushdownProjection;
     @Nullable private int[][] outerProjection;
     @Nullable private VariantAccessInfo[] variantAccess;
+
+    private List<KeyValueSystemFieldsRecordReader.SystemFieldExtractor> systemFieldExtractors =
+            Collections.emptyList();
+
+    @Nullable private int[] projection = null;
 
     private boolean forceKeepDelete = false;
 
@@ -137,18 +144,31 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         return this;
     }
 
+    public List<KeyValueSystemFieldsRecordReader.SystemFieldExtractor> getSystemFieldExtractors() {
+        return systemFieldExtractors;
+    }
+
+    @Nullable
+    public int[] getProjection() {
+        return projection;
+    }
+
     @Override
     public MergeFileSplitRead withReadType(RowType readType) {
+        this.systemFieldExtractors = collectSystemFieldExtractors(readType);
+        this.projection = createProjection(readType);
+
         // todo: replace projectedFields with readType
         RowType tableRowType = tableSchema.logicalRowType();
+        List<String> fieldNames = tableSchema.fieldNames();
         int[][] projectedFields =
                 Arrays.stream(tableRowType.getFieldIndices(readType.getFieldNames()))
+                        .filter(i -> i >= 0) // Filter out system fields (index = -1)
                         .mapToObj(i -> new int[] {i})
                         .toArray(int[][]::new);
         int[][] newProjectedFields = projectedFields;
         if (sequenceFields.size() > 0) {
             // make sure projection contains sequence fields
-            List<String> fieldNames = tableSchema.fieldNames();
             List<String> projectedNames = Projection.of(projectedFields).project(fieldNames);
             int[] lackFields =
                     sequenceFields.stream()
@@ -407,5 +427,69 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     public UserDefinedSeqComparator createUdsComparator() {
         return UserDefinedSeqComparator.create(
                 readerFactoryBuilder.readValueType(), sequenceFields, sequenceOrder);
+    }
+
+    /**
+     * Collects system field extractors for the requested read type.
+     *
+     * @param readType the requested read type (may contain system fields)
+     * @return list of extractors for system fields present in readType
+     */
+    private List<KeyValueSystemFieldsRecordReader.SystemFieldExtractor>
+            collectSystemFieldExtractors(RowType readType) {
+        if (readType == null) {
+            return Collections.emptyList();
+        }
+
+        List<KeyValueSystemFieldsRecordReader.SystemFieldExtractor> extractors = new ArrayList<>();
+        for (String fieldName : readType.getFieldNames()) {
+            KeyValueSystemFieldsRecordReader.SystemFieldExtractor extractor =
+                    KeyValueSystemFieldsRecordReader.getExtractor(fieldName);
+            if (extractor != null) {
+                extractors.add(extractor);
+            }
+        }
+        return extractors;
+    }
+
+    /**
+     * Creates a projection array to reorder fields from natural order to requested order.
+     *
+     * <p>Example: readType = [pt, rowkind, col1], systemFieldExtractors = [rowkind] Natural order:
+     * [rowkind(0), pt(1), col1(2)] (physical fields pt, col1 in readType order) Requested order:
+     * [pt, rowkind, col1] Projection: [1, 0, 2]
+     *
+     * @param readType the requested read type (may contain system fields)
+     * @return projection array, or null if fields are already in natural order
+     */
+    @Nullable
+    private int[] createProjection(RowType readType) {
+        if (readType == null || systemFieldExtractors.isEmpty()) {
+            return null;
+        }
+
+        List<String> readFieldNames = readType.getFieldNames();
+        int[] projection = new int[readFieldNames.size()];
+        // System fields are first in natural order
+        int systemIdx = 0;
+        // Physical fields follow system fields in natural order
+        int physicalIdx = systemFieldExtractors.size();
+        boolean needsProjection = false;
+
+        for (int i = 0; i < readFieldNames.size(); i++) {
+            String fieldName = readFieldNames.get(i);
+            // Check if it's a system field
+            if (KeyValueSystemFieldsRecordReader.getExtractor(fieldName) != null) {
+                projection[i] = systemIdx++;
+            } else {
+                projection[i] = physicalIdx++;
+            }
+
+            if (projection[i] != i) {
+                needsProjection = true;
+            }
+        }
+
+        return needsProjection ? projection : null;
     }
 }

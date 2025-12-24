@@ -46,11 +46,11 @@ import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 /**
  * A {@link Table} for reading binlog of table. The binlog format is as below.
  *
- * <p>INSERT: [+I, [co1], [col2]]
+ * <p>INSERT: [+I, seq_num, [col1], [col2]]
  *
- * <p>UPDATE: [+U, [co1_ub, col1_ua], [col2_ub, col2_ua]]
+ * <p>UPDATE: [+U, seq_num, [col1_ub, col1_ua], [col2_ub, col2_ua]]
  *
- * <p>DELETE: [-D, [co1], [col2]]
+ * <p>DELETE: [-D, seq_num, [col1], [col2]]
  */
 public class BinlogTable extends AuditLogTable {
 
@@ -72,6 +72,9 @@ public class BinlogTable extends AuditLogTable {
     public RowType rowType() {
         List<DataField> fields = new ArrayList<>();
         fields.add(SpecialFields.ROW_KIND);
+        fields.add(
+                SpecialFields.SEQUENCE_NUMBER.newType(
+                        SpecialFields.SEQUENCE_NUMBER.type().nullable()));
         for (DataField field : wrapped.rowType().getFields()) {
             // convert to nullable
             fields.add(field.newType(new ArrayType(field.type().nullable())));
@@ -81,7 +84,7 @@ public class BinlogTable extends AuditLogTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new BinlogRead(wrapped.newRead());
+        return new BinlogRead(wrapped.newRead()).withReadType(rowType());
     }
 
     @Override
@@ -91,7 +94,12 @@ public class BinlogTable extends AuditLogTable {
 
     private class BinlogRead extends AuditLogRead {
 
-        private RowType wrappedReadType = wrapped.rowType();
+        private int[] outputMapping; // naturalIndex -> outputIndex
+        private int systemFieldCount;
+        private int physicalFieldCount;
+        private int rowkindOutputIndex = -1;
+        private InternalRow.FieldGetter[] fieldGetters; // Pre-created field getters
+        private RowType underlyingType;
 
         private BinlogRead(InnerTableRead dataRead) {
             super(dataRead);
@@ -99,71 +107,106 @@ public class BinlogTable extends AuditLogTable {
 
         @Override
         public InnerTableRead withReadType(RowType readType) {
-            List<DataField> fields = new ArrayList<>();
-            List<DataField> wrappedReadFields = new ArrayList<>();
-            for (DataField field : readType.getFields()) {
-                if (field.name().equals(SpecialFields.ROW_KIND.name())) {
-                    fields.add(field);
+            List<Integer> systemIndices = new ArrayList<>();
+            List<Integer> physicalIndices = new ArrayList<>();
+            List<DataField> underlyingFields = new ArrayList<>();
+
+            for (int i = 0; i < readType.getFieldCount(); i++) {
+                DataField field = readType.getFields().get(i);
+                if (SpecialFields.isSystemField(field.name())) {
+                    systemIndices.add(i);
+                    underlyingFields.add(field);
+                    if (field.name().equals(SpecialFields.ROW_KIND.name())) {
+                        rowkindOutputIndex = i;
+                    }
                 } else {
+                    physicalIndices.add(i);
+                    // Convert Array type back to element type for underlying read
                     DataField origin = field.newType(((ArrayType) field.type()).getElementType());
-                    fields.add(origin);
-                    wrappedReadFields.add(origin);
+                    underlyingFields.add(origin);
                 }
             }
-            this.wrappedReadType = this.wrappedReadType.copy(wrappedReadFields);
-            return super.withReadType(readType.copy(fields));
+
+            systemFieldCount = systemIndices.size();
+            physicalFieldCount = physicalIndices.size();
+
+            // Build mapping: outputMapping[naturalIndex] = outputIndex
+            outputMapping = new int[systemIndices.size() + physicalIndices.size()];
+            for (int i = 0; i < systemIndices.size(); i++) {
+                outputMapping[i] = systemIndices.get(i);
+            }
+            for (int i = 0; i < physicalIndices.size(); i++) {
+                outputMapping[systemIndices.size() + i] = physicalIndices.get(i);
+            }
+
+            // Pre-create field getters for natural order [system fields... + physical fields...]
+            this.underlyingType = new RowType(underlyingFields);
+            this.fieldGetters =
+                    IntStream.range(0, underlyingType.getFieldCount())
+                            .mapToObj(
+                                    i ->
+                                            InternalRow.createFieldGetter(
+                                                    underlyingType.getTypeAt(i), i))
+                            .toArray(InternalRow.FieldGetter[]::new);
+
+            // Pass natural order to underlying read
+            return super.withReadType(underlyingType);
         }
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             DataSplit dataSplit = (DataSplit) split;
-            InternalRow.FieldGetter[] fieldGetters =
-                    IntStream.range(0, wrappedReadType.getFieldCount())
-                            .mapToObj(
-                                    i ->
-                                            InternalRow.createFieldGetter(
-                                                    wrappedReadType.getTypeAt(i), i))
-                            .toArray(InternalRow.FieldGetter[]::new);
 
             if (dataSplit.isStreaming()) {
                 return new PackChangelogReader(
-                        dataRead.createReader(split),
-                        (row1, row2) ->
-                                new AuditLogRow(
-                                        readProjection, convertToArray(row1, row2, fieldGetters)),
-                        this.wrappedReadType);
+                        dataRead.createReader(split), this::convertToArray, this.underlyingType);
             } else {
-                return dataRead.createReader(split)
-                        .transform(
-                                (row) ->
-                                        new AuditLogRow(
-                                                readProjection,
-                                                convertToArray(row, null, fieldGetters)));
+                return dataRead.createReader(split).transform(row -> convertToArray(row, null));
             }
         }
 
-        private InternalRow convertToArray(
-                InternalRow row1,
-                @Nullable InternalRow row2,
-                InternalRow.FieldGetter[] fieldGetters) {
-            GenericRow row = new GenericRow(row1.getFieldCount());
-            for (int i = 0; i < row1.getFieldCount(); i++) {
-                Object o1 = fieldGetters[i].getFieldOrNull(row1);
-                Object o2;
+        /**
+         * Convert changelog rows to binlog array format with field reordering.
+         *
+         * @param row1 the before row or the after row (if row2 is null)
+         * @param row2 the after row (null for insert/delete)
+         * @return the converted row in user-requested field order
+         */
+        private InternalRow convertToArray(InternalRow row1, @Nullable InternalRow row2) {
+            // Bottom layer row is already in natural order: [system fields... + physical fields...]
+            InternalRow systemSource = row2 != null ? row2 : row1;
+
+            GenericRow output = new GenericRow(outputMapping.length);
+            int naturalIndex = 0;
+
+            // 1. Copy system fields by mapping (use pre-created FieldGetters)
+            for (int i = 0; i < systemFieldCount; i++) {
+                int outputPos = outputMapping[naturalIndex++];
+                output.setField(outputPos, fieldGetters[i].getFieldOrNull(systemSource));
+            }
+
+            // 2. Pack physical fields into Array by mapping
+            for (int i = 0; i < physicalFieldCount; i++) {
+                int outputPos = outputMapping[naturalIndex++];
+                int naturalPos = systemFieldCount + i;
+
+                Object v1 = fieldGetters[naturalPos].getFieldOrNull(row1);
                 if (row2 != null) {
-                    o2 = fieldGetters[i].getFieldOrNull(row2);
-                    row.setField(i, new GenericArray(new Object[] {o1, o2}));
+                    Object v2 = fieldGetters[naturalPos].getFieldOrNull(row2);
+                    output.setField(outputPos, new GenericArray(new Object[] {v1, v2}));
                 } else {
-                    row.setField(i, new GenericArray(new Object[] {o1}));
+                    output.setField(outputPos, new GenericArray(new Object[] {v1}));
                 }
             }
-            // If no row2 provided, then follow the row1 kind.
-            if (row2 == null) {
-                row.setRowKind(row1.getRowKind());
-            } else {
-                row.setRowKind(row2.getRowKind());
+
+            output.setRowKind(org.apache.paimon.types.RowKind.INSERT);
+
+            // 3. Fallback for append-only tables: rowkind field is null, wrap to return "+I"
+            if (rowkindOutputIndex >= 0 && output.isNullAt(rowkindOutputIndex)) {
+                return new AuditLogTable.AuditLogRow(output, rowkindOutputIndex);
             }
-            return row;
+
+            return output;
         }
     }
 }

@@ -23,15 +23,14 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.KeyValueSystemFieldsRecordReader;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LazyField;
 
 import java.util.function.Supplier;
 
-import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
-
-/** A {@link SplitReadProvider} to merge files. */
+/** A {@link SplitReadProvider} to merge files with support for system field injection. */
 public class MergeFileSplitReadProvider implements SplitReadProvider {
 
     private final LazyField<SplitRead<InternalRow>> splitRead;
@@ -49,7 +48,13 @@ public class MergeFileSplitReadProvider implements SplitReadProvider {
 
     private SplitRead<InternalRow> create(Supplier<MergeFileSplitRead> supplier) {
         final MergeFileSplitRead read = supplier.get().withReadKeyType(RowType.of());
-        return SplitRead.convert(read, split -> unwrap(read.createReader(split)));
+        return SplitRead.convert(
+                read,
+                split ->
+                        KeyValueSystemFieldsRecordReader.wrap(
+                                read.createReader(split),
+                                read.getSystemFieldExtractors(),
+                                read.getProjection()));
     }
 
     @Override

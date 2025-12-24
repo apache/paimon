@@ -60,16 +60,17 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
         val currentResult = () => spark.sql("SELECT * FROM mem_table")
         try {
           readStream.processAllAvailable()
-          val expertResult1 = Row("+I", 1, "v_1") :: Row("+I", 2, "v_2_new") :: Nil
+          val expertResult1 = Row("+I", 0L, 1, "v_1") :: Row("+I", 2L, 2, "v_2_new") :: Nil
           checkAnswer(currentResult(), expertResult1)
 
           spark.sql(s"INSERT INTO $tableName VALUES (1, 'v_1_new'), (3, 'v_3')")
           readStream.processAllAvailable()
           val expertResult2 =
-            Row("+I", 1, "v_1") :: Row("-U", 1, "v_1") :: Row("+U", 1, "v_1_new") :: Row(
-              "+I",
-              2,
-              "v_2_new") :: Row("+I", 3, "v_3") :: Nil
+            Row("+I", 0L, 1, "v_1") :: Row("-U", 0L, 1, "v_1") :: Row(
+              "+U",
+              3L,
+              1,
+              "v_1_new") :: Row("+I", 2L, 2, "v_2_new") :: Row("+I", 0L, 3, "v_3") :: Nil
           checkAnswer(currentResult(), expertResult2)
         } finally {
           readStream.stop()
@@ -113,19 +114,25 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
         val currentResult = () => spark.sql("SELECT * FROM mem_table")
         try {
           readStream.processAllAvailable()
-          val expertResult1 = Row("+I", 1, "v_1") :: Row("+I", 2, "v_2") :: Row(
+          val expertResult1 = Row("+I", 0L, 1, "v_1") :: Row("+I", 1L, 2, "v_2") :: Row(
             "-U",
+            1L,
             2,
-            "v_2") :: Row("+U", 2, "v_2_new") :: Nil
+            "v_2") :: Row("+U", 2L, 2, "v_2_new") :: Nil
           checkAnswer(currentResult(), expertResult1)
 
           spark.sql(s"INSERT INTO $tableName VALUES (1, 'v_1_new'), (3, 'v_3')")
           readStream.processAllAvailable()
           val expertResult2 =
-            Row("+I", 1, "v_1") :: Row("-U", 1, "v_1") :: Row("+U", 1, "v_1_new") :: Row(
-              "+I",
+            Row("+I", 0L, 1, "v_1") :: Row("-U", 0L, 1, "v_1") :: Row(
+              "+U",
+              3L,
+              1,
+              "v_1_new") :: Row("+I", 1L, 2, "v_2") :: Row("-U", 1L, 2, "v_2") :: Row(
+              "+U",
+              2L,
               2,
-              "v_2") :: Row("-U", 2, "v_2") :: Row("+U", 2, "v_2_new") :: Row("+I", 3, "v_3") :: Nil
+              "v_2_new") :: Row("+I", 0L, 3, "v_3") :: Nil
           checkAnswer(currentResult(), expertResult2)
         } finally {
           readStream.stop()
@@ -181,32 +188,38 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
           inputData.addData((1, "v_1"))
           writeStream.processAllAvailable()
           readStream.processAllAvailable()
-          val expertResult1 = Row("+I", 1, "v_1") :: Nil
+          val expertResult1 = Row("+I", 0L, 1, "v_1") :: Nil
           checkAnswer(currentResult(), expertResult1)
 
           inputData.addData((2, "v_2"))
           writeStream.processAllAvailable()
           readStream.processAllAvailable()
-          val expertResult2 = Row("+I", 1, "v_1") :: Row("+I", 2, "v_2") :: Nil
+          val expertResult2 = Row("+I", 0L, 1, "v_1") :: Row("+I", 1L, 2, "v_2") :: Nil
           checkAnswer(currentResult(), expertResult2)
 
           inputData.addData((2, "v_2_new"))
           writeStream.processAllAvailable()
           readStream.processAllAvailable()
-          val expertResult3 = Row("+I", 1, "v_1") :: Row("+I", 2, "v_2") :: Row(
+          val expertResult3 = Row("+I", 0L, 1, "v_1") :: Row("+I", 1L, 2, "v_2") :: Row(
             "-U",
+            1L,
             2,
-            "v_2") :: Row("+U", 2, "v_2_new") :: Nil
+            "v_2") :: Row("+U", 2L, 2, "v_2_new") :: Nil
           checkAnswer(currentResult(), expertResult3)
 
           inputData.addData((1, "v_1_new"), (3, "v_3"))
           writeStream.processAllAvailable()
           readStream.processAllAvailable()
           val expertResult4 =
-            Row("+I", 1, "v_1") :: Row("-U", 1, "v_1") :: Row("+U", 1, "v_1_new") :: Row(
-              "+I",
+            Row("+I", 0L, 1, "v_1") :: Row("-U", 0L, 1, "v_1") :: Row(
+              "+U",
+              3L,
+              1,
+              "v_1_new") :: Row("+I", 1L, 2, "v_2") :: Row("-U", 1L, 2, "v_2") :: Row(
+              "+U",
+              2L,
               2,
-              "v_2") :: Row("-U", 2, "v_2") :: Row("+U", 2, "v_2_new") :: Row("+I", 3, "v_3") :: Nil
+              "v_2_new") :: Row("+I", 0L, 3, "v_3") :: Nil
           checkAnswer(currentResult(), expertResult4)
         } finally {
           readStream.stop()
@@ -238,11 +251,11 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
           try {
             spark.sql(s"INSERT INTO T VALUES (1, 'v_1')")
             readStream.processAllAvailable()
-            checkAnswer(currentResult(), Row("+I", 1, "v_1") :: Nil)
+            checkAnswer(currentResult(), Row("+I", 0L, 1, "v_1") :: Nil)
 
             spark.sql(s"INSERT INTO T VALUES (2, 'v_2')")
             readStream.processAllAvailable()
-            checkAnswer(currentResult(), Row("+I", 1, "v_1") :: Row("+I", 2, "v_2") :: Nil)
+            checkAnswer(currentResult(), Row("+I", 0L, 1, "v_1") :: Row("+I", 1L, 2, "v_2") :: Nil)
           } finally {
             readStream.stop()
           }

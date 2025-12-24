@@ -243,12 +243,12 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
       checkAnswer(
         sql(
           "SELECT * FROM paimon_incremental_query('`t$audit_log`', '2024-01-01', '2024-01-04') ORDER BY a, b"),
-        Seq(Row("-D", 1, 11), Row("+I", 3, 33)))
+        Seq(Row("-D", 2L, 1, 11), Row("+I", 0L, 3, 33)))
 
       checkAnswer(
         sql(
           "SELECT * FROM paimon_incremental_query('`t$audit_log`', '2024-01-01', '2024-01-05') ORDER BY a, b"),
-        Seq(Row("-D", 1, 11), Row("+U", 2, 222), Row("+I", 3, 33))
+        Seq(Row("-D", 2L, 1, 11), Row("+U", 3L, 2, 222), Row("+I", 0L, 3, 33))
       )
     }
   }
@@ -289,7 +289,7 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
       // after files:  f(-D 999),   f(+I 10001,10002)
       checkAnswer(
         sql("SELECT * FROM paimon_incremental_query('`t$audit_log`', 'tag1', 'tag2') ORDER BY id"),
-        Seq(Row("-D", 999)))
+        Seq(Row("-D", 100002L, 999)))
     }
   }
 
@@ -324,7 +324,7 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
 
       checkAnswer(
         sql("SELECT * FROM paimon_incremental_query('`t$audit_log`', 'tag1', 'tag2') ORDER BY id"),
-        Seq(Row("-D", 1)))
+        Seq(Row("-D", 2L, 1)))
     }
   }
 

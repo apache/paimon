@@ -26,14 +26,13 @@ import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.KeyValueSystemFieldsRecordReader;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.LazyField;
 
 import java.util.function.Supplier;
-
-import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
 
 /** A {@link SplitReadProvider} to incremental changelog read. */
 public class IncrementalChangelogReadProvider implements SplitReadProvider {
@@ -75,7 +74,8 @@ public class IncrementalChangelogReadProvider implements SplitReadProvider {
                                                     dataSplit.dataFiles(),
                                                     dataSplit.deletionFiles().orElse(null),
                                                     false));
-                    return unwrap(reader);
+                    return KeyValueSystemFieldsRecordReader.wrap(
+                            reader, read.getSystemFieldExtractors(), read.getProjection());
                 };
 
         return SplitRead.convert(read, convertedFactory);

@@ -214,14 +214,14 @@ public class IncrementalTableTest extends TableTestBase {
         List<InternalRow> result = read(auditLog, Pair.of(INCREMENTAL_BETWEEN, "1,3"));
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        GenericRow.of(fromString("-D"), 1, 1, 1),
-                        GenericRow.of(fromString("-D"), 1, 2, 1),
-                        GenericRow.of(fromString("+I"), 1, 4, 1),
-                        GenericRow.of(fromString("+I"), 2, 1, 2),
-                        GenericRow.of(fromString("-D"), 1, 3, 1),
-                        GenericRow.of(fromString("+I"), 1, 1, 2),
-                        GenericRow.of(fromString("+I"), 2, 1, 3),
-                        GenericRow.of(fromString("+I"), 2, 2, 1));
+                        GenericRow.of(fromString("-D"), 3L, 1, 1, 1),
+                        GenericRow.of(fromString("-D"), 4L, 1, 2, 1),
+                        GenericRow.of(fromString("+I"), 5L, 1, 4, 1),
+                        GenericRow.of(fromString("+I"), 1L, 2, 1, 2),
+                        GenericRow.of(fromString("-D"), 6L, 1, 3, 1),
+                        GenericRow.of(fromString("+I"), 7L, 1, 1, 2),
+                        GenericRow.of(fromString("+I"), 2L, 2, 1, 3),
+                        GenericRow.of(fromString("+I"), 3L, 2, 2, 1));
     }
 
     @Test
@@ -274,9 +274,9 @@ public class IncrementalTableTest extends TableTestBase {
         result = read(auditLog, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2"));
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        GenericRow.of(fromString("-D"), 1, 1, 1),
-                        GenericRow.of(fromString("+I"), 1, 2, 2),
-                        GenericRow.of(fromString("+I"), 1, 6, 1));
+                        GenericRow.of(fromString("-D"), 5L, 1, 1, 1),
+                        GenericRow.of(fromString("+I"), 6L, 1, 2, 2),
+                        GenericRow.of(fromString("+I"), 7L, 1, 6, 1));
 
         // read tag1 tag3
         result = read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG3"));
@@ -287,9 +287,9 @@ public class IncrementalTableTest extends TableTestBase {
         result = read(auditLog, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG3"));
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        GenericRow.of(fromString("-D"), 1, 1, 1),
-                        GenericRow.of(fromString("+I"), 1, 2, 2),
-                        GenericRow.of(fromString("+I"), 1, 6, 1));
+                        GenericRow.of(fromString("-D"), 0L, 1, 1, 1),
+                        GenericRow.of(fromString("+I"), 6L, 1, 2, 2),
+                        GenericRow.of(fromString("+I"), 7L, 1, 6, 1));
 
         // read tag1 tag3 projection
         result = read(table, new int[] {1}, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG3"));
