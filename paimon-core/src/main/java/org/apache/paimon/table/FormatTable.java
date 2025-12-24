@@ -76,6 +76,7 @@ public interface FormatTable extends Table {
         ORC,
         PARQUET,
         CSV,
+        TEXT,
         JSON
     }
 

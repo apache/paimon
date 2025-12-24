@@ -230,6 +230,7 @@ public class CoreOptions implements Serializable {
     public static final String FILE_FORMAT_AVRO = "avro";
     public static final String FILE_FORMAT_PARQUET = "parquet";
     public static final String FILE_FORMAT_CSV = "csv";
+    public static final String FILE_FORMAT_TEXT = "text";
     public static final String FILE_FORMAT_JSON = "json";
 
     public static final ConfigOption<String> FILE_FORMAT =
@@ -2379,6 +2380,7 @@ public class CoreOptions implements Serializable {
                 case FILE_FORMAT_ORC:
                     return "zstd";
                 case FILE_FORMAT_CSV:
+                case FILE_FORMAT_TEXT:
                 case FILE_FORMAT_JSON:
                     return "none";
                 default:

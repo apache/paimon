@@ -18,42 +18,32 @@
 
 package org.apache.paimon.format.text;
 
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.RowType;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 
-/** TEXT format reader implementation. */
-public class TextFileReader extends AbstractTextFileReader {
+/** TEXT format writer implementation. */
+public class TextFormatWriter extends AbstractTextFileWriter {
 
-    private static final GenericRow emptyRow = new GenericRow(0);
+    private final TextOptions textOptions;
 
-    private final boolean isEmptyRow;
-
-    public TextFileReader(
-            FileIO fileIO,
-            Path filePath,
-            RowType projectedRowType,
-            TextOptions options,
-            long offset,
-            @Nullable Long length)
+    protected TextFormatWriter(
+            PositionOutputStream outputStream,
+            RowType rowType,
+            TextOptions textOptions,
+            String compression)
             throws IOException {
-        super(fileIO, filePath, projectedRowType, options.lineDelimiter(), offset, length);
-        this.isEmptyRow = projectedRowType.getFieldCount() == 0;
+        super(outputStream, rowType, compression);
+        this.textOptions = textOptions;
     }
 
     @Override
-    protected @Nullable InternalRow parseLine(String line) {
-        if (isEmptyRow) {
-            return emptyRow;
+    public void addElement(InternalRow element) throws IOException {
+        if (!element.isNullAt(0)) {
+            writer.write(element.getString(0).toString());
         }
-
-        return GenericRow.of(BinaryString.fromString(line));
+        writer.write(textOptions.lineDelimiter());
     }
 }
