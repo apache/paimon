@@ -238,4 +238,25 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
       }
     }
   }
+
+  test("Paimon format table: text format") {
+    withTable("t") {
+      sql(s"""
+             |CREATE TABLE t (v STRING) USING text
+             |TBLPROPERTIES ('text.line-delimiter'='?')
+             |""".stripMargin)
+      sql("INSERT INTO t VALUES ('aaaa'), ('bbbb'), ('cccc'), (null), ('dddd')")
+
+      for (impl <- Seq("paimon", "engine")) {
+        withSparkSQLConf("spark.paimon.format-table.implementation" -> impl) {
+          checkAnswer(sql("SELECT COUNT(*) FROM t"), Row(5))
+          // Follow spark, write null as empty string and read as empty string too.
+          checkAnswer(
+            sql("SELECT * FROM t ORDER BY v"),
+            Seq(Row(""), Row("aaaa"), Row("bbbb"), Row("cccc"), Row("dddd"))
+          )
+        }
+      }
+    }
+  }
 }
