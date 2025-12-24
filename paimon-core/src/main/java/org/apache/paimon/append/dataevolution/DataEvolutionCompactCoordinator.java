@@ -109,6 +109,8 @@ public class DataEvolutionCompactCoordinator {
                 List<ManifestEntry> targetEntries =
                         currentMetas.stream()
                                 .flatMap(meta -> snapshotReader.readManifest(meta).stream())
+                                // we don't need stats for compaction
+                                .map(ManifestEntry::copyWithoutStats)
                                 .collect(Collectors.toList());
                 result.addAll(targetEntries);
             }
