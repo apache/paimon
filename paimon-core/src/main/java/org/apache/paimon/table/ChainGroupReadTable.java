@@ -89,41 +89,36 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
         return new ChainGroupReadTable(
-                (AbstractFileStoreTable) wrapped.copy(dynamicOptions),
-                (AbstractFileStoreTable) fallback().copy(rewriteFallbackOptions(dynamicOptions)));
+                wrapped.copy(dynamicOptions),
+                fallback().copy(rewriteFallbackOptions(dynamicOptions)));
     }
 
     @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
         return new ChainGroupReadTable(
-                (AbstractFileStoreTable) wrapped.copy(newTableSchema),
-                (AbstractFileStoreTable)
-                        fallback()
-                                .copy(
-                                        newTableSchema.copy(
-                                                rewriteFallbackOptions(newTableSchema.options()))));
+                wrapped.copy(newTableSchema),
+                fallback()
+                        .copy(
+                                newTableSchema.copy(
+                                        rewriteFallbackOptions(newTableSchema.options()))));
     }
 
     @Override
     public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
         return new ChainGroupReadTable(
-                (AbstractFileStoreTable) wrapped.copyWithoutTimeTravel(dynamicOptions),
-                (AbstractFileStoreTable)
-                        fallback().copyWithoutTimeTravel(rewriteFallbackOptions(dynamicOptions)));
+                wrapped.copyWithoutTimeTravel(dynamicOptions),
+                fallback().copyWithoutTimeTravel(rewriteFallbackOptions(dynamicOptions)));
     }
 
     @Override
     public FileStoreTable copyWithLatestSchema() {
         return new ChainGroupReadTable(
-                (AbstractFileStoreTable) wrapped.copyWithLatestSchema(),
-                (AbstractFileStoreTable) fallback().copyWithLatestSchema());
+                wrapped.copyWithLatestSchema(), fallback().copyWithLatestSchema());
     }
 
     @Override
     public FileStoreTable switchToBranch(String branchName) {
-        return new ChainGroupReadTable(
-                (AbstractFileStoreTable) switchWrappedToBranch(branchName),
-                (AbstractFileStoreTable) fallback());
+        return new ChainGroupReadTable(switchWrappedToBranch(branchName), fallback());
     }
 
     /** Scan implementation for {@link ChainGroupReadTable}. */
