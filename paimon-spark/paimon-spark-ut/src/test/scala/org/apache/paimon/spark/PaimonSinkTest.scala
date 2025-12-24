@@ -22,7 +22,7 @@ import org.apache.paimon.Snapshot.CommitKind._
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
+import org.apache.spark.sql.execution.streaming.runtime.MemoryStream
 import org.apache.spark.sql.functions.{col, mean, window}
 import org.apache.spark.sql.streaming.StreamTest
 
