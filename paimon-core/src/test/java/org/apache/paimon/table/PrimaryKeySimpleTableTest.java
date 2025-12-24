@@ -1454,6 +1454,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                                 row,
                                 DataTypes.ROW(
                                         DataTypes.STRING(),
+                                        DataTypes.BIGINT(),
                                         DataTypes.INT(),
                                         DataTypes.INT(),
                                         DataTypes.BIGINT()));
@@ -1466,7 +1467,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        "+I[+I, 2, 20, 200]", "+I[+U, 1, 30, 300]", "+I[+I, 1, 10, 100]");
+                        "+I[+I, 0, 2, 20, 200]", "+I[+U, 1, 1, 30, 300]", "+I[+I, 0, 1, 10, 100]");
 
         // Read by filter row kind (No effect)
         Predicate rowKindEqual = predicateBuilder.equal(0, BinaryString.fromString("+I"));
@@ -1475,14 +1476,14 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        "+I[+I, 2, 20, 200]", "+I[+U, 1, 30, 300]", "+I[+I, 1, 10, 100]");
+                        "+I[+I, 0, 2, 20, 200]", "+I[+U, 1, 1, 30, 300]", "+I[+I, 0, 1, 10, 100]");
 
         // Read by filter
         snapshotReader =
-                auditLogTable.newSnapshotReader().withFilter(predicateBuilder.equal(2, 10));
-        read = auditLogTable.newRead().withFilter(predicateBuilder.equal(2, 10));
+                auditLogTable.newSnapshotReader().withFilter(predicateBuilder.equal(3, 10));
+        read = auditLogTable.newRead().withFilter(predicateBuilder.equal(3, 10));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[+I, 1, 10, 100]");
+        assertThat(result).containsExactlyInAnyOrder("+I[+I, 0, 1, 10, 100]");
 
         // Read by requiredType
         RowType rowType = auditLogTable.rowType();
@@ -1596,8 +1597,9 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
             reader.forEachRemaining(
                     row -> {
                         assertThat(row.getString(0).toString()).isEqualTo("-D");
-                        assertThat(row.isNullAt(1)).isFalse();
-                        assertThat(row.getInt(1)).isEqualTo(1);
+                        assertThat(row.getLong(1)).isEqualTo(1L);
+                        assertThat(row.isNullAt(2)).isFalse();
+                        assertThat(row.getInt(3)).isEqualTo(1);
                     });
         }
     }

@@ -592,14 +592,14 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CREATE TABLE t (a INT, b INT)");
         sql("INSERT INTO t VALUES (1, 2)");
         assertThat(collectResult("SELECT * FROM t$audit_log"))
-                .containsExactlyInAnyOrder("+I[+I, 1, 2]");
+                .containsExactlyInAnyOrder("+I[+I, null, 1, 2]");
 
         sql("CALL sys.create_branch('default.t', 'b1')");
         sql("INSERT INTO t$branch_b1 VALUES (3, 4)");
         assertThat(collectResult("SELECT * FROM t$branch_b1$audit_log"))
-                .containsExactlyInAnyOrder("+I[+I, 3, 4]");
+                .containsExactlyInAnyOrder("+I[+I, null, 3, 4]");
         assertThat(collectResult("SELECT * FROM t$audit_log /*+ OPTIONS('branch'='b1') */"))
-                .containsExactlyInAnyOrder("+I[+I, 3, 4]");
+                .containsExactlyInAnyOrder("+I[+I, null, 3, 4]");
     }
 
     @Test
