@@ -86,6 +86,15 @@ public interface FormatTableCatalog {
         CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(options.toMap());
         if (formatTable.format() == FormatTable.Format.CSV) {
             options.set("sep", options.get(CsvOptions.FIELD_DELIMITER));
+            options.set("lineSep", options.get(CsvOptions.LINE_DELIMITER));
+            options.set("quote", options.get(CsvOptions.QUOTE_CHARACTER));
+            options.set("header", options.get(CsvOptions.INCLUDE_HEADER).toString());
+            options.set("escape", options.get(CsvOptions.ESCAPE_CHARACTER));
+            options.set("nullvalue", options.get(CsvOptions.NULL_LITERAL));
+            options.set("mode", options.get(CsvOptions.MODE).getValue());
+            if (options.contains(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION)) {
+                options.set("compression", options.get(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION));
+            }
             dsOptions = new CaseInsensitiveStringMap(options.toMap());
             return new PartitionedCSVTable(
                     ident.name(),
