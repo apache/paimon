@@ -146,9 +146,6 @@ public class PostgresActionUtils {
                 .getOptional(PostgresSourceOptions.SCAN_SNAPSHOT_FETCH_SIZE)
                 .ifPresent(sourceBuilder::fetchSize);
         postgresConfig
-                .getOptional(PostgresSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_CHUNK_KEY_COLUMN)
-                .ifPresent(sourceBuilder::chunkKeyColumn);
-        postgresConfig
                 .getOptional(PostgresSourceOptions.CHUNK_META_GROUP_SIZE)
                 .ifPresent(sourceBuilder::splitMetaGroupSize);
         postgresConfig
