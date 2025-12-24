@@ -49,13 +49,6 @@ under the License.
             <version>${project.version}</version>
         </dependency>
 
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-lucene</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
-
         <!-- Below are test dependencies which need to be distinguished for different Spark versions. -->
 
         <dependency>
