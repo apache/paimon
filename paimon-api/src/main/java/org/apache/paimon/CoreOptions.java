@@ -752,6 +752,15 @@ public class CoreOptions implements Serializable {
                             "Implying how often to perform an optimization compaction, this configuration is used to "
                                     + "ensure the query timeliness of the read-optimized system table.");
 
+    public static final ConfigOption<Boolean> READ_OPTIMIZED =
+            key("read-optimized")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Improves reading performance by only scanning files which does not need merging. "
+                                    + "For primary-key tables, only scans files on the topmost level. "
+                                    + "For append tables, acts like the normal append table.");
+
     public static final ConfigOption<MemorySize> COMPACTION_TOTAL_SIZE_THRESHOLD =
             key("compaction.total-size-threshold")
                     .memoryType()

@@ -38,6 +38,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.system.ReadOptimizedTable;
+import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -72,6 +74,7 @@ import java.util.regex.Pattern;
 import static java.lang.Boolean.parseBoolean;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.paimon.CoreOptions.READ_OPTIMIZED;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_MODE;
 import static org.apache.paimon.CoreOptions.StartupMode.FROM_SNAPSHOT;
@@ -112,6 +115,11 @@ public abstract class AbstractFlinkTableFactory
         }
         if (origin instanceof SystemCatalogTable) {
             return new SystemTableSource(table, unbounded, context.getObjectIdentifier());
+        } else if (!unbounded && parseBoolean(options.get(READ_OPTIMIZED.key()))) {
+            Table roTable =
+                    SystemTableLoader.load(
+                            ReadOptimizedTable.READ_OPTIMIZED, (FileStoreTable) table);
+            return new SystemTableSource(roTable, unbounded, context.getObjectIdentifier());
         } else {
             return new DataTableSource(
                     context.getObjectIdentifier(),
