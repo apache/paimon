@@ -142,9 +142,6 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
     import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory
     import java.util.ServiceLoader
     import scala.collection.JavaConverters._
-    val loader = ServiceLoader.load(classOf[GlobalIndexBuilderFactory])
-    println(
-      "DEBUG: Factories found: " + loader.iterator().asScala.map(_.identifier()).mkString(", "))
 
     withTable("T") {
       spark.sql("""

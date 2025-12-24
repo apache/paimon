@@ -18,6 +18,7 @@
 
 package org.apache.paimon.lucene.index;
 
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
@@ -38,20 +39,38 @@ public abstract class LuceneVectorIndexFactory {
         }
     }
 
-    public abstract LuceneVectorIndex<?> create(long rowId, Object vector);
+    public abstract LuceneVectorIndex create(long rowId, Object vector);
 
     /** Factory for creating LuceneFloatVectorIndex instances. */
     public static class LuceneFloatVectorIndexFactory extends LuceneVectorIndexFactory {
         @Override
-        public LuceneVectorIndex<?> create(long rowId, Object vector) {
-            return new LuceneFloatVectorIndex(rowId, (float[]) vector);
+        public LuceneVectorIndex create(long rowId, Object fieldData) {
+            float[] vector;
+            if (fieldData instanceof float[]) {
+                vector = (float[]) fieldData;
+            } else if (fieldData instanceof InternalArray) {
+                vector = ((InternalArray) fieldData).toFloatArray();
+            } else {
+                throw new RuntimeException(
+                        "Unsupported vector type: " + fieldData.getClass().getName());
+            }
+            return new LuceneFloatVectorIndex(rowId, vector);
         }
     }
 
     /** Factory for creating LuceneByteVectorIndex instances. */
     public static class LuceneByteVectorIndexFactory extends LuceneVectorIndexFactory {
         @Override
-        public LuceneVectorIndex<?> create(long rowId, Object vector) {
+        public LuceneVectorIndex create(long rowId, Object fieldData) {
+            byte[] vector;
+            if (fieldData instanceof byte[]) {
+                vector = (byte[]) fieldData;
+            } else if (fieldData instanceof InternalArray) {
+                vector = ((InternalArray) fieldData).toByteArray();
+            } else {
+                throw new RuntimeException(
+                        "Unsupported vector type: " + fieldData.getClass().getName());
+            }
             return new LuceneByteVectorIndex(rowId, (byte[]) vector);
         }
     }
