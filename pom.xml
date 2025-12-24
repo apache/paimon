@@ -426,6 +426,7 @@ under the License.
             <modules>
                 <module>paimon-spark/paimon-spark4-common</module>
                 <module>paimon-spark/paimon-spark-4.0</module>
+                <module>paimon-spark/paimon-spark-4.1</module>
             </modules>
             <properties>
                 <target.java.version>17</target.java.version>
