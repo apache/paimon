@@ -37,12 +37,15 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
+import org.apache.paimon.rest.filter.Filter;
+import org.apache.paimon.rest.filter.FilterPredicateConverter;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
@@ -524,11 +527,12 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public List<String> authTableQuery(Identifier identifier, @Nullable List<String> select)
+    public Predicate authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "authTable");
         try {
-            return api.authTableQuery(identifier, select);
+            Filter filter = api.authTableQuery(identifier, select);
+            return FilterPredicateConverter.toPredicate(filter);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {

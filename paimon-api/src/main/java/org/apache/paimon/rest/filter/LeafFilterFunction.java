@@ -16,23 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source;
+package org.apache.paimon.rest.filter;
 
-import org.apache.paimon.predicate.Predicate;
-
-import javax.annotation.Nullable;
-
-import java.util.List;
-
-/** Table query auth. */
-public interface TableQueryAuth {
-
-    /**
-     * Authorize table query and return a row-level access control predicate.
-     *
-     * @param select select columns, null if select all
-     * @return row-level access control predicate, null if no additional filter
-     */
-    @Nullable
-    Predicate auth(@Nullable List<String> select);
+/** Supported leaf comparison functions for REST {@link Filter} expressions. */
+public enum LeafFilterFunction {
+    EQUAL,
+    NOT_EQUAL,
+    GREATER_THAN,
+    GREATER_OR_EQUAL,
+    LESS_THAN,
+    LESS_OR_EQUAL,
+    IN,
+    NOT_IN,
+    IS_NULL,
+    IS_NOT_NULL,
+    STARTS_WITH,
+    ENDS_WITH,
+    CONTAINS,
+    LIKE
 }

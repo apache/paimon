@@ -169,8 +169,10 @@ abstract class AbstractDataTableScan implements DataTableScan {
         if (!options.queryAuthEnabled()) {
             return;
         }
-        queryAuth.auth(readType == null ? null : readType.getFieldNames());
-        // TODO add support for row level access control
+        Predicate rowFilter = queryAuth.auth(readType == null ? null : readType.getFieldNames());
+        if (rowFilter != null) {
+            snapshotReader.withFilter(rowFilter);
+        }
     }
 
     @Override

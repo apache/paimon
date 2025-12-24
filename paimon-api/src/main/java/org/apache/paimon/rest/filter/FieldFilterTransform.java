@@ -16,34 +16,52 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.responses;
+package org.apache.paimon.rest.filter;
 
-import org.apache.paimon.rest.RESTResponse;
-import org.apache.paimon.rest.filter.Filter;
+import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Response for auth table query. */
+/**
+ * A {@link FilterTransform} which references a table field (index/name/type) as the transform
+ * input.
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class AuthTableQueryResponse implements RESTResponse {
+public class FieldFilterTransform implements FilterTransform {
 
-    private static final String FIELD_FILTER = "filter";
+    private static final String FIELD_INDEX = "index";
+    private static final String FIELD_NAME = "name";
+    private static final String FIELD_DATA_TYPE = "dataType";
 
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonProperty(FIELD_FILTER)
-    private final Filter filter;
+    private final int index;
+    private final String name;
+    private final DataType dataType;
 
     @JsonCreator
-    public AuthTableQueryResponse(@JsonProperty(FIELD_FILTER) Filter filter) {
-        this.filter = filter;
+    public FieldFilterTransform(
+            @JsonProperty(FIELD_INDEX) int index,
+            @JsonProperty(FIELD_NAME) String name,
+            @JsonProperty(FIELD_DATA_TYPE) DataType dataType) {
+        this.index = index;
+        this.name = name;
+        this.dataType = dataType;
     }
 
-    @JsonGetter(FIELD_FILTER)
-    public Filter filter() {
-        return filter;
+    @JsonGetter(FIELD_INDEX)
+    public int index() {
+        return index;
+    }
+
+    @JsonGetter(FIELD_NAME)
+    public String name() {
+        return name;
+    }
+
+    @JsonGetter(FIELD_DATA_TYPE)
+    public DataType dataType() {
+        return dataType;
     }
 }
