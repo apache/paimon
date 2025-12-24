@@ -1,6 +1,6 @@
 ---
 title: "Chain Table"
-weight: 6
+weight: 9
 type: docs
 aliases:
 - /primary-key-table/chain-table.html
