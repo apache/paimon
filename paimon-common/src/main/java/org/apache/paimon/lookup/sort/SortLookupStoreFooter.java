@@ -16,28 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.sst;
+package org.apache.paimon.lookup.sort;
 
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.memory.MemorySliceOutput;
+import org.apache.paimon.sst.BlockHandle;
+import org.apache.paimon.sst.BloomFilterHandle;
 
 import javax.annotation.Nullable;
-
-import java.io.IOException;
 
 import static org.apache.paimon.sst.SstFileWriter.MAGIC_NUMBER;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Footer for a sorted file. */
-public class Footer {
+public class SortLookupStoreFooter {
 
     public static final int ENCODED_LENGTH = 36;
 
     @Nullable private final BloomFilterHandle bloomFilterHandle;
     private final BlockHandle indexBlockHandle;
 
-    Footer(@Nullable BloomFilterHandle bloomFilterHandle, BlockHandle indexBlockHandle) {
+    public SortLookupStoreFooter(
+            @Nullable BloomFilterHandle bloomFilterHandle, BlockHandle indexBlockHandle) {
         this.bloomFilterHandle = bloomFilterHandle;
         this.indexBlockHandle = indexBlockHandle;
     }
@@ -51,7 +52,7 @@ public class Footer {
         return indexBlockHandle;
     }
 
-    public static Footer readFooter(MemorySliceInput sliceInput) throws IOException {
+    public static SortLookupStoreFooter readFooter(MemorySliceInput sliceInput) {
         // read bloom filter and index handles
         @Nullable
         BloomFilterHandle bloomFilterHandle =
@@ -71,16 +72,16 @@ public class Footer {
         int magicNumber = sliceInput.readInt();
         checkArgument(magicNumber == MAGIC_NUMBER, "File is not a table (bad magic number)");
 
-        return new Footer(bloomFilterHandle, indexBlockHandle);
+        return new SortLookupStoreFooter(bloomFilterHandle, indexBlockHandle);
     }
 
-    public static MemorySlice writeFooter(Footer footer) {
+    public static MemorySlice writeFooter(SortLookupStoreFooter footer) {
         MemorySliceOutput output = new MemorySliceOutput(ENCODED_LENGTH);
         writeFooter(footer, output);
         return output.toSlice();
     }
 
-    public static void writeFooter(Footer footer, MemorySliceOutput sliceOutput) {
+    public static void writeFooter(SortLookupStoreFooter footer, MemorySliceOutput sliceOutput) {
         // write bloom filter and index handles
         if (footer.bloomFilterHandle == null) {
             sliceOutput.writeLong(0);

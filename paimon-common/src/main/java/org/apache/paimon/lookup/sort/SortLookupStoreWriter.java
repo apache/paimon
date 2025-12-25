@@ -19,32 +19,49 @@
 package org.apache.paimon.lookup.sort;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.lookup.LookupStoreWriter;
+import org.apache.paimon.memory.MemorySlice;
+import org.apache.paimon.sst.BlockHandle;
+import org.apache.paimon.sst.BloomFilterHandle;
 import org.apache.paimon.sst.SstFileWriter;
 import org.apache.paimon.utils.BloomFilter;
 
 import javax.annotation.Nullable;
 
-import java.io.File;
 import java.io.IOException;
 
-/** A {@link LookupStoreWriter} backed by an {@link SstFileWriter}. */
+/**
+ * A {@link LookupStoreWriter} backed by an {@link SstFileWriter}. The SST File layout is as below:
+ * (For layouts of each block type, please refer to corresponding classes)
+ *
+ * <pre>
+ *     +-----------------------------------+------+
+ *     |             Footer                |      |
+ *     +-----------------------------------+      |
+ *     |           Index Block             |      +--> Loaded on open
+ *     +-----------------------------------+      |
+ *     |        Bloom Filter Block         |      |
+ *     +-----------------------------------+------+
+ *     |            Data Block             |      |
+ *     +-----------------------------------+      |
+ *     |              ......               |      +--> Loaded on requested
+ *     +-----------------------------------+      |
+ *     |            Data Block             |      |
+ *     +-----------------------------------+------+
+ * </pre>
+ */
 public class SortLookupStoreWriter implements LookupStoreWriter {
 
     private final SstFileWriter writer;
     private final PositionOutputStream out;
 
     public SortLookupStoreWriter(
-            File file,
+            PositionOutputStream out,
             int blockSize,
             @Nullable BloomFilter.Builder bloomFilter,
-            BlockCompressionFactory compressionFactory)
-            throws IOException {
-        Path filePath = new Path(file.getAbsolutePath());
-        this.out = LocalFileIO.INSTANCE.newOutputStream(filePath, true);
+            BlockCompressionFactory compressionFactory) {
+        this.out = out;
         this.writer = new SstFileWriter(out, blockSize, bloomFilter, compressionFactory);
     }
 
@@ -55,7 +72,13 @@ public class SortLookupStoreWriter implements LookupStoreWriter {
 
     @Override
     public void close() throws IOException {
-        writer.close();
+        writer.flush();
+        BloomFilterHandle bloomFilterHandle = writer.writeBloomFilter();
+        BlockHandle indexBlockHandle = writer.writeIndexBlock();
+        SortLookupStoreFooter footer =
+                new SortLookupStoreFooter(bloomFilterHandle, indexBlockHandle);
+        MemorySlice footerEncoding = SortLookupStoreFooter.writeFooter(footer);
+        writer.writeSlice(footerEncoding);
         out.close();
     }
 }

@@ -30,6 +30,7 @@ import java.util.Map;
 
 /** Test for {@link BlockIterator}. */
 public class BlockIteratorTest {
+
     private static final int ROW_NUM = 10_000;
     private static final Comparator<MemorySlice> COMPARATOR =
             Comparator.comparingInt(slice -> slice.readInt(0));

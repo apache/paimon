@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.sst;
+package org.apache.paimon.lookup.sort;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.CompressOptions;
@@ -29,6 +29,10 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.sst.BlockEntry;
+import org.apache.paimon.sst.BlockIterator;
+import org.apache.paimon.sst.SstFileReader;
+import org.apache.paimon.sst.SstFileWriter;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.utils.BloomFilter;
@@ -41,6 +45,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -50,8 +55,9 @@ import java.util.UUID;
 
 /** Test for {@link SstFileReader} and {@link SstFileWriter}. */
 @ExtendWith(ParameterizedTestExtension.class)
-public class SstFileTest {
-    private static final Logger LOG = LoggerFactory.getLogger(SstFileTest.class);
+public class SortLookupStoreTest {
+
+    private static final Logger LOG = LoggerFactory.getLogger(SortLookupStoreTest.class);
 
     // 256 records per block
     private static final int BLOCK_SIZE = (10) * 256;
@@ -63,9 +69,9 @@ public class SstFileTest {
 
     private FileIO fileIO;
     private Path file;
-    private Path parent;
+    private File localFile;
 
-    public SstFileTest(List<Object> var) {
+    public SortLookupStoreTest(List<Object> var) {
         this.bloomFilterEnabled = (Boolean) var.get(0);
         this.compress = new CompressOptions((String) var.get(1), 1);
     }
@@ -85,8 +91,8 @@ public class SstFileTest {
     @BeforeEach
     public void beforeEach() {
         this.fileIO = LocalFileIO.create();
-        this.parent = new Path(tempPath.toUri());
         this.file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+        this.localFile = new File(file.toUri().getPath());
     }
 
     @TestTemplate
@@ -95,16 +101,18 @@ public class SstFileTest {
         innerTestLookup();
     }
 
+    private SortLookupStoreReader newReader() throws IOException {
+        SeekableInputStream input = LocalFileIO.INSTANCE.newInputStream(file);
+        return new SortLookupStoreReader(
+                Comparator.comparingInt(slice -> slice.readInt(0)),
+                file,
+                localFile.length(),
+                input,
+                CACHE_MANAGER);
+    }
+
     private void innerTestLookup() throws Exception {
-        long fileSize = fileIO.getFileSize(file);
-        try (SeekableInputStream inputStream = fileIO.newInputStream(file);
-                SstFileReader reader =
-                        new SstFileReader(
-                                Comparator.comparingInt(slice -> slice.readInt(0)),
-                                fileSize,
-                                file,
-                                inputStream,
-                                CACHE_MANAGER); ) {
+        try (SortLookupStoreReader reader = newReader()) {
             Random random = new Random();
             MemorySliceOutput keyOut = new MemorySliceOutput(4);
 
@@ -162,15 +170,7 @@ public class SstFileTest {
         int recordNum = 20000;
         writeData(recordNum, bloomFilterEnabled);
 
-        long fileSize = fileIO.getFileSize(file);
-        try (SeekableInputStream inputStream = fileIO.newInputStream(file);
-                SstFileReader reader =
-                        new SstFileReader(
-                                Comparator.comparingInt(slice -> slice.readInt(0)),
-                                fileSize,
-                                file,
-                                inputStream,
-                                CACHE_MANAGER); ) {
+        try (SortLookupStoreReader reader = newReader()) {
             SstFileReader.SstFileIterator fileIterator = reader.createIterator();
 
             MemorySliceOutput keyOut = new MemorySliceOutput(4);
@@ -230,7 +230,8 @@ public class SstFileTest {
         iterator.seekTo(keyOut.toSlice().getHeapMemory());
     }
 
-    private void interleaveLookup(SstFileReader reader, MemorySliceOutput keyOut) throws Exception {
+    private void interleaveLookup(SortLookupStoreReader reader, MemorySliceOutput keyOut)
+            throws Exception {
         keyOut.reset();
         keyOut.writeInt(0);
         reader.lookup(keyOut.toSlice().getHeapMemory());
@@ -243,8 +244,8 @@ public class SstFileTest {
         }
         BlockCompressionFactory compressionFactory = BlockCompressionFactory.create(compress);
         try (PositionOutputStream outputStream = fileIO.newOutputStream(file, true);
-                SstFileWriter writer =
-                        new SstFileWriter(
+                SortLookupStoreWriter writer =
+                        new SortLookupStoreWriter(
                                 outputStream, BLOCK_SIZE, bloomFilter, compressionFactory); ) {
             MemorySliceOutput keyOut = new MemorySliceOutput(4);
             MemorySliceOutput valueOut = new MemorySliceOutput(4);
