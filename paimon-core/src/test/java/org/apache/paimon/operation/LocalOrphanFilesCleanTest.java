@@ -188,6 +188,11 @@ public class LocalOrphanFilesCleanTest {
         // delete branch1 first before deleting tags
         table.deleteBranch("branch1");
 
+        // deleteBranch also removes the manually added files in branch directory,
+        // so we need to remove them from manuallyAddedFiles to avoid validation failure
+        String branchPathPrefix = branchPath(tablePath, "branch1").toString();
+        manuallyAddedFiles.removeIf(path -> path.toString().startsWith(branchPathPrefix));
+
         // randomly delete tags
         List<String> deleteTags = Collections.emptyList();
         deleteTags = randomlyPick(allTags);
@@ -293,6 +298,11 @@ public class LocalOrphanFilesCleanTest {
 
         // delete branch1 first before deleting tags
         table.deleteBranch("branch1");
+
+        // deleteBranch also removes the manually added files in branch directory,
+        // so we need to remove them from manuallyAddedFiles to avoid validation failure
+        String branchPathPrefix = branchPath(tablePath, "branch1").toString();
+        manuallyAddedFiles.removeIf(path -> path.toString().startsWith(branchPathPrefix));
 
         // randomly delete tags
         List<String> deleteTags = Collections.emptyList();
