@@ -21,7 +21,7 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.streaming.StreamTest
 
 class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
@@ -40,7 +40,7 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
           val table = loadTable("T")
           val location = table.location().toString
 
-          val inputData = MemoryStream[(Int, String)]
+          val inputData = SparkShimLoader.shim.createMemoryStream[(Int, String)]
           val stream = inputData
             .toDS()
             .toDF("a", "b")
@@ -169,7 +169,7 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, String)]
+          val inputData = SparkShimLoader.shim.createMemoryStream[(Int, String)]
           val stream = inputData
             .toDS()
             .toDF("a", "b")
