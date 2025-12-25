@@ -31,7 +31,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 object MinorVersionShim {
 
   def createKeep(context: String, condition: Expression, output: Seq[Expression]): Instruction = {
-    null
+    throw new UnsupportedOperationException("Not implemented")
   }
 
   def createFileIndex(
@@ -40,22 +40,22 @@ object MinorVersionShim {
       paths: Seq[String],
       userSpecifiedSchema: Option[StructType],
       partitionSchema: StructType): PartitioningAwareFileIndex = {
-    null
+    throw new UnsupportedOperationException("Not implemented")
   }
 
   def createSparkInternalRow(rowType: RowType): SparkInternalRow = {
-    null
+    throw new UnsupportedOperationException("Not implemented")
   }
 
   def createSparkInternalRowWithBlob(
       rowType: RowType,
       blobFieldIndex: Int,
       blobAsDescriptor: Boolean): SparkInternalRow = {
-    null
+    throw new UnsupportedOperationException("Not implemented")
   }
 
   def createSparkArrayData(elementType: DataType): SparkArrayData = {
-    null
+    throw new UnsupportedOperationException("Not implemented")
   }
 
 }
