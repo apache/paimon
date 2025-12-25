@@ -215,6 +215,18 @@ public class FileSystemBranchManager implements BranchManager {
         }
     }
 
+    @Override
+    public List<String> branchesCreatedFromTag(String tagName) {
+        List<String> result = new java.util.ArrayList<>();
+        for (String branchName : branches()) {
+            TagManager branchTagManager = tagManager.copyWithBranch(branchName);
+            if (branchTagManager.tagExists(tagName)) {
+                result.add(branchName);
+            }
+        }
+        return result;
+    }
+
     private void copySchemasToBranch(String branchName, long schemaId) throws IOException {
         for (int i = 0; i <= schemaId; i++) {
             if (schemaManager.schemaExists(i)) {
