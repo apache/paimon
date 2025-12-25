@@ -25,7 +25,7 @@ import org.apache.paimon.spark.data.{Spark3ArrayData, Spark3InternalRow, Spark3I
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, Dataset, Encoder, SparkSession, SQLContext}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
@@ -37,7 +37,7 @@ import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.datasources._
-import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
+import org.apache.spark.sql.execution.streaming.{FileStreamSink, MemoryStream, MetadataLogFileIndex, Offset}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -198,6 +198,17 @@ class Spark3Shim extends SparkShim {
         userSpecifiedSchema,
         fileStatusCache,
         partitionSchema = partitionSchema)
+    }
+  }
+
+  override def createMemoryStream[A](implicit
+      encoder: Encoder[A],
+      sqlContext: SQLContext): MemoryStreamWrapper[A] = {
+    val stream = MemoryStream[A]
+    new MemoryStreamWrapper[A] {
+      override def toDS(): Dataset[A] = stream.toDS()
+      override def toDF(): DataFrame = stream.toDF()
+      override def addData(data: A*): Offset = stream.addData(data)
     }
   }
 }

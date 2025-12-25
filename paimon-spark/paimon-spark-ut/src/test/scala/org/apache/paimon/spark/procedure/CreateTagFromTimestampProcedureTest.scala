@@ -22,7 +22,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.utils.SnapshotNotExistException
 
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.streaming.StreamTest
 
 class CreateTagFromTimestampProcedureTest extends PaimonSparkTestBase with StreamTest {
@@ -39,7 +39,7 @@ class CreateTagFromTimestampProcedureTest extends PaimonSparkTestBase with Strea
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, String)]
+          val inputData = SparkShimLoader.shim.createMemoryStream[(Int, String)]
           val stream = inputData
             .toDS()
             .toDF("a", "b")
@@ -116,7 +116,7 @@ class CreateTagFromTimestampProcedureTest extends PaimonSparkTestBase with Strea
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, String)]
+          val inputData = SparkShimLoader.shim.createMemoryStream[(Int, String)]
           val stream = inputData
             .toDS()
             .toDF("a", "b")

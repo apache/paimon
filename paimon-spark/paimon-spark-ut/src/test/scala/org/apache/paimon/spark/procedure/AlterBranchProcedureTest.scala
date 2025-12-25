@@ -21,7 +21,7 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.streaming.StreamTest
 
 class AlterBranchProcedureTest extends PaimonSparkTestBase with StreamTest {
@@ -37,7 +37,7 @@ class AlterBranchProcedureTest extends PaimonSparkTestBase with StreamTest {
                      |""".stripMargin)
         val location = loadTable("T").location().toString
 
-        val inputData = MemoryStream[(Int, String)]
+        val inputData = SparkShimLoader.shim.createMemoryStream[(Int, String)]
         val stream = inputData
           .toDS()
           .toDF("a", "b")

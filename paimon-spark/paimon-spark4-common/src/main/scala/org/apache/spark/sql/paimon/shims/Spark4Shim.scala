@@ -24,7 +24,7 @@ import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensi
 import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{Encoder, SparkSession, SQLContext}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
@@ -155,5 +155,11 @@ class Spark4Shim extends SparkShim {
       paths,
       userSpecifiedSchema,
       partitionSchema)
+  }
+
+  override def createMemoryStream[A](implicit
+      encoder: Encoder[A],
+      sqlContext: SQLContext): MemoryStreamWrapper[A] = {
+    MinorVersionShim.createMemoryStream[A]
   }
 }

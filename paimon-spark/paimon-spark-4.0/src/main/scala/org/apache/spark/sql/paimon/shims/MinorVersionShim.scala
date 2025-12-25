@@ -22,12 +22,12 @@ import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4I
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, Dataset, Encoder, SparkSession, SQLContext}
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
 import org.apache.spark.sql.execution.datasources._
-import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
+import org.apache.spark.sql.execution.streaming.{FileStreamSink, MemoryStream, MetadataLogFileIndex, Offset}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -120,4 +120,14 @@ object MinorVersionShim {
     }
   }
 
+  def createMemoryStream[A](implicit
+      encoder: Encoder[A],
+      sqlContext: SQLContext): MemoryStreamWrapper[A] = {
+    val stream = MemoryStream[A]
+    new MemoryStreamWrapper[A] {
+      override def toDS(): Dataset[A] = stream.toDS()
+      override def toDF(): DataFrame = stream.toDF()
+      override def addData(data: A*): Offset = stream.addData(data)
+    }
+  }
 }

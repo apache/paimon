@@ -19,7 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.streaming.StreamTest
 
 class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
@@ -150,7 +150,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
         val location = table.location().toString
 
         // streaming write
-        val inputData = MemoryStream[(Int, String)]
+        val inputData = SparkShimLoader.shim.createMemoryStream[(Int, String)]
         val writeStream = inputData
           .toDS()
           .toDF("a", "b")
