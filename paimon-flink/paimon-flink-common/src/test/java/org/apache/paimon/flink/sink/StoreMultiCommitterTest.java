@@ -71,6 +71,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
@@ -81,7 +83,6 @@ class StoreMultiCommitterTest {
     private Path warehouse;
     private CatalogLoader catalogLoader;
     private Catalog catalog;
-    private String databaseName;
     private Identifier firstTable;
     private Identifier secondTable;
     private Path firstTablePath;
@@ -100,7 +101,7 @@ class StoreMultiCommitterTest {
     public void beforeEach() throws Exception {
         initialCommitUser = UUID.randomUUID().toString();
         warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
-        databaseName = "test_db";
+        String databaseName = "test_db";
         firstTable = Identifier.create(databaseName, "test_table1");
         secondTable = Identifier.create(databaseName, "test_table2");
 
@@ -122,7 +123,7 @@ class StoreMultiCommitterTest {
         Options firstOptions = new Options();
         firstOptions.set(
                 CoreOptions.TAG_AUTOMATIC_CREATION, CoreOptions.TagCreationMode.PROCESS_TIME);
-        firstOptions.setString("bucket", "-1");
+        firstOptions.set(BUCKET, -1);
         Schema firstTableSchema =
                 new Schema(
                         rowType1.getFields(),
@@ -132,8 +133,8 @@ class StoreMultiCommitterTest {
                         "");
 
         Options secondOptions = new Options();
-        secondOptions.setString("bucket", "1");
-        secondOptions.setString("bucket-key", "a");
+        secondOptions.set(BUCKET, 1);
+        secondOptions.set(BUCKET_KEY, "a");
         Schema secondTableSchema =
                 new Schema(
                         rowType2.getFields(),
@@ -258,6 +259,7 @@ class StoreMultiCommitterTest {
     public void testCheckpointAbort() throws Exception {
         FileStoreTable table1 = (FileStoreTable) catalog.getTable(firstTable);
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
+        table2 = table2.copy(Collections.singletonMap("write-only", "true"));
         OneInputStreamOperatorTestHarness<MultiTableCommittable, MultiTableCommittable>
                 testHarness = createRecoverableTestHarness();
         testHarness.open();
@@ -328,7 +330,7 @@ class StoreMultiCommitterTest {
         // should create 20 snapshots in total for first table
         assertThat(snapshotManager1.latestSnapshotId()).isEqualTo(20);
         // should create 10 snapshots for second table
-        assertThat(snapshotManager2.latestSnapshotId()).isEqualTo(11);
+        assertThat(snapshotManager2.latestSnapshotId()).isEqualTo(10);
         testHarness.close();
     }
 
