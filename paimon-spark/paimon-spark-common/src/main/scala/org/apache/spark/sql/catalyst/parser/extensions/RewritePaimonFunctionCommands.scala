@@ -25,6 +25,7 @@ import org.apache.paimon.spark.SparkCatalog.FUNCTION_DEFINITION_NAME
 import org.apache.paimon.spark.catalog.SupportV1Function
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions
 import org.apache.paimon.spark.execution.{CreatePaimonV1FunctionCommand, DescribePaimonV1FunctionCommand, DropPaimonV1FunctionCommand}
+import org.apache.paimon.spark.function.BuiltInFunctions
 import org.apache.paimon.spark.util.OptionUtils
 
 import org.apache.spark.sql.SparkSession
@@ -143,7 +144,9 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
     def unapply(nameParts: Seq[String]): Option[(CatalogPlugin, FunctionIdentifier, Boolean)] = {
       nameParts match {
         // Spark's built-in or tmp functions is without database name or catalog name.
-        case Seq(funName) if isSparkBuiltInFunction(FunctionIdentifier(funName)) =>
+        case Seq(funName)
+            if isSparkBuiltInFunction(FunctionIdentifier(funName)) || isPaimonBuiltInFunction(
+              FunctionIdentifier(funName)) =>
           None
         case Seq(funName) if isSparkTmpFunc(FunctionIdentifier(funName)) =>
           Some(null, FunctionIdentifier(funName), true)
@@ -173,6 +176,10 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
 
   private def isSparkBuiltInFunction(funcIdent: FunctionIdentifier): Boolean = {
     catalogManager.v1SessionCatalog.isBuiltinFunction(funcIdent)
+  }
+
+  private def isPaimonBuiltInFunction(funcIdent: FunctionIdentifier): Boolean = {
+    BuiltInFunctions.FUNCTIONS.containsKey(funcIdent.funcName)
   }
 
   private def isSparkTmpFunc(funcIdent: FunctionIdentifier): Boolean = {
