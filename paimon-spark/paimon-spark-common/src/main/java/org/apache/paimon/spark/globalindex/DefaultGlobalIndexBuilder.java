@@ -16,28 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.globalindex.bitmap;
+package org.apache.paimon.spark.globalindex;
 
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory;
-
-/**
- * Factory for creating bitmap-based global index builders.
- *
- * <p>This factory is automatically discovered via Java's ServiceLoader mechanism.
- */
-public class BitmapGlobalIndexBuilderFactory implements GlobalIndexBuilderFactory {
-
-    private static final String IDENTIFIER = "bitmap";
-
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
-    }
-
-    @Override
-    public GlobalIndexBuilder create(GlobalIndexBuilderContext context) {
-        return new BitmapGlobalIndexBuilder(context);
+/** Default {@link GlobalIndexBuilder}. */
+public class DefaultGlobalIndexBuilder extends GlobalIndexBuilder {
+    public DefaultGlobalIndexBuilder(GlobalIndexBuilderContext context) {
+        super(context);
     }
 }
