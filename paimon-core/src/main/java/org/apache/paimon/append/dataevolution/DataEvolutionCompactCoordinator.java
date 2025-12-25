@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.RangeHelper;
@@ -44,6 +45,7 @@ import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compact coordinator to compact data evolution table. */
 public class DataEvolutionCompactCoordinator {
@@ -108,8 +110,13 @@ public class DataEvolutionCompactCoordinator {
                 List<ManifestEntry> targetEntries =
                         currentMetas.stream()
                                 .flatMap(meta -> snapshotReader.readManifest(meta).stream())
+                                // we don't need stats for compaction
+                                .map(ManifestEntry::copyWithoutStats)
                                 .collect(Collectors.toList());
                 result.addAll(targetEntries);
+            }
+            if (result.isEmpty()) {
+                throw new EndOfScanException();
             }
             return result;
         }
@@ -199,6 +206,10 @@ public class DataEvolutionCompactCoordinator {
 
                     long weightSum = 0L;
                     for (List<DataFileMeta> fileGroup : groupedFiles) {
+                        checkArgument(
+                                rangeHelper.areAllRangesSame(fileGroup),
+                                "Data files %s should be all row id ranges same.",
+                                dataFiles);
                         long currentGroupWeight =
                                 fileGroup.stream()
                                         .mapToLong(d -> Math.max(d.fileSize(), openFileCost))

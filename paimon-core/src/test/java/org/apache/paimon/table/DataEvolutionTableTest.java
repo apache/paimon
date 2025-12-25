@@ -56,6 +56,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
@@ -913,11 +914,15 @@ public class DataEvolutionTableTest extends TableTestBase {
         // Each plan() call processes one manifest group
         List<DataEvolutionCompactTask> allTasks = new ArrayList<>();
         List<DataEvolutionCompactTask> tasks;
-        while (!(tasks = coordinator.plan()).isEmpty() || allTasks.isEmpty()) {
-            allTasks.addAll(tasks);
-            if (tasks.isEmpty()) {
-                break;
+        try {
+            while (!(tasks = coordinator.plan()).isEmpty() || allTasks.isEmpty()) {
+                allTasks.addAll(tasks);
+                if (tasks.isEmpty()) {
+                    break;
+                }
             }
+        } catch (EndOfScanException ingore) {
+
         }
 
         // Verify no exceptions were thrown and tasks list is valid (may be empty)
@@ -940,10 +945,13 @@ public class DataEvolutionTableTest extends TableTestBase {
         // Each plan() call processes one manifest group
         List<CommitMessage> commitMessages = new ArrayList<>();
         List<DataEvolutionCompactTask> tasks;
-        while (!(tasks = coordinator.plan()).isEmpty()) {
-            for (DataEvolutionCompactTask task : tasks) {
-                commitMessages.add(task.doCompact(table));
+        try {
+            while (!(tasks = coordinator.plan()).isEmpty()) {
+                for (DataEvolutionCompactTask task : tasks) {
+                    commitMessages.add(task.doCompact(table, "test-commit"));
+                }
             }
+        } catch (EndOfScanException ignore) {
         }
 
         table.newBatchWriteBuilder().newCommit().commit(commitMessages);
