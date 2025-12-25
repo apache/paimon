@@ -22,7 +22,6 @@ import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.BlockCompressionType;
 import org.apache.paimon.compression.BlockCompressor;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.lookup.sort.SortLookupStoreFooter;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.MemorySize;
@@ -189,38 +188,6 @@ public class SstFileWriter {
         LOG.info("totalUncompressedSize: {}", MemorySize.ofBytes(totalUncompressedSize));
         LOG.info("totalCompressedSize: {}", MemorySize.ofBytes(totalCompressedSize));
         return indexBlock;
-    }
-
-    public void close() throws IOException {
-        // flush current data block
-        flush();
-
-        LOG.info("Number of record: {}", recordCount);
-
-        // write bloom filter
-        @Nullable BloomFilterHandle bloomFilterHandle = null;
-        if (bloomFilter != null) {
-            MemorySegment buffer = bloomFilter.getBuffer();
-            bloomFilterHandle =
-                    new BloomFilterHandle(
-                            out.getPos(), buffer.size(), bloomFilter.expectedEntries());
-            writeSlice(MemorySlice.wrap(buffer));
-            LOG.info("Bloom filter size: {} bytes", bloomFilter.getBuffer().size());
-        }
-
-        // write index block
-        BlockHandle indexBlockHandle = writeBlock(indexBlockWriter);
-
-        // write footer
-        SortLookupStoreFooter footer =
-                new SortLookupStoreFooter(bloomFilterHandle, indexBlockHandle);
-        MemorySlice footerEncoding = SortLookupStoreFooter.writeFooter(footer);
-        writeSlice(footerEncoding);
-
-        // do not need to close outputStream, since it will be closed by outer classes
-
-        LOG.info("totalUncompressedSize: {}", MemorySize.ofBytes(totalUncompressedSize));
-        LOG.info("totalCompressedSize: {}", MemorySize.ofBytes(totalCompressedSize));
     }
 
     public void writeSlice(MemorySlice slice) throws IOException {
