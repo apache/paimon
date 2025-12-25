@@ -20,26 +20,21 @@ package org.apache.paimon.spark.data
 
 import org.apache.paimon.spark.AbstractSparkInternalRow
 import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.InternalRowUtils.copyInternalRow
 
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.unsafe.types.VariantVal
+import org.apache.spark.unsafe.types.{GeographyVal, GeometryVal, VariantVal}
 
-class Spark4InternalRowWithBlob(rowType: RowType, blobFieldIndex: Int, blobAsDescriptor: Boolean)
-  extends Spark4InternalRow(rowType) {
+class Spark4InternalRow(rowType: RowType) extends AbstractSparkInternalRow(rowType) {
 
-  override def getBinary(ordinal: Int): Array[Byte] = {
-    if (ordinal == blobFieldIndex) {
-      if (blobAsDescriptor) {
-        row.getBlob(ordinal).toDescriptor.serialize()
-      } else {
-        row.getBlob(ordinal).toData
-      }
-    } else {
-      super.getBinary(ordinal)
-    }
+  override def getVariant(i: Int): VariantVal = {
+    val v = row.getVariant(i)
+    new VariantVal(v.value(), v.metadata())
   }
 
-  override def copy: InternalRow =
-    SparkInternalRow.create(rowType, blobAsDescriptor).replace(copyInternalRow(row, rowType))
+  def getGeography(ordinal: Int): GeographyVal = {
+    throw new UnsupportedOperationException("GeographyVal is not supported")
+  }
+
+  def getGeometry(ordinal: Int): GeometryVal = {
+    throw new UnsupportedOperationException("GeometryVal is not supported")
+  }
 }

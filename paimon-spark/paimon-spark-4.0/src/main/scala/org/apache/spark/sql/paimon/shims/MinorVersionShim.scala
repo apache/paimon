@@ -18,6 +18,9 @@
 
 package org.apache.spark.sql.paimon.shims
 
+import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4InternalRowWithBlob, SparkArrayData, SparkInternalRow}
+import org.apache.paimon.types.{DataType, RowType}
+
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.Expression
@@ -34,6 +37,21 @@ object MinorVersionShim {
 
   def createKeep(context: String, condition: Expression, output: Seq[Expression]): Instruction = {
     MergeRows.Keep(condition, output)
+  }
+
+  def createSparkInternalRow(rowType: RowType): SparkInternalRow = {
+    new Spark4InternalRow(rowType)
+  }
+
+  def createSparkInternalRowWithBlob(
+      rowType: RowType,
+      blobFieldIndex: Int,
+      blobAsDescriptor: Boolean): SparkInternalRow = {
+    new Spark4InternalRowWithBlob(rowType, blobFieldIndex, blobAsDescriptor)
+  }
+
+  def createSparkArrayData(elementType: DataType): SparkArrayData = {
+    new Spark4ArrayData(elementType)
   }
 
   def createFileIndex(
