@@ -461,7 +461,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 newExpireRunnable(),
                 options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
                 options.writeOnly() ? null : store().newTagAutoManager(this),
-                CoreOptions.fromMap(options()).consumerExpireTime(),
+                options.writeOnly() ? null : CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path, snapshotManager().branch()),
                 options.snapshotExpireExecutionMode(),
                 name(),
