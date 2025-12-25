@@ -25,6 +25,7 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 
 import static org.apache.paimon.predicate.SimpleColStatsTestUtils.test;
@@ -106,5 +107,15 @@ public class PredicateBuilderTest {
                                 builder.isNull(4),
                                 builder.isNull(5),
                                 child3));
+    }
+
+    @Test
+    public void testIn() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate predicate = builder.in(0, new ArrayList<>());
+        assertThat(predicate.test(GenericRow.of(1))).isEqualTo(false);
+        predicate = builder.in(0, Arrays.asList(1, 2));
+        assertThat(predicate.test(GenericRow.of(1))).isEqualTo(true);
+        assertThat(predicate.test(GenericRow.of(10))).isEqualTo(false);
     }
 }
