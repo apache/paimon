@@ -144,9 +144,7 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
     def unapply(nameParts: Seq[String]): Option[(CatalogPlugin, FunctionIdentifier, Boolean)] = {
       nameParts match {
         // Spark's built-in or tmp functions is without database name or catalog name.
-        case Seq(funName)
-            if isSparkBuiltInFunction(FunctionIdentifier(funName)) || isPaimonBuiltInFunction(
-              FunctionIdentifier(funName)) =>
+        case Seq(funName) if isSparkBuiltInFunction(FunctionIdentifier(funName)) =>
           None
         case Seq(funName) if isSparkTmpFunc(FunctionIdentifier(funName)) =>
           Some(null, FunctionIdentifier(funName), true)
@@ -170,7 +168,7 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
       case Some(db)
           if db == SYSTEM_DATABASE_NAME && PaimonFunctions.names.contains(funcIdent.funcName) =>
         true
-      case _ => false
+      case _ => BuiltInFunctions.FUNCTIONS.containsKey(funcIdent.funcName)
     }
   }
 
