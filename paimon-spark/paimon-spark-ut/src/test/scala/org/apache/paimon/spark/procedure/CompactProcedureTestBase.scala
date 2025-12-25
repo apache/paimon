@@ -27,7 +27,7 @@ import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted}
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.runtime.MemoryStream
+import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions
 import org.scalatest.time.Span
