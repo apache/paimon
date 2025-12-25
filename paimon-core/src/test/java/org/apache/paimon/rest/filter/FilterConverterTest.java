@@ -29,13 +29,12 @@ import org.junit.Test;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for {@link FilterPredicateConverter}. */
@@ -132,44 +131,31 @@ public class FilterConverterTest {
 
     @Test
     public void testLiteralConversions() {
-        // BOOLEAN from string
+        // BOOLEAN from boolean
         Predicate boolEq =
                 FilterPredicateConverter.toPredicate(
                         new TransformFilter(
                                 new FieldFilterTransform(0, "b", DataTypes.BOOLEAN()),
                                 LeafFilterFunction.EQUAL,
-                                Collections.singletonList("true")));
+                                Collections.singletonList(true)));
         assertNotNull(boolEq);
         assertTrue(boolEq.test(GenericRow.of(true)));
         assertFalse(boolEq.test(GenericRow.of(false)));
 
-        // VARBINARY/BINARY from base64 string
-        byte[] bytes = new byte[] {1, 2, 3};
-        String b64 = Base64.getEncoder().encodeToString(bytes);
-        Predicate bytesEq =
-                FilterPredicateConverter.toPredicate(
-                        new TransformFilter(
-                                new FieldFilterTransform(0, "c", DataTypes.VARBINARY(3)),
-                                LeafFilterFunction.EQUAL,
-                                Collections.singletonList(b64)));
-        assertNotNull(bytesEq);
-        assertTrue(bytesEq.test(GenericRow.of(bytes)));
-        assertFalse(bytesEq.test(GenericRow.of(new byte[] {1, 2, 4})));
-
-        // DECIMAL from string
+        // DECIMAL from BigDecimal
         Decimal expectedDec = Decimal.fromBigDecimal(new BigDecimal("12.34"), 10, 2);
         Predicate decEq =
                 FilterPredicateConverter.toPredicate(
                         new TransformFilter(
                                 new FieldFilterTransform(0, "d", DataTypes.DECIMAL(10, 2)),
                                 LeafFilterFunction.EQUAL,
-                                Collections.singletonList("12.34")));
+                                Collections.singletonList(new BigDecimal("12.34"))));
         assertNotNull(decEq);
         assertTrue(decEq.test(GenericRow.of(expectedDec)));
         assertFalse(
                 decEq.test(GenericRow.of(Decimal.fromBigDecimal(new BigDecimal("12.35"), 10, 2))));
 
-        // DATE from ISO string -> epoch day int
+        // DATE from LocalDate -> epoch day int
         LocalDate date = LocalDate.parse("2025-12-23");
         int epochDay = (int) date.toEpochDay();
         Predicate dateEq =
@@ -177,34 +163,24 @@ public class FilterConverterTest {
                         new TransformFilter(
                                 new FieldFilterTransform(0, "e", DataTypes.DATE()),
                                 LeafFilterFunction.EQUAL,
-                                Collections.singletonList("2025-12-23")));
+                                Collections.singletonList(date)));
         assertNotNull(dateEq);
         assertTrue(dateEq.test(GenericRow.of(epochDay)));
         assertFalse(dateEq.test(GenericRow.of(epochDay + 1)));
 
-        // TIMESTAMP from string (java.sql.Timestamp.valueOf compatible)
-        Timestamp ts = Timestamp.fromEpochMillis(1_700_000_000_000L);
-        String tsString = ts.toSQLTimestamp().toString();
+        // TIMESTAMP from LocalDateTime
+        LocalDateTime dateTime = LocalDateTime.of(2025, 12, 23, 12, 34, 56, 789_000_000);
+        Timestamp ts = Timestamp.fromLocalDateTime(dateTime);
         Predicate tsEq =
                 FilterPredicateConverter.toPredicate(
                         new TransformFilter(
                                 new FieldFilterTransform(0, "f", DataTypes.TIMESTAMP_MILLIS()),
                                 LeafFilterFunction.EQUAL,
-                                Collections.singletonList(tsString)));
+                                Collections.singletonList(dateTime)));
         assertNotNull(tsEq);
         assertTrue(tsEq.test(GenericRow.of(ts)));
-        assertFalse(tsEq.test(GenericRow.of(Timestamp.fromEpochMillis(ts.getMillisecond() + 1))));
-    }
-
-    @Test
-    public void testDecimalOverflowThrows() {
-        TransformFilter rest =
-                new TransformFilter(
-                        new FieldFilterTransform(0, "d", DataTypes.DECIMAL(2, 0)),
-                        LeafFilterFunction.EQUAL,
-                        Collections.singletonList("123"));
-
-        assertThrows(
-                IllegalArgumentException.class, () -> FilterPredicateConverter.toPredicate(rest));
+        assertFalse(
+                tsEq.test(
+                        GenericRow.of(Timestamp.fromLocalDateTime(dateTime.plusNanos(1_000_000)))));
     }
 }
