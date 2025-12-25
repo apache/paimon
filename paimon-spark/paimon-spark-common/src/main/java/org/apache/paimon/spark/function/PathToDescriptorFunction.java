@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.function;
 
 import org.apache.paimon.data.BlobDescriptor;
+
 import org.apache.spark.sql.connector.catalog.functions.ScalarFunction;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
@@ -31,7 +32,7 @@ public class PathToDescriptorFunction implements ScalarFunction<byte[]>, Seriali
 
     @Override
     public DataType[] inputTypes() {
-        return new DataType[] { DataTypes.StringType };
+        return new DataType[] {DataTypes.StringType};
     }
 
     @Override

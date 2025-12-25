@@ -30,15 +30,14 @@ public class PathToDescriptorUnbound implements UnboundFunction {
     public BoundFunction bind(StructType inputType) {
         if (inputType.fields().length != 1) {
             throw new UnsupportedOperationException(
-                    "Function 'byte_to_string' requires 1 argument, but found " + inputType.fields().length
-            );
+                    "Function 'byte_to_string' requires 1 argument, but found "
+                            + inputType.fields().length);
         }
 
         if (!(inputType.fields()[0].dataType() instanceof StringType)) {
             throw new UnsupportedOperationException(
-                    "The first argument of 'byte_to_string' must be BINARY type, but found " +
-                            inputType.fields()[0].dataType().simpleString()
-            );
+                    "The first argument of 'byte_to_string' must be BINARY type, but found "
+                            + inputType.fields()[0].dataType().simpleString());
         }
 
         return new PathToDescriptorFunction();
