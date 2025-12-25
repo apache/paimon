@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.flink.function.BuiltInFunctions;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
@@ -1361,16 +1362,23 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public final List<String> listFunctions(String dbName) throws CatalogException {
+        List<String> functions = new ArrayList<>(BuiltInFunctions.FUNCTIONS.keySet());
         try {
-            return catalog.listFunctions(dbName);
+            functions.addAll(catalog.listFunctions(dbName));
         } catch (Catalog.DatabaseNotExistException e) {
             throw new CatalogException(e.getMessage(), e);
         }
+        return functions;
     }
 
     @Override
     public final CatalogFunction getFunction(ObjectPath functionPath)
             throws FunctionNotExistException, CatalogException {
+        if (BuiltInFunctions.FUNCTIONS.containsKey(functionPath.getObjectName())) {
+            String builtInFunction = BuiltInFunctions.FUNCTIONS.get(functionPath.getObjectName());
+            return new CatalogFunctionImpl(builtInFunction, FunctionLanguage.JAVA);
+        }
+
         try {
             org.apache.paimon.function.Function function =
                     catalog.getFunction(toIdentifier(functionPath));
