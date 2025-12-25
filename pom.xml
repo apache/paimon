@@ -90,7 +90,7 @@ under the License.
         <paimon-flink-common.flink.version>1.20.1</paimon-flink-common.flink.version>
         <flink.scala.binary.version>2.12</flink.scala.binary.version>
         <scala212.version>2.12.18</scala212.version>
-        <scala213.version>2.13.16</scala213.version>
+        <scala213.version>2.13.18</scala213.version>
         <scala.version>${scala212.version}</scala.version>
         <codegen.scala.version>${scala212.version}</codegen.scala.version>
         <snappy.version>1.1.8.4</snappy.version>
