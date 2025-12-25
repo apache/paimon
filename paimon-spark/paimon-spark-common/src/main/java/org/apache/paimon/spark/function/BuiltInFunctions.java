@@ -30,6 +30,7 @@ public class BuiltInFunctions {
             new HashMap<String, UnboundFunction>() {
                 {
                     put("path_to_descriptor", new PathToDescriptorUnbound());
+                    put("descriptor_to_string", new DescriptorToStringUnbound());
                 }
             };
 }

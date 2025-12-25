@@ -20,23 +20,23 @@ package org.apache.paimon.spark.function;
 
 import org.apache.spark.sql.connector.catalog.functions.BoundFunction;
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
-import org.apache.spark.sql.types.StringType;
+import org.apache.spark.sql.types.BinaryType;
 import org.apache.spark.sql.types.StructType;
 
 /** Function unbound to {@link PathToDescriptorFunction}. */
-public class PathToDescriptorUnbound implements UnboundFunction {
+public class DescriptorToStringUnbound implements UnboundFunction {
 
     @Override
     public BoundFunction bind(StructType inputType) {
         if (inputType.fields().length != 1) {
             throw new UnsupportedOperationException(
-                    "Function 'path_to_descriptor' requires 1 argument, but found "
+                    "Function 'descriptor_to_string' requires 1 argument, but found "
                             + inputType.fields().length);
         }
 
-        if (!(inputType.fields()[0].dataType() instanceof StringType)) {
+        if (!(inputType.fields()[0].dataType() instanceof BinaryType)) {
             throw new UnsupportedOperationException(
-                    "The first argument of 'path_to_descriptor' must be STRING type, but found "
+                    "The first argument of 'descriptor_to_string' must be BINARY type, but found "
                             + inputType.fields()[0].dataType().simpleString());
         }
 
