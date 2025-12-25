@@ -1635,6 +1635,12 @@ public class CoreOptions implements Serializable {
                             "The default maximum time retained for newly created tags. "
                                     + "It affects both auto-created tags and manually created (by procedure) tags.");
 
+    public static final ConfigOption<Boolean> TAG_TIME_EXPIRE_ENABLED =
+            key("tag.time-expire-enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Whether to enable tag expiration by retained time.");
+
     public static final ConfigOption<Boolean> TAG_AUTOMATIC_COMPLETION =
             key("tag.automatic-completion")
                     .booleanType()
@@ -3051,6 +3057,10 @@ public class CoreOptions implements Serializable {
 
     public Duration tagDefaultTimeRetained() {
         return options.get(TAG_DEFAULT_TIME_RETAINED);
+    }
+
+    public boolean tagTimeExpireEnabled() {
+        return options.get(TAG_TIME_EXPIRE_ENABLED);
     }
 
     public boolean tagAutomaticCompletion() {
