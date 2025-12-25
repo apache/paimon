@@ -18,6 +18,9 @@
 
 package org.apache.spark.sql.paimon.shims
 
+import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
+import org.apache.paimon.types.{DataType, RowType}
+
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
@@ -37,6 +40,21 @@ object MinorVersionShim {
       paths: Seq[String],
       userSpecifiedSchema: Option[StructType],
       partitionSchema: StructType): PartitioningAwareFileIndex = {
+    null
+  }
+
+  def createSparkInternalRow(rowType: RowType): SparkInternalRow = {
+    null
+  }
+
+  def createSparkInternalRowWithBlob(
+      rowType: RowType,
+      blobFieldIndex: Int,
+      blobAsDescriptor: Boolean): SparkInternalRow = {
+    null
+  }
+
+  def createSparkArrayData(elementType: DataType): SparkArrayData = {
     null
   }
 

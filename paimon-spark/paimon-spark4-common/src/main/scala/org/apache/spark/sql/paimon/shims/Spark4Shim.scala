@@ -21,7 +21,7 @@ package org.apache.spark.sql.paimon.shims
 import org.apache.paimon.data.variant.{GenericVariant, Variant}
 import org.apache.paimon.spark.catalyst.analysis.Spark4ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensionsParser
-import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4InternalRowWithBlob, SparkArrayData, SparkInternalRow}
+import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.spark.sql.SparkSession
@@ -55,18 +55,18 @@ class Spark4Shim extends SparkShim {
   }
 
   override def createSparkInternalRow(rowType: RowType): SparkInternalRow = {
-    new Spark4InternalRow(rowType)
+    MinorVersionShim.createSparkInternalRow(rowType)
   }
 
   override def createSparkInternalRowWithBlob(
       rowType: RowType,
       blobFieldIndex: Int,
       blobAsDescriptor: Boolean): SparkInternalRow = {
-    new Spark4InternalRowWithBlob(rowType, blobFieldIndex, blobAsDescriptor)
+    MinorVersionShim.createSparkInternalRowWithBlob(rowType, blobFieldIndex, blobAsDescriptor)
   }
 
   override def createSparkArrayData(elementType: DataType): SparkArrayData = {
-    new Spark4ArrayData(elementType)
+    MinorVersionShim.createSparkArrayData(elementType)
   }
 
   override def createTable(
