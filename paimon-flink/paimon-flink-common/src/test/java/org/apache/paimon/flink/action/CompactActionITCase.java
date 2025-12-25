@@ -840,6 +840,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 60_000);
     }
 
+    @Test
     public void testDataEvolutionTableCompact() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.BUCKET.key(), "-1");
