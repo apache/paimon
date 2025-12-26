@@ -254,7 +254,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         Split wrapped();
     }
 
-    private static class FallbackSplitImpl implements FallbackSplit {
+    /** Other split (except DataSplit) fallback implementation. */
+    public static class FallbackSplitImpl implements FallbackSplit {
 
         private static final long serialVersionUID = 1L;
 
@@ -282,7 +283,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
     }
 
-    private static class FallbackDataSplit extends DataSplit implements FallbackSplit {
+    /** DataSplit fallback implementation. */
+    public static class FallbackDataSplit extends DataSplit implements FallbackSplit {
 
         private static final long serialVersionUID = 1L;
 
