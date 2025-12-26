@@ -207,9 +207,9 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public void rollbackTo(Identifier identifier, Instant instant)
+    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException {
-        wrapped.rollbackTo(identifier, instant);
+        wrapped.rollbackTo(identifier, instant, fromSnapshot);
     }
 
     @Override

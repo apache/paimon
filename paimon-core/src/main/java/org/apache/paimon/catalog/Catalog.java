@@ -717,7 +717,24 @@ public interface Catalog extends AutoCloseable {
      * @throws UnsupportedOperationException if the catalog does not {@link
      *     #supportsVersionManagement()}
      */
-    void rollbackTo(Identifier identifier, Instant instant) throws Catalog.TableNotExistException;
+    default void rollbackTo(Identifier identifier, Instant instant)
+            throws Catalog.TableNotExistException {
+        rollbackTo(identifier, instant, null);
+    }
+
+    /**
+     * rollback table by the given {@link Identifier} and instant.
+     *
+     * @param identifier path of the table
+     * @param instant like snapshotId or tagName
+     * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
+     *     snapshot.
+     * @throws Catalog.TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
+            throws Catalog.TableNotExistException;
 
     /**
      * Create a new branch for this table. By default, an empty branch will be created using the
