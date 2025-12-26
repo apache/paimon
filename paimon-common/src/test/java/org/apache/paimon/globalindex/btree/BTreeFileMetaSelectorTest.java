@@ -54,11 +54,11 @@ public class BTreeFileMetaSelectorTest {
 
         files =
                 Arrays.asList(
-                        new GlobalIndexIOMeta("file1", 1, 1L, meta1.serialize()),
-                        new GlobalIndexIOMeta("file2", 1, 1L, meta2.serialize()),
-                        new GlobalIndexIOMeta("file3", 1, 1L, meta3.serialize()),
-                        new GlobalIndexIOMeta("file4", 1, 1L, meta4.serialize()),
-                        new GlobalIndexIOMeta("file5", 1, 1L, meta5.serialize()));
+                        new GlobalIndexIOMeta("file1", 1, meta1.serialize()),
+                        new GlobalIndexIOMeta("file2", 1, meta2.serialize()),
+                        new GlobalIndexIOMeta("file3", 1, meta3.serialize()),
+                        new GlobalIndexIOMeta("file4", 1, meta4.serialize()),
+                        new GlobalIndexIOMeta("file5", 1, meta5.serialize()));
     }
 
     @Test

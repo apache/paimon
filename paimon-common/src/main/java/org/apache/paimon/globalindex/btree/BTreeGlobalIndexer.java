@@ -22,17 +22,17 @@ import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.UnionGlobalIndexReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.LazyField;
-import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -79,7 +79,7 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
     }
 
     @Override
-    public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException {
+    public BTreeIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException {
         long blockSize = options.get(BTreeIndexOptions.BTREE_INDEX_BLOCK_SIZE).getBytes();
         CompressOptions compressOptions =
                 new CompressOptions(
@@ -95,8 +95,10 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
     @Override
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
-        // Single reader only supports read one index file
-        Preconditions.checkState(files.size() == 1);
-        return new BTreeIndexReader(keySerializer, fileReader, files.get(0), cacheManager.get());
+        List<GlobalIndexReader> readers = new ArrayList<>();
+        for (GlobalIndexIOMeta meta : files) {
+            readers.add(new BTreeIndexReader(keySerializer, fileReader, meta, cacheManager.get()));
+        }
+        return new UnionGlobalIndexReader(readers);
     }
 }

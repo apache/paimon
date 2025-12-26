@@ -67,13 +67,17 @@ public class GlobalIndexEvaluator
                 vectorSearch = vectorSearch.withIncludeRowIds(compoundResult.get().results());
             }
             for (GlobalIndexReader fileIndexReader : readers) {
-                GlobalIndexResult childResult = vectorSearch.visit(fileIndexReader);
+                Optional<GlobalIndexResult> childResult = vectorSearch.visit(fileIndexReader);
+                if (!childResult.isPresent()) {
+                    continue;
+                }
+                GlobalIndexResult result = childResult.get();
                 // AND Operation
                 if (compoundResult.isPresent()) {
                     GlobalIndexResult r1 = compoundResult.get();
-                    compoundResult = Optional.of(r1.and(childResult));
+                    compoundResult = Optional.of(r1.and(result));
                 } else {
-                    compoundResult = Optional.of(childResult);
+                    compoundResult = Optional.of(result);
                 }
 
                 if (compoundResult.get().results().isEmpty()) {
@@ -93,15 +97,20 @@ public class GlobalIndexEvaluator
         Collection<GlobalIndexReader> readers =
                 indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
         for (GlobalIndexReader fileIndexReader : readers) {
-            GlobalIndexResult childResult =
+            Optional<GlobalIndexResult> childResult =
                     predicate.function().visit(fileIndexReader, fieldRef, predicate.literals());
+            if (!childResult.isPresent()) {
+                continue;
+            }
+
+            GlobalIndexResult result = childResult.get();
 
             // AND Operation
             if (compoundResult.isPresent()) {
                 GlobalIndexResult r1 = compoundResult.get();
-                compoundResult = Optional.of(r1.and(childResult));
+                compoundResult = Optional.of(r1.and(result));
             } else {
-                compoundResult = Optional.of(childResult);
+                compoundResult = Optional.of(result);
             }
 
             if (compoundResult.get().results().isEmpty()) {

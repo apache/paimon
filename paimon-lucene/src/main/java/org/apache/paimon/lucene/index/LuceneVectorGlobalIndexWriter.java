@@ -18,10 +18,10 @@
 
 package org.apache.paimon.lucene.index;
 
-import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.Range;
 
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.lucene912.Lucene912Codec;
@@ -43,7 +43,7 @@ import java.util.List;
  * <p>This implementation uses Lucene's native KnnFloatVectorField with HNSW algorithm for efficient
  * approximate nearest neighbor search.
  */
-public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
+public class LuceneVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
 
     private final GlobalIndexFileWriter fileWriter;
     private final LuceneVectorIndexOptions vectorIndexOptions;
@@ -106,9 +106,7 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
                     this.vectorIndexOptions.writeBufferSize(),
                     out);
         }
-        long minRowIdInBatch = vectorIndices.get(0).id();
-        long maxRowIdInBatch = vectorIndices.get(vectorIndices.size() - 1).id();
-        results.add(ResultEntry.of(fileName, null, new Range(minRowIdInBatch, maxRowIdInBatch)));
+        results.add(new ResultEntry(fileName, count, null));
         vectorIndices.clear();
     }
 
