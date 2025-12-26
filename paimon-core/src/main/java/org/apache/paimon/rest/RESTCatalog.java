@@ -373,10 +373,10 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void rollbackTo(Identifier identifier, Instant instant)
+    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException {
         try {
-            api.rollbackTo(identifier, instant);
+            api.rollbackTo(identifier, instant, fromSnapshot);
         } catch (NoSuchResourceException e) {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new IllegalArgumentException(

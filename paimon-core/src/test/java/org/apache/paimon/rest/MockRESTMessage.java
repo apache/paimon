@@ -267,11 +267,11 @@ public class MockRESTMessage {
     }
 
     public static RollbackTableRequest rollbackTableRequestBySnapshot(long snapshotId) {
-        return new RollbackTableRequest(Instant.snapshot(snapshotId));
+        return new RollbackTableRequest(Instant.snapshot(snapshotId), null);
     }
 
     public static RollbackTableRequest rollbackTableRequestByTag(String tagName) {
-        return new RollbackTableRequest(Instant.tag(tagName));
+        return new RollbackTableRequest(Instant.tag(tagName), null);
     }
 
     public static AlterViewRequest alterViewRequest() {

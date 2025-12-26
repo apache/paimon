@@ -50,6 +50,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
@@ -1751,24 +1752,32 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             GenericRow record = GenericRow.of(i);
             write.write(record);
             commit.commit(i, write.prepareCommit(false, i));
-            table.createTag("tag-" + i);
+            table.createTag("tag-" + (i + 1));
         }
         write.close();
         commit.close();
+
+        // rollback to snapshot 4
         long rollbackToSnapshotId = 4;
         table.rollbackTo(rollbackToSnapshotId);
         assertThat(table.snapshotManager().snapshot(rollbackToSnapshotId))
                 .isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
         assertThat(table.tagManager().tagExists("tag-" + (rollbackToSnapshotId + 2))).isFalse();
         assertThat(table.snapshotManager().snapshotExists(rollbackToSnapshotId + 1)).isFalse();
-
         assertThrows(
                 IllegalArgumentException.class, () -> table.rollbackTo(rollbackToSnapshotId + 1));
 
+        // rollback to snapshot 3
         String rollbackToTagName = "tag-" + (rollbackToSnapshotId - 1);
         table.rollbackTo(rollbackToTagName);
         Snapshot tagSnapshot = table.tagManager().getOrThrow(rollbackToTagName).trimToSnapshot();
         assertThat(tagSnapshot).isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
+
+        // rollback to snapshot 2 from snapshot
+        assertThatThrownBy(() -> catalog.rollbackTo(identifier, Instant.snapshot(2L), 4L))
+                .hasMessageContaining("Latest snapshot 3 is not 4");
+        catalog.rollbackTo(identifier, Instant.snapshot(2L), 3L);
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(2);
     }
 
     @Test
