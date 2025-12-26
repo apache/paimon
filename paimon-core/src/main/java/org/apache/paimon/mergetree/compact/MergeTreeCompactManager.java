@@ -55,6 +55,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(MergeTreeCompactManager.class);
 
+    private static final String COMPACT_TYPE_FULL = "full";
+    private static final String COMPACT_TYPE_MINOR = "minor";
+
     private final ExecutorService executor;
     private final Levels levels;
     private final CompactStrategy strategy;
@@ -68,6 +71,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private final boolean lazyGenDeletionFile;
     private final boolean needLookup;
     private final boolean forceRewriteAllFiles;
+    private String compactType;
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
 
@@ -147,6 +151,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                             recordLevelExpire,
                             dvMaintainer,
                             forceRewriteAllFiles);
+            compactType = COMPACT_TYPE_FULL;
         } else {
             if (taskFuture != null) {
                 return;
@@ -162,6 +167,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                                             unit.files().size() > 1
                                                     || unit.files().get(0).level()
                                                             != unit.outputLevel());
+            compactType = COMPACT_TYPE_MINOR;
         }
 
         optionalUnit.ifPresent(
@@ -212,7 +218,12 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
         CompactTask task;
         if (unit.fileRewrite()) {
-            task = new FileRewriteCompactTask(rewriter, unit, dropDelete, metricsReporter);
+            task = new FileRewriteCompactTask(
+                            rewriter,
+                            unit,
+                            dropDelete,
+                            metricsReporter,
+                    compactType);
         } else {
             task =
                     new MergeTreeCompactTask(
@@ -225,7 +236,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                             metricsReporter,
                             compactDfSupplier,
                             recordLevelExpire,
-                            forceRewriteAllFiles);
+                            forceRewriteAllFiles,
+                            compactType);
         }
 
         if (LOG.isDebugEnabled()) {

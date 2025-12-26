@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.CompactMetricIncrement;
 import org.apache.paimon.io.DataIncrement;
 
 import javax.annotation.Nullable;
@@ -29,14 +30,24 @@ public class CommitIncrement {
 
     private final DataIncrement dataIncrement;
     private final CompactIncrement compactIncrement;
+    @Nullable private final CompactMetricIncrement compactMetricIncrement;
     @Nullable private final CompactDeletionFile compactDeletionFile;
 
     public CommitIncrement(
             DataIncrement dataIncrement,
             CompactIncrement compactIncrement,
             @Nullable CompactDeletionFile compactDeletionFile) {
+        this(dataIncrement, compactIncrement, new CompactMetricIncrement(), compactDeletionFile);
+    }
+
+    public CommitIncrement(
+            DataIncrement dataIncrement,
+            CompactIncrement compactIncrement,
+            @Nullable CompactMetricIncrement compactMetricIncrement,
+            @Nullable CompactDeletionFile compactDeletionFile) {
         this.dataIncrement = dataIncrement;
         this.compactIncrement = compactIncrement;
+        this.compactMetricIncrement = compactMetricIncrement;
         this.compactDeletionFile = compactDeletionFile;
     }
 
@@ -49,12 +60,17 @@ public class CommitIncrement {
     }
 
     @Nullable
+    public CompactMetricIncrement compactMetricIncrement() {
+        return compactMetricIncrement;
+    }
+
+    @Nullable
     public CompactDeletionFile compactDeletionFile() {
         return compactDeletionFile;
     }
 
     @Override
     public String toString() {
-        return dataIncrement.toString() + "\n" + compactIncrement + "\n" + compactDeletionFile;
+        return dataIncrement.toString() + "\n" + compactIncrement + "\n" + compactDeletionFile + "\n" + compactMetricIncrement;
     }
 }

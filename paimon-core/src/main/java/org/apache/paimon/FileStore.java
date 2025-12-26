@@ -46,6 +46,7 @@ import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
+import org.apache.paimon.utils.CompactMetricsManager;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
@@ -127,4 +128,6 @@ public interface FileStore<T> {
     void setSnapshotCache(Cache<Path, Snapshot> cache);
 
     GlobalIndexScanBuilder newGlobalIndexScanBuilder();
+
+    CompactMetricsManager compactMetricsManager();
 }

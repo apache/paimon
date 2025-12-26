@@ -19,10 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.DataInputViewStreamWrapper;
-import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.io.*;
 
 import javax.annotation.Nullable;
 
@@ -47,6 +44,7 @@ public class CommitMessageImpl implements CommitMessage {
     private transient @Nullable Integer totalBuckets;
     private transient DataIncrement dataIncrement;
     private transient CompactIncrement compactIncrement;
+    private transient @Nullable CompactMetricIncrement compactMetricIncrement;
 
     public CommitMessageImpl(
             BinaryRow partition,
@@ -54,11 +52,22 @@ public class CommitMessageImpl implements CommitMessage {
             @Nullable Integer totalBuckets,
             DataIncrement dataIncrement,
             CompactIncrement compactIncrement) {
+        this(partition, bucket, totalBuckets, dataIncrement, compactIncrement, null);
+    }
+
+    public CommitMessageImpl(
+            BinaryRow partition,
+            int bucket,
+            @Nullable Integer totalBuckets,
+            DataIncrement dataIncrement,
+            CompactIncrement compactIncrement,
+            @Nullable CompactMetricIncrement compactMetricIncrement) {
         this.partition = partition;
         this.bucket = bucket;
         this.totalBuckets = totalBuckets;
         this.dataIncrement = dataIncrement;
         this.compactIncrement = compactIncrement;
+        this.compactMetricIncrement = compactMetricIncrement;
     }
 
     @Override
@@ -84,6 +93,10 @@ public class CommitMessageImpl implements CommitMessage {
         return compactIncrement;
     }
 
+    public CompactMetricIncrement compactMetricIncrement() {
+        return compactMetricIncrement;
+    }
+
     public boolean isEmpty() {
         return dataIncrement.isEmpty() && compactIncrement.isEmpty();
     }
@@ -105,6 +118,7 @@ public class CommitMessageImpl implements CommitMessage {
         this.totalBuckets = message.totalBuckets;
         this.dataIncrement = message.dataIncrement;
         this.compactIncrement = message.compactIncrement;
+        this.compactMetricIncrement = message.compactMetricIncrement;
     }
 
     @Override
@@ -121,12 +135,13 @@ public class CommitMessageImpl implements CommitMessage {
                 && Objects.equals(partition, that.partition)
                 && Objects.equals(totalBuckets, that.totalBuckets)
                 && Objects.equals(dataIncrement, that.dataIncrement)
-                && Objects.equals(compactIncrement, that.compactIncrement);
+                && Objects.equals(compactIncrement, that.compactIncrement)
+                && Objects.equals(compactMetricIncrement, that.compactMetricIncrement);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(partition, bucket, totalBuckets, dataIncrement, compactIncrement);
+        return Objects.hash(partition, bucket, totalBuckets, dataIncrement, compactIncrement, compactMetricIncrement);
     }
 
     @Override
@@ -137,7 +152,8 @@ public class CommitMessageImpl implements CommitMessage {
                         + "bucket = %d, "
                         + "totalBuckets = %s, "
                         + "newFilesIncrement = %s, "
-                        + "compactIncrement = %s}",
-                partition, bucket, totalBuckets, dataIncrement, compactIncrement);
+                        + "compactIncrement = %s, "
+                        + "compactMetricIncrement = $s}",
+                partition, bucket, totalBuckets, dataIncrement, compactIncrement, compactMetricIncrement);
     }
 }

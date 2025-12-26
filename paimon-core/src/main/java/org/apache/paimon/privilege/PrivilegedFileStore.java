@@ -50,6 +50,7 @@ import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
+import org.apache.paimon.utils.CompactMetricsManager;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
@@ -243,5 +244,11 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     @Override
     public GlobalIndexScanBuilder newGlobalIndexScanBuilder() {
         return wrapped.newGlobalIndexScanBuilder();
+    }
+
+    @Override
+    public CompactMetricsManager compactMetricsManager() {
+        privilegeChecker.assertCanSelectOrInsert(identifier);
+        return wrapped.compactMetricsManager();
     }
 }

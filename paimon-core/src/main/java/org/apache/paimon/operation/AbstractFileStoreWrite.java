@@ -29,6 +29,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.CompactMetricIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.memory.MemoryPoolFactory;
@@ -215,6 +216,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 CommitIncrement increment = writerContainer.writer.prepareCommit(waitCompaction);
                 DataIncrement newFilesIncrement = increment.newFilesIncrement();
                 CompactIncrement compactIncrement = increment.compactIncrement();
+                CompactMetricIncrement compactMetricIncrement = increment.compactMetricIncrement();
                 if (writerContainer.dynamicBucketMaintainer != null) {
                     newFilesIncrement
                             .newIndexFiles()
@@ -232,7 +234,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 bucket,
                                 writerContainer.totalBuckets,
                                 newFilesIncrement,
-                                compactIncrement);
+                                compactIncrement,
+                                compactMetricIncrement);
                 result.add(committable);
 
                 if (committable.isEmpty()) {

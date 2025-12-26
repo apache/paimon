@@ -44,6 +44,9 @@ public class ManifestEntryChanges {
     public List<ManifestEntry> compactTableFiles;
     public List<ManifestEntry> compactChangelog;
     public List<IndexManifestEntry> compactIndexFiles;
+    public List<String> buckets;
+    public List<String> types;
+    public List<Long> compactionDurationTime;
 
     public ManifestEntryChanges(int defaultNumBucket) {
         this.defaultNumBucket = defaultNumBucket;
@@ -53,6 +56,9 @@ public class ManifestEntryChanges {
         this.compactTableFiles = new ArrayList<>();
         this.compactChangelog = new ArrayList<>();
         this.compactIndexFiles = new ArrayList<>();
+        this.buckets = new ArrayList<>();
+        this.types = new ArrayList<>();
+        this.compactionDurationTime = new ArrayList<>();
     }
 
     public void collect(CommitMessage message) {
@@ -126,6 +132,19 @@ public class ManifestEntryChanges {
                                                 commitMessage.partition(),
                                                 commitMessage.bucket(),
                                                 m)));
+        if (commitMessage.partition().getFieldCount() == 0) {
+            buckets.add("bucket-" + commitMessage.bucket());
+        } else {
+            StringBuilder builder = new StringBuilder();
+            for (int i = 0; i < commitMessage.partition().getFieldCount(); i++) {
+                builder.append(commitMessage.partition().getString(i)).append("/");
+            }
+            buckets.add(builder + "bucket-" + commitMessage.bucket());
+        }
+        if (commitMessage.compactMetricIncrement() != null && commitMessage.compactMetricIncrement().metric() != null) {
+            types.add(commitMessage.compactMetricIncrement().metric().type());
+            compactionDurationTime.add(commitMessage.compactMetricIncrement().metric().duration());
+        }
     }
 
     private ManifestEntry makeEntry(FileKind kind, CommitMessage commitMessage, DataFileMeta file) {

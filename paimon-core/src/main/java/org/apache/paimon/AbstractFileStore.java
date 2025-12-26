@@ -61,6 +61,7 @@ import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.CompactMetricsManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -292,6 +293,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.partitionDefaultName(),
                 pathFactory(),
                 snapshotManager,
+                compactMetricsManager(),
                 manifestFileFactory(),
                 manifestListFactory(),
                 indexManifestFileFactory(),
@@ -506,5 +508,12 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 pathFactory().globalIndexFileFactory(),
                 snapshotManager(),
                 newIndexFileHandler());
+    }
+
+    @Override
+    public CompactMetricsManager compactMetricsManager() {
+        return new CompactMetricsManager(fileIO,
+                options.path(),
+                options.branch());
     }
 }
