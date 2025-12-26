@@ -38,7 +38,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.paimon.operation.FileStoreCommitImpl.RetryResult;
+import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -1073,7 +1073,7 @@ public class FileStoreCommitTest {
                     null);
             // Compact
             commit.tryCommitOnce(
-                    new RetryResult(firstLatest, Collections.emptyList(), null),
+                    new RetryCommitResult(firstLatest, Collections.emptyList(), null),
                     Collections.emptyList(),
                     Collections.emptyList(),
                     Collections.emptyList(),
