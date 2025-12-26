@@ -26,6 +26,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan, Repartiti
 import org.apache.spark.sql.execution.QueryExecution
 import org.apache.spark.sql.util.QueryExecutionListener
 
+import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 abstract class RowTrackingTestBase extends PaimonSparkTestBase {
@@ -441,13 +442,13 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       sql(
         "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
 
-      val capturedPlans: mutable.ListBuffer[LogicalPlan] = mutable.ListBuffer.empty
+      val capturedPlans = new java.util.concurrent.CopyOnWriteArrayList[LogicalPlan]()
       val listener = new QueryExecutionListener {
         override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
-          capturedPlans += qe.analyzed
+          capturedPlans.add(qe.analyzed)
         }
         override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
-          capturedPlans += qe.analyzed
+          capturedPlans.add(qe.analyzed)
         }
       }
       spark.listenerManager.register(listener)
@@ -462,14 +463,14 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       // Assert no shuffle/join/sort was used in
       // 'org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.updateActionInvoke'
       assert(
-        capturedPlans.forall(
+        capturedPlans.asScala.forall(
           plan =>
             plan.collectFirst {
               case p: Join => p
               case p: Sort => p
               case p: RepartitionByExpression => p
             }.isEmpty),
-        s"Found unexpected Join/Sort/Exchange in plan:\n${capturedPlans.head}"
+        s"Found unexpected Join/Sort/Exchange in plan:\n$capturedPlans"
       )
       spark.listenerManager.unregister(listener)
 
