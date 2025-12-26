@@ -32,7 +32,7 @@ case class SparkTable(override val table: Table)
   override def newRowLevelOperationBuilder(
       info: RowLevelOperationInfo): RowLevelOperationBuilder = {
     table match {
-      case t: FileStoreTable =>
+      case t: FileStoreTable if useV2Write =>
         () => new PaimonSparkCopyOnWriteOperation(t, info)
       case _ =>
         throw new UnsupportedOperationException(
