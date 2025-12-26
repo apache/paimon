@@ -21,7 +21,7 @@ package org.apache.spark.sql.paimon.shims
 import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
-import org.apache.spark.sql.{Encoder, SparkSession, SQLContext}
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
 import org.apache.spark.sql.execution.datasources._
@@ -58,9 +58,4 @@ object MinorVersionShim {
     throw new UnsupportedOperationException("Not implemented")
   }
 
-  def createMemoryStream[A](implicit
-      encoder: Encoder[A],
-      sqlContext: SQLContext): MemoryStreamWrapper[A] = {
-    throw new UnsupportedOperationException("Not implemented")
-  }
 }
