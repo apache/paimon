@@ -71,6 +71,12 @@ public class CommitIncrement {
 
     @Override
     public String toString() {
-        return dataIncrement.toString() + "\n" + compactIncrement + "\n" + compactDeletionFile + "\n" + compactMetricIncrement;
+        return dataIncrement.toString()
+                + "\n"
+                + compactIncrement
+                + "\n"
+                + compactDeletionFile
+                + "\n"
+                + compactMetricIncrement;
     }
 }

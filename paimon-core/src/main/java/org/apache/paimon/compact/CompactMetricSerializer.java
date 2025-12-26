@@ -35,15 +35,11 @@ public class CompactMetricSerializer extends ObjectSerializer<CompactMetricMeta>
 
     @Override
     public InternalRow toRow(CompactMetricMeta meta) {
-        return GenericRow.of(
-                BinaryString.fromString(meta.type()),
-                meta.duration());
+        return GenericRow.of(BinaryString.fromString(meta.type()), meta.duration());
     }
 
     @Override
     public CompactMetricMeta fromRow(InternalRow row) {
-        return new CompactMetricMeta(
-                row.getString(0).toString(),
-                row.getLong(1));
+        return new CompactMetricMeta(row.getString(0).toString(), row.getLong(1));
     }
 }

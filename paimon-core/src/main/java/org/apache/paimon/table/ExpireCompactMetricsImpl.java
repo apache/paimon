@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.utils.CompactMetricsManager;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,5 +56,4 @@ public class ExpireCompactMetricsImpl implements ExpireCompactMetrics {
             return -1;
         }
     }
-
 }

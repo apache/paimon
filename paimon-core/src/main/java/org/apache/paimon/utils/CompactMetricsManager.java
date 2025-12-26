@@ -21,14 +21,21 @@ package org.apache.paimon.utils;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metrics.CompactMetric;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -41,7 +48,10 @@ import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
-/** Manager for {@link CompactMetric}, providing utility methods related to paths and compact metrics hints. */
+/**
+ * Manager for {@link CompactMetric}, providing utility methods related to paths and compact metrics
+ * hints.
+ */
 public class CompactMetricsManager implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -56,10 +66,7 @@ public class CompactMetricsManager implements Serializable {
     private final Path tablePath;
     private final String branch;
 
-    public CompactMetricsManager(
-            FileIO fileIO,
-            Path tablePath,
-            @Nullable String branchName) {
+    public CompactMetricsManager(FileIO fileIO, Path tablePath, @Nullable String branchName) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
         this.branch = BranchManager.normalizeBranch(branchName);
@@ -79,7 +86,10 @@ public class CompactMetricsManager implements Serializable {
 
     public Path compactMetricPath(long snapshotId) {
         return new Path(
-                branchPath(tablePath, branch) + "/metrics/" + COMPACTION_METRICS_PREFIX + snapshotId);
+                branchPath(tablePath, branch)
+                        + "/metrics/"
+                        + COMPACTION_METRICS_PREFIX
+                        + snapshotId);
     }
 
     public Path compactMetricsDirectory() {
@@ -152,7 +162,8 @@ public class CompactMetricsManager implements Serializable {
 
     public @Nullable Long earliestSnapshotId() {
         try {
-            return findEarliest(compactMetricsDirectory(), COMPACTION_METRICS_PREFIX, this::compactMetricPath);
+            return findEarliest(
+                    compactMetricsDirectory(), COMPACTION_METRICS_PREFIX, this::compactMetricPath);
         } catch (IOException e) {
             throw new RuntimeException("Failed to find earliest compaction metrics snapshot id", e);
         }
@@ -160,7 +171,8 @@ public class CompactMetricsManager implements Serializable {
 
     public @Nullable Long latestSnapshotId() {
         try {
-            return findLatest(compactMetricsDirectory(), COMPACTION_METRICS_PREFIX, this::compactMetricPath);
+            return findLatest(
+                    compactMetricsDirectory(), COMPACTION_METRICS_PREFIX, this::compactMetricPath);
         } catch (IOException e) {
             throw new RuntimeException("Failed to find latest compaction metrics snapshot id", e);
         }
@@ -171,7 +183,8 @@ public class CompactMetricsManager implements Serializable {
      * be deleted by other processes, so just skip this snapshot.
      */
     public List<CompactMetric> safelyGetAllmetrics() throws IOException {
-        List<Path> paths = metricIdStream().map(this::compactMetricPath).collect(Collectors.toList());
+        List<Path> paths =
+                metricIdStream().map(this::compactMetricPath).collect(Collectors.toList());
 
         List<CompactMetric> metrics = Collections.synchronizedList(new ArrayList<>(paths.size()));
         collectMetrics(

@@ -341,7 +341,9 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                         result -> {
                             compactBefore.addAll(result.before());
                             compactAfter.addAll(result.after());
-                            compactMetricMeta = new CompactMetricMeta(result.compactionType(), result.compactionTimeMillis());
+                            compactMetricMeta =
+                                    new CompactMetricMeta(
+                                            result.compactionType(), result.compactionTimeMillis());
                             updateCompactDeletionFile(result.deletionFile());
                         });
     }
@@ -376,7 +378,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         compactAfter.clear();
         compactDeletionFile = null;
 
-        return new CommitIncrement(dataIncrement, compactIncrement, compactMetricIncrement, drainDeletionFile);
+        return new CommitIncrement(
+                dataIncrement, compactIncrement, compactMetricIncrement, drainDeletionFile);
     }
 
     @Override

@@ -40,13 +40,13 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.metrics.CompactMetric;
 import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.CommitChangesProvider;
 import org.apache.paimon.operation.commit.CommitCleaner;
 import org.apache.paimon.operation.commit.CommitKindProvider;
 import org.apache.paimon.operation.commit.CommitResult;
 import org.apache.paimon.operation.commit.CommitScanner;
-import org.apache.paimon.metrics.CompactMetric;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ConflictDetection.ConflictCheck;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
@@ -67,13 +67,13 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CompactMetricsManager;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.CompactMetricsManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -781,7 +781,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             CommitKindProvider commitKindProvider,
             ConflictCheck conflictCheck,
             @Nullable String statsFileName) {
-        return tryCommit(changesProvider, identifier, watermark, logOffsets, properties, commitKindProvider, conflictCheck, statsFileName, null, null, null);
+        return tryCommit(
+                changesProvider,
+                identifier,
+                watermark,
+                logOffsets,
+                properties,
+                commitKindProvider,
+                conflictCheck,
+                statsFileName,
+                null,
+                null,
+                null);
     }
 
     private int tryCommit(
@@ -889,7 +900,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Snapshot latestSnapshot,
             ConflictCheck conflictCheck,
             @Nullable String newStatsFileName) {
-        return tryCommitOnce(retryResult, deltaFiles, changelogFiles, indexFiles, identifier, watermark, logOffsets, properties, commitKind, latestSnapshot, conflictCheck, newStatsFileName, null, null, null);
+        return tryCommitOnce(
+                retryResult,
+                deltaFiles,
+                changelogFiles,
+                indexFiles,
+                identifier,
+                watermark,
+                logOffsets,
+                properties,
+                commitKind,
+                latestSnapshot,
+                conflictCheck,
+                newStatsFileName,
+                null,
+                null,
+                null);
     }
 
     @VisibleForTesting
@@ -1117,7 +1143,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             properties.isEmpty() ? null : properties,
                             nextRowIdStart);
             if (options.compactMetricsEnabled()) {
-                compactMetric = buildCompactMetric(newSnapshotId, commitKind, buckets, compactTypes, compactDurationTime, identifier);
+                compactMetric =
+                        buildCompactMetric(
+                                newSnapshotId,
+                                commitKind,
+                                buckets,
+                                compactTypes,
+                                compactDurationTime,
+                                identifier);
             }
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
@@ -1377,14 +1410,37 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private CompactMetric buildCompactMetric(long newSnapshotId, CommitKind commitKind, List<String> buckets, List<String> compactTypes, List<Long> compactDurationTime, long identifier) {
-        if (commitKind.equals(CommitKind.COMPACT) && compactDurationTime !=null && !compactDurationTime.isEmpty()) {
+    private CompactMetric buildCompactMetric(
+            long newSnapshotId,
+            CommitKind commitKind,
+            List<String> buckets,
+            List<String> compactTypes,
+            List<Long> compactDurationTime,
+            long identifier) {
+        if (commitKind.equals(CommitKind.COMPACT)
+                && compactDurationTime != null
+                && !compactDurationTime.isEmpty()) {
             long maxDuration = compactDurationTime.stream().max(Long::compareTo).get();
             long minDuration = compactDurationTime.stream().min(Long::compareTo).get();
-            long averageDuration = (long) compactDurationTime.stream().mapToLong(Long::longValue).average().getAsDouble();
+            long averageDuration =
+                    (long)
+                            compactDurationTime.stream()
+                                    .mapToLong(Long::longValue)
+                                    .average()
+                                    .getAsDouble();
             String compParts = buckets == null ? "{}" : String.join(",", buckets);
-            String compTypes = compactTypes == null ? "" : String.join(",", new HashSet<>(compactTypes));
-            return new CompactMetric(newSnapshotId, System.currentTimeMillis(), averageDuration, maxDuration, minDuration, compParts, compTypes, identifier, commitUser);
+            String compTypes =
+                    compactTypes == null ? "" : String.join(",", new HashSet<>(compactTypes));
+            return new CompactMetric(
+                    newSnapshotId,
+                    System.currentTimeMillis(),
+                    averageDuration,
+                    maxDuration,
+                    minDuration,
+                    compParts,
+                    compTypes,
+                    identifier,
+                    commitUser);
         } else {
             return null;
         }

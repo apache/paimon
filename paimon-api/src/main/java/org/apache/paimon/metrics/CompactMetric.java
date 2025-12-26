@@ -19,19 +19,19 @@
 package org.apache.paimon.metrics;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.utils.JsonSerdeUtil;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
-import org.apache.paimon.utils.JsonSerdeUtil;
 
 import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.util.Objects;
 
-/**
- * @since 0.9.0
- */
+/** @since 1.4.0 */
 @Public
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CompactMetric implements Serializable {

@@ -512,8 +512,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public CompactMetricsManager compactMetricsManager() {
-        return new CompactMetricsManager(fileIO,
-                options.path(),
-                options.branch());
+        return new CompactMetricsManager(fileIO, options.path(), options.branch());
     }
 }

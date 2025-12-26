@@ -21,9 +21,10 @@ package org.apache.paimon.io;
 import org.apache.paimon.compact.CompactMetricMeta;
 
 import javax.annotation.Nullable;
+
 import java.util.Objects;
 
-/** Compact metric*/
+/** Compact metric. */
 public class CompactMetricIncrement {
 
     @Nullable private final CompactMetricMeta metric;
@@ -68,8 +69,7 @@ public class CompactMetricIncrement {
 
     @Override
     public String toString() {
-        return String.format(
-                "CompactMetricIncrement {metric = %s}", metric);
+        return String.format("CompactMetricIncrement {metric = %s}", metric);
     }
 
     public static CompactMetricIncrement emptyIncrement() {

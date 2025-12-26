@@ -497,8 +497,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             ExpireSnapshots expireSnapshots = newExpireSnapshots().config(expireConfig);
             ExpireCompactMetrics expireCompactMetrics =
                     new ExpireCompactMetricsImpl(
-                            store().compactMetricsManager(),
-                            options.compactMetricsRetainedNum());
+                            store().compactMetricsManager(), options.compactMetricsRetainedNum());
             snapshotExpire =
                     () -> {
                         expireSnapshots.expire();

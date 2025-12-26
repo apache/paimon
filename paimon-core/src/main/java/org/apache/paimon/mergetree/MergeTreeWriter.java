@@ -304,7 +304,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         compactChangelog.clear();
         compactDeletionFile = null;
 
-        return new CommitIncrement(dataIncrement, compactIncrement, compactMetricIncrement, drainDeletionFile);
+        return new CommitIncrement(
+                dataIncrement, compactIncrement, compactMetricIncrement, drainDeletionFile);
     }
 
     private void trySyncLatestCompaction(boolean blocking) throws Exception {
@@ -332,7 +333,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         }
         compactAfter.addAll(result.after());
         compactChangelog.addAll(result.changelog());
-        compactMetricMeta = new CompactMetricMeta(result.compactionType(), result.compactionTimeMillis());
+        compactMetricMeta =
+                new CompactMetricMeta(result.compactionType(), result.compactionTimeMillis());
 
         updateCompactDeletionFile(result.deletionFile());
     }

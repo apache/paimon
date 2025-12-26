@@ -218,12 +218,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
         CompactTask task;
         if (unit.fileRewrite()) {
-            task = new FileRewriteCompactTask(
-                            rewriter,
-                            unit,
-                            dropDelete,
-                            metricsReporter,
-                    compactType);
+            task =
+                    new FileRewriteCompactTask(
+                            rewriter, unit, dropDelete, metricsReporter, compactType);
         } else {
             task =
                     new MergeTreeCompactTask(

@@ -46,7 +46,6 @@ public class CompactMetricMetaV1Deserializer implements Serializable {
                             new DataField(0, "_TYPE", newStringType(true)),
                             new DataField(1, "_DURATION", new BigIntType(true))));
 
-
     protected final InternalRowSerializer rowSerializer;
 
     public CompactMetricMetaV1Deserializer() {
@@ -57,9 +56,7 @@ public class CompactMetricMetaV1Deserializer implements Serializable {
         if (row == null) {
             return new CompactMetricMeta();
         }
-        return new CompactMetricMeta(
-                row.getString(0).toString(),
-                row.getLong(1));
+        return new CompactMetricMeta(row.getString(0).toString(), row.getLong(1));
     }
 
     public CompactMetricMeta deserialize(DataInputView in) throws IOException {

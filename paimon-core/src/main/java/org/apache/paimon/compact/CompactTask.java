@@ -43,7 +43,8 @@ public abstract class CompactTask implements Callable<CompactResult> {
         this(metricsReporter, null);
     }
 
-    public CompactTask(@Nullable CompactionMetrics.Reporter metricsReporter, @Nullable String type) {
+    public CompactTask(
+            @Nullable CompactionMetrics.Reporter metricsReporter, @Nullable String type) {
         this.metricsReporter = metricsReporter;
         this.type = type;
     }

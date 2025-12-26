@@ -28,7 +28,20 @@ import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.index.IndexFileMetaV1Deserializer;
 import org.apache.paimon.index.IndexFileMetaV2Deserializer;
 import org.apache.paimon.index.IndexFileMetaV3Deserializer;
-import org.apache.paimon.io.*;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.CompactMetricIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFileMeta08Serializer;
+import org.apache.paimon.io.DataFileMeta09Serializer;
+import org.apache.paimon.io.DataFileMeta10LegacySerializer;
+import org.apache.paimon.io.DataFileMeta12LegacySerializer;
+import org.apache.paimon.io.DataFileMetaFirstRowIdLegacySerializer;
+import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.utils.IOExceptionSupplier;
 
 import java.io.ByteArrayOutputStream;
@@ -113,10 +126,10 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         indexEntrySerializer.serializeList(message.compactIncrement().deletedIndexFiles(), view);
 
         // compact metric increment
-        if (message.compactMetricIncrement() != null && message.compactMetricIncrement().metric() != null) {
+        if (message.compactMetricIncrement() != null
+                && message.compactMetricIncrement().metric() != null) {
             compactMetricSerializer.serialize(message.compactMetricIncrement().metric(), view);
         }
-
     }
 
     @Override
@@ -181,7 +194,12 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
                 }
             }
             return new CommitMessageImpl(
-                    partition, bucket, totalBuckets, dataIncrement, compactIncrement, new CompactMetricIncrement(compactMetricDeserializer.get()));
+                    partition,
+                    bucket,
+                    totalBuckets,
+                    dataIncrement,
+                    compactIncrement,
+                    new CompactMetricIncrement(compactMetricDeserializer.get()));
         }
     }
 

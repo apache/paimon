@@ -19,23 +19,23 @@
 package org.apache.paimon.compact;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 
-import org.apache.paimon.types.*;
-
-import java.util.*;
-
+import java.util.Arrays;
 
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /**
  * Metadata of compact metric.
  *
- * @since 1.0.0
+ * @since 1.4.0
  */
 @Public
 public class CompactMetricMeta {
 
-    static RowType SCHEMA =
+    static final RowType SCHEMA =
             new RowType(
                     false,
                     Arrays.asList(

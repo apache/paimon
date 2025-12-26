@@ -26,24 +26,51 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metrics.CompactMetric;
-import org.apache.paimon.predicate.*;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.GreaterOrEqual;
+import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.InPredicateVisitor;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
+import org.apache.paimon.predicate.LessOrEqual;
+import org.apache.paimon.predicate.LessThan;
+import org.apache.paimon.predicate.Or;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.*;
+import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.ReadOnceTableScan;
+import org.apache.paimon.table.source.SingletonSplit;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.utils.*;
+import org.apache.paimon.utils.CompactMetricsManager;
+import org.apache.paimon.utils.IteratorRecordReader;
+import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.SerializationUtils;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
 import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
@@ -59,19 +86,14 @@ public class CompactionMetricsTable implements ReadonlyTable {
                             new DataField(0, "snapshot_id", new BigIntType(false)),
                             new DataField(1, "commit_time", new TimestampType(false, 3)),
                             new DataField(2, "compact_duration", new BigIntType(false)),
-                            new DataField(
-                                    3, "max_duration", new BigIntType(false)),
+                            new DataField(3, "max_duration", new BigIntType(false)),
                             new DataField(4, "min_duration", new BigIntType(false)),
+                            new DataField(5, "partitions", SerializationUtils.newStringType(false)),
                             new DataField(
-                                    5,
-                                    "partitions",
-                                    SerializationUtils.newStringType(false)),
-                            new DataField(
-                                    6,
-                                    "compact_type",
-                                    SerializationUtils.newStringType(false)),
+                                    6, "compact_type", SerializationUtils.newStringType(false)),
                             new DataField(7, "identifier", new BigIntType(false)),
-                            new DataField(8, "commit_user", SerializationUtils.newStringType(false))));
+                            new DataField(
+                                    8, "commit_user", SerializationUtils.newStringType(false))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -259,13 +281,15 @@ public class CompactionMetricsTable implements ReadonlyTable {
             dataTable.fileIO();
             CompactMetricsManager compactMetricsManager = dataTable.store().compactMetricsManager();
             Iterator<CompactMetric> metrics = compactMetricsManager.metrics();
-            Iterator<InternalRow> rows = Iterators.transform(metrics, metric -> metric != null ? toRow(metric) : null);
+            Iterator<InternalRow> rows =
+                    Iterators.transform(metrics, metric -> metric != null ? toRow(metric) : null);
             if (readType != null) {
                 rows =
                         Iterators.transform(
                                 rows,
                                 row ->
-                                        ProjectedRow.from(readType, CompactionMetricsTable.TABLE_TYPE)
+                                        ProjectedRow.from(
+                                                        readType, CompactionMetricsTable.TABLE_TYPE)
                                                 .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);

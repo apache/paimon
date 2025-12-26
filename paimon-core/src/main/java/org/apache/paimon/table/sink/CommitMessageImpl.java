@@ -19,7 +19,11 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.*;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.CompactMetricIncrement;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.io.DataInputViewStreamWrapper;
+import org.apache.paimon.io.DataOutputViewStreamWrapper;
 
 import javax.annotation.Nullable;
 
@@ -141,7 +145,13 @@ public class CommitMessageImpl implements CommitMessage {
 
     @Override
     public int hashCode() {
-        return Objects.hash(partition, bucket, totalBuckets, dataIncrement, compactIncrement, compactMetricIncrement);
+        return Objects.hash(
+                partition,
+                bucket,
+                totalBuckets,
+                dataIncrement,
+                compactIncrement,
+                compactMetricIncrement);
     }
 
     @Override
@@ -154,6 +164,11 @@ public class CommitMessageImpl implements CommitMessage {
                         + "newFilesIncrement = %s, "
                         + "compactIncrement = %s, "
                         + "compactMetricIncrement = $s}",
-                partition, bucket, totalBuckets, dataIncrement, compactIncrement, compactMetricIncrement);
+                partition,
+                bucket,
+                totalBuckets,
+                dataIncrement,
+                compactIncrement,
+                compactMetricIncrement);
     }
 }

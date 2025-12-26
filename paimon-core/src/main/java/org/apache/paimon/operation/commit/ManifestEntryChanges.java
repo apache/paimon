@@ -141,7 +141,8 @@ public class ManifestEntryChanges {
             }
             buckets.add(builder + "bucket-" + commitMessage.bucket());
         }
-        if (commitMessage.compactMetricIncrement() != null && commitMessage.compactMetricIncrement().metric() != null) {
+        if (commitMessage.compactMetricIncrement() != null
+                && commitMessage.compactMetricIncrement().metric() != null) {
             types.add(commitMessage.compactMetricIncrement().metric().type());
             compactionDurationTime.add(commitMessage.compactMetricIncrement().metric().duration());
         }
