@@ -521,6 +521,16 @@ under the License.
                 <jdk>11</jdk>
             </activation>
         </profile>
+
+        <profile>
+            <id>paimon-faiss</id>
+            <modules>
+                <module>paimon-faiss</module>
+            </modules>
+            <activation>
+                <jdk>11</jdk>
+            </activation>
+        </profile>
     </profiles>
 
     <build>
