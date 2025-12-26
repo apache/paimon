@@ -148,6 +148,7 @@ import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
@@ -1362,7 +1363,10 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public final List<String> listFunctions(String dbName) throws CatalogException {
-        List<String> functions = new ArrayList<>(BuiltInFunctions.FUNCTIONS.keySet());
+        List<String> functions = new ArrayList<>();
+        if (isSystemNamespace(dbName)) {
+            functions.addAll(BuiltInFunctions.FUNCTIONS.keySet());
+        }
         try {
             functions.addAll(catalog.listFunctions(dbName));
         } catch (Catalog.DatabaseNotExistException e) {
@@ -1374,9 +1378,12 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public final CatalogFunction getFunction(ObjectPath functionPath)
             throws FunctionNotExistException, CatalogException {
-        if (BuiltInFunctions.FUNCTIONS.containsKey(functionPath.getObjectName())) {
-            String builtInFunction = BuiltInFunctions.FUNCTIONS.get(functionPath.getObjectName());
-            return new CatalogFunctionImpl(builtInFunction, FunctionLanguage.JAVA);
+        if (isSystemNamespace(functionPath.getDatabaseName())) {
+            if (BuiltInFunctions.FUNCTIONS.containsKey(functionPath.getObjectName())) {
+                String builtInFunction =
+                        BuiltInFunctions.FUNCTIONS.get(functionPath.getObjectName());
+                return new CatalogFunctionImpl(builtInFunction, FunctionLanguage.JAVA);
+            }
         }
 
         try {
@@ -1599,6 +1606,10 @@ public class FlinkCatalog extends AbstractCatalog {
             throws ProcedureNotExistException, CatalogException {
         return ProcedureUtil.getProcedure(catalog, procedurePath)
                 .orElseThrow(() -> new ProcedureNotExistException(name, procedurePath));
+    }
+
+    private static boolean isSystemNamespace(String namespace) {
+        return namespace.equalsIgnoreCase(SYSTEM_DATABASE_NAME);
     }
 
     private boolean isCalledFromFlinkRecomputeStatisticsProgram() {
