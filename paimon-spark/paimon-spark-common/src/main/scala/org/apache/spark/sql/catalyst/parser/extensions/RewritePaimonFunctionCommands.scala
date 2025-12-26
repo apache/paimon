@@ -25,7 +25,6 @@ import org.apache.paimon.spark.SparkCatalog.FUNCTION_DEFINITION_NAME
 import org.apache.paimon.spark.catalog.SupportV1Function
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions
 import org.apache.paimon.spark.execution.{CreatePaimonV1FunctionCommand, DescribePaimonV1FunctionCommand, DropPaimonV1FunctionCommand}
-import org.apache.paimon.spark.function.BuiltInFunctions
 import org.apache.paimon.spark.util.OptionUtils
 
 import org.apache.spark.sql.SparkSession
@@ -168,16 +167,12 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
       case Some(db)
           if db == SYSTEM_DATABASE_NAME && PaimonFunctions.names.contains(funcIdent.funcName) =>
         true
-      case _ => BuiltInFunctions.FUNCTIONS.containsKey(funcIdent.funcName)
+      case _ => false
     }
   }
 
   private def isSparkBuiltInFunction(funcIdent: FunctionIdentifier): Boolean = {
     catalogManager.v1SessionCatalog.isBuiltinFunction(funcIdent)
-  }
-
-  private def isPaimonBuiltInFunction(funcIdent: FunctionIdentifier): Boolean = {
-    BuiltInFunctions.FUNCTIONS.containsKey(funcIdent.funcName)
   }
 
   private def isSparkTmpFunc(funcIdent: FunctionIdentifier): Boolean = {
