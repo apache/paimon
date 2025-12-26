@@ -27,9 +27,10 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.MemorySize;
@@ -75,6 +76,8 @@ import java.util.Random;
 import java.util.TreeSet;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link BTreeGlobalIndexer}. */
 @ExtendWith(ParameterizedTestExtension.class)
@@ -174,38 +177,38 @@ public class BTreeGlobalIndexerTest {
                 Object literal = data.get(random.nextInt(dataNum)).getKey();
 
                 // 1. test <= literal
-                result = reader.visitLessOrEqual(ref, literal);
+                result = reader.visitLessOrEqual(ref, literal).get();
                 assertResult(result, filter(obj -> comparator.compare(obj, literal) <= 0));
 
                 // 2. test < literal
-                result = reader.visitLessThan(ref, literal);
+                result = reader.visitLessThan(ref, literal).get();
                 assertResult(result, filter(obj -> comparator.compare(obj, literal) < 0));
 
                 // 3. test >= literal
-                result = reader.visitGreaterOrEqual(ref, literal);
+                result = reader.visitGreaterOrEqual(ref, literal).get();
                 assertResult(result, filter(obj -> comparator.compare(obj, literal) >= 0));
 
                 // 4. test > literal
-                result = reader.visitGreaterThan(ref, literal);
+                result = reader.visitGreaterThan(ref, literal).get();
                 assertResult(result, filter(obj -> comparator.compare(obj, literal) > 0));
 
                 // 5. test equal
-                result = reader.visitEqual(ref, literal);
+                result = reader.visitEqual(ref, literal).get();
                 assertResult(result, filter(obj -> comparator.compare(obj, literal) == 0));
 
                 // 6. test not equal
-                result = reader.visitNotEqual(ref, literal);
+                result = reader.visitNotEqual(ref, literal).get();
                 assertResult(result, filter(obj -> comparator.compare(obj, literal) != 0));
             }
 
             // 7. test < min
             Object literal7 = data.get(0).getKey();
-            result = reader.visitLessThan(ref, literal7);
+            result = reader.visitLessThan(ref, literal7).get();
             Assertions.assertTrue(result.results().isEmpty());
 
             // 8. test > max
             Object literal8 = data.get(dataNum - 1).getKey();
-            result = reader.visitGreaterThan(ref, literal8);
+            result = reader.visitGreaterThan(ref, literal8).get();
             Assertions.assertTrue(result.results().isEmpty());
         }
     }
@@ -223,10 +226,10 @@ public class BTreeGlobalIndexerTest {
                 globalIndexer.createReader(fileReader, Collections.singletonList(written))) {
             GlobalIndexResult result;
 
-            result = reader.visitIsNull(ref);
+            result = reader.visitIsNull(ref).get();
             assertResult(result, filter(Objects::isNull));
 
-            result = reader.visitIsNotNull(ref);
+            result = reader.visitIsNotNull(ref).get();
             assertResult(result, filter(Objects::nonNull));
         }
     }
@@ -250,30 +253,29 @@ public class BTreeGlobalIndexerTest {
                 set.addAll(literals);
 
                 // 1. test in
-                result = reader.visitIn(ref, literals);
+                result = reader.visitIn(ref, literals).get();
                 assertResult(result, filter(set::contains));
 
                 // 2. test not in
-                result = reader.visitNotIn(ref, literals);
+                result = reader.visitNotIn(ref, literals).get();
                 assertResult(result, filter(obj -> !set.contains(obj)));
             }
         }
     }
 
     private GlobalIndexIOMeta writeData() throws IOException {
-        GlobalIndexWriter indexWriter = globalIndexer.createWriter(fileWriter);
+        GlobalIndexParallelWriter indexWriter = globalIndexer.createWriter(fileWriter);
         for (Pair<Object, Long> pair : data) {
             indexWriter.write(pair.getKey(), pair.getValue());
         }
-        List<GlobalIndexWriter.ResultEntry> results = indexWriter.finish();
+        List<ResultEntry> results = indexWriter.finish();
         Assertions.assertEquals(1, results.size());
 
-        GlobalIndexWriter.ResultEntry resultEntry = results.get(0);
+        ResultEntry resultEntry = results.get(0);
         String fileName = resultEntry.fileName();
         return new GlobalIndexIOMeta(
                 fileName,
                 fileIO.getFileSize(new Path(new Path(tempPath.toUri()), fileName)),
-                resultEntry.rowRange().to - resultEntry.rowRange().from,
                 resultEntry.meta());
     }
 
@@ -290,8 +292,7 @@ public class BTreeGlobalIndexerTest {
         while (iter.hasNext()) {
             result.add(iter.next());
         }
-        org.assertj.core.api.Assertions.assertThat(result)
-                .containsExactlyInAnyOrderElementsOf(expected);
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expected);
     }
 
     /** The Generator to generate test data. */

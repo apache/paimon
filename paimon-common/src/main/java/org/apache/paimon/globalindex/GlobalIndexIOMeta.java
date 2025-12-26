@@ -26,13 +26,11 @@ public class GlobalIndexIOMeta {
 
     private final String fileName;
     private final long fileSize;
-    private final long rangeEnd;
     private final byte[] metadata;
 
-    public GlobalIndexIOMeta(String fileName, long fileSize, long rangeEnd, byte[] metadata) {
+    public GlobalIndexIOMeta(String fileName, long fileSize, byte[] metadata) {
         this.fileName = fileName;
         this.fileSize = fileSize;
-        this.rangeEnd = rangeEnd;
         this.metadata = metadata;
     }
 
@@ -42,10 +40,6 @@ public class GlobalIndexIOMeta {
 
     public long fileSize() {
         return fileSize;
-    }
-
-    public long rangeEnd() {
-        return rangeEnd;
     }
 
     public byte[] metadata() {
@@ -63,13 +57,12 @@ public class GlobalIndexIOMeta {
         GlobalIndexIOMeta that = (GlobalIndexIOMeta) o;
         return Objects.equals(fileName, that.fileName)
                 && fileSize == that.fileSize
-                && rangeEnd == that.rangeEnd
                 && Arrays.equals(metadata, that.metadata);
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(fileName, fileSize, rangeEnd);
+        int result = Objects.hash(fileName, fileSize);
         result = 31 * result + Arrays.hashCode(metadata);
         return result;
     }

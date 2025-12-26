@@ -18,10 +18,9 @@
 
 package org.apache.paimon.globalindex;
 
-import java.util.List;
+import javax.annotation.Nullable;
 
 /** Parallel Index writer for global index with relative row id (from 0 to rowCnt - 1). */
-public interface GlobalIndexWriter {
-
-    List<ResultEntry> finish();
+public interface GlobalIndexParallelWriter extends GlobalIndexWriter {
+    void write(@Nullable Object key, long relativeRowId);
 }

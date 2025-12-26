@@ -27,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -170,17 +171,17 @@ public class LuceneVectorGlobalIndexScanTest {
             writer.write(vec);
         }
 
-        List<GlobalIndexWriter.ResultEntry> entries = writer.finish();
+        List<ResultEntry> entries = writer.finish();
 
         List<IndexFileMeta> metas = new ArrayList<>();
         int fieldId = rowType.getFieldIndex(vectorFieldName);
 
-        for (GlobalIndexWriter.ResultEntry entry : entries) {
+        for (ResultEntry entry : entries) {
             long fileSize = fileIO.getFileSize(new Path(indexDir, entry.fileName()));
             GlobalIndexMeta globalMeta =
                     new GlobalIndexMeta(
-                            entry.rowRange().from,
-                            entry.rowRange().to,
+                            0,
+                            vectors.length - 1,
                             fieldId,
                             null,
                             entry.meta());
@@ -190,7 +191,7 @@ public class LuceneVectorGlobalIndexScanTest {
                             LuceneVectorGlobalIndexerFactory.IDENTIFIER,
                             entry.fileName(),
                             fileSize,
-                            entry.rowRange().to - entry.rowRange().from + 1,
+                            entry.rowCount(),
                             globalMeta));
         }
         return metas;

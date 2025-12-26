@@ -18,10 +18,30 @@
 
 package org.apache.paimon.globalindex;
 
-import java.util.List;
+import javax.annotation.Nullable;
 
-/** Parallel Index writer for global index with relative row id (from 0 to rowCnt - 1). */
-public interface GlobalIndexWriter {
+/** Write result meta. */
+public class ResultEntry {
 
-    List<ResultEntry> finish();
+    private final String fileName;
+    private final long rowCount;
+    @Nullable private final byte[] meta;
+
+    public ResultEntry(String fileName, long rowCount, @Nullable byte[] meta) {
+        this.fileName = fileName;
+        this.rowCount = rowCount;
+        this.meta = meta;
+    }
+
+    public String fileName() {
+        return fileName;
+    }
+
+    public long rowCount() {
+        return rowCount;
+    }
+
+    public byte[] meta() {
+        return meta;
+    }
 }

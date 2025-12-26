@@ -50,6 +50,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
 
@@ -67,7 +68,6 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     private final List<LuceneIndexMMapDirectory> directories;
     private final List<GlobalIndexIOMeta> ioMetas;
     private final GlobalIndexFileReader fileReader;
-    private final GlobalIndexResult defaultResult;
     private volatile boolean indicesLoaded = false;
     private final DataType fieldType;
 
@@ -78,11 +78,10 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         this.fieldType = fieldType;
         this.searchers = new ArrayList<>();
         this.directories = new ArrayList<>();
-        this.defaultResult = GlobalIndexResult.fromRange(new Range(0, ioMetas.get(0).rangeEnd()));
     }
 
     @Override
-    public GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
+    public Optional<GlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
         try {
             ensureLoadIndices(fileReader, ioMetas);
             Query query = query(vectorSearch, fieldType);
@@ -178,7 +177,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private GlobalIndexResult search(Query query, int limit) throws IOException {
+    private Optional<GlobalIndexResult> search(Query query, int limit) throws IOException {
         PriorityQueue<ScoredRow> result =
                 new PriorityQueue<>(Comparator.comparingDouble(sr -> sr.score));
         for (IndexSearcher searcher : searchers) {
@@ -209,7 +208,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
             id2scores.put(rowId, scoredRow.score);
             roaringBitmap64.add(rowId);
         }
-        return new LuceneVectorSearchGlobalIndexResult(roaringBitmap64, id2scores);
+        return Optional.of(new LuceneVectorSearchGlobalIndexResult(roaringBitmap64, id2scores));
     }
 
     /** Helper class to store row ID with its score. */
@@ -255,72 +254,72 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
     // =================== unsupported =====================
 
     @Override
-    public GlobalIndexResult visitIsNotNull(FieldRef fieldRef) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitIsNotNull(FieldRef fieldRef) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitIsNull(FieldRef fieldRef) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitIsNull(FieldRef fieldRef) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitStartsWith(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitEndsWith(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitEndsWith(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitContains(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitContains(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitLike(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitLike(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitLessThan(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitNotEqual(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitNotEqual(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitLessOrEqual(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitEqual(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitEqual(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitGreaterThan(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitIn(FieldRef fieldRef, List<Object> literals) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
+        return Optional.empty();
     }
 }
