@@ -52,6 +52,7 @@ import java.io.IOException;
  * </pre>
  */
 public class SortLookupStoreWriter implements LookupStoreWriter {
+    public static final int MAGIC_NUMBER = 1481571681;
 
     private final SstFileWriter writer;
     private final PositionOutputStream out;

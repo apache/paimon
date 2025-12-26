@@ -18,20 +18,27 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.sst.BlockCache;
+import org.apache.paimon.sst.BlockHandle;
 import org.apache.paimon.sst.BlockIterator;
 import org.apache.paimon.sst.SstFileReader;
-import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.FileBasedBloomFilter;
+import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Comparator;
@@ -45,7 +52,7 @@ public class BTreeIndexReader implements GlobalIndexReader {
     private final SstFileReader reader;
     private final KeySerializer keySerializer;
     private final Comparator<Object> comparator;
-    private final RoaringNavigableMap64 nullBitmap;
+    private final LazyField<RoaringNavigableMap64> nullBitmap;
     private final Object minKey;
     private final Object maxKey;
 
@@ -60,66 +67,74 @@ public class BTreeIndexReader implements GlobalIndexReader {
         BTreeIndexMeta indexMeta = BTreeIndexMeta.deserialize(globalIndexIOMeta.metadata());
         this.minKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getFirstKey()));
         this.maxKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getLastKey()));
-
         this.input = fileReader.getInputStream(globalIndexIOMeta.fileName());
-        long fileSize = globalIndexIOMeta.fileSize();
-        Trailer trailer = readTrailer(fileSize - Trailer.TRAILER_LENGTH);
-        this.nullBitmap = readNullBitmap(trailer, fileSize);
 
+        // prepare file footer
+        long fileSize = globalIndexIOMeta.fileSize();
+        Path filePath = fileReader.filePath(globalIndexIOMeta.fileName());
+        BlockCache blockCache = new BlockCache(filePath, input, cacheManager);
+        BTreeFileFooter footer = readFooter(blockCache, fileSize);
+
+        // prepare nullBitmap and SstFileReader
+        this.nullBitmap =
+                new LazyField<>(() -> readNullBitmap(blockCache, footer.getNullBitmapHandle()));
+        FileBasedBloomFilter bloomFilter =
+                FileBasedBloomFilter.create(
+                        input, filePath, cacheManager, footer.getBloomFilterHandle());
         this.reader =
                 new SstFileReader(
                         createSliceComparator(keySerializer),
-                        trailer.getNullBitmapOffset(),
-                        fileReader.filePath(globalIndexIOMeta.fileName()),
-                        input,
-                        cacheManager);
+                        blockCache,
+                        footer.getIndexBlockHandle(),
+                        bloomFilter);
     }
 
-    private Trailer readTrailer(long offset) throws IOException {
-        byte[] trailerEncodings = readSlice(offset, Trailer.TRAILER_LENGTH);
-        return Trailer.readTrailer(MemorySlice.wrap(trailerEncodings));
+    private BTreeFileFooter readFooter(BlockCache blockCache, long fileSize) {
+        MemorySegment footerEncodings =
+                blockCache.getBlock(
+                        fileSize - BTreeFileFooter.ENCODED_LENGTH,
+                        BTreeFileFooter.ENCODED_LENGTH,
+                        b -> b,
+                        true);
+        return BTreeFileFooter.readFooter(MemorySlice.wrap(footerEncodings).toInput());
     }
 
-    private RoaringNavigableMap64 readNullBitmap(Trailer trailer, long fileSize)
-            throws IOException {
+    private RoaringNavigableMap64 readNullBitmap(
+            BlockCache cache, @Nullable BlockHandle blockHandle) {
+        RoaringNavigableMap64 nullBitmap = new RoaringNavigableMap64();
+        if (blockHandle == null) {
+            return nullBitmap;
+        }
+
         CRC32 crc32c = new CRC32();
+        // read bytes and crc value
         MemorySliceInput sliceInput =
                 MemorySlice.wrap(
-                                readSlice(
-                                        trailer.getNullBitmapOffset(),
-                                        (int)
-                                                (fileSize
-                                                        - trailer.getNullBitmapOffset()
-                                                        - Trailer.TRAILER_LENGTH)))
+                                cache.getBlock(
+                                        blockHandle.offset(),
+                                        blockHandle.size() + 4,
+                                        b -> b,
+                                        false))
                         .toInput();
+        byte[] nullBitmapEncodings = sliceInput.readSlice(blockHandle.size()).copyBytes();
 
-        int length = sliceInput.readInt();
-        Preconditions.checkState(length >= 0);
-        crc32c.update(length);
+        // check crc value
+        crc32c.update(nullBitmapEncodings, 0, nullBitmapEncodings.length);
+        int expectedCrcValue = sliceInput.readInt();
+        Preconditions.checkState(
+                (int) crc32c.getValue() == expectedCrcValue,
+                "Crc check failure during decoding null bitmap.");
 
-        RoaringNavigableMap64 nullBitmap = new RoaringNavigableMap64();
-        if (length != 0) {
-            byte[] nullBitmapEncodings = sliceInput.readSlice(length).copyBytes();
-            crc32c.update(nullBitmapEncodings, 0, length);
-            Preconditions.checkState(
-                    (int) crc32c.getValue() == trailer.getCrc32c(),
-                    "Crc check failure during decoding null bitmap.");
-
+        try {
             nullBitmap.deserialize(nullBitmapEncodings);
-        } else {
-            Preconditions.checkState(
-                    (int) crc32c.getValue() == trailer.getCrc32c(),
-                    "Crc check failure during decoding null bitmap.");
+        } catch (IOException ioe) {
+            throw new RuntimeException(
+                    "Fail to deserialize null bitmap but crc check passed,"
+                            + " this means the ser/de algorithms not match.",
+                    ioe);
         }
 
         return nullBitmap;
-    }
-
-    private byte[] readSlice(long offset, int size) throws IOException {
-        byte[] data = new byte[size];
-        input.seek(offset);
-        IOUtils.readFully(input, data);
-        return data;
     }
 
     private Comparator<MemorySlice> createSliceComparator(KeySerializer keySerializer) {
@@ -150,11 +165,12 @@ public class BTreeIndexReader implements GlobalIndexReader {
     @Override
     public GlobalIndexResult visitIsNull(FieldRef fieldRef) {
         // nulls are stored separately in null bitmap.
-        return GlobalIndexResult.create(() -> nullBitmap);
+        return GlobalIndexResult.create(nullBitmap::get);
     }
 
     @Override
     public GlobalIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
+        // todo: `startsWith` can also be covered by btree index.
         return GlobalIndexResult.create(
                 () -> {
                     try {

@@ -48,8 +48,6 @@ public class SstFileWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(SstFileWriter.class.getName());
 
-    public static final int MAGIC_NUMBER = 1481571681;
-
     private final PositionOutputStream out;
     private final int blockSize;
     private final BlockWriter dataBlockWriter;

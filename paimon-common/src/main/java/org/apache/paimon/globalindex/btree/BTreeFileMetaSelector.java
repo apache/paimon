@@ -33,7 +33,11 @@ import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-/** An {@link FunctionVisitor} to select candidate btree index files. */
+/**
+ * An {@link FunctionVisitor} to select candidate btree index files. All files are expected to
+ * belong to the same field. The current {@code RowRangeGlobalIndexScanner} can guarantee that.
+ * Please do not break this premise if you want to implement your own index scanner.
+ */
 public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<GlobalIndexIOMeta>>> {
     private final List<Pair<GlobalIndexIOMeta, BTreeIndexMeta>> files;
     private final Comparator<Object> comparator;

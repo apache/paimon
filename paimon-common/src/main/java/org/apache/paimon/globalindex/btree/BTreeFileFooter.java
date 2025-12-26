@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup.sort;
+package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
@@ -26,21 +26,24 @@ import org.apache.paimon.sst.BloomFilterHandle;
 
 import javax.annotation.Nullable;
 
-import static org.apache.paimon.lookup.sort.SortLookupStoreWriter.MAGIC_NUMBER;
+import static org.apache.paimon.globalindex.btree.BTreeIndexWriter.MAGIC_NUMBER;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Footer for a sorted file. */
-public class SortLookupStoreFooter {
-
-    public static final int ENCODED_LENGTH = 36;
+/** The Footer for BTree file. */
+public class BTreeFileFooter {
+    public static final int ENCODED_LENGTH = 48;
 
     @Nullable private final BloomFilterHandle bloomFilterHandle;
     private final BlockHandle indexBlockHandle;
+    @Nullable private final BlockHandle nullBitmapHandle;
 
-    public SortLookupStoreFooter(
-            @Nullable BloomFilterHandle bloomFilterHandle, BlockHandle indexBlockHandle) {
+    public BTreeFileFooter(
+            @Nullable BloomFilterHandle bloomFilterHandle,
+            BlockHandle indexBlockHandle,
+            BlockHandle nullBitmapHandle) {
         this.bloomFilterHandle = bloomFilterHandle;
         this.indexBlockHandle = indexBlockHandle;
+        this.nullBitmapHandle = nullBitmapHandle;
     }
 
     @Nullable
@@ -52,7 +55,12 @@ public class SortLookupStoreFooter {
         return indexBlockHandle;
     }
 
-    public static SortLookupStoreFooter readFooter(MemorySliceInput sliceInput) {
+    @Nullable
+    public BlockHandle getNullBitmapHandle() {
+        return nullBitmapHandle;
+    }
+
+    public static BTreeFileFooter readFooter(MemorySliceInput sliceInput) {
         // read bloom filter and index handles
         @Nullable
         BloomFilterHandle bloomFilterHandle =
@@ -65,6 +73,12 @@ public class SortLookupStoreFooter {
         }
         BlockHandle indexBlockHandle = new BlockHandle(sliceInput.readLong(), sliceInput.readInt());
 
+        @Nullable
+        BlockHandle nullBitmapHandle = new BlockHandle(sliceInput.readLong(), sliceInput.readInt());
+        if (nullBitmapHandle.offset() == 0 && nullBitmapHandle.size() == 0) {
+            nullBitmapHandle = null;
+        }
+
         // skip padding
         sliceInput.setPosition(ENCODED_LENGTH - 4);
 
@@ -72,16 +86,16 @@ public class SortLookupStoreFooter {
         int magicNumber = sliceInput.readInt();
         checkArgument(magicNumber == MAGIC_NUMBER, "File is not a table (bad magic number)");
 
-        return new SortLookupStoreFooter(bloomFilterHandle, indexBlockHandle);
+        return new BTreeFileFooter(bloomFilterHandle, indexBlockHandle, nullBitmapHandle);
     }
 
-    public static MemorySlice writeFooter(SortLookupStoreFooter footer) {
+    public static MemorySlice writeFooter(BTreeFileFooter footer) {
         MemorySliceOutput output = new MemorySliceOutput(ENCODED_LENGTH);
         writeFooter(footer, output);
         return output.toSlice();
     }
 
-    public static void writeFooter(SortLookupStoreFooter footer, MemorySliceOutput sliceOutput) {
+    public static void writeFooter(BTreeFileFooter footer, MemorySliceOutput sliceOutput) {
         // write bloom filter and index handles
         if (footer.bloomFilterHandle == null) {
             sliceOutput.writeLong(0);
@@ -95,6 +109,14 @@ public class SortLookupStoreFooter {
 
         sliceOutput.writeLong(footer.indexBlockHandle.offset());
         sliceOutput.writeInt(footer.indexBlockHandle.size());
+
+        if (footer.nullBitmapHandle == null) {
+            sliceOutput.writeLong(0);
+            sliceOutput.writeInt(0);
+        } else {
+            sliceOutput.writeLong(footer.nullBitmapHandle.offset());
+            sliceOutput.writeInt(footer.nullBitmapHandle.size());
+        }
 
         // write magic number
         sliceOutput.writeInt(MAGIC_NUMBER);

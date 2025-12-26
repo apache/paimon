@@ -24,6 +24,8 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
+import org.apache.paimon.sst.BlockHandle;
+import org.apache.paimon.sst.BloomFilterHandle;
 import org.apache.paimon.sst.SstFileWriter;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Range;
@@ -41,7 +43,25 @@ import java.util.zip.CRC32;
 /**
  * The {@link GlobalIndexWriter} implementation for BTree index. Note that users must keep written
  * keys monotonically incremental. All null keys are stored in a separate bitmap, which will be
- * serialized and appended to the file end on close.
+ * serialized and appended to the file end on close. The layout is as below:
+ *
+ * <pre>
+ *    +-----------------------------------+------+
+ *    |             Footer                |      |
+ *    +-----------------------------------+      |
+ *    |           Index Block             |      +--> Loaded on open
+ *    +-----------------------------------+      |
+ *    |        Bloom Filter Block         |      |
+ *    +-----------------------------------+------+
+ *    |         Null Bitmap Block         |      |
+ *    +-----------------------------------+      |
+ *    |            Data Block             |      |
+ *    +-----------------------------------+      +--> Loaded on requested
+ *    |              ......               |      |
+ *    +-----------------------------------+      |
+ *    |            Data Block             |      |
+ *    +-----------------------------------+------+
+ * </pre>
  *
  * <p>For efficiency, we combine entries with the same keys and store a compact list of row ids for
  * each key.
@@ -76,6 +96,7 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
         this.out = indexFileWriter.newOutputStream(this.fileName);
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
+        // todo: we may enable bf to accelerate equal and in predicate in the future
         this.writer = new SstFileWriter(out, blockSize, null, compressionFactory);
     }
 
@@ -129,16 +150,27 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
     @Override
     public List<ResultEntry> finish() {
         try {
-            // close the sst file writer
+            // write remaining row ids
             flush();
-            writer.close();
+
+            // flush writer remaining data blocks
+            writer.flush();
 
             // write null bitmap
-            long nullBitmapOffset = out.getPos();
-            int crc32c = writeNullBitmap();
+            BlockHandle nullBitmapHandle = writeNullBitmap();
 
-            // write trailer
-            writeTrailer(new Trailer(nullBitmapOffset, crc32c));
+            // write bloom filter (currently is always null, but we could add it for equal
+            // and in condition.)
+            BloomFilterHandle bloomFilterHandle = writer.writeBloomFilter();
+
+            // write index block
+            BlockHandle indexBlockHandle = writer.writeIndexBlock();
+
+            // write footer
+            BTreeFileFooter footer =
+                    new BTreeFileFooter(bloomFilterHandle, indexBlockHandle, nullBitmapHandle);
+            MemorySlice footerEncoding = BTreeFileFooter.writeFooter(footer);
+            writer.writeSlice(footerEncoding);
 
             out.close();
         } catch (IOException e) {
@@ -160,34 +192,25 @@ public class BTreeIndexWriter implements GlobalIndexWriter {
                         new Range(minRowId, maxRowId)));
     }
 
-    private int writeNullBitmap() throws IOException {
-        MemorySliceOutput sliceOutput;
-        CRC32 crc32 = new CRC32();
-
+    @Nullable
+    private BlockHandle writeNullBitmap() throws IOException {
         if (!nullBitmap.initialized()) {
-            sliceOutput = new MemorySliceOutput(4);
-            crc32.update(0);
-            sliceOutput.writeInt(0);
-        } else {
-            byte[] serializedBitmap = nullBitmap.get().serialize();
-            int length = serializedBitmap.length;
-            crc32.update(length);
-            crc32.update(serializedBitmap, 0, length);
-
-            sliceOutput = new MemorySliceOutput(length + 4);
-            sliceOutput.writeInt(length);
-            sliceOutput.writeBytes(serializedBitmap);
+            return null;
         }
 
-        MemorySlice slice = sliceOutput.toSlice();
-        out.write(slice.getHeapMemory(), slice.offset(), slice.length());
+        CRC32 crc32 = new CRC32();
+        byte[] serializedBitmap = nullBitmap.get().serialize();
+        int length = serializedBitmap.length;
+        crc32.update(serializedBitmap, 0, length);
 
-        return (int) crc32.getValue();
-    }
+        // serialized bitmap + crc value
+        MemorySliceOutput sliceOutput = new MemorySliceOutput(length + 4);
+        sliceOutput.writeBytes(serializedBitmap);
+        sliceOutput.writeInt((int) crc32.getValue());
 
-    private void writeTrailer(Trailer trailer) throws IOException {
-        MemorySliceOutput sliceOutput = new MemorySliceOutput(Trailer.TRAILER_LENGTH);
-        Trailer.write(trailer, sliceOutput);
-        out.write(sliceOutput.toSlice().copyBytes());
+        BlockHandle nullBitmapHandle = new BlockHandle(out.getPos(), length);
+        writer.writeSlice(sliceOutput.toSlice());
+
+        return nullBitmapHandle;
     }
 }
