@@ -97,6 +97,7 @@ import java.util.stream.Collectors;
 import scala.collection.JavaConverters;
 import scala.collection.Seq;
 
+import static com.sun.org.apache.xml.internal.serializer.utils.Utils.messages;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.spark.utils.SparkProcedureUtils.readParallelism;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -489,7 +490,6 @@ public class CompactProcedure extends BaseProcedure {
                 new DataEvolutionCompactCoordinator(table, partitionPredicate, false);
         CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
-        List<CommitMessage> messages = new ArrayList<>();
         try {
             while (true) {
                 compactionTasks = compactCoordinator.plan();
@@ -560,25 +560,21 @@ public class CompactProcedure extends BaseProcedure {
                                                     return messagesBytes.iterator();
                                                 });
 
+                List<CommitMessage> messages = new ArrayList<>();
                 List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
-                try {
+                try (TableCommitImpl commit = table.newCommit(commitUser)) {
                     for (byte[] serializedMessage : serializedMessages) {
                         messages.add(
                                 messageSerializerser.deserialize(
                                         messageSerializerser.getVersion(), serializedMessage));
                     }
+                    commit.commit(messages);
                 } catch (Exception e) {
                     throw new RuntimeException("Deserialize commit message failed", e);
                 }
             }
         } catch (EndOfScanException e) {
             LOG.info("Catching EndOfScanException, the compact job is finishing.");
-        }
-
-        try (TableCommitImpl commit = table.newCommit(commitUser)) {
-            commit.commit(messages);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
         }
     }
 
