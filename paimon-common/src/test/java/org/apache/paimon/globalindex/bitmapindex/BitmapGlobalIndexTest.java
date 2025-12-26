@@ -22,6 +22,8 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -44,7 +46,6 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.UUID;
@@ -207,7 +208,8 @@ public class BitmapGlobalIndexTest {
                     }
 
                     @Override
-                    public OutputStream newOutputStream(String fileName) throws IOException {
+                    public PositionOutputStream newOutputStream(String fileName)
+                            throws IOException {
                         return fileIO.newOutputStream(new Path(tempDir.toString(), fileName), true);
                     }
                 };
@@ -218,7 +220,17 @@ public class BitmapGlobalIndexTest {
         long fileSize = fileIO.getFileSize(path);
 
         GlobalIndexFileReader fileReader =
-                prefix -> fileIO.newInputStream(new Path(tempDir.toString(), prefix));
+                new GlobalIndexFileReader() {
+                    @Override
+                    public SeekableInputStream getInputStream(String fileName) throws IOException {
+                        return fileIO.newInputStream(new Path(tempDir.toString(), fileName));
+                    }
+
+                    @Override
+                    public Path filePath(String fileName) {
+                        return new Path(tempDir.toString(), fileName);
+                    }
+                };
 
         GlobalIndexIOMeta globalIndexMeta =
                 new GlobalIndexIOMeta(fileName, fileSize, Long.MAX_VALUE, null);
