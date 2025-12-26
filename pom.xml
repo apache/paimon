@@ -90,7 +90,7 @@ under the License.
         <paimon-flink-common.flink.version>1.20.1</paimon-flink-common.flink.version>
         <flink.scala.binary.version>2.12</flink.scala.binary.version>
         <scala212.version>2.12.18</scala212.version>
-        <scala213.version>2.13.16</scala213.version>
+        <scala213.version>2.13.17</scala213.version>
         <scala.version>${scala212.version}</scala.version>
         <codegen.scala.version>${scala212.version}</codegen.scala.version>
         <snappy.version>1.1.8.4</snappy.version>
@@ -433,11 +433,11 @@ under the License.
                 <antlr4.version>4.13.1</antlr4.version>
                 <scala.binary.version>2.13</scala.binary.version>
                 <scala.version>${scala213.version}</scala.version>
-                <paimon-spark-common.spark.version>4.0.1</paimon-spark-common.spark.version>
+                <paimon-spark-common.spark.version>4.1.0</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark4-common_2.13</paimon-sparkx-common>
                 <arrow.version>18.1.0</arrow.version>
-                <test.spark.main.version>4.0</test.spark.main.version>
-                <test.spark.version>4.0.1</test.spark.version>
+                <test.spark.main.version>4.1</test.spark.main.version>
+                <test.spark.version>4.1.0</test.spark.version>
             </properties>
             <activation>
                 <property>
