@@ -75,6 +75,30 @@ if [ "$PLATFORM" = "darwin" ]; then
     fi
 fi
 
+# Check dependencies on Linux
+if [ "$PLATFORM" = "linux" ]; then
+    echo "Checking Linux dependencies..."
+    
+    # Check GCC version
+    GCC_VERSION=$(gcc -dumpversion 2>/dev/null | cut -d. -f1)
+    if [ -n "$GCC_VERSION" ] && [ "$GCC_VERSION" -lt 5 ]; then
+        echo "WARNING: GCC version $GCC_VERSION is too old. C++14 or later requires GCC 5+."
+        echo "Please install a newer GCC:"
+        echo "  On Ubuntu/Debian: sudo apt-get install g++-7 (or newer)"
+        echo "  On CentOS/RHEL: sudo yum install devtoolset-7-gcc-c++ && scl enable devtoolset-7 bash"
+    fi
+    
+    # Check for FAISS
+    if [ ! -f /usr/local/lib/libfaiss.so ] && [ ! -f /usr/lib/libfaiss.so ] && [ ! -f /usr/lib64/libfaiss.so ]; then
+        echo "FAISS library not found in standard paths."
+        echo "Please install FAISS:"
+        echo "  Option 1: conda install -c pytorch faiss-cpu"
+        echo "  Option 2: Build from source: https://github.com/facebookresearch/faiss"
+        echo ""
+        echo "If FAISS is installed in a custom location, set FAISS_HOME environment variable."
+    fi
+fi
+
 # Clean and create build directory
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"

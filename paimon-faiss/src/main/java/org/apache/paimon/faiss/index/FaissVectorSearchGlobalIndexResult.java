@@ -46,3 +46,4 @@ public class FaissVectorSearchGlobalIndexResult implements VectorSearchGlobalInd
         return this.results;
     }
 }
+

@@ -408,3 +408,4 @@ JNIEXPORT jstring JNICALL Java_org_apache_paimon_faiss_jni_FaissJNI_getVersion(
     return env->NewStringUTF("1.7.4");
 }
 
+

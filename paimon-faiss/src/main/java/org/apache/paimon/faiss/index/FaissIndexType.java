@@ -55,3 +55,4 @@ public enum FaissIndexType {
         throw new IllegalArgumentException("Unknown index type: " + name);
     }
 }
+

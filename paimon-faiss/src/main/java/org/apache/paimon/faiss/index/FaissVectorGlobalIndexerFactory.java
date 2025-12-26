@@ -38,3 +38,4 @@ public class FaissVectorGlobalIndexerFactory implements GlobalIndexerFactory {
         return new FaissVectorGlobalIndexer(field.type(), options);
     }
 }
+

@@ -180,3 +180,4 @@ public class FaissVectorIndexOptions {
         return trainingSize;
     }
 }
+

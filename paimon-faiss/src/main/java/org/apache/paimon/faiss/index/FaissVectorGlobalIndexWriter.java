@@ -200,3 +200,4 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexWriter {
         }
     }
 }
+

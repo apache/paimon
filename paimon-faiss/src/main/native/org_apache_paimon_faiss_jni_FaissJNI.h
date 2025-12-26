@@ -184,3 +184,4 @@ JNIEXPORT jstring JNICALL Java_org_apache_paimon_faiss_jni_FaissJNI_getVersion
 
 #endif
 
+

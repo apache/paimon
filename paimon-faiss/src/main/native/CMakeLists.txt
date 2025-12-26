@@ -15,11 +15,30 @@
 # specific language governing permissions and limitations
 # under the License.
 
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.10)
 project(paimon_faiss_jni)
 
-set(CMAKE_CXX_STANDARD 17)
+# Try C++17 first, fall back to C++14 if not available
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-std=c++17" COMPILER_SUPPORTS_CXX17)
+check_cxx_compiler_flag("-std=c++14" COMPILER_SUPPORTS_CXX14)
+check_cxx_compiler_flag("-std=c++11" COMPILER_SUPPORTS_CXX11)
+
+if(COMPILER_SUPPORTS_CXX17)
+    set(CMAKE_CXX_STANDARD 17)
+    message(STATUS "Using C++17")
+elseif(COMPILER_SUPPORTS_CXX14)
+    set(CMAKE_CXX_STANDARD 14)
+    message(STATUS "Using C++14")
+elseif(COMPILER_SUPPORTS_CXX11)
+    set(CMAKE_CXX_STANDARD 11)
+    message(STATUS "Using C++11")
+else()
+    message(FATAL_ERROR "The compiler ${CMAKE_CXX_COMPILER} has no C++11 support. Please use a different C++ compiler.")
+endif()
+
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # macOS specific: Find OpenMP from Homebrew
 if(APPLE)
@@ -45,10 +64,13 @@ if(APPLE)
     endif()
 endif()
 
-# Find OpenMP
-find_package(OpenMP)
+# Find OpenMP (optional on some systems)
+find_package(OpenMP QUIET)
 if(OpenMP_CXX_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    message(STATUS "OpenMP found")
+else()
+    message(STATUS "OpenMP not found - building without OpenMP support")
 endif()
 
 # Find JNI
