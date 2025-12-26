@@ -18,20 +18,49 @@
 
 package org.apache.spark.sql.paimon.shims
 
-import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
+import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4InternalRowWithBlob, SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
+import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.catalyst.plans.logical.MergeRows
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
 import org.apache.spark.sql.execution.datasources._
+import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
+import org.apache.spark.sql.execution.streaming.sinks.FileStreamSink
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import scala.collection.JavaConverters._
 
 object MinorVersionShim {
 
   def createKeep(context: String, condition: Expression, output: Seq[Expression]): Instruction = {
-    throw new UnsupportedOperationException("Not implemented")
+    val ctx = context match {
+      case "COPY" => MergeRows.Copy
+      case "DELETE" => MergeRows.Delete
+      case "INSERT" => MergeRows.Insert
+      case "UPDATE" => MergeRows.Update
+      case _ => MergeRows.Copy
+    }
+
+    MergeRows.Keep(ctx, condition, output)
+  }
+
+  def createSparkInternalRow(rowType: RowType): SparkInternalRow = {
+    new Spark4InternalRow(rowType)
+  }
+
+  def createSparkInternalRowWithBlob(
+      rowType: RowType,
+      blobFieldIndex: Int,
+      blobAsDescriptor: Boolean): SparkInternalRow = {
+    new Spark4InternalRowWithBlob(rowType, blobFieldIndex, blobAsDescriptor)
+  }
+
+  def createSparkArrayData(elementType: DataType): SparkArrayData = {
+    new Spark4ArrayData(elementType)
   }
 
   def createFileIndex(
@@ -40,22 +69,64 @@ object MinorVersionShim {
       paths: Seq[String],
       userSpecifiedSchema: Option[StructType],
       partitionSchema: StructType): PartitioningAwareFileIndex = {
-    throw new UnsupportedOperationException("Not implemented")
-  }
 
-  def createSparkInternalRow(rowType: RowType): SparkInternalRow = {
-    throw new UnsupportedOperationException("Not implemented")
-  }
+    class PartitionedMetadataLogFileIndex(
+        sparkSession: SparkSession,
+        path: Path,
+        parameters: Map[String, String],
+        userSpecifiedSchema: Option[StructType],
+        override val partitionSchema: StructType)
+      extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema)
 
-  def createSparkInternalRowWithBlob(
-      rowType: RowType,
-      blobFieldIndex: Int,
-      blobAsDescriptor: Boolean): SparkInternalRow = {
-    throw new UnsupportedOperationException("Not implemented")
-  }
+    class PartitionedInMemoryFileIndex(
+        sparkSession: SparkSession,
+        rootPathsSpecified: Seq[Path],
+        parameters: Map[String, String],
+        userSpecifiedSchema: Option[StructType],
+        fileStatusCache: FileStatusCache = NoopCache,
+        userSpecifiedPartitionSpec: Option[PartitionSpec] = None,
+        metadataOpsTimeNs: Option[Long] = None,
+        override val partitionSchema: StructType)
+      extends InMemoryFileIndex(
+        sparkSession,
+        rootPathsSpecified,
+        parameters,
+        userSpecifiedSchema,
+        fileStatusCache,
+        userSpecifiedPartitionSpec,
+        metadataOpsTimeNs)
 
-  def createSparkArrayData(elementType: DataType): SparkArrayData = {
-    throw new UnsupportedOperationException("Not implemented")
+    def globPaths: Boolean = {
+      val entry = options.get(DataSource.GLOB_PATHS_KEY)
+      Option(entry).forall(_ == "true")
+    }
+
+    val caseSensitiveMap = options.asCaseSensitiveMap.asScala.toMap
+    val hadoopConf = sparkSession.sessionState.newHadoopConfWithOptions(caseSensitiveMap)
+    if (FileStreamSink.hasMetadata(paths, hadoopConf, sparkSession.sessionState.conf)) {
+      new PartitionedMetadataLogFileIndex(
+        sparkSession,
+        new Path(paths.head),
+        options.asScala.toMap,
+        userSpecifiedSchema,
+        partitionSchema = partitionSchema)
+    } else {
+      val rootPathsSpecified = DataSource.checkAndGlobPathIfNecessary(
+        paths,
+        hadoopConf,
+        checkEmptyGlobPath = true,
+        checkFilesExist = true,
+        enableGlobbing = globPaths)
+      val fileStatusCache = FileStatusCache.getOrCreate(sparkSession)
+
+      new PartitionedInMemoryFileIndex(
+        sparkSession,
+        rootPathsSpecified,
+        caseSensitiveMap,
+        userSpecifiedSchema,
+        fileStatusCache,
+        partitionSchema = partitionSchema)
+    }
   }
 
 }
