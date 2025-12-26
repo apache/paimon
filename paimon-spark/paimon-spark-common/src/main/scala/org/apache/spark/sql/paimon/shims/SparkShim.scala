@@ -22,7 +22,7 @@ import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
-import org.apache.spark.sql.{DataFrame, Dataset, Encoder, SparkSession, SQLContext}
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
@@ -34,7 +34,6 @@ import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.datasources.PartitioningAwareFileIndex
-import org.apache.spark.sql.execution.streaming.Offset
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -111,20 +110,4 @@ trait SparkShim {
       paths: Seq[String],
       userSpecifiedSchema: Option[StructType],
       partitionSchema: StructType): PartitioningAwareFileIndex
-
-  /**
-   * Creates a MemoryStream wrapper for streaming tests. In Spark 4.1+, MemoryStream was moved from
-   * `org.apache.spark.sql.execution.streaming` to
-   * `org.apache.spark.sql.execution.streaming.runtime`.
-   */
-  def createMemoryStream[A](implicit
-      encoder: Encoder[A],
-      sqlContext: SQLContext): MemoryStreamWrapper[A]
-}
-
-/** A wrapper trait for MemoryStream to abstract away Spark version differences. */
-trait MemoryStreamWrapper[A] {
-  def toDS(): Dataset[A]
-  def toDF(): DataFrame
-  def addData(data: A*): Offset
 }

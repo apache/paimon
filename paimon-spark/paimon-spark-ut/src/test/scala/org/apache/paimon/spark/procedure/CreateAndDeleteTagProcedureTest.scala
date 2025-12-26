@@ -21,7 +21,7 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 
 class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTest {
@@ -39,7 +39,7 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = SparkShimLoader.shim.createMemoryStream[(Int, String)]
+          val inputData = MemoryStream[(Int, String)]
           val stream = inputData
             .toDS()
             .toDF("a", "b")
@@ -146,7 +146,7 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = SparkShimLoader.shim.createMemoryStream[(Int, String)]
+          val inputData = MemoryStream[(Int, String)]
           val stream = inputData
             .toDS()
             .toDF("a", "b")
