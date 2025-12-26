@@ -25,7 +25,6 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
@@ -235,7 +234,8 @@ public class LuceneVectorGlobalIndexTest {
                 new LuceneVectorGlobalIndexReader(fileReader, metas, vectorType)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 1, fieldName);
             LuceneVectorSearchGlobalIndexResult result =
-                    (LuceneVectorSearchGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
+                    (LuceneVectorSearchGlobalIndexResult)
+                            reader.visitVectorSearch(vectorSearch).get();
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
             long expectedRowId = 0;
             assertThat(containsRowId(result, expectedRowId)).isTrue();
@@ -245,12 +245,16 @@ public class LuceneVectorGlobalIndexTest {
             filterResults.add(expectedRowId);
             vectorSearch =
                     new VectorSearch(vectors[0], 1, fieldName).withIncludeRowIds(filterResults);
-            result = (LuceneVectorSearchGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
+            result =
+                    (LuceneVectorSearchGlobalIndexResult)
+                            reader.visitVectorSearch(vectorSearch).get();
             assertThat(containsRowId(result, expectedRowId)).isTrue();
 
             float[] queryVector = new float[] {0.85f, 0.15f};
             vectorSearch = new VectorSearch(queryVector, 2, fieldName);
-            result = (LuceneVectorSearchGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
+            result =
+                    (LuceneVectorSearchGlobalIndexResult)
+                            reader.visitVectorSearch(vectorSearch).get();
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
             long rowId1 = 1;
             long rowId2 = 3;

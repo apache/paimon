@@ -19,11 +19,9 @@
 package org.apache.paimon.lucene.index;
 
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
-import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.Range;
 
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.lucene912.Lucene912Codec;

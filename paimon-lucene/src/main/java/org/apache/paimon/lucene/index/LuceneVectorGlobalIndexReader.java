@@ -30,7 +30,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.apache.lucene.document.Document;
