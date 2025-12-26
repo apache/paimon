@@ -24,6 +24,7 @@ import org.apache.paimon.options.MemorySize;
 
 /** Options for BTree index. */
 public class BTreeIndexOptions {
+
     public static final ConfigOption<String> BTREE_INDEX_COMPRESSION =
             ConfigOptions.key("btree-index.compression")
                     .stringType()

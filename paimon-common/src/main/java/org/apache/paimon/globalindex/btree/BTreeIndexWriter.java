@@ -67,7 +67,6 @@ import java.util.zip.CRC32;
  * each key.
  */
 public class BTreeIndexWriter implements GlobalIndexWriter {
-    public static final int MAGIC_NUMBER = 198732882;
 
     private final String fileName;
     private final PositionOutputStream out;

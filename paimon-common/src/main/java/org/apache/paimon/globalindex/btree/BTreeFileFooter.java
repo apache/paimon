@@ -26,11 +26,12 @@ import org.apache.paimon.sst.BloomFilterHandle;
 
 import javax.annotation.Nullable;
 
-import static org.apache.paimon.globalindex.btree.BTreeIndexWriter.MAGIC_NUMBER;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** The Footer for BTree file. */
 public class BTreeFileFooter {
+
+    public static final int MAGIC_NUMBER = 198732882;
     public static final int ENCODED_LENGTH = 48;
 
     @Nullable private final BloomFilterHandle bloomFilterHandle;

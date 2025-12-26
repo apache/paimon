@@ -48,6 +48,7 @@ import java.util.zip.CRC32;
 
 /** The {@link GlobalIndexReader} implementation for btree index. */
 public class BTreeIndexReader implements GlobalIndexReader {
+
     private final SeekableInputStream input;
     private final SstFileReader reader;
     private final KeySerializer keySerializer;

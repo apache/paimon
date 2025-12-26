@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataField;
 
 /** The {@link GlobalIndexerFactory} for btree index. */
 public class BTreeGlobalIndexerFactory implements GlobalIndexerFactory {
+
     public static final String IDENTIFIER = "btree";
 
     @Override

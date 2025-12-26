@@ -24,6 +24,7 @@ import org.apache.paimon.memory.MemorySliceOutput;
 
 /** Index Meta of each BTree index file. */
 public class BTreeIndexMeta {
+
     private final byte[] firstKey;
     private final byte[] lastKey;
     private final boolean hasNulls;

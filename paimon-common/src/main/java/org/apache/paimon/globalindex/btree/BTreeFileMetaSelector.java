@@ -39,6 +39,7 @@ import java.util.stream.Collectors;
  * Please do not break this premise if you want to implement your own index scanner.
  */
 public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<GlobalIndexIOMeta>>> {
+
     private final List<Pair<GlobalIndexIOMeta, BTreeIndexMeta>> files;
     private final Comparator<Object> comparator;
     private final KeySerializer keySerializer;
