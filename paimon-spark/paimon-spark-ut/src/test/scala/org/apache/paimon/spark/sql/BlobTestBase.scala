@@ -145,7 +145,7 @@ class BlobTestBase extends PaimonSparkTestBase {
           "PARTITIONED BY (ds STRING, batch STRING) \n" +
           "TBLPROPERTIES ('comment' = 'blob table','partition.expiration-time' = '365 d','row-tracking.enabled' = 'true','data-evolution.enabled' = 'true','blob-field' = 'content','blob-as-descriptor' = 'true')")
       sql(
-        "INSERT OVERWRITE TABLE t\nPARTITION(ds= '1017',batch = 'test') VALUES \n('1','paimon','1024','12345678','20241017', path_to_descriptor('" + uri + "'))")
+        "INSERT OVERWRITE TABLE t\nPARTITION(ds= '1017',batch = 'test') VALUES \n('1','paimon','1024','12345678','20241017', sys.path_to_descriptor('" + uri + "'))")
       val newDescriptorBytes =
         sql("SELECT content FROM t WHERE id = '1'").collect()(0).get(0).asInstanceOf[Array[Byte]]
       val newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes)

@@ -36,7 +36,6 @@ import org.apache.paimon.spark.catalog.SupportV1Function;
 import org.apache.paimon.spark.catalog.SupportView;
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
 import org.apache.paimon.spark.catalog.functions.V1FunctionConverter;
-import org.apache.paimon.spark.function.BuiltInFunctions;
 import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.iceberg.IcebergTable;
@@ -537,12 +536,12 @@ public class SparkCatalog extends SparkBaseCatalog
 
     @Override
     public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
-        List<Identifier> result = new ArrayList<>();
-        BuiltInFunctions.FUNCTIONS.keySet().forEach(fn -> result.add(Identifier.of(namespace, fn)));
         if (isSystemFunctionNamespace(namespace)) {
+            List<Identifier> result = new ArrayList<>();
             PaimonFunctions.names().forEach(name -> result.add(Identifier.of(namespace, name)));
             return result.toArray(new Identifier[0]);
         } else if (isDatabaseFunctionNamespace(namespace)) {
+            List<Identifier> result = new ArrayList<>();
             String databaseName = getDatabaseNameFromNamespace(namespace);
             try {
                 catalog.listFunctions(databaseName)
@@ -557,9 +556,6 @@ public class SparkCatalog extends SparkBaseCatalog
 
     @Override
     public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
-        if (BuiltInFunctions.FUNCTIONS.containsKey(ident.name())) {
-            return BuiltInFunctions.FUNCTIONS.get(ident.name());
-        }
         String[] namespace = ident.namespace();
         if (isSystemFunctionNamespace(namespace)) {
             UnboundFunction func = PaimonFunctions.load(ident.name());
