@@ -97,7 +97,6 @@ import java.util.stream.Collectors;
 import scala.collection.JavaConverters;
 import scala.collection.Seq;
 
-import static com.sun.org.apache.xml.internal.serializer.utils.Utils.messages;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.spark.utils.SparkProcedureUtils.readParallelism;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
