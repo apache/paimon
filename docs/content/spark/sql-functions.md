@@ -53,6 +53,48 @@ SELECT * FROM t where pt = sys.max_pt('t');
 -- a, 20250101
 ```
 
+### path_to_descriptor
+
+`sys.path_to_descriptor($file_path)`
+
+Converts a file path (STRING) to a blob descriptor (BINARY). This function is useful when working with blob data stored in external files. It creates a blob descriptor that references the file at the specified path.
+
+**Arguments:**
+- `file_path` (STRING): The path to the external file containing the blob data.
+
+**Returns:**
+- A BINARY value representing the serialized blob descriptor.
+
+**Example**
+
+```sql
+-- Insert blob data using path_to_descriptor function
+INSERT INTO t VALUES ('1', 'paimon', sys.path_to_descriptor('file:///path/to/blob_file'));
+
+-- Insert with partition
+INSERT OVERWRITE TABLE t PARTITION(ds='1017', batch='test')
+VALUES ('1', 'paimon', '1024', '12345678', '20241017', sys.path_to_descriptor('file:///path/to/blob_file'));
+```
+
+### descriptor_to_string
+
+`sys.descriptor_to_string($descriptor)`
+
+Converts a blob descriptor (BINARY) to its string representation (STRING). This function is useful for debugging or displaying the contents of a blob descriptor in a human-readable format.
+
+**Arguments:**
+- `descriptor` (BINARY): The blob descriptor bytes to convert.
+
+**Returns:**
+- A STRING representation of the blob descriptor.
+
+**Example**
+
+```sql
+-- Convert a blob descriptor to string for inspection
+SELECT sys.descriptor_to_string(content) FROM t WHERE id = '1';
+```
+
 ## User-defined Function
 
 Paimon Spark supports two types of user-defined functions: lambda functions and file-based functions.
