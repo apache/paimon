@@ -80,6 +80,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
@@ -90,14 +91,15 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     public static final PredicateReplaceVisitor PREDICATE_CONVERTER =
             p -> {
-                if (p.index() == 0) {
+                int systemFieldCount = 2;
+                if (p.index() < systemFieldCount) {
                     return Optional.empty();
                 }
                 return Optional.of(
                         new LeafPredicate(
                                 p.function(),
                                 p.type(),
-                                p.index() - 1,
+                                p.index() - systemFieldCount,
                                 p.fieldName(),
                                 p.literals()));
             };
@@ -142,6 +144,9 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     public RowType rowType() {
         List<DataField> fields = new ArrayList<>();
         fields.add(SpecialFields.ROW_KIND);
+        fields.add(
+                SpecialFields.SEQUENCE_NUMBER.newType(
+                        SpecialFields.SEQUENCE_NUMBER.type().nullable()));
         fields.addAll(wrapped.rowType().getFields());
         return new RowType(fields);
     }
@@ -223,7 +228,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new AuditLogRead(wrapped.newRead());
+        return new AuditLogRead(wrapped.newRead()).withReadType(rowType());
     }
 
     @Override
@@ -631,23 +636,10 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     class AuditLogRead implements InnerTableRead {
 
         protected final InnerTableRead dataRead;
-
-        protected int[] readProjection;
+        private int rowkindFieldIndex = -1;
 
         protected AuditLogRead(InnerTableRead dataRead) {
             this.dataRead = dataRead.forceKeepDelete();
-            this.readProjection = defaultProjection();
-        }
-
-        /** Default projection, just add row kind to the first. */
-        private int[] defaultProjection() {
-            int dataFieldCount = wrapped.rowType().getFieldCount();
-            int[] projection = new int[dataFieldCount + 1];
-            projection[0] = -1;
-            for (int i = 0; i < dataFieldCount; i++) {
-                projection[i + 1] = i;
-            }
-            return projection;
         }
 
         @Override
@@ -658,30 +650,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
         @Override
         public InnerTableRead withReadType(RowType readType) {
-            // data projection to push down to dataRead
-            List<DataField> dataReadFields = new ArrayList<>();
-
-            // read projection to handle record returned by dataRead
-            List<DataField> fields = readType.getFields();
-            int[] readProjection = new int[fields.size()];
-
-            boolean rowKindAppeared = false;
-            for (int i = 0; i < fields.size(); i++) {
-                String fieldName = fields.get(i).name();
-                if (fieldName.equals(SpecialFields.ROW_KIND.name())) {
-                    rowKindAppeared = true;
-                    readProjection[i] = -1;
-                } else {
-                    dataReadFields.add(fields.get(i));
-                    // There is no row kind field. Keep it as it is
-                    // Row kind field has occurred, and the following fields are offset by 1
-                    // position
-                    readProjection[i] = rowKindAppeared ? i - 1 : i;
-                }
-            }
-
-            this.readProjection = readProjection;
-            dataRead.withReadType(new RowType(readType.isNullable(), dataReadFields));
+            dataRead.withReadType(readType);
+            rowkindFieldIndex = readType.getFieldNames().indexOf(SpecialFields.ROW_KIND.name());
             return this;
         }
 
@@ -696,17 +666,24 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             return dataRead.createReader(split).transform(this::convertRow);
         }
 
-        private InternalRow convertRow(InternalRow data) {
-            return new AuditLogRow(readProjection, data);
+        private InternalRow convertRow(InternalRow row) {
+            row.setRowKind(org.apache.paimon.types.RowKind.INSERT);
+            // Fallback for append-only tables: rowkind field is null, wrap to return "+I"
+            if (rowkindFieldIndex >= 0 && row.isNullAt(rowkindFieldIndex)) {
+                row = new AuditLogRow(row, rowkindFieldIndex);
+            }
+            return row;
         }
     }
 
-    /** A {@link ProjectedRow} which returns row kind when mapping index is negative. */
-    static class AuditLogRow extends ProjectedRow {
+    /** Wrapper to return rowkind string for null rowkind field (append-only table fallback). */
+    protected static class AuditLogRow extends ProjectedRow {
+        private final int rowkindPos;
 
-        AuditLogRow(int[] indexMapping, InternalRow row) {
-            super(indexMapping);
-            replaceRow(row);
+        protected AuditLogRow(InternalRow row, int rowkindPos) {
+            super(IntStream.range(0, row.getFieldCount()).toArray());
+            this.replaceRow(row);
+            this.rowkindPos = rowkindPos;
         }
 
         @Override
@@ -722,19 +699,14 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
         @Override
         public boolean isNullAt(int pos) {
-            if (indexMapping[pos] < 0) {
-                // row kind is always not null
-                return false;
-            }
-            return super.isNullAt(pos);
+            return pos == rowkindPos ? false : super.isNullAt(pos);
         }
 
         @Override
         public BinaryString getString(int pos) {
-            if (indexMapping[pos] < 0) {
-                return BinaryString.fromString(row.getRowKind().shortString());
-            }
-            return super.getString(pos);
+            return pos == rowkindPos
+                    ? BinaryString.fromString(getRowKind().shortString())
+                    : super.getString(pos);
         }
     }
 }

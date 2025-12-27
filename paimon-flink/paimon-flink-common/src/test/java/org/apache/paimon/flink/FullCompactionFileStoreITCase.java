@@ -150,19 +150,19 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO %s VALUES ('1', '2', '3')", table);
         assertThat(iterator.collect(1))
-                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "+I", "1", "2", "3"));
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "+I", 0L, "1", "2", "3"));
 
         sql("INSERT INTO %s VALUES ('1', '4', '5')", table);
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(
-                        Row.ofKind(RowKind.INSERT, "-U", "1", "2", "3"),
-                        Row.ofKind(RowKind.INSERT, "+U", "1", "4", "5"));
+                        Row.ofKind(RowKind.INSERT, "-U", 0L, "1", "2", "3"),
+                        Row.ofKind(RowKind.INSERT, "+U", 1L, "1", "4", "5"));
 
         iterator.close();
 
         // BATCH mode
         assertThat(sql("SELECT * FROM %s$audit_log", table))
-                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "+I", "1", "4", "5"));
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "+I", 1L, "1", "4", "5"));
     }
 
     @Test

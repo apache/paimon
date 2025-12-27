@@ -27,6 +27,7 @@ import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.{OptionUtils, SplitUtils}
 import org.apache.paimon.table.{SpecialFields, Table}
 import org.apache.paimon.table.source.{ReadBuilder, Split}
+import org.apache.paimon.table.system.{AuditLogTable, BinlogTable}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.internal.Logging
@@ -87,7 +88,8 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     }
 
     if (ROW_TRACKING_META_COLUMNS.contains(fieldName)) {
-      if (!coreOptions.rowTrackingEnabled()) {
+      val isSystemTable = table.isInstanceOf[AuditLogTable] || table.isInstanceOf[BinlogTable]
+      if (!isSystemTable && !coreOptions.rowTrackingEnabled()) {
         throw new UnsupportedOperationException(
           s"Only row-tracking tables support metadata column: $fieldName")
       }
