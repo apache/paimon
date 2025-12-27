@@ -23,7 +23,6 @@ import org.apache.paimon.spark.SparkTable
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.analysis.{EliminateSubqueryAliases, ResolvedTable}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Project}
-import org.apache.spark.sql.connector.catalog.Table
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
 import scala.util.control.NonFatal
@@ -37,8 +36,6 @@ object PaimonRelation extends Logging {
         Some(d.table.asInstanceOf[SparkTable])
       case d: DataSourceV2Relation if d.table.isInstanceOf[SparkTable] =>
         Some(d.table.asInstanceOf[SparkTable])
-      case d: DataSourceV2Relation if isRowLevelOpTable(d.table) =>
-        Some(getTableFromRowLevelOpTable(d.table))
       case ResolvedTable(_, _, table: SparkTable, _) => Some(table)
       case _ => None
     }
@@ -57,31 +54,7 @@ object PaimonRelation extends Logging {
     EliminateSubqueryAliases(plan) match {
       case Project(_, d: DataSourceV2Relation) if d.table.isInstanceOf[SparkTable] => d
       case d: DataSourceV2Relation if d.table.isInstanceOf[SparkTable] => d
-      case d: DataSourceV2Relation if isRowLevelOpTable(d.table) =>
-        d.copy(table = getTableFromRowLevelOpTable(d.table))
       case _ => throw new RuntimeException(s"It's not a paimon table, $plan")
-    }
-  }
-
-  private def isRowLevelOpTable(table: Table) = {
-    if (table.getClass.getName == "org.apache.spark.sql.connector.write.RowLevelOperationTable") {
-      val clazz = Class.forName("org.apache.spark.sql.connector.write.RowLevelOperationTable")
-      val method = clazz.getMethod("table")
-      val innerTable = method.invoke(table).asInstanceOf[Table]
-      innerTable.isInstanceOf[SparkTable]
-    } else {
-      false
-    }
-  }
-
-  private def getTableFromRowLevelOpTable(table: Table) = {
-    if (table.getClass.getName == "org.apache.spark.sql.connector.write.RowLevelOperationTable") {
-      val clazz = Class.forName("org.apache.spark.sql.connector.write.RowLevelOperationTable")
-      val method = clazz.getMethod("table")
-      val innerTable = method.invoke(table).asInstanceOf[Table]
-      innerTable.asInstanceOf[SparkTable]
-    } else {
-      table.asInstanceOf[SparkTable]
     }
   }
 }
