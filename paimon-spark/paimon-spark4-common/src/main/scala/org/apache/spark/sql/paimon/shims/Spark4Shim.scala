@@ -21,7 +21,7 @@ package org.apache.spark.sql.paimon.shims
 import org.apache.paimon.data.variant.{GenericVariant, Variant}
 import org.apache.paimon.spark.catalyst.analysis.Spark4ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensionsParser
-import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4InternalRowWithBlob, SparkArrayData, SparkInternalRow}
+import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.spark.sql.SparkSession
@@ -30,11 +30,14 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable}
+import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.types.{DataTypes, StructType, VariantType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.unsafe.types.VariantVal
 
 import java.util.{Map => JMap}
@@ -52,18 +55,18 @@ class Spark4Shim extends SparkShim {
   }
 
   override def createSparkInternalRow(rowType: RowType): SparkInternalRow = {
-    new Spark4InternalRow(rowType)
+    MinorVersionShim.createSparkInternalRow(rowType)
   }
 
   override def createSparkInternalRowWithBlob(
       rowType: RowType,
       blobFieldIndex: Int,
       blobAsDescriptor: Boolean): SparkInternalRow = {
-    new Spark4InternalRowWithBlob(rowType, blobFieldIndex, blobAsDescriptor)
+    MinorVersionShim.createSparkInternalRowWithBlob(rowType, blobFieldIndex, blobAsDescriptor)
   }
 
   override def createSparkArrayData(elementType: DataType): SparkArrayData = {
-    new Spark4ArrayData(elementType)
+    MinorVersionShim.createSparkArrayData(elementType)
   }
 
   override def createTable(
@@ -113,6 +116,13 @@ class Spark4Shim extends SparkShim {
       withSchemaEvolution)
   }
 
+  override def createKeep(
+      context: String,
+      condition: Expression,
+      output: Seq[Expression]): Instruction = {
+    MinorVersionShim.createKeep(context, condition, output)
+  }
+
   override def toPaimonVariant(o: Object): Variant = {
     val v = o.asInstanceOf[VariantVal]
     new GenericVariant(v.getValue, v.getMetadata)
@@ -132,4 +142,18 @@ class Spark4Shim extends SparkShim {
     dataType.isInstanceOf[VariantType]
 
   override def SparkVariantType(): org.apache.spark.sql.types.DataType = DataTypes.VariantType
+
+  override def createFileIndex(
+      options: CaseInsensitiveStringMap,
+      sparkSession: SparkSession,
+      paths: Seq[String],
+      userSpecifiedSchema: Option[StructType],
+      partitionSchema: StructType): PartitioningAwareFileIndex = {
+    MinorVersionShim.createFileIndex(
+      options,
+      sparkSession,
+      paths,
+      userSpecifiedSchema,
+      partitionSchema)
+  }
 }

@@ -19,10 +19,10 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.Snapshot.CommitKind._
+import org.apache.paimon.spark.MemoryStreamWrapper
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.functions.{col, mean, window}
 import org.apache.spark.sql.streaming.StreamTest
 
@@ -47,7 +47,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, String)]
+          val inputData = MemoryStreamWrapper[(Int, String)]
           val stream = inputData
             .toDS()
             .toDF("a", "b")
@@ -91,7 +91,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, String)]
+          val inputData = MemoryStreamWrapper[(Int, String)]
           val stream = inputData
             .toDS()
             .toDF("a", "b")
@@ -131,7 +131,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, String)]
+          val inputData = MemoryStreamWrapper[(Int, String)]
           val stream = inputData.toDS
             .toDF("uid", "city")
             .groupBy("city")
@@ -175,7 +175,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, String)]
+          val inputData = MemoryStreamWrapper[(Int, String)]
           intercept[RuntimeException] {
             inputData
               .toDF()
@@ -199,7 +199,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                      |""".stripMargin)
         val location = loadTable("T").location().toString
 
-        val inputData = MemoryStream[(Long, Int, Double)]
+        val inputData = MemoryStreamWrapper[(Long, Int, Double)]
         val data = inputData.toDS
           .toDF("time", "stockId", "price")
           .selectExpr("CAST(time AS timestamp) AS timestamp", "stockId", "price")
@@ -256,7 +256,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
             spark.sql("SELECT * FROM T ORDER BY a, b"),
             Row(1, "2023-08-09") :: Row(2, "2023-08-09") :: Nil)
 
-          val inputData = MemoryStream[(Long, Date, Int)]
+          val inputData = MemoryStreamWrapper[(Long, Date, Int)]
           val stream = inputData
             .toDS()
             .toDF("a", "b", "c")
@@ -325,7 +325,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
           val table = loadTable("T")
           val location = table.location().toString
 
-          val inputData = MemoryStream[(Int, Int)]
+          val inputData = MemoryStreamWrapper[(Int, Int)]
           val stream = inputData
             .toDS()
             .toDF("a", "b")

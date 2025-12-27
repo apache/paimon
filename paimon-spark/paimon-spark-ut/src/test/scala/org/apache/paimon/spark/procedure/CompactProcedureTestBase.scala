@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.fs.Path
+import org.apache.paimon.spark.MemoryStreamWrapper
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.FileStoreTable
@@ -27,7 +28,6 @@ import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted}
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions
 import org.scalatest.time.Span
@@ -102,7 +102,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, Int)]
+          val inputData = MemoryStreamWrapper[(Int, Int)]
           val stream = inputData
             .toDS()
             .toDF("a", "b")
@@ -198,7 +198,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, Int, Int)]
+          val inputData = MemoryStreamWrapper[(Int, Int, Int)]
           val stream = inputData
             .toDS()
             .toDF("p", "a", "b")
@@ -368,7 +368,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, Int)]
+          val inputData = MemoryStreamWrapper[(Int, Int)]
           val stream = inputData
             .toDS()
             .toDF("a", "b")
@@ -822,7 +822,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, Int, String)]
+          val inputData = MemoryStreamWrapper[(Int, Int, String)]
           val stream = inputData
             .toDS()
             .toDF("a", "b", "c")
@@ -970,7 +970,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, Int, String, Int)]
+          val inputData = MemoryStreamWrapper[(Int, Int, String, Int)]
           val stream = inputData
             .toDS()
             .toDF("a", "b", "c", "pt")
@@ -1184,7 +1184,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(Int, Int, String)]
+          val inputData = MemoryStreamWrapper[(Int, Int, String)]
           val stream = inputData
             .toDS()
             .toDF("a", "b", "c")

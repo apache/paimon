@@ -18,10 +18,10 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.spark.MemoryStreamWrapper
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions.assertThatThrownBy
 
@@ -41,7 +41,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(String, String)]
+          val inputData = MemoryStreamWrapper[(String, String)]
           val stream = inputData
             .toDS()
             .toDF("k", "pt")
@@ -93,7 +93,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(String, String, String)]
+          val inputData = MemoryStreamWrapper[(String, String, String)]
           val stream = inputData
             .toDS()
             .toDF("k", "pt", "hm")
@@ -162,7 +162,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(String, String)]
+          val inputData = MemoryStreamWrapper[(String, String)]
           val stream = inputData
             .toDS()
             .toDF("k", "pt")
@@ -218,7 +218,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(String, String)]
+          val inputData = MemoryStreamWrapper[(String, String)]
           val stream = inputData
             .toDS()
             .toDF("k", "pt")
@@ -286,7 +286,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(String, String, String)]
+          val inputData = MemoryStreamWrapper[(String, String, String)]
           val stream = inputData
             .toDS()
             .toDF("k", "pt", "hm")
@@ -352,7 +352,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(String, String)]
+          val inputData = MemoryStreamWrapper[(String, String)]
           val stream = inputData
             .toDS()
             .toDF("k", "pt")
@@ -417,7 +417,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(String, String, String)]
+          val inputData = MemoryStreamWrapper[(String, String, String)]
           val stream = inputData
             .toDS()
             .toDF("k", "pt", "hm")
@@ -487,7 +487,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(String, String, String)]
+          val inputData = MemoryStreamWrapper[(String, String, String)]
           val stream = inputData
             .toDS()
             .toDF("k", "pt", "hm")
@@ -565,7 +565,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(String, String)]
+          val inputData = MemoryStreamWrapper[(String, String)]
           val stream = inputData
             .toDS()
             .toDF("k", "pt")
@@ -634,7 +634,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(String, String)]
+          val inputData = MemoryStreamWrapper[(String, String)]
           val stream = inputData
             .toDS()
             .toDF("k", "pt")
@@ -701,7 +701,7 @@ class ExpirePartitionsProcedureTest extends PaimonSparkTestBase with StreamTest 
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(String, String)]
+          val inputData = MemoryStreamWrapper[(String, String)]
           val stream = inputData
             .toDS()
             .toDF("k", "pt")
