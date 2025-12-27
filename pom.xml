@@ -126,7 +126,6 @@ under the License.
         <test.mysql.connector.java.version>8.0.27</test.mysql.connector.java.version>
 
         <!-- spark profile properties-->
-        <paimon-sparkx-common>paimon-spark3-common_${scala.binary.version}</paimon-sparkx-common>
         <paimon-spark-common.spark.version>3.5.7</paimon-spark-common.spark.version>
         <test.spark.main.version>3.3</test.spark.main.version>
         <test.spark.version>3.3.0</test.spark.version>
@@ -408,7 +407,6 @@ under the License.
                 <scala.binary.version>2.12</scala.binary.version>
                 <scala.version>${scala212.version}</scala.version>
                 <paimon-spark-common.spark.version>3.5.7</paimon-spark-common.spark.version>
-                <paimon-sparkx-common>paimon-spark3-common_${scala.binary.version}</paimon-sparkx-common>
                 <!-- todo: support the latest spark in paimon e2e test2 -->
                 <test.spark.main.version>3.3</test.spark.main.version>
                 <test.spark.version>3.3.0</test.spark.version>
@@ -433,7 +431,6 @@ under the License.
                 <scala.binary.version>2.13</scala.binary.version>
                 <scala.version>${scala213.version}</scala.version>
                 <paimon-spark-common.spark.version>4.0.1</paimon-spark-common.spark.version>
-                <paimon-sparkx-common>paimon-spark4-common_2.13</paimon-sparkx-common>
                 <arrow.version>18.1.0</arrow.version>
                 <test.spark.main.version>4.0</test.spark.main.version>
                 <test.spark.version>4.0.1</test.spark.version>
