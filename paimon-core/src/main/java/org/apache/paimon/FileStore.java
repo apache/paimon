@@ -41,6 +41,7 @@ import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.CompactMetricsManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.SegmentsCache;
@@ -127,4 +128,6 @@ public interface FileStore<T> {
     void setSnapshotCache(Cache<Path, Snapshot> cache);
 
     GlobalIndexScanBuilder newGlobalIndexScanBuilder();
+
+    CompactMetricsManager compactMetricsManager();
 }
