@@ -32,61 +32,48 @@ class RowIdPushDownTestBase extends PaimonSparkTestBase {
     withTable("t") {
       sql("CREATE TABLE t (a INT, b INT, c STRING) TBLPROPERTIES " +
         "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'row-id-push-down.enabled'='true')")
-      sql("INSERT INTO t VALUES (1, 1, '1'), (2, 2, '2'), (3, 3, '3'), (4, 4, '4')")
+
+      // first manifest
+      sql("INSERT INTO t VALUES (0, 0, '0'), (1, 1, '1'), (2, 2, '2'), (3, 3, '3')")
+
+      // second manifest
+      sql("INSERT INTO t VALUES (4, 4, '4'), (5, 5, '5')")
+
+      // delete second manifest
+      // after push down, should never read it
+      val table = loadTable("t")
+      val manifests =
+        table.store().manifestListFactory().create().readAllManifests(table.latestSnapshot().get)
+      val secondManifest = manifests.asScala.find(m => m.minRowId() == 4L).get
+      table.store().manifestFileFactory().create().delete(secondManifest.fileName())
 
       // 1.LeafPredicate
-      assertResult(Seq(new Range(0L, 0L)))(
-        getPaimonScan("SELECT * FROM t WHERE _ROW_ID = 0").readBuilder
-          .asInstanceOf[ReadBuilderImpl]
-          .rowRanges
-          .asScala)
       checkAnswer(
         sql("SELECT * FROM t WHERE _ROW_ID = 0"),
-        Seq(Row(1, 1, "1"))
+        Seq(Row(0, 0, "0"))
       )
-      assertResult(Seq(new Range(0L, 1L), new Range(3L, 3L)))(
-        getPaimonScan("SELECT * FROM t WHERE _ROW_ID IN (0, 1, 3)").readBuilder
-          .asInstanceOf[ReadBuilderImpl]
-          .rowRanges
-          .asScala)
       checkAnswer(
         sql("SELECT * FROM t WHERE _ROW_ID IN (0, 1, 3)"),
-        Seq(Row(1, 1, "1"), Row(2, 2, "2"), Row(4, 4, "4"))
+        Seq(Row(0, 0, "0"), Row(1, 1, "1"), Row(3, 3, "3"))
       )
-      assertResult(Seq(new Range(4L, 5L)))(
-        getPaimonScan("SELECT * FROM t WHERE _ROW_ID IN (4, 5)").readBuilder
-          .asInstanceOf[ReadBuilderImpl]
-          .rowRanges
-          .asScala)
       checkAnswer(
-        sql("SELECT * FROM t WHERE _ROW_ID IN (4, 5)"),
+        sql("SELECT * FROM t WHERE _ROW_ID IN (1, 6)"),
+        Seq(Row(1, 1, "1"))
+      )
+      checkAnswer(
+        sql("SELECT * FROM t WHERE _ROW_ID IN (6, 7)"),
         Seq()
       )
 
       // 2.CompoundPredicate
-      assertResult(Seq(new Range(0, 0)))(
-        getPaimonScan("SELECT * FROM t WHERE _ROW_ID = 0 AND _ROW_ID IN (0, 1)").readBuilder
-          .asInstanceOf[ReadBuilderImpl]
-          .rowRanges
-          .asScala)
       checkAnswer(
         sql("SELECT * FROM t WHERE _ROW_ID = 0 AND _ROW_ID IN (0, 1)"),
-        Seq(Row(1, 1, "1"))
+        Seq(Row(0, 0, "0"))
       )
-      assertResult(Seq(new Range(0, 2)))(
-        getPaimonScan("SELECT * FROM t WHERE _ROW_ID = 0 OR _ROW_ID IN (1, 2)").readBuilder
-          .asInstanceOf[ReadBuilderImpl]
-          .rowRanges
-          .asScala)
       checkAnswer(
         sql("SELECT * FROM t WHERE _ROW_ID = 0 OR _ROW_ID IN (1, 2)"),
-        Seq(Row(1, 1, "1"), Row(2, 2, "2"), Row(3, 3, "3"))
+        Seq(Row(0, 0, "0"), Row(1, 1, "1"), Row(2, 2, "2"))
       )
-      assertResult(Seq())(
-        getPaimonScan("SELECT * FROM t WHERE _ROW_ID = 0 AND _ROW_ID IN (1, 2)").readBuilder
-          .asInstanceOf[ReadBuilderImpl]
-          .rowRanges
-          .asScala)
       checkAnswer(
         sql("SELECT * FROM t WHERE _ROW_ID = 0 AND _ROW_ID IN (1, 2)"),
         Seq()

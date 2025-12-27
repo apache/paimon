@@ -25,7 +25,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.DataEvolutionArray;
 import org.apache.paimon.reader.DataEvolutionRow;
@@ -101,36 +100,6 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         // TODO refactor this hacky
         this.inputFilter = predicate;
         return this;
-    }
-
-    @Override
-    protected List<ManifestFileMeta> postFilterManifests(List<ManifestFileMeta> manifests) {
-        if (rowRanges == null || rowRanges.isEmpty()) {
-            return manifests;
-        }
-        return manifests.stream().filter(this::filterManifestByRowIds).collect(Collectors.toList());
-    }
-
-    private boolean filterManifestByRowIds(ManifestFileMeta manifest) {
-        if (rowRanges == null || rowRanges.isEmpty()) {
-            return true;
-        }
-
-        Long min = manifest.minRowId();
-        Long max = manifest.maxRowId();
-        if (min == null || max == null) {
-            return true;
-        }
-
-        Range manifestRowRange = new Range(min, max);
-
-        for (Range expected : rowRanges) {
-            if (Range.intersection(manifestRowRange, expected) != null) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     @Override

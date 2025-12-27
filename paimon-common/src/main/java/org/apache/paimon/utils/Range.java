@@ -22,9 +22,9 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 /** Range represents from (inclusive) and to (inclusive). */
 public class Range implements Serializable {
@@ -178,31 +178,29 @@ public class Range implements Serializable {
         return result;
     }
 
-    public static List<Range> getRangesFromList(List<Long> origLongs) {
-        if (origLongs == null || origLongs.isEmpty()) {
-            return Collections.emptyList();
+    public static List<Range> toRanges(Iterable<Long> ids) {
+        List<Range> ranges = new ArrayList<>();
+        Iterator<Long> iterator = ids.iterator();
+
+        if (!iterator.hasNext()) {
+            return ranges;
         }
 
-        List<Long> longs = origLongs.stream().distinct().sorted().collect(Collectors.toList());
+        long rangeStart = iterator.next();
+        long rangeEnd = rangeStart;
 
-        ArrayList<Range> ranges = new ArrayList<>();
-        Long rangeStart = null;
-        Long rangeEnd = null;
-        for (Long cur : longs) {
-            if (rangeStart == null) {
-                rangeStart = cur;
-                rangeEnd = cur;
-            } else if (rangeEnd == cur - 1) {
-                rangeEnd = cur;
-            } else {
+        while (iterator.hasNext()) {
+            long current = iterator.next();
+            if (current != rangeEnd + 1) {
+                // Save the current range and start a new one
                 ranges.add(new Range(rangeStart, rangeEnd));
-                rangeStart = cur;
-                rangeEnd = cur;
+                rangeStart = current;
             }
+            rangeEnd = current;
         }
-        if (rangeStart != null) {
-            ranges.add(new Range(rangeStart, rangeEnd));
-        }
+        // Add the last range
+        ranges.add(new Range(rangeStart, rangeEnd));
+
         return ranges;
     }
 

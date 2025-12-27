@@ -2146,14 +2146,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to try upgrading the data files after overwriting a primary key table.");
 
-    public static final ConfigOption<Boolean> ROW_ID_PUSH_DOWN_ENABLED =
-            key("row-id-push-down.enabled")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether to enable row id push down for scan."
-                                    + " Currently, only the data evolution table supports row id push down.");
-
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3336,10 +3328,6 @@ public class CoreOptions implements Serializable {
 
     public boolean overwriteUpgrade() {
         return options.get(OVERWRITE_UPGRADE);
-    }
-
-    public boolean rowIdPushDownEnabled() {
-        return options.get(ROW_ID_PUSH_DOWN_ENABLED);
     }
 
     /** Specifies the merge engine for table with primary key. */

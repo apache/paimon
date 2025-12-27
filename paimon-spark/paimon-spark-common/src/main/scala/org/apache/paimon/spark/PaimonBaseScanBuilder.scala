@@ -22,15 +22,14 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN}
-import org.apache.paimon.table.{InnerTable, Table}
-import org.apache.paimon.table.SpecialFields.ROW_ID
-import org.apache.paimon.types.{DataField, DataTypes, RowType}
+import org.apache.paimon.table.{SpecialFields, Table}
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
 import org.apache.spark.sql.connector.read.{SupportsPushDownLimit, SupportsPushDownRequiredColumns, SupportsPushDownV2Filters}
 import org.apache.spark.sql.types.StructType
 
-import java.util.{ArrayList, List => JList}
+import java.util.{List => JList}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -67,11 +66,8 @@ abstract class PaimonBaseScanBuilder
     val postScan = mutable.ArrayBuffer.empty[SparkPredicate]
 
     var newRowType = rowType
-    if (table.isInstanceOf[InnerTable] && coreOptions.rowIdPushDownEnabled()) {
-      val dataFieldsWithRowId = new ArrayList[DataField](rowType.getFields)
-      dataFieldsWithRowId.add(
-        new DataField(rowType.getFieldCount, ROW_ID.name(), DataTypes.BIGINT()))
-      newRowType = rowType.copy(dataFieldsWithRowId)
+    if (coreOptions.rowTrackingEnabled() && coreOptions.dataEvolutionEnabled()) {
+      newRowType = SpecialFields.rowTypeWithRowTracking(newRowType);
     }
     val converter = SparkV2FilterConverter(newRowType)
     val partitionPredicateVisitor = new PartitionPredicateVisitor(partitionKeys)

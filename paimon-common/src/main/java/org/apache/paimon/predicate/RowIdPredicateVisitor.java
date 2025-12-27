@@ -22,6 +22,7 @@ import org.apache.paimon.utils.Range;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
 
@@ -40,10 +41,10 @@ import static org.apache.paimon.table.SpecialFields.ROW_ID;
  *       AND _ROW_ID IN (1, 2)}).
  * </ul>
  */
-public class RowIdPredicateVisitor implements PredicateVisitor<List<Range>> {
+public class RowIdPredicateVisitor implements PredicateVisitor<Optional<List<Range>>> {
 
     @Override
-    public List<Range> visit(LeafPredicate predicate) {
+    public Optional<List<Range>> visit(LeafPredicate predicate) {
         if (ROW_ID.name().equals(predicate.fieldName())) {
             LeafFunction function = predicate.function();
             if (function instanceof Equal || function instanceof In) {
@@ -53,57 +54,55 @@ public class RowIdPredicateVisitor implements PredicateVisitor<List<Range>> {
                 }
                 // The list output by getRangesFromList is already sorted,
                 // and has no overlap
-                return Range.getRangesFromList(rowIds);
+                return Optional.of(Range.toRanges(rowIds));
             }
         }
-        return null;
+        return Optional.empty();
     }
 
     @Override
-    public List<Range> visit(CompoundPredicate predicate) {
+    public Optional<List<Range>> visit(CompoundPredicate predicate) {
         CompoundPredicate.Function function = predicate.function();
-        List<Range> rowIds = null;
+        Optional<List<Range>> rowIds = Optional.empty();
         // `And` means we should get the intersection of all children.
         if (function instanceof And) {
             for (Predicate child : predicate.children()) {
-                List<Range> childList = child.visit(this);
-                if (childList == null) {
+                Optional<List<Range>> childList = child.visit(this);
+                if (!childList.isPresent()) {
                     continue;
                 }
 
-                if (rowIds == null) {
-                    rowIds = childList;
-                } else {
-                    rowIds = Range.and(rowIds, childList);
-                }
+                rowIds =
+                        rowIds.map(ranges -> Optional.of(Range.and(ranges, childList.get())))
+                                .orElse(childList);
 
                 // shortcut for intersection
-                if (rowIds.isEmpty()) {
+                if (rowIds.get().isEmpty()) {
                     return rowIds;
                 }
             }
         } else if (function instanceof Or) {
             // `Or` means we should get the union of all children
-            rowIds = new ArrayList<>();
+            rowIds = Optional.of(new ArrayList<>());
             for (Predicate child : predicate.children()) {
-                List<Range> childList = child.visit(this);
-                if (childList == null) {
-                    return null;
+                Optional<List<Range>> childList = child.visit(this);
+                if (!childList.isPresent()) {
+                    return Optional.empty();
                 }
 
-                rowIds.addAll(childList);
-                rowIds = Range.sortAndMergeOverlap(rowIds, true);
+                rowIds.get().addAll(childList.get());
+                rowIds = Optional.of(Range.sortAndMergeOverlap(rowIds.get(), true));
             }
         } else {
-            // unexpected function type, just return null
-            return null;
+            // unexpected function type, just return empty
+            return Optional.empty();
         }
         return rowIds;
     }
 
     @Override
-    public List<Range> visit(TransformPredicate predicate) {
+    public Optional<List<Range>> visit(TransformPredicate predicate) {
         // do not support transform predicate now.
-        return null;
+        return Optional.empty();
     }
 }
