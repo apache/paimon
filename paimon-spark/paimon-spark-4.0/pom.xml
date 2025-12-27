@@ -33,6 +33,7 @@ under the License.
 
     <properties>
         <spark.version>4.0.1</spark.version>
+        <scala.binary.version>2.13</scala.binary.version>
     </properties>
 
     <dependencies>
