@@ -24,7 +24,7 @@ import org.apache.paimon.spark.commands.DeleteFromPaimonTableCommand
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.catalyst.expressions.Expression
-import org.apache.spark.sql.catalyst.plans.logical.{DeleteFromTable, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{DeleteFromTable, LogicalPlan, ReplaceData}
 import org.apache.spark.sql.catalyst.rules.Rule
 
 object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
@@ -48,6 +48,22 @@ object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.resolveOperators {
+      case d @ ReplaceData(PaimonRelation(table), condition, _, _, _, _, _)
+          if d.resolved && shouldFallbackToV1Delete(table, condition) =>
+        checkPaimonTable(table.getTable)
+
+        table.getTable match {
+          case paimonTable: FileStoreTable =>
+            val relation = PaimonRelation.getPaimonRelation(d.table)
+            if (paimonTable.coreOptions().dataEvolutionEnabled()) {
+              throw new RuntimeException(
+                "Delete operation is not supported when data evolution is enabled yet.")
+            }
+            DeleteFromPaimonTableCommand(relation, paimonTable, condition)
+
+          case _ =>
+            throw new RuntimeException("Delete Operation is only supported for FileStoreTable.")
+        }
       case d @ DeleteFromTable(PaimonRelation(table), condition)
           if d.resolved && shouldFallbackToV1Delete(table, condition) =>
         checkPaimonTable(table.getTable)
