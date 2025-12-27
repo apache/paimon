@@ -433,7 +433,7 @@ under the License.
                 <antlr4.version>4.13.1</antlr4.version>
                 <scala.binary.version>2.13</scala.binary.version>
                 <scala.version>${scala213.version}</scala.version>
-                <paimon-spark-common.spark.version>4.0.1</paimon-spark-common.spark.version>
+                <paimon-spark-common.spark.version>4.1.0</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark4-common_2.13</paimon-sparkx-common>
                 <arrow.version>18.1.0</arrow.version>
                 <test.spark.main.version>4.0</test.spark.main.version>
