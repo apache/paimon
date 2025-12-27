@@ -85,6 +85,11 @@ public class S3FileIO extends HadoopCompliantFileIO {
                 new S3MultiPartUpload(fs, fs.getConf()), hadoopPath, path);
     }
 
+    @Override
+    public boolean moveToTrash(Path path) throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
     // add additional config entries from the IO config to the Hadoop config
     private Options loadHadoopConfigFromContext(CatalogContext context) {
         Options hadoopConfig = new Options();

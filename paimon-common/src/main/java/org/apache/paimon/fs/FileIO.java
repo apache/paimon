@@ -227,6 +227,13 @@ public interface FileIO extends Serializable, Closeable {
     boolean delete(Path path, boolean recursive) throws IOException;
 
     /**
+     * Move the path to trash.
+     *
+     * @param path the path to move to trash.
+     */
+    boolean moveToTrash(Path path) throws IOException;
+
+    /**
      * Make the given file and all non-existent parents into directories. Has the semantics of Unix
      * 'mkdir -p'. Existence of the directory hierarchy is not an error.
      *
