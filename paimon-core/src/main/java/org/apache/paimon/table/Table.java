@@ -171,8 +171,10 @@ public interface Table extends Serializable {
 
     /** Delete branches, branches are separated by commas. */
     @Experimental
-    default void deleteBranches(String branchNames) {
-        for (String branch : branchNames.split(",")) {
+    default void deleteBranches(String branchNamesStr) {
+        String[] branchNames =
+                Arrays.stream(branchNamesStr.split(",")).map(String::trim).toArray(String[]::new);
+        for (String branch : branchNames) {
             deleteBranch(branch);
         }
     }
