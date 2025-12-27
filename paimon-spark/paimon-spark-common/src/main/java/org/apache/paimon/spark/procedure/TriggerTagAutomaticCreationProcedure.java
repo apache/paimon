@@ -28,6 +28,8 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
+import java.util.Collections;
+
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** A procedure to trigger the tag automatic creation for a table. */
@@ -63,7 +65,11 @@ public class TriggerTagAutomaticCreationProcedure extends BaseProcedure {
                 tableIdent,
                 table -> {
                     try {
-                        ((FileStoreTable) table).newTagAutoManager().run();
+                        FileStoreTable fsTable = (FileStoreTable) table;
+                        // Force a empty commit to make sure a snapshot exists
+                        fsTable.newBatchWriteBuilder().newCommit().commit(Collections.emptyList());
+
+                        fsTable.newTagAutoManager().run();
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     }
