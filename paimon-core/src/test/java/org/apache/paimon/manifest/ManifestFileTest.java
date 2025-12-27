@@ -143,6 +143,7 @@ public class ManifestFileTest {
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
                         null,
+                        CoreOptions.ExternalPathStrategy.NONE,
                         false);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         FileIO fileIO = FileIOFinder.find(path);

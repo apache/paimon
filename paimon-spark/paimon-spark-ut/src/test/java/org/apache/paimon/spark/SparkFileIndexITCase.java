@@ -210,6 +210,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
                         null,
+                        CoreOptions.ExternalPathStrategy.NONE,
                         false);
 
         Table table = fileSystemCatalog.getTable(Identifier.create("db", tableName));

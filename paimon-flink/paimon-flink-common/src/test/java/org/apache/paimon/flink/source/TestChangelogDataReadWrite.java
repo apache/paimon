@@ -112,6 +112,7 @@ public class TestChangelogDataReadWrite {
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
                         null,
+                        CoreOptions.ExternalPathStrategy.NONE,
                         false);
         this.snapshotManager = newSnapshotManager(LocalFileIO.create(), new Path(root));
         this.commitUser = UUID.randomUUID().toString();

@@ -94,6 +94,7 @@ public class FileStorePathFactoryTest {
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
                         null,
+                        CoreOptions.ExternalPathStrategy.NONE,
                         false);
 
         assertPartition("20211224", 16, pathFactory, "/dt=20211224/hr=16");
@@ -138,6 +139,7 @@ public class FileStorePathFactoryTest {
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
                 null,
                 null,
+                CoreOptions.ExternalPathStrategy.NONE,
                 false);
     }
 }

@@ -25,10 +25,10 @@ import java.util.concurrent.ThreadLocalRandom;
 /** Provider for external data paths. */
 public class ExternalPathProvider implements Serializable {
 
-    private final List<Path> externalTablePaths;
-    private final Path relativeBucketPath;
+    protected final List<Path> externalTablePaths;
+    protected final Path relativeBucketPath;
 
-    private int position;
+    protected int position;
 
     public ExternalPathProvider(List<Path> externalTablePaths, Path relativeBucketPath) {
         this.externalTablePaths = externalTablePaths;
