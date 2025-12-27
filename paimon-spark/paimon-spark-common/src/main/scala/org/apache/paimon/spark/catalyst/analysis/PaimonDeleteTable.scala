@@ -47,9 +47,15 @@ object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
   override val operation: RowLevelOp = Delete
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
+    def isPaimonTable(d: ReplaceData): Boolean = {
+      val maybeTable = PaimonRelation.unapply(d.table)
+      maybeTable.exists(table => shouldFallbackToV1Delete(table, d.condition))
+    }
+
     plan.resolveOperators {
-      case d @ ReplaceData(PaimonRelation(table), condition, _, _, _, _, _)
-          if d.resolved && shouldFallbackToV1Delete(table, condition) =>
+      case d: ReplaceData if d.resolved && isPaimonTable(d) =>
+        val condition = d.condition
+        val table = PaimonRelation.unapply(d.table).get
         checkPaimonTable(table.getTable)
 
         table.getTable match {
