@@ -16,23 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source;
+package org.apache.paimon.rest.filter;
 
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonSubTypes;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTypeInfo;
 
-import javax.annotation.Nullable;
-
-import java.util.List;
-
-/** Table query auth. */
-public interface TableQueryAuth {
-
-    /**
-     * Authorize table query and return a row-level access control predicate.
-     *
-     * @param select select columns, null if select all
-     * @return row-level access control predicate, null if no additional filter
-     */
-    @Nullable
-    Predicate auth(@Nullable List<String> select);
-}
+/** Base interface for REST filter expressions. */
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
+@JsonSubTypes({
+    @JsonSubTypes.Type(value = CompoundFilter.class, name = "compound"),
+    @JsonSubTypes.Type(value = TransformFilter.class, name = "transform")
+})
+public interface Filter {}

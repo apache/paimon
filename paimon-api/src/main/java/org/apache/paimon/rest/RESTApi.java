@@ -32,6 +32,7 @@ import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
+import org.apache.paimon.rest.filter.Filter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -676,7 +677,7 @@ public class RESTApi {
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
-    public List<String> authTableQuery(Identifier identifier, @Nullable List<String> select) {
+    public @Nullable Filter authTableQuery(Identifier identifier, @Nullable List<String> select) {
         AuthTableQueryRequest request = new AuthTableQueryRequest(select);
         AuthTableQueryResponse response =
                 client.post(

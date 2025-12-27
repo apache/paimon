@@ -574,7 +574,8 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public List<String> authTableQuery(Identifier identifier, List<String> select) {
+    public org.apache.paimon.predicate.Predicate authTableQuery(
+            Identifier identifier, @Nullable List<String> select) {
         throw new UnsupportedOperationException();
     }
 

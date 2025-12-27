@@ -30,6 +30,9 @@ import org.apache.paimon.rest.RESTCatalogServer;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
+import org.apache.paimon.rest.filter.FieldFilterTransform;
+import org.apache.paimon.rest.filter.LeafFilterFunction;
+import org.apache.paimon.rest.filter.TransformFilter;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
 import org.apache.paimon.types.DataField;
@@ -48,6 +51,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -235,6 +239,25 @@ public class SparkCatalogWithRestTest {
                                 .toString())
                 .isEqualTo("[1]");
         cleanFunction(functionName);
+    }
+
+    @Test
+    public void testRowFilter() {
+        spark.sql(
+                "CREATE TABLE t_row_filter (col1 INT) TBLPROPERTIES"
+                        + " ('bucket'='1', 'bucket-key'='col1', 'file.format'='avro', 'query-auth.enabled'='true')");
+        spark.sql("INSERT INTO t_row_filter VALUES (1), (2), (3), (4)");
+
+        // Only allow rows with col1 > 2
+        restCatalogServer.addTableFilter(
+                Identifier.create("db2", "t_row_filter"),
+                new TransformFilter(
+                        new FieldFilterTransform(0, "col1", DataTypes.INT()),
+                        LeafFilterFunction.GREATER_THAN,
+                        Collections.singletonList(2)));
+
+        assertThat(spark.sql("SELECT col1 FROM t_row_filter").collectAsList().toString())
+                .isEqualTo("[[3], [4]]");
     }
 
     private Catalog getPaimonCatalog() {

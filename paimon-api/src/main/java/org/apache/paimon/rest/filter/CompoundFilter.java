@@ -16,34 +16,42 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.rest.responses;
-
-import org.apache.paimon.rest.RESTResponse;
-import org.apache.paimon.rest.filter.Filter;
+package org.apache.paimon.rest.filter;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Response for auth table query. */
+import java.util.List;
+
+/**
+ * A compound filter which combines child {@link Filter}s using a {@link CompoundFilterFunction}.
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class AuthTableQueryResponse implements RESTResponse {
+public class CompoundFilter implements Filter {
 
-    private static final String FIELD_FILTER = "filter";
+    private static final String FIELD_FUNCTION = "function";
+    private static final String FIELD_CHILDREN = "children";
 
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonProperty(FIELD_FILTER)
-    private final Filter filter;
+    private final CompoundFilterFunction function;
+    private final List<Filter> children;
 
     @JsonCreator
-    public AuthTableQueryResponse(@JsonProperty(FIELD_FILTER) Filter filter) {
-        this.filter = filter;
+    public CompoundFilter(
+            @JsonProperty(FIELD_FUNCTION) CompoundFilterFunction function,
+            @JsonProperty(FIELD_CHILDREN) List<Filter> children) {
+        this.function = function;
+        this.children = children;
     }
 
-    @JsonGetter(FIELD_FILTER)
-    public Filter filter() {
-        return filter;
+    @JsonGetter(FIELD_FUNCTION)
+    public CompoundFilterFunction function() {
+        return function;
+    }
+
+    @JsonGetter(FIELD_CHILDREN)
+    public List<Filter> children() {
+        return children;
     }
 }

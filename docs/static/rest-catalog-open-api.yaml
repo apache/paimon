@@ -2915,9 +2915,86 @@ components:
       type: object
       properties:
         filter:
+          $ref: '#/components/schemas/Filter'
+    Filter:
+      oneOf:
+        - $ref: '#/components/schemas/CompoundFilter'
+        - $ref: '#/components/schemas/TransformFilter'
+      discriminator:
+        propertyName: type
+    CompoundFilter:
+      type: object
+      required:
+        - type
+        - function
+        - children
+      properties:
+        type:
+          type: string
+          enum: [compound]
+        function:
+          type: string
+          enum: [AND, OR]
+        children:
           type: array
           items:
-            type: string
+            $ref: '#/components/schemas/Filter'
+    TransformFilter:
+      type: object
+      required:
+        - type
+        - transform
+        - function
+        - literals
+      properties:
+        type:
+          type: string
+          enum: [transform]
+        transform:
+          $ref: '#/components/schemas/FilterTransform'
+        function:
+          type: string
+          enum:
+            - EQUAL
+            - NOT_EQUAL
+            - GREATER_THAN
+            - GREATER_OR_EQUAL
+            - LESS_THAN
+            - LESS_OR_EQUAL
+            - IN
+            - NOT_IN
+            - IS_NULL
+            - IS_NOT_NULL
+            - STARTS_WITH
+            - ENDS_WITH
+            - CONTAINS
+            - LIKE
+        literals:
+          type: array
+          items:
+            nullable: true
+    FilterTransform:
+      oneOf:
+        - $ref: '#/components/schemas/FieldFilterTransform'
+      discriminator:
+        propertyName: type
+    FieldFilterTransform:
+      type: object
+      required:
+        - type
+        - index
+        - name
+        - dataType
+      properties:
+        type:
+          type: string
+          enum: [field]
+        index:
+          type: integer
+        name:
+          type: string
+        dataType:
+          type: string
     AlterDatabaseRequest:
       type: object
       properties:

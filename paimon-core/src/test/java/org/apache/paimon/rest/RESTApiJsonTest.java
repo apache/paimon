@@ -18,6 +18,12 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.rest.filter.CompoundFilter;
+import org.apache.paimon.rest.filter.CompoundFilterFunction;
+import org.apache.paimon.rest.filter.FieldFilterTransform;
+import org.apache.paimon.rest.filter.Filter;
+import org.apache.paimon.rest.filter.LeafFilterFunction;
+import org.apache.paimon.rest.filter.TransformFilter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -29,6 +35,7 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
+import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -49,6 +56,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 
 import org.junit.Test;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -297,5 +305,47 @@ public class RESTApiJsonTest {
         String requestStr = RESTApi.toJson(request);
         AlterFunctionRequest parseData = RESTApi.fromJson(requestStr, AlterFunctionRequest.class);
         assertEquals(parseData.changes().size(), request.changes().size());
+    }
+
+    @Test
+    public void authTableQueryResponseWithPredicateParseTest() throws Exception {
+        AuthTableQueryResponse response =
+                new AuthTableQueryResponse(
+                        new TransformFilter(
+                                new FieldFilterTransform(0, "a", DataTypes.INT()),
+                                LeafFilterFunction.EQUAL,
+                                java.util.Collections.singletonList(1)));
+        String responseStr = RESTApi.toJson(response);
+        AuthTableQueryResponse parseData =
+                RESTApi.fromJson(responseStr, AuthTableQueryResponse.class);
+        assertTrue(parseData.filter() instanceof TransformFilter);
+    }
+
+    @Test
+    public void authTableQueryResponseWithCompoundPredicateParseTest() throws Exception {
+        Filter p1 =
+                new TransformFilter(
+                        new FieldFilterTransform(0, "a", DataTypes.INT()),
+                        LeafFilterFunction.GREATER_THAN,
+                        java.util.Collections.singletonList(10));
+        Filter p2 =
+                new TransformFilter(
+                        new FieldFilterTransform(1, "b", DataTypes.STRING()),
+                        LeafFilterFunction.STARTS_WITH,
+                        java.util.Collections.singletonList("x"));
+        AuthTableQueryResponse response =
+                new AuthTableQueryResponse(
+                        new CompoundFilter(CompoundFilterFunction.OR, Arrays.asList(p1, p2)));
+
+        String responseStr = RESTApi.toJson(response);
+        AuthTableQueryResponse parseData =
+                RESTApi.fromJson(responseStr, AuthTableQueryResponse.class);
+
+        assertTrue(parseData.filter() instanceof CompoundFilter);
+        CompoundFilter cp = (CompoundFilter) parseData.filter();
+        assertEquals(CompoundFilterFunction.OR, cp.function());
+        assertEquals(2, cp.children().size());
+        assertTrue(cp.children().get(0) instanceof TransformFilter);
+        assertTrue(cp.children().get(1) instanceof TransformFilter);
     }
 }

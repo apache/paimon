@@ -26,6 +26,7 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -1032,10 +1033,11 @@ public interface Catalog extends AutoCloseable {
      *
      * @param identifier path of the table to alter partitions
      * @param select selected fields, null if select all
-     * @return additional filter for row level access control
+     * @return row-level access control predicate, null if no additional filter
      * @throws TableNotExistException if the table does not exist
      */
-    List<String> authTableQuery(Identifier identifier, @Nullable List<String> select)
+    @Nullable
+    Predicate authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException;
 
     // ==================== Catalog Information ==========================
