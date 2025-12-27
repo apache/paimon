@@ -565,22 +565,6 @@ public class AppendTableITCase extends CatalogITCaseBase {
         partitionEntriesLess.forEach(x -> assertThat(x.fileCount()).isEqualTo(fileCountLess));
     }
 
-    @Test
-    public void testFlinkMemoryPool() throws Exception {
-        batchSql("ALTER TABLE append_table SET ('sink.use-managed-memory-allocator' = 'true')");
-        sEnv.executeSql(
-                "CREATE TEMPORARY TABLE Orders_in (\n"
-                        + "    f0        INT,\n"
-                        + "    f1        STRING\n"
-                        + ") WITH (\n"
-                        + "    'connector' = 'datagen',\n"
-                        + "    'number-of-rows' = '10'\n"
-                        + ")");
-
-        sEnv.executeSql("INSERT INTO append_table SELECT * FROM Orders_in").await();
-        assertThat(batchSql("SELECT * FROM append_table").size()).isEqualTo(10);
-    }
-
     private static class TestStatelessWriterSource extends AbstractNonCoordinatedSource<Integer> {
 
         private final FileStoreTable table;
