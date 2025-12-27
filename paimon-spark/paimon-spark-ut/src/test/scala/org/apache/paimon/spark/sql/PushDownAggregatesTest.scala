@@ -294,4 +294,17 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
       Seq(Row(1, "t1"))
     )
   }
+
+  // https://github.com/apache/paimon/issues/6610
+  test("Push down aggregate: aggregate a column in one partition is all null and another is not") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (c1 INT, c2 LONG) PARTITIONED BY(day STRING)")
+
+      spark.sql("INSERT INTO T VALUES (1, 2, '2025-11-10')")
+      spark.sql("INSERT INTO T VALUES (null, 2, '2025-11-11')")
+
+      runAndCheckAggregate("SELECT MIN(c1) FROM T", Row(1) :: Nil, 0)
+      runAndCheckAggregate("SELECT MAX(c1) FROM T", Row(1) :: Nil, 0)
+    }
+  }
 }
