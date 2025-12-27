@@ -18,17 +18,19 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN}
-import org.apache.paimon.table.Table
-import org.apache.paimon.types.RowType
+import org.apache.paimon.table.{InnerTable, Table}
+import org.apache.paimon.table.SpecialFields.ROW_ID
+import org.apache.paimon.types.{DataField, DataTypes, RowType}
 
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
 import org.apache.spark.sql.connector.read.{SupportsPushDownLimit, SupportsPushDownRequiredColumns, SupportsPushDownV2Filters}
 import org.apache.spark.sql.types.StructType
 
-import java.util.{List => JList}
+import java.util.{ArrayList, List => JList}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -42,6 +44,7 @@ abstract class PaimonBaseScanBuilder
   val table: Table
   val partitionKeys: JList[String] = table.partitionKeys()
   val rowType: RowType = table.rowType()
+  val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
   private var pushedSparkPredicates = Array.empty[SparkPredicate]
   protected var hasPostScanPredicates = false
@@ -63,7 +66,14 @@ abstract class PaimonBaseScanBuilder
     val pushableDataFilters = mutable.ArrayBuffer.empty[Predicate]
     val postScan = mutable.ArrayBuffer.empty[SparkPredicate]
 
-    val converter = SparkV2FilterConverter(rowType)
+    var newRowType = rowType
+    if (table.isInstanceOf[InnerTable] && coreOptions.rowIdPushDownEnabled()) {
+      val dataFieldsWithRowId = new ArrayList[DataField](rowType.getFields)
+      dataFieldsWithRowId.add(
+        new DataField(rowType.getFieldCount, ROW_ID.name(), DataTypes.BIGINT()))
+      newRowType = rowType.copy(dataFieldsWithRowId)
+    }
+    val converter = SparkV2FilterConverter(newRowType)
     val partitionPredicateVisitor = new PartitionPredicateVisitor(partitionKeys)
     predicates.foreach {
       predicate =>

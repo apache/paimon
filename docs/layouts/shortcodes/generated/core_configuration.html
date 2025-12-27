@@ -1038,6 +1038,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Time field for record level expire. It supports the following types: `timestamps in seconds with INT`,`timestamps in seconds with BIGINT`, `timestamps in milliseconds with BIGINT` or `timestamp`.</td>
         </tr>
         <tr>
+            <td><h5>row-id-push-down.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable row id push down for scan. Currently, only the data evolution table supports row id push down.</td>
+        </tr>
+        <tr>
             <td><h5>row-tracking.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

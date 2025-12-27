@@ -653,6 +653,12 @@ public class SchemaValidation {
                     "Data evolution config must disabled with deletion-vectors.enabled");
         }
 
+        if (options.rowIdPushDownEnabled()) {
+            checkArgument(
+                    options.dataEvolutionEnabled(),
+                    "Row id push down config must enabled with data-evolution.enabled");
+        }
+
         List<String> blobNames =
                 BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldNames();
         if (!blobNames.isEmpty()) {

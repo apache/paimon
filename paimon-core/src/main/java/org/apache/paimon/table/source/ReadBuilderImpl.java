@@ -19,11 +19,15 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.data.variant.VariantAccessInfoUtils;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.RowIdPredicateVisitor;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.table.InnerTable;
@@ -33,12 +37,14 @@ import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
+import static org.apache.paimon.table.SpecialFields.ROW_ID;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Implementation for {@link ReadBuilder}. */
@@ -65,7 +71,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private @Nullable RowType readType;
     private @Nullable VariantAccessInfo[] variantAccessInfo;
-    private @Nullable List<Range> rowRanges;
+    public @Nullable @VisibleForTesting List<Range> rowRanges;
     private @Nullable VectorSearch vectorSearch;
 
     private boolean dropStats = false;
@@ -99,7 +105,53 @@ public class ReadBuilderImpl implements ReadBuilder {
         } else {
             this.filter = PredicateBuilder.and(this.filter, filter);
         }
+        calculateRowRanges(this.filter);
+        this.filter = removeRowIdFilter(this.filter);
         return this;
+    }
+
+    private void calculateRowRanges(Predicate filter) {
+        if (filter == null) {
+            return;
+        }
+
+        RowIdPredicateVisitor visitor = new RowIdPredicateVisitor();
+        List<Range> ranges = filter.visit(visitor);
+        // When rowRanges is not null, filter data based on rowRanges.
+        // If rowRanges is empty, it means no data will be read.
+        if (ranges != null) {
+            withRowRanges(ranges);
+        }
+    }
+
+    private Predicate removeRowIdFilter(Predicate filter) {
+        if (filter == null) {
+            return null;
+        }
+
+        if (filter instanceof LeafPredicate
+                && ROW_ID.name().equals(((LeafPredicate) filter).fieldName())) {
+            return null;
+        } else if (filter instanceof CompoundPredicate) {
+            CompoundPredicate compoundPredicate = (CompoundPredicate) filter;
+
+            List<Predicate> newChildren = new ArrayList<>();
+            for (Predicate child : compoundPredicate.children()) {
+                Predicate newChild = removeRowIdFilter(child);
+                if (newChild != null) {
+                    newChildren.add(newChild);
+                }
+            }
+
+            if (newChildren.isEmpty()) {
+                return null;
+            } else if (newChildren.size() == 1) {
+                return newChildren.get(0);
+            } else {
+                return new CompoundPredicate(compoundPredicate.function(), newChildren);
+            }
+        }
+        return filter;
     }
 
     @Override

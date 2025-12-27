@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /** Range represents from (inclusive) and to (inclusive). */
 public class Range implements Serializable {
@@ -175,6 +176,34 @@ public class Range implements Serializable {
         result.add(current);
 
         return result;
+    }
+
+    public static List<Range> getRangesFromList(List<Long> origLongs) {
+        if (origLongs == null || origLongs.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<Long> longs = origLongs.stream().distinct().sorted().collect(Collectors.toList());
+
+        ArrayList<Range> ranges = new ArrayList<>();
+        Long rangeStart = null;
+        Long rangeEnd = null;
+        for (Long cur : longs) {
+            if (rangeStart == null) {
+                rangeStart = cur;
+                rangeEnd = cur;
+            } else if (rangeEnd == cur - 1) {
+                rangeEnd = cur;
+            } else {
+                ranges.add(new Range(rangeStart, rangeEnd));
+                rangeStart = cur;
+                rangeEnd = cur;
+            }
+        }
+        if (rangeStart != null) {
+            ranges.add(new Range(rangeStart, rangeEnd));
+        }
+        return ranges;
     }
 
     /**
