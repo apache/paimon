@@ -58,15 +58,21 @@ public class IncrementalClusterManagerTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testNonUnAwareBucketTable() {
+    public void testCreateClusterTable() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.BUCKET_KEY.key(), "f0");
-
         assertThatThrownBy(() -> createTable(options, Collections.emptyList()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
-                        "Cannot define bucket for incremental clustering  table, it only support bucket = -1");
+                        "bucket-append-ordered must be false for incremental clustering table.");
+
+        options.put(CoreOptions.BUCKET_APPEND_ORDERED.key(), "false");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        assertThatThrownBy(() -> createTable(options, Collections.emptyList()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Cannot enable deletion-vectors for incremental clustering table which bucket is not -1.");
     }
 
     @Test
@@ -82,7 +88,7 @@ public class IncrementalClusterManagerTest {
     }
 
     @Test
-    public void testConstructPartitionLevels() throws Exception {
+    public void testConstructLevels() throws Exception {
         // Create a valid table for IncrementalClusterManager
         Map<String, String> options = new HashMap<>();
         FileStoreTable table = createTable(options, Collections.emptyList());
@@ -108,8 +114,7 @@ public class IncrementalClusterManagerTest {
         partitionFiles.add(level2File1);
 
         // Call the method under test
-        List<LevelSortedRun> result =
-                incrementalClusterManager.constructPartitionLevels(partitionFiles);
+        List<LevelSortedRun> result = IncrementalClusterManager.constructLevels(partitionFiles);
 
         // Verify the results
         assertThat(result).hasSize(4); // 2 level-0 runs + 1 level-1 run + 1 level-2 run
@@ -191,7 +196,7 @@ public class IncrementalClusterManagerTest {
                         PartitionPredicate.fromMultiple(
                                 RowType.of(DataTypes.INT()),
                                 Lists.newArrayList(BinaryRow.singleColumn("pt3"))));
-        Map<BinaryRow, CompactUnit> partitionLevels =
+        Map<BinaryRow, Map<Integer, CompactUnit>> partitionLevels =
                 incrementalClusterManager.createCompactUnits(true);
         assertThat(partitionLevels.size()).isEqualTo(2);
         assertThat(partitionLevels.get(BinaryRow.singleColumn("pt1"))).isNotNull();

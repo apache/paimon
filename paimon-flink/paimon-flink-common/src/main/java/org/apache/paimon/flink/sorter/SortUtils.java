@@ -78,6 +78,7 @@ public class SortUtils {
      * @param convertor convert the `KEY` to the sort key, then we can sort in
      *     `BinaryExternalSortBuffer`.
      * @param tableSortInfo the necessary info of table sort.
+     * @param isGlobalSort whether to do global sort
      * @return the global sorted data stream
      * @param <KEY> the KEY type in range shuffle
      */
@@ -89,14 +90,163 @@ public class SortUtils {
             final SerializableSupplier<Comparator<KEY>> shuffleKeyComparator,
             final KeyAbstract<KEY> shuffleKeyAbstract,
             final ShuffleKeyConvertor<KEY> convertor,
-            final TableSortInfo tableSortInfo) {
+            final TableSortInfo tableSortInfo,
+            final boolean isGlobalSort) {
+        return isGlobalSort
+                ? sortStreamByKeyInGlobal(
+                        inputStream,
+                        table,
+                        sortKeyType,
+                        keyTypeInformation,
+                        shuffleKeyComparator,
+                        shuffleKeyAbstract,
+                        convertor,
+                        tableSortInfo)
+                : sortStreamByKeyInLocal(
+                        inputStream,
+                        table,
+                        sortKeyType,
+                        keyTypeInformation,
+                        shuffleKeyAbstract,
+                        convertor,
+                        tableSortInfo);
+    }
 
-        final RowType valueRowType = table.rowType();
+    public static <KEY> DataStream<RowData> sortStreamByKeyInGlobal(
+            final DataStream<RowData> inputStream,
+            final FileStoreTable table,
+            final RowType sortKeyType,
+            final TypeInformation<KEY> keyTypeInformation,
+            final SerializableSupplier<Comparator<KEY>> shuffleKeyComparator,
+            final KeyAbstract<KEY> shuffleKeyAbstract,
+            final ShuffleKeyConvertor<KEY> convertor,
+            final TableSortInfo tableSortInfo) {
         CoreOptions options = table.coreOptions();
+        final RowType valueRowType = table.rowType();
+        final int sinkParallelism = tableSortInfo.getSinkParallelism();
+
+        DataStream<Tuple2<KEY, RowData>> inputWithKey =
+                generateSortKey(inputStream, keyTypeInformation, shuffleKeyAbstract);
+
+        DataStream<Tuple2<KEY, RowData>> rangeShuffleResult =
+                rangeShuffle(
+                        inputWithKey,
+                        keyTypeInformation,
+                        shuffleKeyComparator,
+                        tableSortInfo,
+                        valueRowType,
+                        options.sortBySize());
+
+        if (tableSortInfo.isSortInCluster()) {
+            return localSort(
+                    rangeShuffleResult,
+                    convertor,
+                    sortKeyType,
+                    valueRowType,
+                    inputStream.getType(),
+                    options,
+                    sinkParallelism);
+        } else {
+            return rangeShuffleResult
+                    .transform("REMOVE KEY", inputStream.getType(), new RemoveKeyOperator<>())
+                    .setParallelism(sinkParallelism);
+        }
+    }
+
+    public static <KEY> DataStream<RowData> sortStreamByKeyInLocal(
+            final DataStream<RowData> inputStream,
+            final FileStoreTable table,
+            final RowType sortKeyType,
+            final TypeInformation<KEY> keyTypeInformation,
+            final KeyAbstract<KEY> shuffleKeyAbstract,
+            final ShuffleKeyConvertor<KEY> convertor,
+            final TableSortInfo tableSortInfo) {
+        CoreOptions options = table.coreOptions();
+        final RowType valueRowType = table.rowType();
+        final int sinkParallelism = tableSortInfo.getSinkParallelism();
+
+        DataStream<Tuple2<KEY, RowData>> inputWithKey =
+                generateSortKey(inputStream, keyTypeInformation, shuffleKeyAbstract);
+
+        return localSort(
+                inputWithKey,
+                convertor,
+                sortKeyType,
+                valueRowType,
+                inputStream.getType(),
+                options,
+                sinkParallelism);
+    }
+
+    public static <KEY> DataStream<Tuple2<KEY, RowData>> generateSortKey(
+            final DataStream<RowData> inputStream,
+            final TypeInformation<KEY> keyTypeInformation,
+            final KeyAbstract<KEY> shuffleKeyAbstract) {
+        // generate the KEY as the key of Pair.
+        return inputStream
+                .map(
+                        new RichMapFunction<RowData, Tuple2<KEY, RowData>>() {
+
+                            /**
+                             * Do not annotate with <code>@override</code> here to maintain
+                             * compatibility with Flink 1.18-.
+                             */
+                            public void open(OpenContext openContext) throws Exception {
+                                open(new Configuration());
+                            }
+
+                            /**
+                             * Do not annotate with <code>@override</code> here to maintain
+                             * compatibility with Flink 2.0+.
+                             */
+                            public void open(Configuration parameters) throws Exception {
+                                shuffleKeyAbstract.open();
+                            }
+
+                            @Override
+                            public Tuple2<KEY, RowData> map(RowData value) {
+                                return Tuple2.of(shuffleKeyAbstract.apply(value), value);
+                            }
+                        },
+                        new TupleTypeInfo<>(keyTypeInformation, inputStream.getType()))
+                .setParallelism(inputStream.getParallelism());
+    }
+
+    public static <KEY> DataStream<Tuple2<KEY, RowData>> rangeShuffle(
+            final DataStream<Tuple2<KEY, RowData>> inputWithKey,
+            final TypeInformation<KEY> keyTypeInformation,
+            final SerializableSupplier<Comparator<KEY>> shuffleKeyComparator,
+            final TableSortInfo tableSortInfo,
+            final RowType valueRowType,
+            final boolean isSortBySize) {
+
         final int sinkParallelism = tableSortInfo.getSinkParallelism();
         final int localSampleSize = tableSortInfo.getLocalSampleSize();
         final int globalSampleSize = tableSortInfo.getGlobalSampleSize();
         final int rangeNum = tableSortInfo.getRangeNumber();
+
+        // range shuffle by key
+        return RangeShuffle.rangeShuffleByKey(
+                inputWithKey,
+                shuffleKeyComparator,
+                keyTypeInformation,
+                localSampleSize,
+                globalSampleSize,
+                rangeNum,
+                sinkParallelism,
+                valueRowType,
+                isSortBySize);
+    }
+
+    public static <KEY> DataStream<RowData> localSort(
+            DataStream<Tuple2<KEY, RowData>> rangeShuffleResult,
+            final ShuffleKeyConvertor<KEY> convertor,
+            final RowType sortKeyType,
+            final RowType valueRowType,
+            final TypeInformation<RowData> typeInformation,
+            final CoreOptions options,
+            final Integer sinkParallelism) {
+
         int keyFieldCount = sortKeyType.getFieldCount();
         int valueFieldCount = valueRowType.getFieldCount();
         final int[] valueProjectionMap = new int[valueFieldCount];
@@ -114,105 +264,57 @@ public class SortUtils {
         final InternalTypeInfo<InternalRow> internalRowType =
                 InternalTypeInfo.fromRowType(longRowType);
 
-        // generate the KEY as the key of Pair.
-        DataStream<Tuple2<KEY, RowData>> inputWithKey =
-                inputStream
-                        .map(
-                                new RichMapFunction<RowData, Tuple2<KEY, RowData>>() {
+        return rangeShuffleResult
+                .map(
+                        a -> new JoinedRow(convertor.apply(a.f0), new FlinkRowWrapper(a.f1)),
+                        internalRowType)
+                .setParallelism(sinkParallelism)
+                // sort the output locally by `SortOperator`
+                .transform(
+                        "LOCAL SORT",
+                        internalRowType,
+                        new SortOperator(
+                                sortKeyType,
+                                longRowType,
+                                options.writeBufferSize(),
+                                options.pageSize(),
+                                options.localSortMaxNumFileHandles(),
+                                options.spillCompressOptions(),
+                                sinkParallelism,
+                                options.writeBufferSpillDiskSize(),
+                                options.sequenceFieldSortOrderIsAscending()))
+                .setParallelism(sinkParallelism)
+                // remove the key column from every row
+                .map(
+                        new RichMapFunction<InternalRow, InternalRow>() {
 
-                                    /**
-                                     * Do not annotate with <code>@override</code> here to maintain
-                                     * compatibility with Flink 1.18-.
-                                     */
-                                    public void open(OpenContext openContext) throws Exception {
-                                        open(new Configuration());
-                                    }
+                            private transient KeyProjectedRow keyProjectedRow;
 
-                                    /**
-                                     * Do not annotate with <code>@override</code> here to maintain
-                                     * compatibility with Flink 2.0+.
-                                     */
-                                    public void open(Configuration parameters) throws Exception {
-                                        shuffleKeyAbstract.open();
-                                    }
+                            /**
+                             * Do not annotate with <code>@override</code> here to maintain
+                             * compatibility with Flink 1.18-.
+                             */
+                            public void open(OpenContext openContext) {
+                                open(new Configuration());
+                            }
 
-                                    @Override
-                                    public Tuple2<KEY, RowData> map(RowData value) {
-                                        return Tuple2.of(shuffleKeyAbstract.apply(value), value);
-                                    }
-                                },
-                                new TupleTypeInfo<>(keyTypeInformation, inputStream.getType()))
-                        .setParallelism(inputStream.getParallelism());
+                            /**
+                             * Do not annotate with <code>@override</code> here to maintain
+                             * compatibility with Flink 2.0+.
+                             */
+                            public void open(Configuration parameters) {
+                                keyProjectedRow = new KeyProjectedRow(valueProjectionMap);
+                            }
 
-        // range shuffle by key
-        DataStream<Tuple2<KEY, RowData>> rangeShuffleResult =
-                RangeShuffle.rangeShuffleByKey(
-                        inputWithKey,
-                        shuffleKeyComparator,
-                        keyTypeInformation,
-                        localSampleSize,
-                        globalSampleSize,
-                        rangeNum,
-                        sinkParallelism,
-                        valueRowType,
-                        options.sortBySize());
-        if (tableSortInfo.isSortInCluster()) {
-            return rangeShuffleResult
-                    .map(
-                            a -> new JoinedRow(convertor.apply(a.f0), new FlinkRowWrapper(a.f1)),
-                            internalRowType)
-                    .setParallelism(sinkParallelism)
-                    // sort the output locally by `SortOperator`
-                    .transform(
-                            "LOCAL SORT",
-                            internalRowType,
-                            new SortOperator(
-                                    sortKeyType,
-                                    longRowType,
-                                    options.writeBufferSize(),
-                                    options.pageSize(),
-                                    options.localSortMaxNumFileHandles(),
-                                    options.spillCompressOptions(),
-                                    sinkParallelism,
-                                    options.writeBufferSpillDiskSize(),
-                                    options.sequenceFieldSortOrderIsAscending()))
-                    .setParallelism(sinkParallelism)
-                    // remove the key column from every row
-                    .map(
-                            new RichMapFunction<InternalRow, InternalRow>() {
-
-                                private transient KeyProjectedRow keyProjectedRow;
-
-                                /**
-                                 * Do not annotate with <code>@override</code> here to maintain
-                                 * compatibility with Flink 1.18-.
-                                 */
-                                public void open(OpenContext openContext) {
-                                    open(new Configuration());
-                                }
-
-                                /**
-                                 * Do not annotate with <code>@override</code> here to maintain
-                                 * compatibility with Flink 2.0+.
-                                 */
-                                public void open(Configuration parameters) {
-                                    keyProjectedRow = new KeyProjectedRow(valueProjectionMap);
-                                }
-
-                                @Override
-                                public InternalRow map(InternalRow value) {
-                                    return keyProjectedRow.replaceRow(value);
-                                }
-                            },
-                            InternalTypeInfo.fromRowType(valueRowType))
-                    .setParallelism(sinkParallelism)
-                    .map(FlinkRowData::new, inputStream.getType())
-                    .setParallelism(sinkParallelism);
-        } else {
-            return rangeShuffleResult
-                    .transform("REMOVE KEY", inputStream.getType(), new RemoveKeyOperator<>())
-                    .setParallelism(sinkParallelism);
-        }
+                            @Override
+                            public InternalRow map(InternalRow value) {
+                                return keyProjectedRow.replaceRow(value);
+                            }
+                        },
+                        InternalTypeInfo.fromRowType(valueRowType))
+                .setParallelism(sinkParallelism)
+                .map(FlinkRowData::new, typeInformation)
+                .setParallelism(sinkParallelism);
     }
 
     /** Abstract key from a row data. */

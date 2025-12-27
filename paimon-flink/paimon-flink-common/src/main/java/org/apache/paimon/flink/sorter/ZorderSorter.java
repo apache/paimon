@@ -61,7 +61,12 @@ public class ZorderSorter extends TableSorter {
 
     @Override
     public DataStream<RowData> sort() {
-        return sortStreamByZOrder(origin, table);
+        return sortStreamByZOrder(origin, table, true);
+    }
+
+    @Override
+    public DataStream<RowData> sortInLocal() {
+        return sortStreamByZOrder(origin, table, false);
     }
 
     /**
@@ -71,7 +76,7 @@ public class ZorderSorter extends TableSorter {
      * @return the sorted data stream
      */
     private DataStream<RowData> sortStreamByZOrder(
-            DataStream<RowData> inputStream, FileStoreTable table) {
+            DataStream<RowData> inputStream, FileStoreTable table, boolean isGlobalSort) {
         final ZIndexer zIndexer =
                 new ZIndexer(table.rowType(), orderColNames, table.coreOptions().varTypeSize());
         return SortUtils.sortStreamByKey(
@@ -105,6 +110,7 @@ public class ZorderSorter extends TableSorter {
                     }
                 },
                 GenericRow::of,
-                sortInfo);
+                sortInfo,
+                isGlobalSort);
     }
 }

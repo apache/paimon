@@ -67,6 +67,8 @@ public abstract class TableSorter {
 
     public abstract DataStream<RowData> sort();
 
+    public abstract DataStream<RowData> sortInLocal();
+
     public static TableSorter getSorter(
             StreamExecutionEnvironment batchTEnv,
             DataStream<RowData> origin,
