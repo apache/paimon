@@ -73,6 +73,7 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         LuceneVectorIndex<?> index = vectorIndexFactory.create(count, key);
         index.checkDimension(vectorIndexOptions.dimension());
         vectorIndices.add(index);
+        count++;
         if (vectorIndices.size() >= sizePerIndex) {
             try {
                 flush();
@@ -80,7 +81,6 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
                 throw new RuntimeException(e);
             }
         }
-        count++;
     }
 
     @Override
