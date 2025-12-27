@@ -120,9 +120,9 @@ public class BloomFilterFileIndex implements FileIndexer {
             // big endian
             int numHashFunctions =
                     ((serializedBytes[0] << 24)
-                            + (serializedBytes[1] << 16)
-                            + (serializedBytes[2] << 8)
-                            + serializedBytes[3]);
+                            | (serializedBytes[1] << 16)
+                            | (serializedBytes[2] << 8)
+                            | serializedBytes[3]);
             BitSet bitSet = new BitSet(serializedBytes, 4);
             this.filter = new BloomFilter64(numHashFunctions, bitSet);
             this.hashFunction = FastHash.getHashFunction(type);
