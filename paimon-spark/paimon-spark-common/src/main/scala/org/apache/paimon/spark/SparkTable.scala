@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.spark.rowops.{PaimonSpark41CopyOnWriteOperation, PaimonSparkCopyOnWriteOperation}
+import org.apache.paimon.spark.rowops.PaimonSparkCopyOnWriteOperation
 import org.apache.paimon.table.{FileStoreTable, Table}
 
 import org.apache.spark.sql.connector.catalog.SupportsRowLevelOperations
@@ -34,8 +34,6 @@ case class SparkTable(override val table: Table)
     table match {
       case t: FileStoreTable if useV2Write =>
         () => new PaimonSparkCopyOnWriteOperation(t, info)
-      case t: FileStoreTable if org.apache.spark.SPARK_VERSION >= "4.1" =>
-        () => new PaimonSpark41CopyOnWriteOperation(t, info)
       case _ =>
         throw new UnsupportedOperationException(
           s"Write operation is only supported for FileStoreTable with V2 write enabled. " +
