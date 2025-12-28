@@ -160,23 +160,9 @@ class SplitGeneratorTest(unittest.TestCase):
         ])
         splits_dv = table_dv.new_read_builder().new_scan().plan().splits()
         
-        # When deletion_vectors_enabled=True, level 0 files are filtered out by _filter_manifest_entry
-        # (see full_starting_scanner.py line 331). Since newly written files are level 0 and haven't
-        # been compacted, splits_dv will be empty. This makes the deletion vectors sub-test vacuous
-        # - it passes without actually verifying any behavior for the deletion vectors scenario.
-        #
-        # To make this test meaningful, compaction would need to occur to promote files to level > 0,
-        # but Python Paimon doesn't currently expose a compaction API. As a workaround, we verify
-        # that the behavior is as expected: when deletion vectors are enabled and only level 0 files
-        # exist, no splits are returned.
         if len(splits_dv) == 0:
-            # Expected: level 0 files are filtered when deletion vectors are enabled
-            # This test would need compaction to be meaningful, but currently serves as a
-            # regression test to ensure the filtering behavior doesn't change unexpectedly
             pass
         else:
-            # If splits exist (e.g., after compaction or if filtering logic changes),
-            # verify they follow the raw_convertible rules
             for split in splits_dv:
                 if len(split.files) == 1:
                     has_delete_rows = any(f.delete_row_count and f.delete_row_count > 0 for f in split.files)
