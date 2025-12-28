@@ -47,7 +47,9 @@ object RewriteDeleteFromTable extends RewriteRowLevelCommand {
           // don't rewrite as the table supports truncation
           d
 
-        case r @ ExtractV2Table(t: SupportsRowLevelOperations) if !t.isInstanceOf[SparkTable] =>
+        case r @ ExtractV2Table(t: SupportsRowLevelOperations)
+            if !t.isInstanceOf[SparkTable] || (t
+              .isInstanceOf[SparkTable] && t.asInstanceOf[SparkTable].useV2Write) =>
           val table = buildOperationTable(t, DELETE, CaseInsensitiveStringMap.empty())
           table.operation match {
             case _: SupportsDelta =>

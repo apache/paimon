@@ -148,7 +148,9 @@ object RewriteMergeIntoTable extends RewriteRowLevelCommand with PredicateHelper
           _) if m.resolved && m.rewritable && m.aligned && !m.needSchemaEvolution =>
 
       EliminateSubqueryAliases(aliasedTable) match {
-        case r @ ExtractV2Table(tbl: SupportsRowLevelOperations) if !tbl.isInstanceOf[SparkTable] =>
+        case r @ ExtractV2Table(tbl: SupportsRowLevelOperations)
+            if !tbl.isInstanceOf[SparkTable] || (tbl
+              .isInstanceOf[SparkTable] && tbl.asInstanceOf[SparkTable].useV2Write) =>
           validateMergeIntoConditions(m)
           val table = buildOperationTable(tbl, MERGE, CaseInsensitiveStringMap.empty())
           table.operation match {

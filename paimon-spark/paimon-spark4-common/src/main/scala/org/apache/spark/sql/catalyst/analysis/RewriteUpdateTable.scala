@@ -43,7 +43,9 @@ object RewriteUpdateTable extends RewriteRowLevelCommand {
         if u.resolved && u.rewritable && u.aligned =>
 
       EliminateSubqueryAliases(aliasedTable) match {
-        case r @ ExtractV2Table(tbl: SupportsRowLevelOperations) if !tbl.isInstanceOf[SparkTable] =>
+        case r @ ExtractV2Table(tbl: SupportsRowLevelOperations)
+            if !tbl.isInstanceOf[SparkTable] || (tbl
+              .isInstanceOf[SparkTable] && tbl.asInstanceOf[SparkTable].useV2Write) =>
           val table = buildOperationTable(tbl, UPDATE, CaseInsensitiveStringMap.empty())
           val updateCond = cond.getOrElse(TrueLiteral)
           table.operation match {
