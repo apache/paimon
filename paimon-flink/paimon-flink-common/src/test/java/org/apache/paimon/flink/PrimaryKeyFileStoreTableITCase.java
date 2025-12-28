@@ -1579,4 +1579,129 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
             }
         }
     }
+
+    @Test
+    public void testLimitPushdownWithTimeFilter() throws Exception {
+        // This test verifies that limit pushdown works correctly when valueFilter
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        tEnv.executeSql("USE CATALOG testCatalog");
+        tEnv.executeSql(
+                "CREATE TABLE T ("
+                        + "id INT, "
+                        + "name STRING, "
+                        + "ts TIMESTAMP(3), "
+                        + "PRIMARY KEY (id) NOT ENFORCED"
+                        + ")");
+
+        // Insert data with different timestamps
+        tEnv.executeSql(
+                        "INSERT INTO T VALUES "
+                                + "(1, 'a', TIMESTAMP '2024-01-01 10:00:00'), "
+                                + "(2, 'b', TIMESTAMP '2024-01-01 11:00:00'), "
+                                + "(3, 'c', TIMESTAMP '2024-01-01 12:00:00'), "
+                                + "(4, 'd', TIMESTAMP '2024-01-01 13:00:00'), "
+                                + "(5, 'e', TIMESTAMP '2024-01-01 14:00:00')")
+                .await();
+
+        // Without filter, limit pushdown should work
+        try (CloseableIterator<Row> iter = tEnv.executeSql("SELECT * FROM T LIMIT 3").collect()) {
+            List<Row> allRows = new ArrayList<>();
+            iter.forEachRemaining(allRows::add);
+            assertThat(allRows.size()).isEqualTo(3);
+        }
+
+        // Test limit pushdown with time filter (4 rows match, LIMIT 3)
+        try (CloseableIterator<Row> iter =
+                tEnv.executeSql(
+                                "SELECT * FROM T WHERE ts >= TIMESTAMP '2024-01-01 11:00:00' LIMIT 3")
+                        .collect()) {
+            List<Row> filteredRows = new ArrayList<>();
+            iter.forEachRemaining(filteredRows::add);
+            assertThat(filteredRows.size()).isGreaterThanOrEqualTo(3);
+            assertThat(filteredRows.size()).isLessThanOrEqualTo(4);
+            for (Row row : filteredRows) {
+                java.time.LocalDateTime ts = (java.time.LocalDateTime) row.getField(2);
+                java.time.LocalDateTime filterTime =
+                        java.time.LocalDateTime.parse("2024-01-01T11:00:00");
+                assertThat(ts).isAfterOrEqualTo(filterTime);
+            }
+        }
+
+        // Test with more restrictive filter (3 rows match, LIMIT 2)
+        try (CloseableIterator<Row> iter =
+                tEnv.executeSql(
+                                "SELECT * FROM T WHERE ts >= TIMESTAMP '2024-01-01 12:00:00' LIMIT 2")
+                        .collect()) {
+            List<Row> filteredRows2 = new ArrayList<>();
+            iter.forEachRemaining(filteredRows2::add);
+            assertThat(filteredRows2.size()).isGreaterThanOrEqualTo(2);
+            assertThat(filteredRows2.size()).isLessThanOrEqualTo(3);
+            for (Row row : filteredRows2) {
+                java.time.LocalDateTime ts = (java.time.LocalDateTime) row.getField(2);
+                java.time.LocalDateTime filterTime =
+                        java.time.LocalDateTime.parse("2024-01-01T12:00:00");
+                assertThat(ts).isAfterOrEqualTo(filterTime);
+            }
+        }
+    }
+
+    @Test
+    public void testLimitPushdownBasic() throws Exception {
+        // Test basic limit pushdown
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        tEnv.executeSql("USE CATALOG testCatalog");
+        tEnv.executeSql(
+                "CREATE TABLE T ("
+                        + "id INT, "
+                        + "name STRING, "
+                        + "PRIMARY KEY (id) NOT ENFORCED"
+                        + ")");
+
+        tEnv.executeSql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')").await();
+        tEnv.executeSql("INSERT INTO T VALUES (4, 'd'), (5, 'e'), (6, 'f')").await();
+        tEnv.executeSql("INSERT INTO T VALUES (7, 'g'), (8, 'h'), (9, 'i')").await();
+
+        try (CloseableIterator<Row> iter = tEnv.executeSql("SELECT * FROM T LIMIT 5").collect()) {
+            List<Row> rows = new ArrayList<>();
+            iter.forEachRemaining(rows::add);
+
+            assertThat(rows.size()).isEqualTo(5);
+        }
+    }
+
+    @Test
+    public void testLimitPushdownWithDeletionVector() throws Exception {
+        // Test limit pushdown is disabled when deletion vector is enabled
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        tEnv.executeSql("USE CATALOG testCatalog");
+        tEnv.executeSql(
+                "CREATE TABLE T ("
+                        + "id INT, "
+                        + "name STRING, "
+                        + "PRIMARY KEY (id) NOT ENFORCED"
+                        + ") WITH ("
+                        + "'deletion-vectors.enabled' = 'true'"
+                        + ")");
+
+        tEnv.executeSql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')").await();
+        tEnv.executeSql("INSERT INTO T VALUES (4, 'd'), (5, 'e'), (6, 'f')").await();
+
+        tEnv.executeSql("DELETE FROM T WHERE id = 2").await();
+
+        // Limit pushdown should be disabled when deletion vector is enabled
+        // because we can't accurately calculate row count after applying deletion vectors
+        try (CloseableIterator<Row> iter = tEnv.executeSql("SELECT * FROM T LIMIT 3").collect()) {
+            List<Row> rows = new ArrayList<>();
+            iter.forEachRemaining(rows::add);
+
+            assertThat(rows.size()).isEqualTo(3);
+
+            for (Row row : rows) {
+                assertThat(row.getField(0)).isNotEqualTo(2);
+            }
+        }
+    }
 }

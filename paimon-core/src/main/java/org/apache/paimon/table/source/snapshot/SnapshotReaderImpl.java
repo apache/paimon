@@ -409,9 +409,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         isStreaming
                                 ? splitGenerator.splitForStreaming(bucketFiles)
                                 : splitGenerator.splitForBatch(bucketFiles);
+
+                // Calculate bucketPath once per bucket to avoid repeated computation
+                String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
-                    String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
                     builder.withDataFiles(dataFiles)
                             .rawConvertible(splitGroup.rawConvertible)
                             .withBucketPath(bucketPath);
