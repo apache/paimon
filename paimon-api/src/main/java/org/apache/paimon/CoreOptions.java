@@ -578,6 +578,32 @@ public class CoreOptions implements Serializable {
                             "Open file cost of a source file. It is used to avoid reading"
                                     + " too many files with a source split, which can be very slow.");
 
+    public static final ConfigOption<Boolean> SOURCE_SPLIT_FILE_ENABLED =
+            key("source.split.file-enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable finer-grained file splitting. When enabled, large files can be split "
+                                    + "by row groups (Parquet) or stripes (ORC) to improve concurrency. "
+                                    + "This feature is disabled by default for backward compatibility.");
+
+    public static final ConfigOption<MemorySize> SOURCE_SPLIT_FILE_THRESHOLD =
+            key("source.split.file-threshold")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(128))
+                    .withDescription(
+                            "Minimum file size to consider for finer-grained splitting. Files smaller "
+                                    + "than this threshold will not be split further.");
+
+    public static final ConfigOption<Integer> SOURCE_SPLIT_FILE_MAX_SPLITS =
+            key("source.split.file-max-splits")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription(
+                            "Maximum number of splits to generate per file when using finer-grained "
+                                    + "splitting. This prevents excessive splitting for files with many "
+                                    + "row groups or stripes.");
+
     public static final ConfigOption<MemorySize> WRITE_BUFFER_SIZE =
             key("write-buffer-size")
                     .memoryType()
@@ -2532,6 +2558,18 @@ public class CoreOptions implements Serializable {
 
     public long splitOpenFileCost() {
         return options.get(SOURCE_SPLIT_OPEN_FILE_COST).getBytes();
+    }
+
+    public boolean splitFileEnabled() {
+        return options.get(SOURCE_SPLIT_FILE_ENABLED);
+    }
+
+    public long splitFileThreshold() {
+        return options.get(SOURCE_SPLIT_FILE_THRESHOLD).getBytes();
+    }
+
+    public int splitFileMaxSplits() {
+        return options.get(SOURCE_SPLIT_FILE_MAX_SPLITS);
     }
 
     public long writeBufferSize() {
