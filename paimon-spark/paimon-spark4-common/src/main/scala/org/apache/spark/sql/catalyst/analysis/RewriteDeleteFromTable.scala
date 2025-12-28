@@ -19,6 +19,7 @@
 package org.apache.spark.sql.catalyst.analysis
 
 import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.analysis.PaimonDeleteTable
 
 import org.apache.spark.sql.catalyst.expressions.{Alias, EqualNullSafe, Expression, Literal, Not}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
@@ -49,7 +50,9 @@ object RewriteDeleteFromTable extends RewriteRowLevelCommand {
 
         case r @ ExtractV2Table(t: SupportsRowLevelOperations)
             if !t.isInstanceOf[SparkTable] || (t
-              .isInstanceOf[SparkTable] && t.asInstanceOf[SparkTable].useV2Write) =>
+              .isInstanceOf[SparkTable] && !PaimonDeleteTable.shouldFallbackToV1Delete(
+              t.asInstanceOf[SparkTable],
+              cond)) =>
           val table = buildOperationTable(t, DELETE, CaseInsensitiveStringMap.empty())
           table.operation match {
             case _: SupportsDelta =>
