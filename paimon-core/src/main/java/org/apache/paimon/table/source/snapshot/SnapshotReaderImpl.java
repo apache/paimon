@@ -25,6 +25,7 @@ import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.format.FileSplitBoundary;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -46,6 +47,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.FineGrainedSplitGenerator;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.SplitGenerator;
@@ -409,9 +411,62 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         isStreaming
                                 ? splitGenerator.splitForStreaming(bucketFiles)
                                 : splitGenerator.splitForBatch(bucketFiles);
+
+                // Track boundaries from FineGrainedSplitGenerator if available
+                FineGrainedSplitGenerator fineGrainedGenerator = null;
+                if (splitGenerator instanceof FineGrainedSplitGenerator) {
+                    fineGrainedGenerator = (FineGrainedSplitGenerator) splitGenerator;
+                }
+
+                // Track which SplitGroup index we're on for each file (for fine-grained splits)
+                Map<String, Integer> fileSplitGroupIndex = new HashMap<>();
+
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
                     String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
+
+                    // Check if this is a fine-grained split (single file with boundaries)
+                    if (fineGrainedGenerator != null
+                            && dataFiles.size() == 1
+                            && splitGroup.rawConvertible) {
+                        DataFileMeta file = dataFiles.get(0);
+                        List<FileSplitBoundary> boundaries =
+                                fineGrainedGenerator.getFileBoundaries(file.fileName());
+
+                        if (!boundaries.isEmpty()) {
+                            // This SplitGroup corresponds to one boundary
+                            // Get the current index for this file
+                            int boundaryIndex =
+                                    fileSplitGroupIndex.getOrDefault(file.fileName(), 0);
+
+                            if (boundaryIndex < boundaries.size()) {
+                                // Create DataSplit with single boundary for this file
+                                Map<Integer, List<FileSplitBoundary>> splitBoundaries =
+                                        new HashMap<>();
+                                splitBoundaries.put(0, List.of(boundaries.get(boundaryIndex)));
+
+                                builder.withDataFiles(dataFiles)
+                                        .rawConvertible(splitGroup.rawConvertible)
+                                        .withBucketPath(bucketPath)
+                                        .withFileSplitBoundaries(splitBoundaries);
+
+                                if (deletionVectors && deletionFilesMap != null) {
+                                    builder.withDataDeletionFiles(
+                                            getDeletionFiles(
+                                                    dataFiles,
+                                                    deletionFilesMap.getOrDefault(
+                                                            Pair.of(partition, bucket),
+                                                            Collections.emptyMap())));
+                                }
+                                splits.add(builder.build());
+                                fileSplitGroupIndex.put(file.fileName(), boundaryIndex + 1);
+                            }
+                            // Continue to next SplitGroup
+                            continue;
+                        }
+                    }
+
+                    // Normal split creation (no fine-grained splitting or boundaries not available)
                     builder.withDataFiles(dataFiles)
                             .rawConvertible(splitGroup.rawConvertible)
                             .withBucketPath(bucketPath);

@@ -22,6 +22,9 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.format.FormatMetadataReader;
+import org.apache.paimon.format.orc.OrcMetadataReader;
+import org.apache.paimon.format.parquet.ParquetMetadataReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
@@ -48,6 +51,7 @@ import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
+import org.apache.paimon.table.source.FineGrainedSplitGenerator;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -68,6 +72,8 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+
+import org.apache.hadoop.conf.Configuration;
 
 import javax.annotation.Nullable;
 
@@ -270,18 +276,55 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public SnapshotReader newSnapshotReader() {
-        return new SnapshotReaderImpl(
-                store().newScan(),
-                tableSchema,
-                coreOptions(),
-                snapshotManager(),
-                changelogManager(),
-                splitGenerator(),
-                nonPartitionFilterConsumer(),
-                store().pathFactory(),
-                name(),
-                store().newIndexFileHandler(),
-                dvmetaCache);
+        SplitGenerator baseGenerator = splitGenerator();
+        CoreOptions options = coreOptions();
+
+        // Wrap with FineGrainedSplitGenerator if enabled
+        if (options.splitFileEnabled()) {
+            Map<String, FormatMetadataReader> metadataReaders = createMetadataReaders(options);
+            SplitGenerator wrappedGenerator =
+                    new FineGrainedSplitGenerator(
+                            baseGenerator,
+                            true,
+                            options.splitFileThreshold(),
+                            options.splitFileMaxSplits(),
+                            fileIO(),
+                            store().pathFactory(),
+                            metadataReaders);
+            return new SnapshotReaderImpl(
+                    store().newScan(),
+                    tableSchema,
+                    options,
+                    snapshotManager(),
+                    changelogManager(),
+                    wrappedGenerator,
+                    nonPartitionFilterConsumer(),
+                    store().pathFactory(),
+                    name(),
+                    store().newIndexFileHandler(),
+                    dvmetaCache);
+        } else {
+            return new SnapshotReaderImpl(
+                    store().newScan(),
+                    tableSchema,
+                    options,
+                    snapshotManager(),
+                    changelogManager(),
+                    baseGenerator,
+                    nonPartitionFilterConsumer(),
+                    store().pathFactory(),
+                    name(),
+                    store().newIndexFileHandler(),
+                    dvmetaCache);
+        }
+    }
+
+    private Map<String, FormatMetadataReader> createMetadataReaders(CoreOptions options) {
+        Map<String, FormatMetadataReader> readers = new HashMap<>();
+        Configuration hadoopConfig = options.toConfiguration();
+        readers.put("parquet", new ParquetMetadataReader());
+        readers.put("orc", new OrcMetadataReader(hadoopConfig));
+        return readers;
     }
 
     @Override
