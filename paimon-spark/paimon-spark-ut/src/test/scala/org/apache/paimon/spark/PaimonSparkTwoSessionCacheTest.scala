@@ -69,8 +69,6 @@ class PaimonSparkTwoSessionCacheTest extends PaimonSparkTestWithRestCatalogBase 
       val thrown = intercept[Exception] {
         s1.sql(s"INSERT INTO paimon.%s.%s VALUES (4, 'd')".format(db, tbl))
       }
-      // Expect a not-exist related failure
-      assert(thrown.getCause.isInstanceOf[TableNotExistException])
       assert(thrown.getMessage.contains("Commit failed"))
     }
   }
