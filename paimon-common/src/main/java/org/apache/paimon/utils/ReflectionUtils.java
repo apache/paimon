@@ -81,4 +81,34 @@ public class ReflectionUtils {
         }
         throw new NoSuchFieldException(fieldName);
     }
+
+    @SuppressWarnings("unchecked")
+    public static <T> T invokeMethod(Object obj, String methodName, Object... args)
+            throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
+        Class<?> clazz = obj.getClass();
+        while (clazz != null) {
+            try {
+                Method[] methods = clazz.getDeclaredMethods();
+                for (Method m : methods) {
+                    if (methodName.equals(m.getName())
+                            && m.getParameterTypes().length == args.length) {
+                        m.setAccessible(true);
+                        return (T) m.invoke(obj, args);
+                    }
+                }
+                // Try public methods
+                Method[] publicMethods = clazz.getMethods();
+                for (Method m : publicMethods) {
+                    if (methodName.equals(m.getName())
+                            && m.getParameterTypes().length == args.length) {
+                        return (T) m.invoke(obj, args);
+                    }
+                }
+                clazz = clazz.getSuperclass();
+            } catch (NoSuchMethodException e) {
+                clazz = clazz.getSuperclass();
+            }
+        }
+        throw new NoSuchMethodException(methodName + " with " + args.length + " parameters");
+    }
 }
