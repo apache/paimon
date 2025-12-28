@@ -212,6 +212,7 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
         }
 
         evalComputedColumns(resultMap, schemaBuilder);
+        evalMetadataColumns(resultMap, schemaBuilder);
 
         return resultMap;
     }

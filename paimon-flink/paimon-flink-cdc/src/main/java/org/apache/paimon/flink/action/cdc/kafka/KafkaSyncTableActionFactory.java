@@ -60,6 +60,7 @@ public class KafkaSyncTableActionFactory extends SyncTableActionFactoryBase {
                         + "[--primary_keys <primary_keys>] \\\n"
                         + "[--type_mapping <option1,option2...>] \\\n"
                         + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] \\\n"
+                        + "[--metadata_column <metadata_column>] \\\n"
                         + "[--kafka_conf <kafka_source_conf> [--kafka_conf <kafka_source_conf> ...]] \\\n"
                         + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \\\n"
                         + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
