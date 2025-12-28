@@ -63,6 +63,7 @@ import org.apache.paimon.utils.CatalogBranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.FileSystemBranchManager;
+import org.apache.paimon.utils.HadoopUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
@@ -321,7 +322,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private Map<String, FormatMetadataReader> createMetadataReaders(CoreOptions options) {
         Map<String, FormatMetadataReader> readers = new HashMap<>();
-        Configuration hadoopConfig = options.toConfiguration();
+        Configuration hadoopConfig = HadoopUtils.getHadoopConfiguration(options.toConfiguration());
         readers.put("parquet", new ParquetMetadataReader());
         readers.put("orc", new OrcMetadataReader(hadoopConfig));
         return readers;

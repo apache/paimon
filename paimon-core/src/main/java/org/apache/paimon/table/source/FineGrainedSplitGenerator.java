@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -131,8 +132,10 @@ public class FineGrainedSplitGenerator implements SplitGenerator {
                     // Could not split or only one boundary, keep as single file
                     result.add(
                             group.rawConvertible
-                                    ? SplitGroup.rawConvertibleGroup(List.of(file))
-                                    : SplitGroup.nonRawConvertibleGroup(List.of(file)));
+                                    ? SplitGroup.rawConvertibleGroup(
+                                            Collections.singletonList(file))
+                                    : SplitGroup.nonRawConvertibleGroup(
+                                            Collections.singletonList(file)));
                 } else {
                     // Create one SplitGroup per boundary
                     // Limit the number of splits per file
@@ -146,8 +149,10 @@ public class FineGrainedSplitGenerator implements SplitGenerator {
                     for (int i = 0; i < numSplits; i++) {
                         result.add(
                                 group.rawConvertible
-                                        ? SplitGroup.rawConvertibleGroup(List.of(file))
-                                        : SplitGroup.nonRawConvertibleGroup(List.of(file)));
+                                        ? SplitGroup.rawConvertibleGroup(
+                                                Collections.singletonList(file))
+                                        : SplitGroup.nonRawConvertibleGroup(
+                                                Collections.singletonList(file)));
                     }
                 }
             }
@@ -176,7 +181,22 @@ public class FineGrainedSplitGenerator implements SplitGenerator {
         }
 
         try {
-            Path filePath = pathFactory.toPath(file);
+            // Construct path from external path if available
+            // If external path is not available, we cannot construct the full path here
+            // as we don't have partition/bucket info. In this case, return empty list
+            // and the file will be treated as a single split (fallback behavior).
+            Path filePath = file.externalPath().map(Path::new).orElse(null);
+
+            if (filePath == null) {
+                // Cannot construct full path without partition/bucket info
+                // Fall back to file-level splitting
+                LOG.debug(
+                        "Cannot construct full path for file {} (no external path), "
+                                + "skipping fine-grained splitting",
+                        file.fileName());
+                return new ArrayList<>();
+            }
+
             List<FileSplitBoundary> boundaries =
                     reader.getSplitBoundaries(fileIO, filePath, file.fileSize());
 

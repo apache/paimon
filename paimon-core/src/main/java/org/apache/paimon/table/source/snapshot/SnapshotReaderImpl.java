@@ -443,7 +443,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 // Create DataSplit with single boundary for this file
                                 Map<Integer, List<FileSplitBoundary>> splitBoundaries =
                                         new HashMap<>();
-                                splitBoundaries.put(0, List.of(boundaries.get(boundaryIndex)));
+                                splitBoundaries.put(
+                                        0,
+                                        Collections.singletonList(boundaries.get(boundaryIndex)));
 
                                 builder.withDataFiles(dataFiles)
                                         .rawConvertible(splitGroup.rawConvertible)
