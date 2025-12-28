@@ -277,13 +277,15 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestFileMeta> manifests = manifestsResult.filteredManifests;
 
         Iterator<ManifestEntry> iterator = readManifestEntries(manifests, false);
-        if (supportsLimitPushManifestEntries()) {
-            iterator = limitPushManifestEntries(iterator);
-        }
 
         List<ManifestEntry> files = ListUtils.toList(iterator);
         if (postFilterManifestEntriesEnabled()) {
             files = postFilterManifestEntries(files);
+        }
+
+        if (supportsLimitPushManifestEntries()) {
+            iterator = limitPushManifestEntries(files.iterator());
+            files = ListUtils.toList(iterator);
         }
 
         List<ManifestEntry> result = files;
