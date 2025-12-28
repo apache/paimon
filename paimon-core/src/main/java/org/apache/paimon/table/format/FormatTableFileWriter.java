@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.RowType;
@@ -30,10 +31,12 @@ import org.apache.paimon.utils.FileStorePathFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
+import static org.apache.paimon.utils.PartitionPathUtils.generatePartitionPathUtil;
 
 /** File writer for format table. */
 public class FormatTableFileWriter {
@@ -99,12 +102,21 @@ public class FormatTableFileWriter {
     }
 
     private FormatTableRecordWriter createWriter(BinaryRow partition) {
+        Path parent = pathFactory.root();
+        if (partition.getFieldCount() > 0) {
+            LinkedHashMap<String, String> partValues =
+                    pathFactory.partitionComputer().generatePartValues(partition);
+            parent =
+                    new Path(
+                            parent,
+                            generatePartitionPathUtil(
+                                    partValues, options.formatTablePartitionOnlyValueInPath()));
+        }
         return new FormatTableRecordWriter(
                 fileIO,
                 fileFormat,
                 options.targetFileSize(false),
-                pathFactory.createFormatTableDataFilePathFactory(
-                        partition, options.formatTablePartitionOnlyValueInPath()),
+                pathFactory.createDataFilePathFactory(parent, null),
                 writeRowType,
                 options.formatTableFileCompression());
     }
