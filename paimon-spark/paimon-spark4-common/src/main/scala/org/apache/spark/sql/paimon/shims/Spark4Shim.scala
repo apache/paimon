@@ -47,7 +47,7 @@ class Spark4Shim extends SparkShim {
   override def classicApi: ClassicApi = new Classic4Api
 
   override def createSparkParser(delegate: ParserInterface): ParserInterface = {
-    new PaimonSpark4SqlExtensionsParser(delegate)
+    MinorVersionShim.createSparkParser(delegate)
   }
 
   override def createCustomResolution(spark: SparkSession): Rule[LogicalPlan] = {
