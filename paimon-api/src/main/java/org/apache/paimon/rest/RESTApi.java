@@ -595,7 +595,23 @@ public class RESTApi {
      *     this table
      */
     public void rollbackTo(Identifier identifier, Instant instant) {
-        RollbackTableRequest request = new RollbackTableRequest(instant);
+        rollbackTo(identifier, instant, null);
+    }
+
+    /**
+     * Rollback instant for table.
+     *
+     * @param identifier database name and table name.
+     * @param instant instant to rollback
+     * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
+     *     snapshot.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
+     *     or the tag not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot) {
+        RollbackTableRequest request = new RollbackTableRequest(instant, fromSnapshot);
         client.post(
                 resourcePaths.rollbackTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),

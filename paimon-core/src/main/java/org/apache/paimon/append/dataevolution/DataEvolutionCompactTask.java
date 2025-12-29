@@ -80,7 +80,7 @@ public class DataEvolutionCompactTask {
         return blobTask;
     }
 
-    public CommitMessage doCompact(FileStoreTable table) throws Exception {
+    public CommitMessage doCompact(FileStoreTable table, String commitUser) throws Exception {
         if (blobTask) {
             // TODO: support blob file compaction
             throw new UnsupportedOperationException("Blob task is not supported");
@@ -107,8 +107,7 @@ public class DataEvolutionCompactTask {
                         .build();
         RecordReader<InternalRow> reader =
                 store.newDataEvolutionRead().withReadType(readWriteType).createReader(dataSplit);
-        AppendFileStoreWrite storeWrite =
-                (AppendFileStoreWrite) store.newWrite("Compact-Data-Evolution");
+        AppendFileStoreWrite storeWrite = (AppendFileStoreWrite) store.newWrite(commitUser);
         storeWrite.withWriteType(readWriteType);
         RecordWriter<InternalRow> writer = storeWrite.createWriter(partition, 0);
 

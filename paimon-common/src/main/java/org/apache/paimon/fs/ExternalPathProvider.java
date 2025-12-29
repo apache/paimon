@@ -18,34 +18,34 @@
 
 package org.apache.paimon.fs;
 
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
+
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
 
 /** Provider for external data paths. */
-public class ExternalPathProvider implements Serializable {
+public interface ExternalPathProvider extends Serializable {
 
-    private final List<Path> externalTablePaths;
-    private final Path relativeBucketPath;
+    Path getNextExternalDataPath(String fileName);
 
-    private int position;
-
-    public ExternalPathProvider(List<Path> externalTablePaths, Path relativeBucketPath) {
-        this.externalTablePaths = externalTablePaths;
-        this.relativeBucketPath = relativeBucketPath;
-        this.position = ThreadLocalRandom.current().nextInt(externalTablePaths.size());
-    }
-
-    /**
-     * Get the next external data path.
-     *
-     * @return the next external data path
-     */
-    public Path getNextExternalDataPath(String fileName) {
-        position++;
-        if (position == externalTablePaths.size()) {
-            position = 0;
+    @Nullable
+    static ExternalPathProvider create(
+            ExternalPathStrategy strategy, List<Path> externalTablePaths, Path relativeBucketPath) {
+        switch (strategy) {
+            case ENTROPY_INJECT:
+                return new EntropyInjectExternalPathProvider(
+                        externalTablePaths, relativeBucketPath);
+            case SPECIFIC_FS:
+                // specific fs can use round-robin with only one path
+            case ROUND_ROBIN:
+                return new RoundRobinExternalPathProvider(externalTablePaths, relativeBucketPath);
+            case NONE:
+                return null;
+            default:
+                throw new UnsupportedOperationException(
+                        "Cannot support create external path provider for: " + strategy);
         }
-        return new Path(new Path(externalTablePaths.get(position), relativeBucketPath), fileName);
     }
 }

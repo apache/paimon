@@ -18,9 +18,11 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate}
+import org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking
 import org.apache.paimon.table.Table
 import org.apache.paimon.types.RowType
 
@@ -41,6 +43,7 @@ abstract class PaimonBaseScanBuilder
   val table: Table
   val partitionKeys: JList[String] = table.partitionKeys()
   val rowType: RowType = table.rowType()
+  val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
   private var pushedSparkFilters = Array.empty[Filter]
   protected var hasPostScanPredicates = false
@@ -65,7 +68,11 @@ abstract class PaimonBaseScanBuilder
     val pushableDataFilters = mutable.ArrayBuffer.empty[Predicate]
     val postScan = mutable.ArrayBuffer.empty[Filter]
 
-    val converter = new SparkFilterConverter(rowType)
+    var newRowType = rowType
+    if (coreOptions.rowTrackingEnabled() && coreOptions.dataEvolutionEnabled()) {
+      newRowType = rowTypeWithRowTracking(newRowType);
+    }
+    val converter = new SparkFilterConverter(newRowType)
     val partitionPredicateVisitor = new PartitionPredicateVisitor(partitionKeys)
     filters.foreach {
       filter =>

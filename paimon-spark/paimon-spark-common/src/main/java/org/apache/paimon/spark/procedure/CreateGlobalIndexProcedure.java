@@ -27,7 +27,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactoryUtils;
 import org.apache.paimon.spark.globalindex.GlobalIndexTopoBuilder;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
@@ -127,10 +126,6 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
 
         String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : null;
 
-        // Early validation: check if the index type is supported
-        GlobalIndexBuilderFactory globalIndexBuilderFactory =
-                GlobalIndexBuilderFactoryUtils.load(indexType);
-
         LOG.info("Starting to build index for table " + tableIdent + " WHERE: " + finalWhere);
 
         return modifyPaimonTable(
@@ -184,7 +179,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         List<CommitMessage> indexResults;
                         // Step 2: build index by certain index system
                         GlobalIndexTopoBuilder topoBuildr =
-                                globalIndexBuilderFactory.createTopoBulder();
+                                GlobalIndexBuilderFactoryUtils.createTopoBuilder(indexType);
                         if (topoBuildr != null) {
                             indexResults =
                                     topoBuildr.buildIndex(
@@ -266,11 +261,9 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                             InstantiationUtil.deserializeObject(
                                                     dataSplitBytes,
                                                     GlobalIndexBuilder.class.getClassLoader());
-                                    GlobalIndexBuilderFactory globalIndexBuilderFactory =
-                                            GlobalIndexBuilderFactoryUtils.load(
-                                                    builderContext.indexType());
                                     GlobalIndexBuilder globalIndexBuilder =
-                                            globalIndexBuilderFactory.create(builderContext);
+                                            GlobalIndexBuilderFactoryUtils.createIndexBuilder(
+                                                    builderContext);
                                     return commitMessageSerializer.serialize(
                                             globalIndexBuilder.build(split));
                                 })

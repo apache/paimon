@@ -28,6 +28,7 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -54,6 +55,7 @@ public class ManifestsReader {
     @Nullable private Integer specifiedLevel = null;
     @Nullable private PartitionPredicate partitionFilter = null;
     @Nullable private BiFilter<Integer, Integer> levelMinMaxFilter = null;
+    @Nullable protected List<Range> rowRanges;
 
     public ManifestsReader(
             RowType partitionType,
@@ -106,6 +108,11 @@ public class ManifestsReader {
         return this;
     }
 
+    public ManifestsReader withRowRanges(List<Range> rowRanges) {
+        this.rowRanges = rowRanges;
+        return this;
+    }
+
     @Nullable
     public PartitionPredicate partitionFilter() {
         return partitionFilter;
@@ -146,6 +153,26 @@ public class ManifestsReader {
         }
     }
 
+    private boolean filterManifestByRowRanges(ManifestFileMeta manifest) {
+        if (rowRanges == null) {
+            return true;
+        }
+        Long min = manifest.minRowId();
+        Long max = manifest.maxRowId();
+        if (min == null || max == null) {
+            return true;
+        }
+
+        Range manifestRowRange = new Range(min, max);
+
+        for (Range expected : rowRanges) {
+            if (Range.intersection(manifestRowRange, expected) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Note: Keep this thread-safe. */
     private boolean filterManifestFileMeta(ManifestFileMeta manifest) {
         Integer minBucket = manifest.minBucket();
@@ -172,17 +199,22 @@ public class ManifestsReader {
             }
         }
 
-        if (partitionFilter == null) {
-            return true;
+        if (partitionFilter != null) {
+            SimpleStats stats = manifest.partitionStats();
+            if (!partitionFilter.test(
+                    manifest.numAddedFiles() + manifest.numDeletedFiles(),
+                    stats.minValues(),
+                    stats.maxValues(),
+                    stats.nullCounts())) {
+                return false;
+            }
         }
 
-        SimpleStats stats = manifest.partitionStats();
-        return partitionFilter == null
-                || partitionFilter.test(
-                        manifest.numAddedFiles() + manifest.numDeletedFiles(),
-                        stats.minValues(),
-                        stats.maxValues(),
-                        stats.nullCounts());
+        if (!filterManifestByRowRanges(manifest)) {
+            return false;
+        }
+
+        return true;
     }
 
     /** Result for reading manifest files. */

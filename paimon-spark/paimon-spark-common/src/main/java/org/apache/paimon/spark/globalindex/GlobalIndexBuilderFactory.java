@@ -25,7 +25,7 @@ public interface GlobalIndexBuilderFactory {
 
     GlobalIndexBuilder create(GlobalIndexBuilderContext context);
 
-    default GlobalIndexTopoBuilder createTopoBulder() {
+    default GlobalIndexTopoBuilder createTopoBuilder() {
         return null;
     }
 }

@@ -506,6 +506,33 @@ The following table lists the type mapping from Paimon type to CSV type.
     </tbody>
 </table>
 
+## TEXT
+
+Experimental feature, not recommended for production.
+
+Format Options:
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left" style="width: 25%">Option</th>
+        <th class="text-center" style="width: 7%">Default</th>
+        <th class="text-center" style="width: 10%">Type</th>
+        <th class="text-center" style="width: 42%">Description</th>
+      </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>text.line-delimiter</h5></td>
+      <td style="word-wrap: break-word;"><code>\n</code></td>
+      <td>String</td>
+      <td>The line delimiter for TEXT format</td>
+    </tr>
+    </tbody>
+</table>
+
+The Paimon text table contains only one field, and it is of string type.
+
 ## JSON
 
 Experimental feature, not recommended for production.

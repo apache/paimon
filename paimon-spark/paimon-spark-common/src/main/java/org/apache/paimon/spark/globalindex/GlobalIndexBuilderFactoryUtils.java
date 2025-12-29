@@ -21,6 +21,8 @@ package org.apache.paimon.spark.globalindex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.ServiceLoader;
@@ -52,22 +54,20 @@ public class GlobalIndexBuilderFactoryUtils {
         }
     }
 
-    /**
-     * Loads the global index builder factory for the specified type.
-     *
-     * @param indexType The type of index (e.g., "bitmap")
-     * @return The corresponding factory
-     * @throws IllegalArgumentException If no factory is found for the specified type
-     */
-    public static GlobalIndexBuilderFactory load(String indexType) {
+    public static GlobalIndexBuilder createIndexBuilder(GlobalIndexBuilderContext context) {
+        GlobalIndexBuilderFactory factory = FACTORIES.get(context.indexType());
+        if (factory == null) {
+            return new DefaultGlobalIndexBuilder(context);
+        }
+        return factory.create(context);
+    }
+
+    @Nullable
+    public static GlobalIndexTopoBuilder createTopoBuilder(String indexType) {
         GlobalIndexBuilderFactory factory = FACTORIES.get(indexType);
         if (factory == null) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "No GlobalIndexBuilderFactory found for index type '%s'. "
-                                    + "Available types: %s",
-                            indexType, FACTORIES.keySet()));
+            return null;
         }
-        return factory;
+        return factory.createTopoBuilder();
     }
 }

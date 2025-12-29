@@ -103,14 +103,6 @@ public class RowRangeGlobalIndexScanner implements Closeable {
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }
 
-    public Optional<GlobalIndexResult> scan(Predicate predicate) {
-        return globalIndexEvaluator.evaluate(predicate, null);
-    }
-
-    public Optional<GlobalIndexResult> scan(@Nullable VectorSearch vectorSearch) {
-        return globalIndexEvaluator.evaluate(null, vectorSearch);
-    }
-
     public Optional<GlobalIndexResult> scan(
             Predicate predicate, @Nullable VectorSearch vectorSearch) {
         return globalIndexEvaluator.evaluate(predicate, vectorSearch);
@@ -161,8 +153,7 @@ public class RowRangeGlobalIndexScanner implements Closeable {
     private GlobalIndexIOMeta toGlobalMeta(IndexFileMeta meta) {
         GlobalIndexMeta globalIndex = meta.globalIndexMeta();
         checkNotNull(globalIndex);
-        return new GlobalIndexIOMeta(
-                meta.fileName(), meta.fileSize(), meta.rowCount() - 1, globalIndex.indexMeta());
+        return new GlobalIndexIOMeta(meta.fileName(), meta.fileSize(), globalIndex.indexMeta());
     }
 
     @Override

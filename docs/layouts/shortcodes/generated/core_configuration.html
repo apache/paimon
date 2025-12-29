@@ -99,6 +99,12 @@ under the License.
             <td>Memory page size for caching.</td>
         </tr>
         <tr>
+            <td><h5>chain-table.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether enabled chain table.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-file.compression</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -390,7 +396,7 @@ under the License.
             <td><h5>data-file.external-paths.strategy</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
-            <td>The strategy of selecting an external path when writing data.<br /><br />Possible values:<ul><li>"none": Do not choose any external storage, data will still be written to the default warehouse path.</li><li>"specific-fs": Select a specific file system as the external path. Currently supported are S3 and OSS.</li><li>"round-robin": When writing a new file, a path is chosen from data-file.external-paths in turn.</li></ul></td>
+            <td>The strategy of selecting an external path when writing data.<br /><br />Possible values:<ul><li>"none": Do not choose any external storage, data will still be written to the default warehouse path.</li><li>"specific-fs": Select a specific file system as the external path. Currently supported are S3 and OSS.</li><li>"round-robin": When writing a new file, a path is chosen from data-file.external-paths in turn.</li><li>"entropy-inject": When writing a new file, a path is chosen based on the hash value of the file's content.</li></ul></td>
         </tr>
         <tr>
             <td><h5>data-file.path-directory</h5></td>
@@ -1062,6 +1068,18 @@ This config option does not affect the default filesystem metastore.</td>
             <td>When a batch job queries from a table, if a partition does not exist in the current branch, the reader will try to get this partition from this fallback branch.</td>
         </tr>
         <tr>
+            <td><h5>scan.fallback-delta-branch</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When a batch job queries from a chain table, if a partition does not exist in either main or snapshot branch, the reader will try to get this partition from chain snapshot and delta branch together.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.fallback-snapshot-branch</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When a batch job queries from a chain table, if a partition does not exist in the main branch, the reader will try to get this partition from chain snapshot branch.</td>
+        </tr>
+        <tr>
             <td><h5>scan.file-creation-time-millis</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
@@ -1343,6 +1361,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">with_dashes</td>
             <td><p>Enum</p></td>
             <td>The date format for tag periods.<br /><br />Possible values:<ul><li>"with_dashes": Dates and hours with dashes, e.g., 'yyyy-MM-dd HH'</li><li>"without_dashes": Dates and hours without dashes, e.g., 'yyyyMMdd HH'</li><li>"without_dashes_and_spaces": Dates and hours without dashes and spaces, e.g., 'yyyyMMddHH'</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>tag.time-expire-enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable tag expiration by retained time.</td>
         </tr>
         <tr>
             <td><h5>target-file-size</h5></td>

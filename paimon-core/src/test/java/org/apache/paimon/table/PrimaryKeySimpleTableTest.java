@@ -2549,6 +2549,17 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         testWritePreemptMemory(true);
     }
 
+    @Test
+    public void testSwitchBranch() throws Exception {
+        String branchName = "fallback";
+        FileStoreTable mainTable =
+                createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
+        mainTable.createBranch(branchName);
+        FileStoreTable branchTable = mainTable.switchToBranch(branchName);
+        assertThat(branchTable.catalogEnvironment().identifier().getBranchName())
+                .isEqualTo(branchName);
+    }
+
     private void testWritePreemptMemory(boolean singlePartition) throws Exception {
         // write
         FileStoreTable table =

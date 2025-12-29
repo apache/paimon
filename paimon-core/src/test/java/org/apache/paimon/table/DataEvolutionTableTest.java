@@ -30,11 +30,12 @@ import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
-import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -56,6 +57,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
@@ -913,11 +915,15 @@ public class DataEvolutionTableTest extends TableTestBase {
         // Each plan() call processes one manifest group
         List<DataEvolutionCompactTask> allTasks = new ArrayList<>();
         List<DataEvolutionCompactTask> tasks;
-        while (!(tasks = coordinator.plan()).isEmpty() || allTasks.isEmpty()) {
-            allTasks.addAll(tasks);
-            if (tasks.isEmpty()) {
-                break;
+        try {
+            while (!(tasks = coordinator.plan()).isEmpty() || allTasks.isEmpty()) {
+                allTasks.addAll(tasks);
+                if (tasks.isEmpty()) {
+                    break;
+                }
             }
+        } catch (EndOfScanException ingore) {
+
         }
 
         // Verify no exceptions were thrown and tasks list is valid (may be empty)
@@ -940,10 +946,13 @@ public class DataEvolutionTableTest extends TableTestBase {
         // Each plan() call processes one manifest group
         List<CommitMessage> commitMessages = new ArrayList<>();
         List<DataEvolutionCompactTask> tasks;
-        while (!(tasks = coordinator.plan()).isEmpty()) {
-            for (DataEvolutionCompactTask task : tasks) {
-                commitMessages.add(task.doCompact(table));
+        try {
+            while (!(tasks = coordinator.plan()).isEmpty()) {
+                for (DataEvolutionCompactTask task : tasks) {
+                    commitMessages.add(task.doCompact(table, "test-commit"));
+                }
             }
+        } catch (EndOfScanException ignore) {
         }
 
         table.newBatchWriteBuilder().newCommit().commit(commitMessages);
@@ -1006,19 +1015,20 @@ public class DataEvolutionTableTest extends TableTestBase {
         GlobalIndexerFactory globalIndexerFactory =
                 GlobalIndexerFactoryUtils.load(BitmapGlobalIndexerFactory.IDENTIFIER);
         GlobalIndexer globalIndexer = globalIndexerFactory.create(indexField, new Options());
-        GlobalIndexWriter globaIndexBuilder = globalIndexer.createWriter(indexFileReadWrite);
+        GlobalIndexSingletonWriter globaIndexBuilder =
+                (GlobalIndexSingletonWriter) globalIndexer.createWriter(indexFileReadWrite);
 
         reader.forEachRemaining(r -> globaIndexBuilder.write(r.getString(0)));
 
-        List<GlobalIndexWriter.ResultEntry> results = globaIndexBuilder.finish();
+        List<ResultEntry> results = globaIndexBuilder.finish();
 
         List<IndexFileMeta> indexFileMetaList = new ArrayList<>();
-        for (GlobalIndexWriter.ResultEntry result : results) {
+        for (ResultEntry result : results) {
             String fileName = result.fileName();
-            Range range = result.rowRange();
             long fileSize = fileIO.getFileSize(indexFileReadWrite.filePath(fileName));
             GlobalIndexMeta globalIndexMeta =
-                    new GlobalIndexMeta(range.from, range.to, indexField.id(), null, result.meta());
+                    new GlobalIndexMeta(
+                            0, result.rowCount() - 1, indexField.id(), null, result.meta());
             indexFileMetaList.add(
                     new IndexFileMeta(
                             BitmapGlobalIndexerFactory.IDENTIFIER,
@@ -1049,7 +1059,7 @@ public class DataEvolutionTableTest extends TableTestBase {
         for (Range range : ranges) {
             try (RowRangeGlobalIndexScanner scanner =
                     indexScanBuilder.withRowRange(range).build()) {
-                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate);
+                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate, null);
                 if (!globalIndexResult.isPresent()) {
                     throw new RuntimeException("Can't find index result by scan");
                 }

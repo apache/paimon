@@ -242,6 +242,16 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return catalogEnvironment;
     }
 
+    protected CatalogEnvironment newCatalogEnvironment(String branch) {
+        Identifier identifier = identifier();
+        return catalogEnvironment.copy(
+                new Identifier(
+                        identifier.getDatabaseName(),
+                        identifier.getTableName(),
+                        branch,
+                        identifier.getSystemTableName()));
+    }
+
     public RowKeyExtractor createRowKeyExtractor() {
         switch (bucketMode()) {
             case HASH_FIXED:
@@ -461,7 +471,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 newExpireRunnable(),
                 options.writeOnly() ? null : store().newPartitionExpire(commitUser, this),
                 options.writeOnly() ? null : store().newTagAutoManager(this),
-                CoreOptions.fromMap(options()).consumerExpireTime(),
+                options.writeOnly() ? null : CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path, snapshotManager().branch()),
                 options.snapshotExpireExecutionMode(),
                 name(),
@@ -719,7 +729,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         branchOptions.set(CoreOptions.BRANCH, targetBranch);
         branchSchema = branchSchema.copy(branchOptions.toMap());
         return FileStoreTableFactory.create(
-                fileIO(), location(), branchSchema, new Options(), catalogEnvironment());
+                fileIO(),
+                location(),
+                branchSchema,
+                new Options(),
+                newCatalogEnvironment(targetBranch));
     }
 
     private RollbackHelper rollbackHelper() {

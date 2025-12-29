@@ -24,12 +24,13 @@ import org.apache.paimon.memory.MemorySliceOutput;
 
 /** Handle for a block. */
 public class BlockHandle {
+
     public static final int MAX_ENCODED_LENGTH = 9 + 5;
 
     private final long offset;
     private final int size;
 
-    BlockHandle(long offset, int size) {
+    public BlockHandle(long offset, int size) {
         this.offset = offset;
         this.size = size;
     }

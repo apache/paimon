@@ -16,20 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.tests.cdc;
+package org.apache.paimon.globalindex;
 
-import org.apache.paimon.flink.action.cdc.mysql.MySqlVersion;
+import javax.annotation.Nullable;
 
-import org.junit.jupiter.api.condition.EnabledIf;
-
-/**
- * E2e tests for {@link org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction} with MySQL
- * 8.0.
- */
-@EnabledIf("runTest")
-public class MySql80E2eTest extends MySqlCdcE2eTestBase {
-
-    public MySql80E2eTest() {
-        super(MySqlVersion.V8_0);
-    }
+/** Parallel Index writer for global index with relative row id (from 0 to rowCnt - 1). */
+public interface GlobalIndexParallelWriter extends GlobalIndexWriter {
+    void write(@Nullable Object key, long relativeRowId);
 }

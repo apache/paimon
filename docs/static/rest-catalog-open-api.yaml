@@ -2763,6 +2763,10 @@ components:
       properties:
         instant:
           $ref: '#/components/schemas/Instant'
+        fromSnapshot:
+          type: integer
+          format: int64
+          nullable: true
     Instant:
       anyOf:
         - $ref: '#/components/schemas/SnapshotInstant'

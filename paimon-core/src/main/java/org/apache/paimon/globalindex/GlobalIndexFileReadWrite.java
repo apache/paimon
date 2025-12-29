@@ -20,13 +20,13 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.IndexPathFactory;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.util.UUID;
 
 /** Helper class for managing global index files. */
@@ -44,6 +44,7 @@ public class GlobalIndexFileReadWrite implements GlobalIndexFileReader, GlobalIn
         return prefix + "-" + "global-index-" + UUID.randomUUID() + ".index";
     }
 
+    @Override
     public Path filePath(String fileName) {
         return indexPathFactory.toPath(fileName);
     }
@@ -52,7 +53,7 @@ public class GlobalIndexFileReadWrite implements GlobalIndexFileReader, GlobalIn
         return fileIO.getFileSize(filePath(fileName));
     }
 
-    public OutputStream newOutputStream(String fileName) throws IOException {
+    public PositionOutputStream newOutputStream(String fileName) throws IOException {
         return fileIO.newOutputStream(indexPathFactory.toPath(fileName), true);
     }
 

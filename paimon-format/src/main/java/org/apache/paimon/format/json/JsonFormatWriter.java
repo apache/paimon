@@ -24,7 +24,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.text.TextFileWriter;
+import org.apache.paimon.format.text.AbstractTextFileWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -45,7 +45,7 @@ import java.util.List;
 import java.util.Map;
 
 /** Json format writer implementation. */
-public class JsonFormatWriter extends TextFileWriter {
+public class JsonFormatWriter extends AbstractTextFileWriter {
 
     private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
 

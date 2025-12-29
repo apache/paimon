@@ -16,28 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.globalindex.bitmap;
+package org.apache.paimon.operation.commit;
 
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory;
+import org.apache.paimon.Snapshot.CommitKind;
 
-/**
- * Factory for creating bitmap-based global index builders.
- *
- * <p>This factory is automatically discovered via Java's ServiceLoader mechanism.
- */
-public class BitmapGlobalIndexBuilderFactory implements GlobalIndexBuilderFactory {
+/** Provider to provide {@link CommitKind}. */
+@FunctionalInterface
+public interface CommitKindProvider {
 
-    private static final String IDENTIFIER = "bitmap";
+    CommitKind provide(CommitChanges changes);
 
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
-    }
-
-    @Override
-    public GlobalIndexBuilder create(GlobalIndexBuilderContext context) {
-        return new BitmapGlobalIndexBuilder(context);
+    static CommitKindProvider provider(CommitKind kind) {
+        return changes -> kind;
     }
 }

@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.ExternalPathProvider;
@@ -79,6 +80,7 @@ public class FileStorePathFactory {
     private final AtomicInteger indexFileCount;
     private final AtomicInteger statsFileCount;
     private final List<Path> externalPaths;
+    private final ExternalPathStrategy strategy;
 
     public FileStorePathFactory(
             Path root,
@@ -92,6 +94,7 @@ public class FileStorePathFactory {
             String fileCompression,
             @Nullable String dataFilePathDirectory,
             List<Path> externalPaths,
+            ExternalPathStrategy strategy,
             boolean indexFileInDataFileDir) {
         this.root = root;
         this.dataFilePathDirectory = dataFilePathDirectory;
@@ -112,6 +115,7 @@ public class FileStorePathFactory {
         this.indexFileCount = new AtomicInteger(0);
         this.statsFileCount = new AtomicInteger(0);
         this.externalPaths = externalPaths;
+        this.strategy = strategy;
     }
 
     public Path root() {
@@ -164,14 +168,20 @@ public class FileStorePathFactory {
     }
 
     public DataFilePathFactory createDataFilePathFactory(BinaryRow partition, int bucket) {
+        return createDataFilePathFactory(
+                bucketPath(partition, bucket), createExternalPathProvider(partition, bucket));
+    }
+
+    public DataFilePathFactory createDataFilePathFactory(
+            Path parent, @Nullable ExternalPathProvider externalPathProvider) {
         return new DataFilePathFactory(
-                bucketPath(partition, bucket),
+                parent,
                 formatIdentifier,
                 dataFilePrefix,
                 changelogFilePrefix,
                 fileSuffixIncludeCompression,
                 fileCompression,
-                createExternalPathProvider(partition, bucket));
+                externalPathProvider);
     }
 
     public ChainReadDataFilePathFactory createChainReadDataFilePathFactory(
@@ -190,61 +200,13 @@ public class FileStorePathFactory {
                 chainReadContext);
     }
 
-    public DataFilePathFactory createFormatTableDataFilePathFactory(
-            BinaryRow partition, boolean onlyValue) {
-        return new DataFilePathFactory(
-                partitionPath(partition, onlyValue),
-                formatIdentifier,
-                dataFilePrefix,
-                changelogFilePrefix,
-                fileSuffixIncludeCompression,
-                fileCompression,
-                createExternalPartitionPathProvider(partition));
-    }
-
-    private ExternalPathProvider createExternalPartitionPathProvider(
-            BinaryRow partition, boolean onlyValue) {
-        if (externalPaths == null || externalPaths.isEmpty()) {
-            return null;
-        }
-
-        return new ExternalPathProvider(externalPaths, partitionPath(partition, onlyValue));
-    }
-
-    private ExternalPathProvider createExternalPartitionPathProvider(BinaryRow partition) {
-        if (externalPaths == null || externalPaths.isEmpty()) {
-            return null;
-        }
-
-        return new ExternalPathProvider(externalPaths, partitionPath(partition));
-    }
-
-    private Path partitionPath(BinaryRow partition, boolean onlyValue) {
-        Path relativeBucketPath = null;
-        String partitionPath = getPartitionString(partition, onlyValue);
-        if (!partitionPath.isEmpty()) {
-            relativeBucketPath = new Path(partitionPath);
-        }
-        if (dataFilePathDirectory != null) {
-            relativeBucketPath =
-                    relativeBucketPath != null
-                            ? new Path(dataFilePathDirectory, relativeBucketPath)
-                            : new Path(dataFilePathDirectory);
-        }
-        return relativeBucketPath != null ? new Path(root, relativeBucketPath) : root;
-    }
-
-    public Path partitionPath(BinaryRow partition) {
-        return partitionPath(partition, false);
-    }
-
     @Nullable
     private ExternalPathProvider createExternalPathProvider(BinaryRow partition, int bucket) {
         if (externalPaths == null || externalPaths.isEmpty()) {
             return null;
         }
-
-        return new ExternalPathProvider(externalPaths, relativeBucketPath(partition, bucket));
+        return ExternalPathProvider.create(
+                strategy, externalPaths, relativeBucketPath(partition, bucket));
     }
 
     public List<Path> getExternalPaths() {
@@ -279,12 +241,8 @@ public class FileStorePathFactory {
                                 partition, "Partition row data is null. This is unexpected.")));
     }
 
-    public String getPartitionString(BinaryRow partition, boolean onlyValue) {
-        return PartitionPathUtils.generatePartitionPathUtil(
-                partitionComputer.generatePartValues(
-                        Preconditions.checkNotNull(
-                                partition, "Partition row data is null. This is unexpected.")),
-                onlyValue);
+    public InternalRowPartitionComputer partitionComputer() {
+        return partitionComputer;
     }
 
     // @TODO, need to be changed

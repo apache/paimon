@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.Closeable;
 import java.io.IOException;
 
 import static org.apache.paimon.memory.MemorySegmentUtils.allocateReuseBytes;
@@ -43,30 +42,11 @@ import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
 
 /**
  * The writer for writing SST Files. SST Files are row-oriented and designed to serve frequent point
- * queries and range queries by key. The SST File layout is as below: (For layouts of each block
- * type, please refer to corresponding classes)
- *
- * <pre>
- *     +-----------------------------------+------+
- *     |             Footer                |      |
- *     +-----------------------------------+      |
- *     |           Index Block             |      +--> Loaded on open
- *     +-----------------------------------+      |
- *     |        Bloom Filter Block         |      |
- *     +-----------------------------------+------+
- *     |            Data Block             |      |
- *     +-----------------------------------+      |
- *     |              ......               |      +--> Loaded on requested
- *     +-----------------------------------+      |
- *     |            Data Block             |      |
- *     +-----------------------------------+------+
- * </pre>
+ * queries and range queries by key.
  */
-public class SstFileWriter implements Closeable {
+public class SstFileWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(SstFileWriter.class.getName());
-
-    public static final int MAGIC_NUMBER = 1481571681;
 
     private final PositionOutputStream out;
     private final int blockSize;
@@ -77,7 +57,6 @@ public class SstFileWriter implements Closeable {
     @Nullable private final BlockCompressor blockCompressor;
 
     private byte[] lastKey;
-    private long position;
 
     private long recordCount;
     private long totalUncompressedSize;
@@ -127,7 +106,7 @@ public class SstFileWriter implements Closeable {
         recordCount++;
     }
 
-    private void flush() throws IOException {
+    public void flush() throws IOException {
         if (dataBlockWriter.size() == 0) {
             return;
         }
@@ -173,7 +152,7 @@ public class SstFileWriter implements Closeable {
         MemorySlice trailer = BlockTrailer.writeBlockTrailer(blockTrailer);
 
         // create a handle to this block
-        BlockHandle blockHandle = new BlockHandle(position, block.length());
+        BlockHandle blockHandle = new BlockHandle(out.getPos(), block.length());
 
         // write data
         writeSlice(block);
@@ -187,39 +166,29 @@ public class SstFileWriter implements Closeable {
         return blockHandle;
     }
 
-    @Override
-    public void close() throws IOException {
-        // flush current data block
-        flush();
-
-        LOG.info("Number of record: {}", recordCount);
-
-        // write bloom filter
-        @Nullable BloomFilterHandle bloomFilterHandle = null;
-        if (bloomFilter != null) {
-            MemorySegment buffer = bloomFilter.getBuffer();
-            bloomFilterHandle =
-                    new BloomFilterHandle(position, buffer.size(), bloomFilter.expectedEntries());
-            writeSlice(MemorySlice.wrap(buffer));
-            LOG.info("Bloom filter size: {} bytes", bloomFilter.getBuffer().size());
+    @Nullable
+    public BloomFilterHandle writeBloomFilter() throws IOException {
+        if (bloomFilter == null) {
+            return null;
         }
-
-        // write index block
-        BlockHandle indexBlockHandle = writeBlock(indexBlockWriter);
-
-        // write footer
-        Footer footer = new Footer(bloomFilterHandle, indexBlockHandle);
-        MemorySlice footerEncoding = Footer.writeFooter(footer);
-        writeSlice(footerEncoding);
-
-        // do not need to close outputStream, since it will be closed by outer classes
-
-        LOG.info("totalUncompressedSize: {}", MemorySize.ofBytes(totalUncompressedSize));
-        LOG.info("totalCompressedSize: {}", MemorySize.ofBytes(totalCompressedSize));
+        MemorySegment buffer = bloomFilter.getBuffer();
+        BloomFilterHandle bloomFilterHandle =
+                new BloomFilterHandle(out.getPos(), buffer.size(), bloomFilter.expectedEntries());
+        writeSlice(MemorySlice.wrap(buffer));
+        LOG.info("Bloom filter size: {} bytes", bloomFilter.getBuffer().size());
+        return bloomFilterHandle;
     }
 
-    private void writeSlice(MemorySlice slice) throws IOException {
+    @Nullable
+    public BlockHandle writeIndexBlock() throws IOException {
+        BlockHandle indexBlock = writeBlock(indexBlockWriter);
+        LOG.info("Number of record: {}", recordCount);
+        LOG.info("totalUncompressedSize: {}", MemorySize.ofBytes(totalUncompressedSize));
+        LOG.info("totalCompressedSize: {}", MemorySize.ofBytes(totalCompressedSize));
+        return indexBlock;
+    }
+
+    public void writeSlice(MemorySlice slice) throws IOException {
         out.write(slice.getHeapMemory(), slice.offset(), slice.length());
-        position += slice.length();
     }
 }

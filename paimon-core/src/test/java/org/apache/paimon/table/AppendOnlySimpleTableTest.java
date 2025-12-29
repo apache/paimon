@@ -1226,6 +1226,9 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             assertThat(cnt.get()).isEqualTo(limit);
             reader.close();
         }
+
+        // avoid unstable failure from `SimpleTableTestBase.after`.
+        Thread.sleep(1_000);
     }
 
     @Test

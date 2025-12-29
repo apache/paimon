@@ -16,20 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.globalindex.bitmap;
+package org.apache.paimon.operation.commit;
 
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
+/** Success {@link CommitResult}. */
+public class SuccessCommitResult implements CommitResult {
 
-/**
- * Builder for creating bitmap-based global indexes.
- *
- * <p>This implementation does not apply any custom transformations to the input dataset, allowing
- * the data to be processed as-is for bitmap index creation.
- */
-public class BitmapGlobalIndexBuilder extends GlobalIndexBuilder {
-
-    protected BitmapGlobalIndexBuilder(GlobalIndexBuilderContext context) {
-        super(context);
+    @Override
+    public boolean isSuccess() {
+        return true;
     }
 }

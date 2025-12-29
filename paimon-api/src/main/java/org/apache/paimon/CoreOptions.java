@@ -226,10 +226,33 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<String> BRANCH =
             key("branch").stringType().defaultValue("main").withDescription("Specify branch name.");
 
+    public static final ConfigOption<Boolean> CHAIN_TABLE_ENABLED =
+            key("chain-table.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether enabled chain table.");
+
+    public static final ConfigOption<String> SCAN_FALLBACK_SNAPSHOT_BRANCH =
+            key("scan.fallback-snapshot-branch")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "When a batch job queries from a chain table, if a partition does not exist in the main branch, "
+                                    + "the reader will try to get this partition from chain snapshot branch.");
+
+    public static final ConfigOption<String> SCAN_FALLBACK_DELTA_BRANCH =
+            key("scan.fallback-delta-branch")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "When a batch job queries from a chain table, if a partition does not exist in either main or snapshot branch, "
+                                    + "the reader will try to get this partition from chain snapshot and delta branch together.");
+
     public static final String FILE_FORMAT_ORC = "orc";
     public static final String FILE_FORMAT_AVRO = "avro";
     public static final String FILE_FORMAT_PARQUET = "parquet";
     public static final String FILE_FORMAT_CSV = "csv";
+    public static final String FILE_FORMAT_TEXT = "text";
     public static final String FILE_FORMAT_JSON = "json";
 
     public static final ConfigOption<String> FILE_FORMAT =
@@ -1612,6 +1635,12 @@ public class CoreOptions implements Serializable {
                             "The default maximum time retained for newly created tags. "
                                     + "It affects both auto-created tags and manually created (by procedure) tags.");
 
+    public static final ConfigOption<Boolean> TAG_TIME_EXPIRE_ENABLED =
+            key("tag.time-expire-enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Whether to enable tag expiration by retained time.");
+
     public static final ConfigOption<Boolean> TAG_AUTOMATIC_COMPLETION =
             key("tag.automatic-completion")
                     .booleanType()
@@ -2368,6 +2397,8 @@ public class CoreOptions implements Serializable {
             return options.get(FILE_COMPRESSION.key());
         } else if (options.containsKey(FORMAT_TABLE_FILE_COMPRESSION.key())) {
             return options.get(FORMAT_TABLE_FILE_COMPRESSION.key());
+        } else if (options.containsKey("compression")) {
+            return options.get("compression");
         } else {
             String format = formatType();
             switch (format) {
@@ -2377,6 +2408,7 @@ public class CoreOptions implements Serializable {
                 case FILE_FORMAT_ORC:
                     return "zstd";
                 case FILE_FORMAT_CSV:
+                case FILE_FORMAT_TEXT:
                 case FILE_FORMAT_JSON:
                     return "none";
                 default:
@@ -3027,6 +3059,10 @@ public class CoreOptions implements Serializable {
         return options.get(TAG_DEFAULT_TIME_RETAINED);
     }
 
+    public boolean tagTimeExpireEnabled() {
+        return options.get(TAG_TIME_EXPIRE_ENABLED);
+    }
+
     public boolean tagAutomaticCompletion() {
         return options.get(TAG_AUTOMATIC_COMPLETION);
     }
@@ -3248,6 +3284,18 @@ public class CoreOptions implements Serializable {
 
     public int lookupMergeRecordsThreshold() {
         return options.get(LOOKUP_MERGE_RECORDS_THRESHOLD);
+    }
+
+    public boolean isChainTable() {
+        return options.get(CHAIN_TABLE_ENABLED);
+    }
+
+    public String scanFallbackSnapshotBranch() {
+        return options.get(SCAN_FALLBACK_SNAPSHOT_BRANCH);
+    }
+
+    public String scanFallbackDeltaBranch() {
+        return options.get(SCAN_FALLBACK_DELTA_BRANCH);
     }
 
     public boolean formatTableImplementationIsPaimon() {
@@ -3888,7 +3936,11 @@ public class CoreOptions implements Serializable {
 
         ROUND_ROBIN(
                 "round-robin",
-                "When writing a new file, a path is chosen from data-file.external-paths in turn.");
+                "When writing a new file, a path is chosen from data-file.external-paths in turn."),
+
+        ENTROPY_INJECT(
+                "entropy-inject",
+                "When writing a new file, a path is chosen based on the hash value of the file's content.");
 
         private final String value;
 

@@ -144,14 +144,9 @@ class TableRead:
         if parallelism < 1:
             raise ValueError(f"parallelism must be at least 1, got {parallelism}")
 
-        if parallelism == 1:
-            # Single-task read (simple mode)
-            return ray.data.from_arrow(self.to_arrow(splits))
-        else:
-            # Distributed read with specified parallelism
-            from pypaimon.read.ray_datasource import PaimonDatasource
-            datasource = PaimonDatasource(self, splits)
-            return ray.data.read_datasource(datasource, parallelism=parallelism)
+        from pypaimon.read.ray_datasource import PaimonDatasource
+        datasource = PaimonDatasource(self, splits)
+        return ray.data.read_datasource(datasource, parallelism=parallelism)
 
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:

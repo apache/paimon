@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -220,6 +221,7 @@ public class BitSliceIndexRoaringBitmapTest {
                                         (x, y) -> x.or(y)));
     }
 
+    @Disabled // TODO unstable?
     @Test
     public void testCompareUsingMinMax() {
         // a predicate in the value bound

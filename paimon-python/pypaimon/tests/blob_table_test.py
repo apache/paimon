@@ -2167,7 +2167,7 @@ class DataBlobWriterTest(unittest.TestCase):
         table = self.catalog.get_table('test_db.blob_rolling_with_shard')
 
         # Create large blob data
-        large_blob_size = 3 * 1024 * 1024  #
+        large_blob_size = 3 * 1024 * 1024
         blob_pattern = b'LARGE_BLOB_PATTERN_' + b'X' * 1024  # ~1KB pattern
         pattern_size = len(blob_pattern)
         repetitions = large_blob_size // pattern_size

@@ -16,20 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.tests.cdc;
+package org.apache.paimon.format.text;
 
-import org.apache.paimon.flink.action.cdc.mysql.MySqlVersion;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
 
-import org.junit.jupiter.api.condition.EnabledIf;
+/** Options for text format. */
+public class TextOptions {
 
-/**
- * E2e tests for {@link org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction} with MySQL
- * 5.7.
- */
-@EnabledIf("runTest")
-public class MySql57E2eTest extends MySqlCdcE2eTestBase {
+    public static final ConfigOption<String> LINE_DELIMITER =
+            ConfigOptions.key("text.line-delimiter")
+                    .stringType()
+                    .defaultValue("\n")
+                    .withFallbackKeys("lineSep")
+                    .withDescription("The line delimiter for TEXT format");
 
-    public MySql57E2eTest() {
-        super(MySqlVersion.V5_7);
+    private final String lineDelimiter;
+
+    public TextOptions(Options options) {
+        this.lineDelimiter = options.get(LINE_DELIMITER);
+    }
+
+    public String lineDelimiter() {
+        return lineDelimiter;
     }
 }
