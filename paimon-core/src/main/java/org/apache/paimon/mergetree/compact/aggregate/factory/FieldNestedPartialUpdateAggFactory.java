@@ -34,10 +34,10 @@ public class FieldNestedPartialUpdateAggFactory implements FieldAggregatorFactor
     public static final String NAME = "nested_partial_update";
 
     @Override
-    public FieldNestedPartialUpdateAgg create(DataType fieldType, CoreOptions options, String field) {
+    public FieldNestedPartialUpdateAgg create(
+            DataType fieldType, CoreOptions options, String field) {
         return createFieldNestedPartialUpdateAgg(
-                fieldType,
-                options.fieldNestedUpdateAggNestedKey(field));
+                fieldType, options.fieldNestedUpdateAggNestedKey(field));
     }
 
     @Override

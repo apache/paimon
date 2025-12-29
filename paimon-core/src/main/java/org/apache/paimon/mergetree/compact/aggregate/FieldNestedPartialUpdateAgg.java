@@ -19,7 +19,6 @@
 package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.codegen.Projection;
-import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -28,21 +27,18 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Preconditions;
 
-import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.codegen.CodeGenUtils.newProjection;
-import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
- * Used to partial update a field which representing a nested table. The data type of nested table field is {@code ARRAY<ROW>}.
+ * Used to partial update a field which representing a nested table. The data type of nested table
+ * field is {@code ARRAY<ROW>}.
  */
 public class FieldNestedPartialUpdateAgg extends FieldAggregator {
 
@@ -52,8 +48,7 @@ public class FieldNestedPartialUpdateAgg extends FieldAggregator {
     private final Projection keyProjection;
     private final FieldGetter[] fieldGetters;
 
-    public FieldNestedPartialUpdateAgg(
-            String name, ArrayType dataType, List<String> nestedKey) {
+    public FieldNestedPartialUpdateAgg(String name, ArrayType dataType, List<String> nestedKey) {
         super(name, dataType);
         RowType nestedType = (RowType) dataType.getElementType();
         this.nestedFields = nestedType.getFieldCount();
