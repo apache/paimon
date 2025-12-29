@@ -196,7 +196,8 @@ case class MergeIntoPaimonTable(
       if (writeRowTracking) {
         val rowTrackingWriter = writer.withRowTracking()
         addCommitMessageBuilder ++= rowTrackingWriter.write(toWriteDS.filter(rowTrackingNotNull))
-        addCommitMessageBuilder ++= writer.write(toWriteDS.filter(rowTrackingNull).drop(ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN))
+        addCommitMessageBuilder ++= writer.write(
+          toWriteDS.filter(rowTrackingNull).drop(ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN))
       } else {
         addCommitMessageBuilder ++= writer.write(toWriteDS)
       }

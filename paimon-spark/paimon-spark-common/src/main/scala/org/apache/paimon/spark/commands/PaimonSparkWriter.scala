@@ -70,7 +70,7 @@ case class PaimonSparkWriter(
 
   private val writeType = {
     if (writeRowTracking) {
-      SpecialFields.rowTypeWithRowTracking(table.rowType(), true)
+      SpecialFields.rowTypeWithRowTracking(table.rowType(), false, true)
     } else {
       table.rowType()
     }

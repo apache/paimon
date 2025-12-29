@@ -62,6 +62,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -1175,8 +1176,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             checkArgument(
                     entry.file().fileSource().isPresent(),
                     "This is a bug, file source field for row-tracking table must present.");
+            boolean containsRowId =
+                    entry.file().writeCols() != null
+                            && entry.file().writeCols().contains(SpecialFields.ROW_ID.name());
             if (entry.file().fileSource().get().equals(FileSource.APPEND)
-                    && entry.file().firstRowId() == null) {
+                    && entry.file().firstRowId() == null
+                    && !containsRowId) {
                 if (isBlobFile(entry.file().fileName())) {
                     if (blobStart >= start) {
                         throw new IllegalStateException(
