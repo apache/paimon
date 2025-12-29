@@ -55,6 +55,8 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     public void rollback(Instant instant) throws IOException {
         try (Catalog catalog = catalogLoader.load()) {
             catalog.rollbackTo(identifier, instant);
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
