@@ -23,8 +23,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 
-import javax.annotation.Nullable;
-
 /** Stateless writer used for unaware append and postpone bucket table. */
 public class StatelessRowDataStoreWriteOperator extends RowDataStoreWriteOperator {
 
@@ -33,10 +31,9 @@ public class StatelessRowDataStoreWriteOperator extends RowDataStoreWriteOperato
     public StatelessRowDataStoreWriteOperator(
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
-            @Nullable LogSinkFunction logSinkFunction,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
-        super(parameters, table, logSinkFunction, storeSinkWriteProvider, initialCommitUser);
+        super(parameters, table, storeSinkWriteProvider, initialCommitUser);
     }
 
     @Override

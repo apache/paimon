@@ -35,7 +35,6 @@ import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -118,12 +117,11 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
         }
 
         @Override
-        protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
-                throws IOException {
+        protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId) {
             ArrayList<CommitMessage> temp = new ArrayList<>(messages);
             messages.clear();
             return temp.stream()
-                    .map(s -> new Committable(checkpointId, Committable.Kind.FILE, s))
+                    .map(s -> new Committable(checkpointId, s))
                     .collect(Collectors.toList());
         }
     }

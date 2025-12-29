@@ -143,10 +143,6 @@ public class ManifestsReader {
             case DELTA:
                 return manifestList.readDeltaManifests(snapshot);
             case CHANGELOG:
-                if (snapshot.version() <= Snapshot.TABLE_STORE_02_VERSION) {
-                    throw new UnsupportedOperationException(
-                            "Unsupported snapshot version: " + snapshot.version());
-                }
                 return manifestList.readChangelogManifests(snapshot);
             default:
                 throw new UnsupportedOperationException("Unknown scan kind " + scanMode.name());

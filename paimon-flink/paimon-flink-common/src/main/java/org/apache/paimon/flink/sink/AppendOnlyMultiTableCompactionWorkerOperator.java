@@ -101,8 +101,7 @@ public class AppendOnlyMultiTableCompactionWorkerOperator
                                 tableId.getDatabaseName(),
                                 tableId.getObjectName(),
                                 committable.checkpointId(),
-                                committable.kind(),
-                                committable.wrappedCommittable()));
+                                committable.commitMessage()));
             }
         }
 
