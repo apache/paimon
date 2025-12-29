@@ -405,7 +405,7 @@ JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_jni_FaissJNI_resetIndex(
 JNIEXPORT jstring JNICALL Java_org_apache_paimon_faiss_jni_FaissJNI_getVersion(
     JNIEnv* env, jclass cls) {
     // FAISS doesn't have a version macro, so we return a placeholder
-    return env->NewStringUTF("1.7.4");
+    return env->NewStringUTF("1.13.2");
 }
 
 
