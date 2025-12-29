@@ -498,7 +498,7 @@ class FullStartingScanner(StartingScanner):
         splits = []
         for key, file_entries in partitioned_files.items():
             if not file_entries:
-                return []
+                continue
 
             data_files: List[DataFileMeta] = [e.file for e in file_entries]
 

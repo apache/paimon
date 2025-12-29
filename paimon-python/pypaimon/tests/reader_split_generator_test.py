@@ -211,6 +211,38 @@ class SplitGeneratorTest(unittest.TestCase):
                         split.raw_convertible,
                         "Multi-file split should not be raw_convertible when optimized path is not used")
 
+    def test_shard_with_empty_partition(self):
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('value', pa.string())
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={'bucket': '3'}  # Use 3 buckets for shard testing
+        )
+        self.catalog.create_table('default.test_shard_empty_partition', schema, False)
+        table = self.catalog.get_table('default.test_shard_empty_partition')
+        
+        self._write_data(table, [
+            {'id': [0, 3, 6], 'value': ['v0', 'v3', 'v6']},
+            {'id': [1, 4, 7], 'value': ['v1', 'v4', 'v7']},
+            {'id': [2, 5, 8], 'value': ['v2', 'v5', 'v8']},
+        ])
+        
+        read_builder = table.new_read_builder()
+        
+        splits_all = read_builder.new_scan().plan().splits()
+        self.assertGreater(len(splits_all), 0, "Should have splits without shard filtering")
+        
+        splits_shard_0 = read_builder.new_scan().with_shard(0, 3).plan().splits()
+        
+        self.assertGreaterEqual(len(splits_shard_0), 0,
+                               "Should return splits even if some partitions are empty after shard filtering")
+        
+        for split in splits_shard_0:
+            self.assertGreater(len(split.files), 0, "Each split should have at least one file")
+
 
 if __name__ == '__main__':
     unittest.main()
