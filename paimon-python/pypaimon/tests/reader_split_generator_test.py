@@ -237,8 +237,9 @@ class SplitGeneratorTest(unittest.TestCase):
         
         splits_shard_0 = read_builder.new_scan().with_shard(0, 3).plan().splits()
         
-        self.assertGreaterEqual(len(splits_shard_0), 0,
-                               "Should return splits even if some partitions are empty after shard filtering")
+        self.assertGreaterEqual(
+            len(splits_shard_0), 0,
+            "Should return splits even if some partitions are empty after shard filtering")
         
         for split in splits_shard_0:
             self.assertGreater(len(split.files), 0, "Each split should have at least one file")
