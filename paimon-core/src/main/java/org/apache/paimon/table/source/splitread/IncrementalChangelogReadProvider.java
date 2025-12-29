@@ -26,7 +26,7 @@ import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.KeyValueSystemFieldsRecordReader;
+import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
@@ -74,7 +74,7 @@ public class IncrementalChangelogReadProvider implements SplitReadProvider {
                                                     dataSplit.dataFiles(),
                                                     dataSplit.deletionFiles().orElse(null),
                                                     false));
-                    return KeyValueSystemFieldsRecordReader.wrap(
+                    return KeyValueTableRead.unwrap(
                             reader, read.getSystemFieldExtractors(), read.getProjection());
                 };
 

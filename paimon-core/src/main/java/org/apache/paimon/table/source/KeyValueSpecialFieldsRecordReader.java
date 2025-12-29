@@ -35,44 +35,44 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A decorator for {@link RecordReader} that injects system fields into the output rows for
+ * A wrapper for {@link RecordReader} that injects special fields into the output rows for
  * KeyValue-based data sources.
  *
  * <p>This reader wraps a {@code RecordReader<KeyValue>} and produces {@code
- * RecordReader<InternalRow>} with additional system fields extracted from the KeyValue metadata.
+ * RecordReader<InternalRow>} with additional special fields extracted from the KeyValue metadata.
  *
  * <p><b>Naming:</b> This class is specifically designed for KeyValue format data (e.g.,
- * MergeFileSplitRead). For InternalRow readers (e.g., RawFileSplitRead), system fields are handled
+ * MergeFileSplitRead). For InternalRow readers (e.g., RawFileSplitRead), special fields are handled
  * differently in {@link org.apache.paimon.io.DataFileRecordReader} using file metadata.
  *
  * <p><b>Field Ordering:</b> The output schema supports arbitrary field ordering. Internally, fields
- * are assembled as [system fields... + physical fields...], then reordered using {@link
+ * are assembled as [special fields... + physical fields...], then reordered using {@link
  * ProjectedRow} to match the requested field order.
  *
  * <p><b>Performance:</b> Implementation uses {@link JoinedRow} for zero-copy concatenation of
- * system fields and physical fields, then {@link ProjectedRow} for zero-copy field reordering.
+ * special fields and physical fields, then {@link ProjectedRow} for zero-copy field reordering.
  */
-public class KeyValueSystemFieldsRecordReader implements RecordReader<InternalRow> {
+public class KeyValueSpecialFieldsRecordReader implements RecordReader<InternalRow> {
 
     private final RecordReader<KeyValue> wrapped;
-    private final List<SystemFieldExtractor> systemFieldExtractors;
+    private final List<SpecialFieldExtractor> specialFieldExtractors;
     @Nullable private final int[] projection;
 
     /**
-     * Creates a KeyValueSystemFieldsRecordReader.
+     * Creates a KeyValueSpecialFieldsRecordReader.
      *
      * @param wrapped the underlying KeyValue reader
-     * @param systemFieldExtractors extractors for system fields, in order
+     * @param specialFieldExtractors extractors for special fields, in order
      * @param projection optional projection to reorder fields. If null, fields are in natural order
-     *     [system fields... + physical fields...]. If provided, projects from the natural order to
+     *     [special fields... + physical fields...]. If provided, projects from the natural order to
      *     the desired order.
      */
-    public KeyValueSystemFieldsRecordReader(
+    public KeyValueSpecialFieldsRecordReader(
             RecordReader<KeyValue> wrapped,
-            List<SystemFieldExtractor> systemFieldExtractors,
+            List<SpecialFieldExtractor> specialFieldExtractors,
             @Nullable int[] projection) {
         this.wrapped = wrapped;
-        this.systemFieldExtractors = systemFieldExtractors;
+        this.specialFieldExtractors = specialFieldExtractors;
         this.projection = projection;
     }
 
@@ -83,7 +83,7 @@ public class KeyValueSystemFieldsRecordReader implements RecordReader<InternalRo
         if (batch == null) {
             return null;
         }
-        return new SystemFieldsRecordIterator(batch);
+        return new SpecialFieldsRecordIterator(batch);
     }
 
     @Override
@@ -91,19 +91,14 @@ public class KeyValueSystemFieldsRecordReader implements RecordReader<InternalRo
         wrapped.close();
     }
 
-    private class SystemFieldsRecordIterator implements RecordIterator<InternalRow> {
+    private class SpecialFieldsRecordIterator implements RecordIterator<InternalRow> {
 
         private final RecordIterator<KeyValue> kvIterator;
-        private final JoinedRow joinedRow;
-        private final GenericRow systemFieldsRow;
-        @Nullable private final ProjectedRow projectedRow;
+        private final GenericRow specialFieldsRow;
 
-        private SystemFieldsRecordIterator(RecordIterator<KeyValue> kvIterator) {
+        private SpecialFieldsRecordIterator(RecordIterator<KeyValue> kvIterator) {
             this.kvIterator = kvIterator;
-            this.joinedRow = new JoinedRow();
-            this.systemFieldsRow = new GenericRow(systemFieldExtractors.size());
-            // If projection is provided, use ProjectedRow to reorder fields
-            this.projectedRow = projection != null ? ProjectedRow.from(projection) : null;
+            this.specialFieldsRow = new GenericRow(specialFieldExtractors.size());
         }
 
         @Nullable
@@ -116,20 +111,22 @@ public class KeyValueSystemFieldsRecordReader implements RecordReader<InternalRo
 
             InternalRow value = kv.value();
 
-            // Extract system fields into the reusable row
-            for (int i = 0; i < systemFieldExtractors.size(); i++) {
-                SystemFieldExtractor extractor = systemFieldExtractors.get(i);
-                Object systemValue = extractor.extract(kv);
-                systemFieldsRow.setField(i, systemValue);
+            // Extract special fields into the reusable row
+            for (int i = 0; i < specialFieldExtractors.size(); i++) {
+                SpecialFieldExtractor extractor = specialFieldExtractors.get(i);
+                Object specialValue = extractor.extract(kv);
+                specialFieldsRow.setField(i, specialValue);
             }
 
-            // Join system fields first, then physical fields
-            // Natural order: [system fields...] + [physical fields...]
-            joinedRow.replace(systemFieldsRow, value);
+            // Join special fields first, then physical fields
+            // Natural order: [special fields...] + [physical fields...]
+            JoinedRow joinedRow = new JoinedRow();
+            joinedRow.replace(specialFieldsRow, value);
             joinedRow.setRowKind(kv.valueKind());
 
             // If projection is provided, reorder to match requested order
-            if (projectedRow != null) {
+            if (projection != null) {
+                ProjectedRow projectedRow = ProjectedRow.from(projection);
                 return projectedRow.replaceRow(joinedRow);
             }
             return joinedRow;
@@ -141,37 +138,16 @@ public class KeyValueSystemFieldsRecordReader implements RecordReader<InternalRo
         }
     }
 
-    /**
-     * Wraps a KeyValue reader with system field injection if needed.
-     *
-     * @param reader the KeyValue reader
-     * @param systemFieldExtractors extractors for system fields (empty if no system fields needed)
-     * @param projection optional projection to reorder fields from natural order [system fields...
-     *     + physical fields...] to desired order
-     * @return a reader producing InternalRow with system fields, or a simple unwrapped reader if no
-     *     system fields
-     */
-    public static RecordReader<InternalRow> wrap(
-            RecordReader<KeyValue> reader,
-            List<SystemFieldExtractor> systemFieldExtractors,
-            @Nullable int[] projection) {
-        if (systemFieldExtractors.isEmpty()) {
-            // No system fields, use the default unwrap logic
-            return KeyValueTableRead.unwrap(reader);
-        }
-        return new KeyValueSystemFieldsRecordReader(reader, systemFieldExtractors, projection);
-    }
-
     // ========== Internal Extractor Interface ==========
 
     /**
-     * Internal interface for extracting system fields from {@link KeyValue} objects.
+     * Internal interface for extracting special fields from {@link KeyValue} objects.
      *
-     * <p>System fields are metadata fields like {@code _SEQUENCE_NUMBER}, {@code _LEVEL}, {@code
+     * <p>special fields are metadata fields like {@code _SEQUENCE_NUMBER}, {@code _LEVEL}, {@code
      * rowkind} that are derived from the KeyValue container itself rather than the stored data.
      *
      * <p><b>Note:</b> This interface is specifically for KeyValue-based extraction. For InternalRow
-     * readers (e.g., RawFileSplitRead), system fields are handled differently in {@link
+     * readers (e.g., RawFileSplitRead), special fields are handled differently in {@link
      * org.apache.paimon.io.DataFileRecordReader} using file metadata.
      *
      * <p>All field definitions are sourced from {@link SpecialFields} to maintain consistency
@@ -180,10 +156,10 @@ public class KeyValueSystemFieldsRecordReader implements RecordReader<InternalRo
      * <p>Each extractor is stateless and thread-safe.
      */
     @FunctionalInterface
-    public interface SystemFieldExtractor {
+    public interface SpecialFieldExtractor {
 
         /**
-         * Extracts the system field value from a KeyValue object.
+         * Extracts the special field value from a KeyValue object.
          *
          * @param kv the KeyValue to extract from
          * @return the extracted value, or null if not applicable
@@ -194,61 +170,71 @@ public class KeyValueSystemFieldsRecordReader implements RecordReader<InternalRo
         // ========== Built-in Extractors ==========
 
         /**
-         * Extractor for {@code _SEQUENCE_NUMBER} system field.
+         * Extractor for {@code _SEQUENCE_NUMBER} special field.
          *
          * <p>Extracts the sequence number from KeyValue metadata.
          */
-        SystemFieldExtractor SEQUENCE_NUMBER = kv -> kv.sequenceNumber();
+        SpecialFieldExtractor SEQUENCE_NUMBER = KeyValue::sequenceNumber;
 
         /**
-         * Extractor for {@code rowkind} system field (used in AuditLogTable).
+         * Extractor for {@code rowkind} special field (used in AuditLogTable).
          *
          * <p>Extracts the row kind from KeyValue's valueKind.
          */
-        SystemFieldExtractor ROW_KIND = kv -> BinaryString.fromString(kv.valueKind().shortString());
+        SpecialFieldExtractor ROW_KIND =
+                kv -> BinaryString.fromString(kv.valueKind().shortString());
 
         /**
-         * Extractor for {@code _LEVEL} system field (LSM tree level).
+         * Extractor for {@code _LEVEL} special field (LSM tree level).
          *
          * <p>Note: Currently not extractable from KeyValue at read time. This is a placeholder for
          * future implementation where level information would need to be tracked through the read
          * path.
          */
-        SystemFieldExtractor LEVEL = kv -> null; // TODO: Level information needs to be propagated
+        SpecialFieldExtractor LEVEL =
+                kv -> {
+                    throw new UnsupportedOperationException(
+                            "LEVEL special field is not yet supported for KeyValue-based reads. "
+                                    + "Level information needs to be propagated through the read path.");
+                };
 
         /**
-         * Extractor for {@code _ROW_ID} system field.
+         * Extractor for {@code _ROW_ID} special field.
          *
          * <p>Note: ROW_ID is typically handled by DataFileRecordReader for InternalRow-based
          * readers. This extractor is provided for completeness but may not be used in KeyValue
          * scenarios.
          */
-        SystemFieldExtractor ROW_ID =
-                kv -> null; // ROW_ID is computed from file metadata, not available in KeyValue
+        SpecialFieldExtractor ROW_ID =
+                kv -> {
+                    throw new UnsupportedOperationException(
+                            "ROW_ID special field is not supported for KeyValue-based reads. "
+                                    + "ROW_ID is computed from file metadata in DataFileRecordReader.");
+                };
     }
 
     // ========== Registry ==========
 
-    /** Registry for system field extractors. */
-    private static final Map<String, SystemFieldExtractor> EXTRACTOR_REGISTRY = new HashMap<>();
+    /** Registry for special field extractors. */
+    private static final Map<String, SpecialFieldExtractor> EXTRACTOR_REGISTRY = new HashMap<>();
 
     static {
         // Register all extractors that can be used with KeyValue
         EXTRACTOR_REGISTRY.put(
-                SpecialFields.SEQUENCE_NUMBER.name(), SystemFieldExtractor.SEQUENCE_NUMBER);
-        EXTRACTOR_REGISTRY.put(SpecialFields.ROW_KIND.name(), SystemFieldExtractor.ROW_KIND);
-        EXTRACTOR_REGISTRY.put(SpecialFields.LEVEL.name(), SystemFieldExtractor.LEVEL);
-        EXTRACTOR_REGISTRY.put(SpecialFields.ROW_ID.name(), SystemFieldExtractor.ROW_ID);
+                SpecialFields.SEQUENCE_NUMBER.name(), SpecialFieldExtractor.SEQUENCE_NUMBER);
+        EXTRACTOR_REGISTRY.put(SpecialFields.ROW_KIND.name(), SpecialFieldExtractor.ROW_KIND);
+        EXTRACTOR_REGISTRY.put(SpecialFields.LEVEL.name(), SpecialFieldExtractor.LEVEL);
+        EXTRACTOR_REGISTRY.put(SpecialFields.ROW_ID.name(), SpecialFieldExtractor.ROW_ID);
     }
 
     /**
      * Gets an extractor by field name.
      *
-     * @param fieldName the system field name
-     * @return the extractor, or null if not a registered system field
+     * @param fieldName the special field name
+     * @return the extractor, or null if not a registered special field
      */
     @Nullable
-    public static SystemFieldExtractor getExtractor(String fieldName) {
+    public static SpecialFieldExtractor getExtractor(String fieldName) {
         return EXTRACTOR_REGISTRY.get(fieldName);
     }
 }

@@ -23,7 +23,7 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.KeyValueSystemFieldsRecordReader;
+import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LazyField;
@@ -51,7 +51,7 @@ public class MergeFileSplitReadProvider implements SplitReadProvider {
         return SplitRead.convert(
                 read,
                 split ->
-                        KeyValueSystemFieldsRecordReader.wrap(
+                        KeyValueTableRead.unwrap(
                                 read.createReader(split),
                                 read.getSystemFieldExtractors(),
                                 read.getProjection()));

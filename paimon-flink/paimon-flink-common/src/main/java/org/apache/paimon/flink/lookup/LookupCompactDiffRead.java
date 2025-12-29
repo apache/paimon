@@ -29,13 +29,12 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.AbstractDataTableRead;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
-
-import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
 
 /** An {@link InnerTableRead} that reads the data changed before and after compaction. */
 public class LookupCompactDiffRead extends AbstractDataTableRead {
@@ -46,7 +45,13 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
         super(schema);
         this.incrementalDiffRead = new IncrementalCompactDiffSplitRead(mergeRead);
         this.fullPhaseMergeRead =
-                SplitRead.convert(mergeRead, split -> unwrap(mergeRead.createReader(split)));
+                SplitRead.convert(
+                        mergeRead,
+                        split ->
+                                KeyValueTableRead.unwrap(
+                                        mergeRead.createReader(split),
+                                        mergeRead.getSystemFieldExtractors(),
+                                        mergeRead.getProjection()));
     }
 
     @Override

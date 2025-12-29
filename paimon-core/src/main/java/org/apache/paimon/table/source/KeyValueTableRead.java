@@ -161,7 +161,29 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         throw new RuntimeException("Should not happen.");
     }
 
-    public static RecordReader<InternalRow> unwrap(RecordReader<KeyValue> reader) {
+    /**
+     * Wraps a KeyValue reader with special field injection if needed.
+     *
+     * @param reader the KeyValue reader
+     * @param specialFieldExtractors extractors for special fields (empty if no special fields
+     *     needed)
+     * @param projection optional projection to reorder fields from natural order [special fields...
+     *     + physical fields...] to desired order
+     * @return a reader producing InternalRow with special fields, or a simple unwrapped reader if
+     *     no special fields
+     */
+    public static RecordReader<InternalRow> unwrap(
+            RecordReader<KeyValue> reader,
+            List<KeyValueSpecialFieldsRecordReader.SpecialFieldExtractor> specialFieldExtractors,
+            @Nullable int[] projection) {
+        if (specialFieldExtractors.isEmpty()) {
+            // No special fields, use the default unwrap logic
+            return unwrap(reader);
+        }
+        return new KeyValueSpecialFieldsRecordReader(reader, specialFieldExtractors, projection);
+    }
+
+    private static RecordReader<InternalRow> unwrap(RecordReader<KeyValue> reader) {
         return new RecordReader<InternalRow>() {
 
             @Nullable

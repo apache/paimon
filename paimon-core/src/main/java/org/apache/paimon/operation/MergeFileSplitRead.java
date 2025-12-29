@@ -50,7 +50,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
-import org.apache.paimon.table.source.KeyValueSystemFieldsRecordReader;
+import org.apache.paimon.table.source.KeyValueSpecialFieldsRecordReader;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -99,7 +99,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Nullable private int[][] outerProjection;
     @Nullable private VariantAccessInfo[] variantAccess;
 
-    private List<KeyValueSystemFieldsRecordReader.SystemFieldExtractor> systemFieldExtractors =
+    private List<KeyValueSpecialFieldsRecordReader.SpecialFieldExtractor> specialFieldExtractors =
             Collections.emptyList();
 
     @Nullable private int[] projection = null;
@@ -144,8 +144,9 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         return this;
     }
 
-    public List<KeyValueSystemFieldsRecordReader.SystemFieldExtractor> getSystemFieldExtractors() {
-        return systemFieldExtractors;
+    public List<KeyValueSpecialFieldsRecordReader.SpecialFieldExtractor>
+            getSystemFieldExtractors() {
+        return specialFieldExtractors;
     }
 
     @Nullable
@@ -155,7 +156,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     @Override
     public MergeFileSplitRead withReadType(RowType readType) {
-        this.systemFieldExtractors = collectSystemFieldExtractors(readType);
+        this.specialFieldExtractors = collectSystemFieldExtractors(readType);
         this.projection = createProjection(readType);
 
         // todo: replace projectedFields with readType
@@ -435,16 +436,17 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
      * @param readType the requested read type (may contain system fields)
      * @return list of extractors for system fields present in readType
      */
-    private List<KeyValueSystemFieldsRecordReader.SystemFieldExtractor>
+    private List<KeyValueSpecialFieldsRecordReader.SpecialFieldExtractor>
             collectSystemFieldExtractors(RowType readType) {
         if (readType == null) {
             return Collections.emptyList();
         }
 
-        List<KeyValueSystemFieldsRecordReader.SystemFieldExtractor> extractors = new ArrayList<>();
+        List<KeyValueSpecialFieldsRecordReader.SpecialFieldExtractor> extractors =
+                new ArrayList<>();
         for (String fieldName : readType.getFieldNames()) {
-            KeyValueSystemFieldsRecordReader.SystemFieldExtractor extractor =
-                    KeyValueSystemFieldsRecordReader.getExtractor(fieldName);
+            KeyValueSpecialFieldsRecordReader.SpecialFieldExtractor extractor =
+                    KeyValueSpecialFieldsRecordReader.getExtractor(fieldName);
             if (extractor != null) {
                 extractors.add(extractor);
             }
@@ -455,7 +457,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     /**
      * Creates a projection array to reorder fields from natural order to requested order.
      *
-     * <p>Example: readType = [pt, rowkind, col1], systemFieldExtractors = [rowkind] Natural order:
+     * <p>Example: readType = [pt, rowkind, col1], specialFieldExtractors = [rowkind] Natural order:
      * [rowkind(0), pt(1), col1(2)] (physical fields pt, col1 in readType order) Requested order:
      * [pt, rowkind, col1] Projection: [1, 0, 2]
      *
@@ -464,7 +466,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
      */
     @Nullable
     private int[] createProjection(RowType readType) {
-        if (readType == null || systemFieldExtractors.isEmpty()) {
+        if (readType == null || specialFieldExtractors.isEmpty()) {
             return null;
         }
 
@@ -473,13 +475,13 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         // System fields are first in natural order
         int systemIdx = 0;
         // Physical fields follow system fields in natural order
-        int physicalIdx = systemFieldExtractors.size();
+        int physicalIdx = specialFieldExtractors.size();
         boolean needsProjection = false;
 
         for (int i = 0; i < readFieldNames.size(); i++) {
             String fieldName = readFieldNames.get(i);
             // Check if it's a system field
-            if (KeyValueSystemFieldsRecordReader.getExtractor(fieldName) != null) {
+            if (KeyValueSpecialFieldsRecordReader.getExtractor(fieldName) != null) {
                 projection[i] = systemIdx++;
             } else {
                 projection[i] = physicalIdx++;

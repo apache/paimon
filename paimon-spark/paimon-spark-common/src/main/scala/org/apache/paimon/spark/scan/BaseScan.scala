@@ -88,8 +88,9 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     }
 
     if (ROW_TRACKING_META_COLUMNS.contains(fieldName)) {
-      val isSystemTable = table.isInstanceOf[AuditLogTable] || table.isInstanceOf[BinlogTable]
-      if (!isSystemTable && !coreOptions.rowTrackingEnabled()) {
+      val isAuditOrBinlogTable =
+        table.isInstanceOf[AuditLogTable] || table.isInstanceOf[BinlogTable]
+      if (!isAuditOrBinlogTable && !coreOptions.rowTrackingEnabled()) {
         throw new UnsupportedOperationException(
           s"Only row-tracking tables support metadata column: $fieldName")
       }
