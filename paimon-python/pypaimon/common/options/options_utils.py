@@ -16,6 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+from enum import Enum
 from typing import Any, Type
 
 from pypaimon.common.memory_size import MemorySize
@@ -44,6 +45,12 @@ class OptionsUtils:
 
         if isinstance(value, target_type):
             return value
+
+        try:
+            if issubclass(target_type, Enum):
+                return OptionsUtils.convert_to_enum(value, target_type)
+        except TypeError:
+            pass
 
         # Handle string conversions
         if target_type == str:
@@ -117,3 +124,31 @@ class OptionsUtils:
         if isinstance(value, str):
             return MemorySize.parse(value)
         raise ValueError(f"Cannot convert {type(value)} to MemorySize")
+
+    @staticmethod
+    def convert_to_enum(value: Any, enum_class: Type[Enum]) -> Enum:
+
+        if isinstance(value, enum_class):
+            return value
+
+        if isinstance(value, str):
+            value_lower = value.lower().strip()
+            for enum_member in enum_class:
+                if enum_member.value.lower() == value_lower:
+                    return enum_member
+            try:
+                return enum_class[value.upper()]
+            except KeyError:
+                raise ValueError(
+                    f"Cannot convert '{value}' to {enum_class.__name__}. "
+                    f"Valid values: {[e.value for e in enum_class]}"
+                )
+        elif isinstance(value, Enum):
+            for enum_member in enum_class:
+                if enum_member.value == value.value:
+                    return enum_member
+            raise ValueError(
+                f"Cannot convert {value} (from {type(value).__name__}) to {enum_class.__name__}"
+            )
+        else:
+            raise ValueError(f"Cannot convert {type(value)} to {enum_class.__name__}")
