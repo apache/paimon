@@ -67,7 +67,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final FormatReaderMapping.Builder formatReaderMappingBuilder;
     private final DataFilePathFactory pathFactory;
     private final long asyncThreshold;
-
+    private final boolean ignoreCorruptFiles;
+    private final boolean ignoreLostFiles;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
@@ -80,9 +81,9 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             RowType valueType,
             FormatReaderMapping.Builder formatReaderMappingBuilder,
             DataFilePathFactory pathFactory,
-            long asyncThreshold,
             BinaryRow partition,
-            DeletionVector.Factory dvFactory) {
+            DeletionVector.Factory dvFactory,
+            CoreOptions coreOptions) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -90,7 +91,9 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.valueType = valueType;
         this.formatReaderMappingBuilder = formatReaderMappingBuilder;
         this.pathFactory = pathFactory;
-        this.asyncThreshold = asyncThreshold;
+        this.asyncThreshold = coreOptions.fileReaderAsyncThreshold().getBytes();
+        this.ignoreCorruptFiles = coreOptions.scanIgnoreCorruptFile();
+        this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
         this.partition = partition;
         this.formatReaderMappings = new HashMap<>();
         this.dvFactory = dvFactory;
@@ -149,6 +152,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                                 ? new FormatReaderContext(fileIO, filePath, fileSize)
                                 : new OrcFormatReaderContext(
                                         fileIO, filePath, fileSize, orcPoolSize),
+                        ignoreCorruptFiles,
+                        ignoreLostFiles,
                         formatReaderMapping.getIndexMapping(),
                         formatReaderMapping.getCastMapping(),
                         PartitionUtils.create(
@@ -282,9 +287,9 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     readValueType,
                     builder,
                     pathFactory.createDataFilePathFactory(partition, bucket),
-                    options.fileReaderAsyncThreshold().getBytes(),
                     partition,
-                    dvFactory);
+                    dvFactory,
+                    options);
         }
 
         protected FormatReaderMapping.Builder formatReaderMappingBuilder(
@@ -313,6 +318,10 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
         public FileIO fileIO() {
             return fileIO;
+        }
+
+        public CoreOptions options() {
+            return options;
         }
     }
 }
