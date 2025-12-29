@@ -26,7 +26,7 @@ import org.apache.paimon.types.DataField;
 /** Factory for creating FAISS vector index. */
 public class FaissVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
-    public static final String IDENTIFIER = "faiss-vector-knn";
+    public static final String IDENTIFIER = "faiss-vector-ann";
 
     @Override
     public String identifier() {

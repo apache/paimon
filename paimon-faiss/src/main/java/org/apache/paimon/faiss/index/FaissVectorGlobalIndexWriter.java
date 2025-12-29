@@ -18,6 +18,7 @@
 
 package org.apache.paimon.faiss.index;
 
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
@@ -76,8 +77,16 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
     }
 
     @Override
-    public void write(Object key) {
-        float[] vector = (float[]) key;
+    public void write(Object fieldData) {
+        float[] vector;
+        if (fieldData instanceof float[]) {
+            vector = (float[]) fieldData;
+        } else if (fieldData instanceof InternalArray) {
+            vector = ((InternalArray) fieldData).toFloatArray();
+        } else {
+            throw new RuntimeException(
+                    "Unsupported vector type: " + fieldData.getClass().getName());
+        }
         checkDimension(vector);
         vectorEntries.add(new VectorEntry(count, vector));
 
