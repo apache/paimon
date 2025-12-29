@@ -544,8 +544,7 @@ class RESTCatalogServer:
             "commitUser": getattr(snapshot, 'commit_user', 'rest-server'),
             "commitIdentifier": getattr(snapshot, 'commit_identifier', 1),
             "commitKind": getattr(snapshot, 'commit_kind', 'APPEND'),
-            "timeMillis": getattr(snapshot, 'time_millis', 1703721600000),
-            "logOffsets": getattr(snapshot, 'log_offsets', {})
+            "timeMillis": getattr(snapshot, 'time_millis', 1703721600000)
         }
 
         with open(snapshot_file, 'w') as f:

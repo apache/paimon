@@ -60,8 +60,7 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
             commit_user="test_user",
             commit_identifier=12345,
             commit_kind="APPEND",
-            time_millis=int(time.time() * 1000),
-            log_offsets={}
+            time_millis=int(time.time() * 1000)
         )
 
         # Create test statistics
