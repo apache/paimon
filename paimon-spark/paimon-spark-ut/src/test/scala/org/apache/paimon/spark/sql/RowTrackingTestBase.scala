@@ -559,8 +559,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
             Row(2, 200, "c2", 1, 2),
             Row(3, 300, "c33", 2, 2),
             Row(5, 550, "c5", 4, 2),
-            Row(7, 700, "c77", 9, 2),
-            Row(9, 990, "c99", 10, 2))
+            Row(7, 700, "c77", 5, 2),
+            Row(9, 990, "c99", 6, 2))
         )
       }
     }
