@@ -30,7 +30,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 
 
 class SplitGeneratorTest(unittest.TestCase):
@@ -94,6 +94,7 @@ class SplitGeneratorTest(unittest.TestCase):
                 commit.commit(writer.prepare_commit())
             finally:
                 writer.close()
+                commit.close()
 
     def _get_splits_info(self, table):
         read_builder = table.new_read_builder()
@@ -178,7 +179,7 @@ class SplitGeneratorTest(unittest.TestCase):
         
         deletion_vectors_enabled = table.options.deletion_vectors_enabled()
         merge_engine = table.options.merge_engine()
-        merge_engine_first_row = str(merge_engine) == 'FIRST_ROW'
+        merge_engine_first_row = merge_engine == MergeEngine.FIRST_ROW
         
         for split in splits:
             has_level_0 = any(f.level == 0 for f in split.files)
