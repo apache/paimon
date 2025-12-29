@@ -98,6 +98,40 @@ public class BlobTableITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of(1, "paimon", blobData));
     }
 
+    @Test
+    public void testWriteBlobWithBuiltInFunction() throws Exception {
+        byte[] blobData = new byte[1024 * 1024];
+        RANDOM.nextBytes(blobData);
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + warehouse + "/external_blob";
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(blobData);
+        }
+
+        BlobDescriptor blobDescriptor = new BlobDescriptor(uri, 0, blobData.length);
+        batchSql(
+                "INSERT INTO blob_table_descriptor VALUES (1, 'paimon', sys.path_to_descriptor('"
+                        + uri
+                        + "'))");
+        byte[] newDescriptorBytes =
+                (byte[]) batchSql("SELECT picture FROM blob_table_descriptor").get(0).getField(0);
+        BlobDescriptor newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes);
+        Options options = new Options();
+        options.set("warehouse", warehouse.toString());
+        CatalogContext catalogContext = CatalogContext.create(options);
+        UriReaderFactory uriReaderFactory = new UriReaderFactory(catalogContext);
+        Blob blob =
+                Blob.fromDescriptor(
+                        uriReaderFactory.create(newBlobDescriptor.uri()), blobDescriptor);
+        assertThat(blob.toData()).isEqualTo(blobData);
+        URI blobUri = URI.create(blob.toDescriptor().uri());
+        assertThat(blobUri.getScheme()).isNotNull();
+        batchSql("ALTER TABLE blob_table_descriptor SET ('blob-as-descriptor'='false')");
+        assertThat(batchSql("SELECT * FROM blob_table_descriptor"))
+                .containsExactlyInAnyOrder(Row.of(1, "paimon", blobData));
+    }
+
     private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
 
     public static String bytesToHex(byte[] bytes) {
