@@ -46,11 +46,7 @@ public class RewritePostponeBucketCommittableOperator
     @Override
     public void processElement(StreamRecord<Committable> element) throws Exception {
         Committable committable = element.getValue();
-        if (committable.kind() != Committable.Kind.FILE) {
-            output.collect(element);
-        }
-
-        rewriter.add((CommitMessageImpl) committable.wrappedCommittable());
+        rewriter.add((CommitMessageImpl) committable.commitMessage());
     }
 
     @Override

@@ -20,22 +20,18 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.description.DescribedEnum;
-import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
-import org.apache.paimon.options.description.TextElement;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.STREAMING_READ_MODE;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
 
@@ -47,48 +43,6 @@ public class FlinkConnectorOptions {
     public static final String TABLE_DYNAMIC_OPTION_PREFIX = "paimon.";
 
     public static final int MIN_CLUSTERING_SAMPLE_FACTOR = 20;
-
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<String> LOG_SYSTEM =
-            ConfigOptions.key("log.system")
-                    .stringType()
-                    .defaultValue(NONE)
-                    .withDescription(
-                            Description.builder()
-                                    .text("The log system used to keep changes of the table.")
-                                    .linebreak()
-                                    .linebreak()
-                                    .text("Possible values:")
-                                    .linebreak()
-                                    .list(
-                                            TextElement.text(
-                                                    "\"none\": No log system, the data is written only to file store,"
-                                                            + " and the streaming read will be directly read from the file store."))
-                                    .list(
-                                            TextElement.text(
-                                                    "\"kafka\": Kafka log system, the data is double written to file"
-                                                            + " store and kafka, and the streaming read will be read from kafka. If streaming read from file, configures "
-                                                            + STREAMING_READ_MODE.key()
-                                                            + " to "
-                                                            + StreamingReadMode.FILE.getValue()
-                                                            + "."))
-                                    .build());
-
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<Integer> LOG_SYSTEM_PARTITIONS =
-            ConfigOptions.key("log.system.partitions")
-                    .intType()
-                    .defaultValue(1)
-                    .withDescription(
-                            "The number of partitions of the log system. If log system is kafka, this is kafka partitions.");
-
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<Integer> LOG_SYSTEM_REPLICATION =
-            ConfigOptions.key("log.system.replication")
-                    .intType()
-                    .defaultValue(1)
-                    .withDescription(
-                            "The number of replication of the log system. If log system is kafka, this is kafka replicationFactor.");
 
     public static final ConfigOption<Integer> SINK_PARALLELISM =
             ConfigOptions.key("sink.parallelism")

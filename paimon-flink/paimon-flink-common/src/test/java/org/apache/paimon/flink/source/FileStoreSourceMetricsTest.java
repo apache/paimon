@@ -126,20 +126,6 @@ public class FileStoreSourceMetricsTest {
                 .isEqualTo(1L);
     }
 
-    @Test
-    public void logHybridFileStoreSourceScanMetricsTest() throws Exception {
-        writeOnce();
-        FlinkSource logHybridFileStoreSource =
-                LogHybridSourceFactory.buildHybridFirstSource(table, null, null, null, null);
-        logHybridFileStoreSource.restoreEnumerator(context, null);
-        assertThat(TestingMetricUtils.getGauge(scanMetricGroup, "lastScannedManifests").getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        TestingMetricUtils.getGauge(scanMetricGroup, "lastScanResultedTableFiles")
-                                .getValue())
-                .isEqualTo(1L);
-    }
-
     private void writeOnce() throws Exception {
         InnerTableWrite writer = table.newWrite("test");
         TableCommitImpl commit = table.newCommit("test");

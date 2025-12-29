@@ -351,9 +351,9 @@ public class CompactAction extends TableActionBase {
                                     realTable.rowType(),
                                     blobAsDescriptor,
                                     table.catalogEnvironment().catalogContext()),
-                            new RowDataChannelComputer(realTable.schema(), false),
+                            new RowDataChannelComputer(realTable.schema()),
                             null);
-            FixedBucketSink sink = new FixedBucketSink(realTable, null, null);
+            FixedBucketSink sink = new FixedBucketSink(realTable, null);
             DataStream<Committable> written =
                     sink.doWrite(partitioned, commitUser, partitioned.getParallelism())
                             .forward()
@@ -365,7 +365,7 @@ public class CompactAction extends TableActionBase {
             dataStreams.add(sourcePair.getRight());
         }
 
-        FixedBucketSink sink = new FixedBucketSink(fileStoreTable, null, null);
+        FixedBucketSink sink = new FixedBucketSink(fileStoreTable, null);
         DataStream<Committable> dataStream = dataStreams.get(0);
         for (int i = 1; i < dataStreams.size(); i++) {
             dataStream = dataStream.union(dataStreams.get(i));

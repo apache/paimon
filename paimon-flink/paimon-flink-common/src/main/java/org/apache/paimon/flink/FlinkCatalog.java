@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
@@ -117,7 +116,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -149,13 +147,9 @@ import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
 import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
-import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
-import static org.apache.paimon.flink.FlinkCatalogOptions.REGISTER_TIMEOUT;
 import static org.apache.paimon.flink.LogicalTypeConversion.toBlobType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
-import static org.apache.paimon.flink.log.LogStoreRegister.registerLogSystem;
-import static org.apache.paimon.flink.log.LogStoreRegister.unRegisterLogSystem;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.SCHEMA;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.compoundKey;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeNonPhysicalColumn;
@@ -184,9 +178,6 @@ public class FlinkCatalog extends AbstractCatalog {
     private final ClassLoader classLoader;
     private final Catalog catalog;
     private final String name;
-    private final boolean logStoreAutoRegister;
-
-    private final Duration logStoreAutoRegisterTimeout;
 
     private final boolean disableCreateTableInDefaultDatabase;
 
@@ -201,8 +192,6 @@ public class FlinkCatalog extends AbstractCatalog {
         this.catalog = catalog;
         this.name = name;
         this.classLoader = classLoader;
-        this.logStoreAutoRegister = options.get(LOG_SYSTEM_AUTO_REGISTER);
-        this.logStoreAutoRegisterTimeout = options.get(REGISTER_TIMEOUT);
         this.disableCreateTableInDefaultDatabase = options.get(DISABLE_CREATE_TABLE_IN_DEFAULT_DB);
         if (!disableCreateTableInDefaultDatabase) {
             try {
@@ -400,16 +389,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
         try {
             Table table = null;
-            if (logStoreAutoRegister) {
-                try {
-                    table = catalog.getTable(identifier);
-                } catch (Catalog.TableNotExistException ignored) {
-                }
-            }
             catalog.dropTable(toIdentifier(tablePath), ignoreIfNotExists);
-            if (logStoreAutoRegister && table != null) {
-                unRegisterLogSystem(identifier, table.options(), classLoader);
-            }
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
         }
@@ -429,28 +409,20 @@ public class FlinkCatalog extends AbstractCatalog {
             return;
         }
 
-        Identifier identifier = toIdentifier(tablePath);
         // the returned value of "table.getOptions" may be unmodifiable (for example from
         // TableDescriptor)
         Map<String, String> options = new HashMap<>(table.getOptions());
         if (table instanceof CatalogMaterializedTable) {
             fillOptionsForMaterializedTable((CatalogMaterializedTable) table, options);
         }
-        Schema paimonSchema = buildPaimonSchema(identifier, table, options);
+        Schema paimonSchema = buildPaimonSchema(table, options);
 
-        boolean unRegisterLogSystem = false;
         try {
-            catalog.createTable(identifier, paimonSchema, ignoreIfExists);
+            catalog.createTable(toIdentifier(tablePath), paimonSchema, ignoreIfExists);
         } catch (Catalog.TableAlreadyExistException e) {
-            unRegisterLogSystem = true;
             throw new TableAlreadyExistException(getName(), tablePath);
         } catch (Catalog.DatabaseNotExistException e) {
-            unRegisterLogSystem = true;
             throw new DatabaseNotExistException(getName(), e.database());
-        } finally {
-            if (logStoreAutoRegister && unRegisterLogSystem) {
-                unRegisterLogSystem(identifier, options, classLoader);
-            }
         }
     }
 
@@ -519,8 +491,7 @@ public class FlinkCatalog extends AbstractCatalog {
         options.putAll(mtOptions.toMap());
     }
 
-    protected Schema buildPaimonSchema(
-            Identifier identifier, CatalogBaseTable catalogTable, Map<String, String> options) {
+    protected Schema buildPaimonSchema(CatalogBaseTable catalogTable, Map<String, String> options) {
         String connector = options.get(CONNECTOR.key());
         options.remove(CONNECTOR.key());
         if (!StringUtils.isNullOrWhitespaceOnly(connector)
@@ -531,15 +502,6 @@ public class FlinkCatalog extends AbstractCatalog {
                             + connector
                             + "' when using Paimon Catalog\n"
                             + " You can create TEMPORARY table instead if you want to create the table of other connector.");
-        }
-
-        if (logStoreAutoRegister) {
-            // Although catalog.createTable will copy the default options, but we need this info
-            // here before create table, such as table-default.kafka.bootstrap.servers defined in
-            // catalog options. Temporarily, we copy the default options here.
-            CatalogUtils.tableDefaultOptions(catalog.options()).forEach(options::putIfAbsent);
-            options.put(REGISTER_TIMEOUT.key(), logStoreAutoRegisterTimeout.toString());
-            registerLogSystem(catalog, identifier, options, classLoader);
         }
 
         if (catalogTable instanceof CatalogTable) {

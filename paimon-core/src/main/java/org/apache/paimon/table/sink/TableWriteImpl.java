@@ -224,15 +224,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
                 row);
     }
 
-    public SinkRecord toLogRecord(SinkRecord record) {
-        keyAndBucketExtractor.setRecord(record.row());
-        return new SinkRecord(
-                record.partition(),
-                bucketMode == BucketMode.BUCKET_UNAWARE ? -1 : record.bucket(),
-                keyAndBucketExtractor.logPrimaryKey(),
-                record.row());
-    }
-
     @Override
     public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
         write.compact(partition, bucket, fullCompaction);

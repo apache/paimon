@@ -20,11 +20,8 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
-import org.apache.paimon.flink.log.LogSinkProvider;
-import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
@@ -38,8 +35,6 @@ import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.types.RowKind;
 
-import javax.annotation.Nullable;
-
 import java.util.HashMap;
 import java.util.Map;
 
@@ -47,7 +42,6 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.CLUSTERING_COLUMNS;
 import static org.apache.paimon.CoreOptions.CLUSTERING_INCREMENTAL;
 import static org.apache.paimon.CoreOptions.CLUSTERING_STRATEGY;
-import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SORT_IN_CLUSTER;
@@ -59,7 +53,6 @@ public abstract class FlinkTableSinkBase
 
     protected final ObjectIdentifier tableIdentifier;
     protected final DynamicTableFactory.Context context;
-    @Nullable protected final LogStoreTableFactory logStoreTableFactory;
 
     protected final Table table;
 
@@ -67,14 +60,10 @@ public abstract class FlinkTableSinkBase
     protected boolean overwrite = false;
 
     public FlinkTableSinkBase(
-            ObjectIdentifier tableIdentifier,
-            Table table,
-            DynamicTableFactory.Context context,
-            @Nullable LogStoreTableFactory logStoreTableFactory) {
+            ObjectIdentifier tableIdentifier, Table table, DynamicTableFactory.Context context) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
         this.context = context;
-        this.logStoreTableFactory = logStoreTableFactory;
     }
 
     @Override
@@ -95,10 +84,6 @@ public abstract class FlinkTableSinkBase
 
             if (options.get(MERGE_ENGINE) == MergeEngine.PARTIAL_UPDATE
                     && new CoreOptions(options).definedAggFunc()) {
-                return requestedMode;
-            }
-
-            if (options.get(LOG_CHANGELOG_MODE) == LogChangelogMode.ALL) {
                 return requestedMode;
             }
 
@@ -127,23 +112,16 @@ public abstract class FlinkTableSinkBase
                                             formatTable, overwrite, staticPartitions)
                                     .sinkFrom(dataStream));
         }
-        LogSinkProvider logSinkProvider = null;
-        if (logStoreTableFactory != null) {
-            logSinkProvider = logStoreTableFactory.createSinkProvider(this.context, context);
-        }
 
         Options conf = Options.fromMap(table.options());
         // Do not sink to log store when overwrite mode
-        final LogSinkFunction logSinkFunction =
-                overwrite ? null : (logSinkProvider == null ? null : logSinkProvider.createSink());
         return new PaimonDataStreamSinkProvider(
                 (dataStream) -> {
-                    LogFlinkSinkBuilder builder = createSinkBuilder();
-                    builder.logSinkFunction(logSinkFunction)
-                            .forRowData(
-                                    new DataStream<>(
-                                            dataStream.getExecutionEnvironment(),
-                                            dataStream.getTransformation()));
+                    FlinkSinkBuilder builder = createSinkBuilder();
+                    builder.forRowData(
+                            new DataStream<>(
+                                    dataStream.getExecutionEnvironment(),
+                                    dataStream.getTransformation()));
                     if (!conf.get(CLUSTERING_INCREMENTAL)) {
                         builder.clusteringIfPossible(
                                 conf.get(CLUSTERING_COLUMNS),
@@ -159,14 +137,13 @@ public abstract class FlinkTableSinkBase
                 });
     }
 
-    protected LogFlinkSinkBuilder createSinkBuilder() {
-        return new LogFlinkSinkBuilder(table);
+    protected FlinkSinkBuilder createSinkBuilder() {
+        return new FlinkSinkBuilder(table);
     }
 
     @Override
     public DynamicTableSink copy() {
-        FlinkTableSink copied =
-                new FlinkTableSink(tableIdentifier, table, context, logStoreTableFactory);
+        FlinkTableSink copied = new FlinkTableSink(tableIdentifier, table, context);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         return copied;

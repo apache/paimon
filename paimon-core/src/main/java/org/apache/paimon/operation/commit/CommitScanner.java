@@ -122,8 +122,4 @@ public class CommitScanner {
         indexChangesWithOverwrite.addAll(indexFiles);
         return new CommitChanges(changesWithOverwrite, emptyList(), indexChangesWithOverwrite);
     }
-
-    public long totalRecordCount(Snapshot snapshot) {
-        return scan.totalRecordCount(snapshot);
-    }
 }

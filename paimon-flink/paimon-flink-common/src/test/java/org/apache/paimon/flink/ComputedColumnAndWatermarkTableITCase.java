@@ -16,7 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.kafka;
+package org.apache.paimon.flink;
+
+import org.apache.paimon.flink.util.AbstractTestBase;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,20 +31,16 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
-import static org.apache.paimon.flink.kafka.KafkaLogTestUtils.createTableWithKafkaLog;
-import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.SCAN_LATEST;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildQuery;
-import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildQueryWithTableOptions;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildSimpleQuery;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTable;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTemporaryTable;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.insertIntoFromTable;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
-import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingReadWithReadFirst;
 
 /** Paimon IT case when the table has computed column and watermark spec. */
-public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
+public class ComputedColumnAndWatermarkTableITCase extends AbstractTestBase {
 
     @BeforeEach
     public void setUp() {
@@ -220,117 +218,5 @@ public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
         insertIntoFromTable(temporaryTable, table);
 
         testBatchRead(buildSimpleQuery(table), initialRecords);
-    }
-
-    @Test
-    public void testStreamingSelectWithWatermark() throws Exception {
-        // physical column as watermark
-        List<Row> initialRecords =
-                Arrays.asList(
-                        changelogRow(
-                                "+I",
-                                "US Dollar",
-                                102L,
-                                LocalDateTime.parse("1990-04-07T10:00:11.120")),
-                        changelogRow(
-                                "+I", "Euro", 119L, LocalDateTime.parse("2020-04-07T10:10:11.120")),
-                        changelogRow(
-                                "+I", "Yen", 1L, LocalDateTime.parse("2022-04-07T09:54:11.120")));
-
-        String temporaryTable =
-                createTemporaryTable(
-                        Arrays.asList("currency STRING", "rate BIGINT", "ts TIMESTAMP(3)"),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        initialRecords,
-                        null,
-                        true,
-                        "I");
-
-        String table =
-                createTableWithKafkaLog(
-                        Arrays.asList(
-                                "currency STRING",
-                                "rate BIGINT",
-                                "ts TIMESTAMP(3)",
-                                "WATERMARK FOR ts AS ts - INTERVAL '3' YEAR"),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        true);
-
-        testStreamingReadWithReadFirst(
-                        temporaryTable,
-                        table,
-                        buildQueryWithTableOptions(
-                                table,
-                                "*",
-                                "WHERE CURRENT_WATERMARK(ts) IS NULL OR ts > CURRENT_WATERMARK(ts)",
-                                SCAN_LATEST),
-                        Collections.singletonList(
-                                changelogRow(
-                                        "+I",
-                                        "US Dollar",
-                                        102L,
-                                        LocalDateTime.parse("1990-04-07T10:00:11.120"))))
-                .close();
-
-        // computed column as watermark
-        table =
-                createTableWithKafkaLog(
-                        Arrays.asList(
-                                "currency STRING",
-                                "rate BIGINT",
-                                "ts TIMESTAMP(3)",
-                                "ts1 AS ts",
-                                "WATERMARK FOR ts1 AS ts1 - INTERVAL '3' YEAR"),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        true);
-
-        testStreamingReadWithReadFirst(
-                        temporaryTable,
-                        table,
-                        buildQueryWithTableOptions(
-                                table,
-                                "currency, rate, ts1",
-                                "WHERE CURRENT_WATERMARK(ts1) IS NULL OR ts1 > CURRENT_WATERMARK(ts1)",
-                                SCAN_LATEST),
-                        Collections.singletonList(
-                                changelogRow(
-                                        "+I",
-                                        "US Dollar",
-                                        102L,
-                                        LocalDateTime.parse("1990-04-07T10:00:11.120"))))
-                .close();
-
-        // query both event time and processing time
-        table =
-                createTableWithKafkaLog(
-                        Arrays.asList(
-                                "currency STRING",
-                                "rate BIGINT",
-                                "ts TIMESTAMP(3)",
-                                "ptime AS PROCTIME()",
-                                "WATERMARK FOR ts AS ts - INTERVAL '3' YEAR"),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        true);
-
-        testStreamingReadWithReadFirst(
-                        temporaryTable,
-                        table,
-                        buildQueryWithTableOptions(
-                                table,
-                                "currency, rate, ts, CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))",
-                                "WHERE CURRENT_WATERMARK(ts) IS NULL OR ts > CURRENT_WATERMARK(ts)",
-                                SCAN_LATEST),
-                        Collections.singletonList(
-                                changelogRow(
-                                        "+I",
-                                        "US Dollar",
-                                        102L,
-                                        LocalDateTime.parse("1990-04-07T10:00:11.120"),
-                                        16)))
-                .close();
     }
 }

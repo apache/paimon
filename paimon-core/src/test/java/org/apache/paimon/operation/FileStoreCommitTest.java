@@ -446,84 +446,41 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testSnapshotAddLogOffset() throws Exception {
-        TestFileStore store = createStore(false, 2);
-
-        // commit 1
-        Map<Integer, Long> offsets = new HashMap<>();
-        offsets.put(0, 1L);
-        offsets.put(1, 3L);
-        Snapshot snapshot =
-                store.commitData(generateDataList(10), gen::getPartition, kv -> 0, offsets).get(0);
-        assertThat(snapshot.logOffsets()).isEqualTo(offsets);
-
-        // commit 2
-        offsets = new HashMap<>();
-        offsets.put(1, 8L);
-        snapshot =
-                store.commitData(generateDataList(10), gen::getPartition, kv -> 0, offsets).get(0);
-        Map<Integer, Long> expected = new HashMap<>();
-        expected.put(0, 1L);
-        expected.put(1, 8L);
-        assertThat(snapshot.logOffsets()).isEqualTo(expected);
-    }
-
-    @Test
     public void testSnapshotRecordCount() throws Exception {
         TestFileStore store = createStore(false);
 
         // commit 1
         Snapshot snapshot1 =
-                store.commitData(
-                                generateDataList(10),
-                                gen::getPartition,
-                                kv -> 0,
-                                Collections.emptyMap())
-                        .get(0);
+                store.commitData(generateDataList(10), gen::getPartition, kv -> 0).get(0);
         long deltaRecordCount1 = snapshot1.deltaRecordCount();
         assertThat(deltaRecordCount1).isNotEqualTo(0L);
         assertThat(snapshot1.totalRecordCount()).isEqualTo(deltaRecordCount1);
-        assertThat(snapshot1.changelogRecordCount()).isEqualTo(0L);
+        assertThat(snapshot1.changelogRecordCount()).isNull();
 
         // commit 2
         Snapshot snapshot2 =
-                store.commitData(
-                                generateDataList(20),
-                                gen::getPartition,
-                                kv -> 0,
-                                Collections.emptyMap())
-                        .get(0);
+                store.commitData(generateDataList(20), gen::getPartition, kv -> 0).get(0);
         long deltaRecordCount2 = snapshot2.deltaRecordCount();
         assertThat(deltaRecordCount2).isNotEqualTo(0L);
         assertThat(snapshot2.totalRecordCount())
                 .isEqualTo(snapshot1.totalRecordCount() + deltaRecordCount2);
-        assertThat(snapshot2.changelogRecordCount()).isEqualTo(0L);
+        assertThat(snapshot2.changelogRecordCount()).isNull();
 
         // commit 3
         Snapshot snapshot3 =
-                store.commitData(
-                                generateDataList(30),
-                                gen::getPartition,
-                                kv -> 0,
-                                Collections.emptyMap())
-                        .get(0);
+                store.commitData(generateDataList(30), gen::getPartition, kv -> 0).get(0);
         long deltaRecordCount3 = snapshot3.deltaRecordCount();
         assertThat(deltaRecordCount3).isNotEqualTo(0L);
         assertThat(snapshot3.totalRecordCount())
                 .isEqualTo(snapshot2.totalRecordCount() + deltaRecordCount3);
-        assertThat(snapshot3.changelogRecordCount()).isEqualTo(0L);
+        assertThat(snapshot3.changelogRecordCount()).isNull();
     }
 
     @Test
     public void testCommitEmpty() throws Exception {
         TestFileStore store = createStore(false, 2);
         Snapshot snapshot =
-                store.commitData(
-                                generateDataList(10),
-                                gen::getPartition,
-                                kv -> 0,
-                                Collections.emptyMap())
-                        .get(0);
+                store.commitData(generateDataList(10), gen::getPartition, kv -> 0).get(0);
 
         // not commit empty new files
         store.commitDataImpl(
@@ -634,8 +591,7 @@ public class FileStoreCommitTest {
         store.commitData(
                 data.values().stream().flatMap(Collection::stream).collect(Collectors.toList()),
                 gen::getPartition,
-                kv -> 0,
-                Collections.singletonMap(0, 1L));
+                kv -> 0);
 
         // generate partitions to be dropped
         ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -820,7 +776,7 @@ public class FileStoreCommitTest {
         TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
         StatsFileHandler statsFileHandler = store.newStatsFileHandler();
         FileStoreCommitImpl fileStoreCommit = store.newCommit();
-        store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+        store.commitData(generateDataList(10), gen::getPartition, kv -> 0);
         Snapshot latestSnapshot = store.snapshotManager().latestSnapshot();
 
         // Analyze and check
@@ -839,7 +795,7 @@ public class FileStoreCommitTest {
         assertThat(readStats.get()).isEqualTo(fakeStats);
 
         // New snapshot will inherit last snapshot's stats
-        store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+        store.commitData(generateDataList(10), gen::getPartition, kv -> 0);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
         assertThat(readStats.get()).isEqualTo(fakeStats);
@@ -849,7 +805,7 @@ public class FileStoreCommitTest {
                 new ArrayList<>(TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields());
         newFields.add(new DataField(-1, "newField", DataTypes.INT()));
         store.mergeSchema(new RowType(false, newFields), true);
-        store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+        store.commitData(generateDataList(10), gen::getPartition, kv -> 0);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isEmpty();
 
@@ -937,8 +893,7 @@ public class FileStoreCommitTest {
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));
         // commit 1
-        Snapshot snapshot1 =
-                store.commitData(keyValues, s -> partition, kv -> 0, Collections.emptyMap()).get(0);
+        Snapshot snapshot1 = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
         // commit 2
         Snapshot snapshot2 =
                 store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
@@ -970,8 +925,7 @@ public class FileStoreCommitTest {
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));
         // commit 1
-        Snapshot snapshot1 =
-                store.commitData(keyValues, s -> partition, kv -> 0, Collections.emptyMap()).get(0);
+        Snapshot snapshot1 = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
         // overwrite commit 2
         Snapshot snapshot2 =
                 store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
@@ -1001,8 +955,7 @@ public class FileStoreCommitTest {
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));
         // commit 1
-        Snapshot snapshot =
-                store.commitData(keyValues, s -> partition, kv -> 0, Collections.emptyMap()).get(0);
+        Snapshot snapshot = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
 
         for (int i = 0; i < 100; i++) {
             snapshot =
@@ -1066,7 +1019,6 @@ public class FileStoreCommitTest {
                     0,
                     null,
                     Collections.emptyMap(),
-                    Collections.emptyMap(),
                     Snapshot.CommitKind.APPEND,
                     firstLatest,
                     mustConflictCheck(),
@@ -1079,7 +1031,6 @@ public class FileStoreCommitTest {
                     Collections.emptyList(),
                     0,
                     null,
-                    Collections.emptyMap(),
                     Collections.emptyMap(),
                     Snapshot.CommitKind.COMPACT,
                     store.snapshotManager().latestSnapshot(),

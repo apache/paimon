@@ -1927,8 +1927,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 new FlinkTableSink(
                         context.getObjectIdentifier(),
                         new FlinkTableFactory().buildPaimonTable(context),
-                        context,
-                        null);
+                        context);
         assertThat(tableSink).isInstanceOf(FlinkTableSink.class);
 
         // 2. get sink provider
