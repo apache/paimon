@@ -130,8 +130,6 @@ public class FileSystemCatalog extends AbstractCatalog {
         SchemaManager schemaManager = schemaManager(identifier);
         try {
             runWithLock(identifier, () -> uncheck(() -> schemaManager.createTable(schema)));
-        } catch (RuntimeException e) {
-            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
