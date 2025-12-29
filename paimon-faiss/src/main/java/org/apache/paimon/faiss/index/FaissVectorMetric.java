@@ -76,4 +76,3 @@ public enum FaissVectorMetric {
         throw new IllegalArgumentException("Unknown metric value: " + value);
     }
 }
-

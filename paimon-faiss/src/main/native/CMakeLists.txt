@@ -90,17 +90,26 @@ if(NOT faiss_FOUND)
     endif()
     
     if(NOT FAISS_FOUND)
-        # Manual search for FAISS
+        # Manual search for FAISS - check build directory structure first
+        # FAISS build directory has: build/faiss/libfaiss.so and headers in source dir
         find_path(FAISS_INCLUDE_DIR faiss/Index.h
             HINTS 
+                $ENV{FAISS_HOME}
                 $ENV{FAISS_HOME}/include
+                $ENV{FAISS_BUILD_DIR}/../
+                /root/faiss/faiss
                 /usr/local/include
                 /opt/homebrew/include
         )
         find_library(FAISS_LIBRARY faiss
             HINTS
+                $ENV{FAISS_BUILD_DIR}/faiss
+                $ENV{FAISS_HOME}/build/faiss
                 $ENV{FAISS_HOME}/lib
+                /root/faiss/faiss/build/faiss
                 /usr/local/lib
+                /usr/lib
+                /usr/lib64
                 /opt/homebrew/lib
         )
         
@@ -108,8 +117,13 @@ if(NOT faiss_FOUND)
             set(FAISS_FOUND TRUE)
             set(FAISS_INCLUDE_DIRS ${FAISS_INCLUDE_DIR})
             set(FAISS_LIBRARIES ${FAISS_LIBRARY})
+            message(STATUS "Found FAISS include dir: ${FAISS_INCLUDE_DIR}")
+            message(STATUS "Found FAISS library: ${FAISS_LIBRARY}")
         else()
-            message(FATAL_ERROR "FAISS not found. Please install FAISS:\n  brew install faiss\nOr set FAISS_HOME environment variable.")
+            message(FATAL_ERROR "FAISS not found. Please install FAISS:\n"
+                "  brew install faiss (macOS)\n"
+                "  conda install -c pytorch faiss-cpu\n"
+                "Or set FAISS_HOME environment variable to the FAISS source/install directory.")
         endif()
     endif()
 endif()

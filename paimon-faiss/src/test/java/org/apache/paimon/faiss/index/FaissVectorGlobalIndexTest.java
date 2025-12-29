@@ -380,4 +380,3 @@ public class FaissVectorGlobalIndexTest {
         return resultIds.contains(rowId);
     }
 }
-

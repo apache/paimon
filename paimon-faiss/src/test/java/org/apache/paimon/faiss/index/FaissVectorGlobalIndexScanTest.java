@@ -335,4 +335,3 @@ public class FaissVectorGlobalIndexScanTest {
         commit.commit(1, Collections.singletonList(message));
     }
 }
-

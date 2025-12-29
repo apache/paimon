@@ -51,4 +51,3 @@ public class FaissVectorGlobalIndexer implements GlobalIndexer {
         return new FaissVectorGlobalIndexReader(fileReader, files, fieldType, options);
     }
 }
-

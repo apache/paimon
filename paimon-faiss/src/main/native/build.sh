@@ -88,14 +88,28 @@ if [ "$PLATFORM" = "linux" ]; then
         echo "  On CentOS/RHEL: sudo yum install devtoolset-7-gcc-c++ && scl enable devtoolset-7 bash"
     fi
     
-    # Check for FAISS
-    if [ ! -f /usr/local/lib/libfaiss.so ] && [ ! -f /usr/lib/libfaiss.so ] && [ ! -f /usr/lib64/libfaiss.so ]; then
-        echo "FAISS library not found in standard paths."
-        echo "Please install FAISS:"
-        echo "  Option 1: conda install -c pytorch faiss-cpu"
-        echo "  Option 2: Build from source: https://github.com/facebookresearch/faiss"
-        echo ""
-        echo "If FAISS is installed in a custom location, set FAISS_HOME environment variable."
+    # Auto-detect FAISS installation paths
+    if [ -z "$FAISS_HOME" ]; then
+        # Check common FAISS build locations
+        if [ -f /root/faiss/faiss/build/faiss/libfaiss.so ]; then
+            export FAISS_HOME="/root/faiss/faiss"
+            export FAISS_BUILD_DIR="/root/faiss/faiss/build"
+            echo "Found FAISS at: $FAISS_HOME (build dir: $FAISS_BUILD_DIR)"
+        elif [ -f /usr/local/lib/libfaiss.so ]; then
+            export FAISS_HOME="/usr/local"
+            echo "Found FAISS at: $FAISS_HOME"
+        elif [ -f /usr/lib/libfaiss.so ] || [ -f /usr/lib64/libfaiss.so ]; then
+            export FAISS_HOME="/usr"
+            echo "Found FAISS at: $FAISS_HOME"
+        else
+            echo "FAISS library not found in standard paths."
+            echo "Please set FAISS_HOME environment variable or install FAISS:"
+            echo "  Option 1: conda install -c pytorch faiss-cpu"
+            echo "  Option 2: Build from source: https://github.com/facebookresearch/faiss"
+            exit 1
+        fi
+    else
+        echo "Using FAISS_HOME: $FAISS_HOME"
     fi
 fi
 
@@ -104,8 +118,20 @@ rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
+# Build CMake arguments
+CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release"
+
+# Add FAISS paths if set
+if [ -n "$FAISS_HOME" ]; then
+    CMAKE_ARGS="${CMAKE_ARGS} -DFAISS_HOME=${FAISS_HOME}"
+fi
+if [ -n "$FAISS_BUILD_DIR" ]; then
+    CMAKE_ARGS="${CMAKE_ARGS} -DFAISS_BUILD_DIR=${FAISS_BUILD_DIR}"
+fi
+
 # Configure with CMake
-cmake -DCMAKE_BUILD_TYPE=Release ..
+echo "Running: cmake ${CMAKE_ARGS} .."
+cmake ${CMAKE_ARGS} ..
 
 # Build
 cmake --build . --config Release

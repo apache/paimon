@@ -409,4 +409,3 @@ public class FaissIndex implements Closeable {
         }
     }
 }
-

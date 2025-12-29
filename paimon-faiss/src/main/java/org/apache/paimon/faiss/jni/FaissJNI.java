@@ -318,4 +318,3 @@ public class FaissJNI {
      */
     public static native String getVersion();
 }
-
