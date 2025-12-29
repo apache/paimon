@@ -36,24 +36,6 @@ import java.util.Objects;
 /**
  * This file is the entrance to all data committed at some specific time point.
  *
- * <p>Versioned change list:
- *
- * <ul>
- *   <li>Version 1: Initial version for paimon <= 0.2. There is no "version" field in json file.
- *   <li>Version 2: Introduced in paimon 0.3. Add "version" field and "changelogManifestList" field.
- *   <li>Version 3: Introduced in paimon 0.4. Add "baseRecordCount" field, "deltaRecordCount" field
- *       and "changelogRecordCount" field.
- * </ul>
- *
- * <p>Unversioned change list:
- *
- * <ul>
- *   <li>Since paimon 0.2 and paimon 0.3, commitIdentifier is changed from a String to a long value.
- *       For paimon < 0.2, only Flink connectors have paimon sink and they use checkpointId as
- *       commitIdentifier (which is a long value). Json can automatically perform type conversion so
- *       there is no compatibility issue.
- * </ul>
- *
  * @since 0.9.0
  */
 @Public
