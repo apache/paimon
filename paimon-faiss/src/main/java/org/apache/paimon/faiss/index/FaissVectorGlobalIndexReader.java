@@ -29,7 +29,6 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.DataInputStream;
@@ -38,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.PriorityQueue;
 
 /**
@@ -52,7 +52,6 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
     private final List<FaissIndex> indices;
     private final List<GlobalIndexIOMeta> ioMetas;
     private final GlobalIndexFileReader fileReader;
-    private final GlobalIndexResult defaultResult;
     private final DataType fieldType;
     private final FaissVectorIndexOptions options;
     private volatile boolean indicesLoaded = false;
@@ -67,14 +66,13 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
         this.fieldType = fieldType;
         this.options = options;
         this.indices = new ArrayList<>();
-        this.defaultResult = GlobalIndexResult.fromRange(new Range(0, ioMetas.get(0).rangeEnd()));
     }
 
     @Override
-    public GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
+    public Optional<GlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
         try {
             ensureLoadIndices();
-            return search(vectorSearch);
+            return Optional.ofNullable(search(vectorSearch));
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
@@ -273,72 +271,72 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
     // =================== unsupported =====================
 
     @Override
-    public GlobalIndexResult visitIsNotNull(FieldRef fieldRef) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitIsNotNull(FieldRef fieldRef) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitIsNull(FieldRef fieldRef) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitIsNull(FieldRef fieldRef) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitStartsWith(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitEndsWith(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitEndsWith(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitContains(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitContains(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitLike(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitLike(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitLessThan(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitNotEqual(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitNotEqual(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitLessOrEqual(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitEqual(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitEqual(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitGreaterThan(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitIn(FieldRef fieldRef, List<Object> literals) {
+        return Optional.empty();
     }
 
     @Override
-    public GlobalIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        return defaultResult;
+    public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
+        return Optional.empty();
     }
 }

@@ -150,17 +150,14 @@ public class FaissJNI {
         // Try to load from build directory or known paths
         String userDir = System.getProperty("user.dir");
         String[] buildPaths = {
-            userDir + "/paimon-faiss/src/main/native/build/lib",
+            // When running from IDE, user.dir might be module directory
             userDir + "/src/main/native/build/lib",
-            userDir + "/paimon-faiss/src/main/resources/native/" + platformDir,
             userDir + "/src/main/resources/native/" + platformDir,
             // Paths relative to module directory when running from IDE or Maven
             "paimon-faiss/src/main/native/build/lib",
             "paimon-faiss/src/main/resources/native/" + platformDir,
             "src/main/native/build/lib",
-            "src/main/resources/native/" + platformDir,
-            // Fallback for test running from target directory
-            userDir + "/target/classes/native/" + platformDir
+            "src/main/resources/native/" + platformDir
         };
 
         for (String path : buildPaths) {

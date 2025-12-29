@@ -18,12 +18,12 @@
 
 package org.apache.paimon.faiss.index;
 
-import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
-import org.apache.paimon.utils.Range;
 
 import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
@@ -38,7 +38,7 @@ import java.util.List;
  * <p>This implementation uses FAISS for efficient approximate nearest neighbor search with support
  * for multiple index types including Flat, HNSW, IVF, and IVF-PQ.
  */
-public class FaissVectorGlobalIndexWriter implements GlobalIndexWriter {
+public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
 
     private static final int VERSION = 1;
 
@@ -108,9 +108,7 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexWriter {
         try (OutputStream out = new BufferedOutputStream(fileWriter.newOutputStream(fileName))) {
             buildIndex(vectorEntries, out);
         }
-        long minRowIdInBatch = vectorEntries.get(0).id;
-        long maxRowIdInBatch = vectorEntries.get(vectorEntries.size() - 1).id;
-        results.add(ResultEntry.of(fileName, null, new Range(minRowIdInBatch, maxRowIdInBatch)));
+        results.add(new ResultEntry(fileName, count, null));
         vectorEntries.clear();
     }
 
