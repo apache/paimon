@@ -44,8 +44,10 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
@@ -1227,7 +1229,8 @@ public class FlinkCatalog extends AbstractCatalog {
         if (partitionSpec != null && partitionSpec.getPartitionSpec() != null) {
             readBuilder.withPartitionFilter(partitionSpec.getPartitionSpec());
         }
-        return readBuilder.newScan().listPartitionEntries();
+        DataTableScan tableScan = (DataTableScan) readBuilder.newScan();
+        return tableScan.withLevelFilter(Filter.alwaysTrue()).listPartitionEntries();
     }
 
     private List<CatalogPartitionSpec> getPartitionSpecs(
