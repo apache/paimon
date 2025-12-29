@@ -64,7 +64,11 @@ class FileIO:
             return uri.scheme, uri.netloc, f"{uri.netloc}{uri.path}"
 
     @staticmethod
-    def _create_s3_retry_config(max_attempts: int = 10, request_timeout: int = 60, connect_timeout: int = 60) -> Dict[str, Any]:
+    def _create_s3_retry_config(
+            max_attempts: int = 10,
+            request_timeout: int = 60,
+            connect_timeout: int = 60
+    ) -> Dict[str, Any]:
         from pyarrow.fs import AwsStandardS3RetryStrategy
 
         retry_strategy = AwsStandardS3RetryStrategy(max_attempts=max_attempts)
