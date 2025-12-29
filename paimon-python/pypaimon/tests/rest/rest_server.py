@@ -541,11 +541,12 @@ class RESTCatalogServer:
             "schemaId": getattr(snapshot, 'schema_id', 0),
             "baseManifestList": getattr(snapshot, 'base_manifest_list', f"manifest-list-{uuid.uuid4()}"),
             "deltaManifestList": getattr(snapshot, 'delta_manifest_list', f"manifest-list-{uuid.uuid4()}"),
+            "totalRecordCount": getattr(snapshot, 'total_record_count'),
+            "deltaRecordCount": getattr(snapshot, 'delta_record_count'),
             "commitUser": getattr(snapshot, 'commit_user', 'rest-server'),
             "commitIdentifier": getattr(snapshot, 'commit_identifier', 1),
             "commitKind": getattr(snapshot, 'commit_kind', 'APPEND'),
-            "timeMillis": getattr(snapshot, 'time_millis', 1703721600000),
-            "logOffsets": getattr(snapshot, 'log_offsets', {})
+            "timeMillis": getattr(snapshot, 'time_millis', 1703721600000)
         }
 
         with open(snapshot_file, 'w') as f:
