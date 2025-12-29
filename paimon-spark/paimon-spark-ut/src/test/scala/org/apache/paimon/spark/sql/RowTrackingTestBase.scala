@@ -146,6 +146,22 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Row Tracking: update") {
+    withTable("s", "t") {
+      spark.sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      spark.sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+
+      spark.sql("UPDATE t SET data = 22 WHERE id = 2")
+
+      spark.sql("INSERT INTO t VALUES (4, 4), (5, 5)")
+
+      checkAnswer(
+        spark.sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+        Seq(Row(1, 1, 0, 1), Row(2, 22, 1, 2), Row(3, 3, 2, 1), Row(4, 4, 3, 3), Row(5, 5, 4, 3))
+      )
+    }
+  }
+
   test("Row Tracking: merge into table") {
     withTable("s", "t") {
       sql("CREATE TABLE s (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
