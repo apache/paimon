@@ -51,7 +51,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Build Faiss
-        run:  mvn -T 2C -B clean install -DskipTests -Ppaimon-faiss
+        run:  mvn -T 2C -B clean install -DskipTests -Pflink1,spark3,paimon-faiss
 
       - name: Test Faiss
         timeout-minutes: 60
