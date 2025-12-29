@@ -69,14 +69,23 @@ class FileIO:
             request_timeout: int = 60,
             connect_timeout: int = 60
     ) -> Dict[str, Any]:
-        from pyarrow.fs import AwsStandardS3RetryStrategy
-
-        retry_strategy = AwsStandardS3RetryStrategy(max_attempts=max_attempts)
-        return {
-            'retry_strategy': retry_strategy,
+        """
+        AwsStandardS3RetryStrategy is only available in PyArrow >= 8.0.0.
+        """
+        config = {
             'request_timeout': request_timeout,
             'connect_timeout': connect_timeout
         }
+
+        if parse(pyarrow.__version__) >= parse("8.0.0"):
+            try:
+                from pyarrow.fs import AwsStandardS3RetryStrategy
+                retry_strategy = AwsStandardS3RetryStrategy(max_attempts=max_attempts)
+                config['retry_strategy'] = retry_strategy
+            except ImportError:
+                pass
+
+        return config
 
     def _extract_oss_bucket(self, location) -> str:
         uri = urlparse(location)
