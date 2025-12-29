@@ -44,6 +44,8 @@ public class SnapshotLoaderImpl implements SnapshotLoader {
     public Optional<Snapshot> load() throws IOException {
         try (Catalog catalog = catalogLoader.load()) {
             return catalog.loadSnapshot(identifier).map(TableSnapshot::snapshot);
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
