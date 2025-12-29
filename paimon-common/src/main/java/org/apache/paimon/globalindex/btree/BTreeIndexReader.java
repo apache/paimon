@@ -67,8 +67,14 @@ public class BTreeIndexReader implements GlobalIndexReader {
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
         BTreeIndexMeta indexMeta = BTreeIndexMeta.deserialize(globalIndexIOMeta.metadata());
-        this.minKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getFirstKey()));
-        this.maxKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getLastKey()));
+        if (indexMeta.getFirstKey() != null) {
+            this.minKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getFirstKey()));
+            this.maxKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getLastKey()));
+        } else {
+            // this is possible if this btree index file only stores nulls.
+            this.minKey = null;
+            this.maxKey = null;
+        }
         this.input = fileReader.getInputStream(globalIndexIOMeta.fileName());
 
         // prepare file footer
@@ -340,6 +346,9 @@ public class BTreeIndexReader implements GlobalIndexReader {
         // Traverse all data to avoid returning null values, which is very advantageous in
         // situations where there are many null values
         // TODO do not traverse all data if less null values
+        if (minKey == null) {
+            return new RoaringNavigableMap64();
+        }
         return rangeQuery(minKey, maxKey, true, true);
     }
 
@@ -364,14 +373,15 @@ public class BTreeIndexReader implements GlobalIndexReader {
         while ((dataIter = fileIter.readBatch()) != null) {
             while (dataIter.hasNext()) {
                 entry = dataIter.next();
+                Object key = keySerializer.deserialize(entry.getKey());
 
-                if (!fromInclusive && !skipped) {
+                if (!fromInclusive && !skipped && comparator.compare(key, from) == 0) {
                     // this is correct only if the underlying file do not have duplicated keys.
                     skipped = true;
                     continue;
                 }
 
-                int difference = comparator.compare(keySerializer.deserialize(entry.getKey()), to);
+                int difference = comparator.compare(key, to);
                 if (difference > 0 || !toInclusive && difference == 0) {
                     return result;
                 }

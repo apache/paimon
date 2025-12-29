@@ -23,7 +23,6 @@ import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.UnionGlobalIndexReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
@@ -32,7 +31,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.LazyField;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -95,10 +93,6 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
     @Override
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
-        List<GlobalIndexReader> readers = new ArrayList<>();
-        for (GlobalIndexIOMeta meta : files) {
-            readers.add(new BTreeIndexReader(keySerializer, fileReader, meta, cacheManager.get()));
-        }
-        return new UnionGlobalIndexReader(readers);
+        return new LazyFilteredBTreeReader(files, keySerializer, fileReader, cacheManager.get());
     }
 }
