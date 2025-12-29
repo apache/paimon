@@ -77,8 +77,22 @@ public class FaissVectorGlobalIndexScanTest {
     @BeforeEach
     public void before() throws Exception {
         // Skip tests if FAISS native library is not available
-        Assumptions.assumeTrue(
-                FaissJNI.isLoaded(), "FAISS native library not available, skipping test");
+        if (!FaissJNI.isLoaded()) {
+            Throwable error = FaissJNI.getLoadError();
+            StringBuilder errorMsg = new StringBuilder("FAISS native library not available.");
+            if (error != null) {
+                errorMsg.append("\nError: ").append(error.getMessage());
+                if (error.getCause() != null) {
+                    errorMsg.append("\nCause: ").append(error.getCause().getMessage());
+                }
+            }
+            errorMsg.append(
+                    "\n\nTo run FAISS tests on Linux:"
+                            + "\n1. Build native library: cd paimon-faiss/src/main/native && ./build.sh"
+                            + "\n2. Set LD_LIBRARY_PATH: export LD_LIBRARY_PATH=/root/faiss/faiss/build/faiss:$LD_LIBRARY_PATH"
+                            + "\n3. Run tests: mvn test -pl paimon-faiss -Ppaimon-faiss");
+            Assumptions.assumeTrue(false, errorMsg.toString());
+        }
 
         Path tablePath = new Path(tempDir.toString());
         fileIO = new LocalFileIO();

@@ -44,12 +44,67 @@ public class FaissJNI {
 
     static {
         try {
+            // Try to load libfaiss dependency first (required on Linux)
+            tryLoadFaissDependency();
             loadNativeLibrary();
             loaded = true;
+            LOG.info("FAISS native library loaded successfully");
         } catch (Throwable t) {
             loadError = t;
             LOG.warn("Failed to load FAISS native library: {}", t.getMessage());
+            LOG.warn(
+                    "Make sure libfaiss.so is in LD_LIBRARY_PATH. "
+                            + "If FAISS is built from source, run: "
+                            + "export LD_LIBRARY_PATH=/path/to/faiss/build/faiss:$LD_LIBRARY_PATH");
+            LOG.debug("Full stack trace:", t);
         }
+    }
+
+    private static void tryLoadFaissDependency() {
+        // Try to load libfaiss.so from common locations
+        String[] faissPaths = {
+            System.getenv("FAISS_BUILD_DIR") != null
+                    ? System.getenv("FAISS_BUILD_DIR") + "/faiss/libfaiss.so"
+                    : null,
+            System.getenv("FAISS_HOME") != null
+                    ? System.getenv("FAISS_HOME") + "/build/faiss/libfaiss.so"
+                    : null,
+            System.getenv("FAISS_HOME") != null
+                    ? System.getenv("FAISS_HOME") + "/lib/libfaiss.so"
+                    : null,
+            "/root/faiss/faiss/build/faiss/libfaiss.so",
+            "/usr/local/lib/libfaiss.so",
+            "/usr/lib/libfaiss.so",
+            "/usr/lib64/libfaiss.so",
+            "/usr/lib/x86_64-linux-gnu/libfaiss.so"
+        };
+
+        for (String path : faissPaths) {
+            if (path != null) {
+                File libFile = new File(path);
+                if (libFile.exists()) {
+                    try {
+                        System.load(libFile.getAbsolutePath());
+                        LOG.info("Loaded libfaiss.so from: {}", libFile.getAbsolutePath());
+                        return; // Success
+                    } catch (UnsatisfiedLinkError e) {
+                        LOG.debug("Could not load libfaiss from {}: {}", path, e.getMessage());
+                    }
+                }
+            }
+        }
+
+        // Try system library path
+        try {
+            System.loadLibrary("faiss");
+            LOG.info("Loaded libfaiss from system library path");
+            return; // Success
+        } catch (UnsatisfiedLinkError e) {
+            LOG.debug("Could not load libfaiss from system: {}", e.getMessage());
+        }
+
+        // FAISS might already be loaded or available via rpath in the JNI library
+        LOG.debug("libfaiss not loaded directly, will try to load JNI library anyway");
     }
 
     /** Check if the native library is loaded successfully. */
@@ -72,27 +127,80 @@ public class FaissJNI {
     }
 
     private static void loadNativeLibrary() throws IOException {
+        StringBuilder errors = new StringBuilder();
+
         // Try to load from java.library.path first
         try {
             System.loadLibrary(LIBRARY_NAME);
             LOG.info("Loaded FAISS native library from java.library.path");
             return;
         } catch (UnsatisfiedLinkError e) {
-            LOG.debug("Could not load from java.library.path, trying bundled library");
+            String msg = "java.library.path: " + e.getMessage();
+            LOG.debug("Could not load from java.library.path, trying other locations");
+            errors.append(msg).append("; ");
         }
 
-        // Try to load bundled library from resources
         String osName = System.getProperty("os.name").toLowerCase();
         String osArch = System.getProperty("os.arch").toLowerCase();
         String libraryFileName = getLibraryFileName(osName);
-        String resourcePath = "/native/" + getPlatformDir(osName, osArch) + "/" + libraryFileName;
+        String platformDir = getPlatformDir(osName, osArch);
+
+        LOG.debug("Looking for {} in platform dir {}", libraryFileName, platformDir);
+
+        // Try to load from build directory or known paths
+        String userDir = System.getProperty("user.dir");
+        String[] buildPaths = {
+            userDir + "/paimon-faiss/src/main/native/build/lib",
+            userDir + "/src/main/native/build/lib",
+            userDir + "/paimon-faiss/src/main/resources/native/" + platformDir,
+            userDir + "/src/main/resources/native/" + platformDir,
+            // Paths relative to module directory when running from IDE or Maven
+            "paimon-faiss/src/main/native/build/lib",
+            "paimon-faiss/src/main/resources/native/" + platformDir,
+            "src/main/native/build/lib",
+            "src/main/resources/native/" + platformDir,
+            // Fallback for test running from target directory
+            userDir + "/target/classes/native/" + platformDir
+        };
+
+        for (String path : buildPaths) {
+            File libFile = new File(path, libraryFileName);
+            LOG.debug("Checking path: {}", libFile.getAbsolutePath());
+            if (libFile.exists()) {
+                try {
+                    System.load(libFile.getAbsolutePath());
+                    LOG.info("Loaded FAISS native library from: {}", libFile.getAbsolutePath());
+                    return;
+                } catch (UnsatisfiedLinkError e) {
+                    String msg =
+                            "Could not load from "
+                                    + libFile.getAbsolutePath()
+                                    + ": "
+                                    + e.getMessage();
+                    LOG.debug(msg);
+                    errors.append(msg).append("; ");
+                }
+            }
+        }
+
+        // Try to load bundled library from resources
+        String resourcePath = "/native/" + platformDir + "/" + libraryFileName;
+        LOG.debug("Trying to load from resources: {}", resourcePath);
 
         try (InputStream is = FaissJNI.class.getResourceAsStream(resourcePath)) {
             if (is == null) {
-                throw new UnsatisfiedLinkError(
+                String msg =
                         "Native library not found in resources: "
                                 + resourcePath
-                                + ". Please ensure FAISS native library is installed and accessible.");
+                                + ". Platform: "
+                                + osName
+                                + "-"
+                                + osArch
+                                + ". "
+                                + "Please build the native library first: "
+                                + "cd paimon-faiss/src/main/native && ./build.sh";
+                errors.append(msg);
+                throw new UnsatisfiedLinkError(errors.toString());
             }
 
             Path tempDir = Files.createTempDirectory("paimon-faiss-");
@@ -101,8 +209,23 @@ public class FaissJNI {
             tempDir.toFile().deleteOnExit();
 
             Files.copy(is, tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            System.load(tempFile.getAbsolutePath());
-            LOG.info("Loaded FAISS native library from resources: {}", resourcePath);
+
+            LOG.debug("Extracted library to: {}", tempFile.getAbsolutePath());
+
+            try {
+                System.load(tempFile.getAbsolutePath());
+                LOG.info("Loaded FAISS native library from resources: {}", resourcePath);
+            } catch (UnsatisfiedLinkError e) {
+                String msg =
+                        "Library extracted but failed to load from "
+                                + tempFile.getAbsolutePath()
+                                + ": "
+                                + e.getMessage()
+                                + ". This usually means libfaiss.so is missing. "
+                                + "Set LD_LIBRARY_PATH to include the FAISS library directory.";
+                errors.append(msg);
+                throw new UnsatisfiedLinkError(errors.toString());
+            }
         }
     }
 

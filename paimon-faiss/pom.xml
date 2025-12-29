@@ -31,10 +31,6 @@ under the License.
     <artifactId>paimon-faiss</artifactId>
     <name>Paimon : Faiss</name>
 
-    <properties>
-        <target.java.version>11</target.java.version>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
