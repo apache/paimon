@@ -50,6 +50,6 @@ public class DescriptorToStringUnbound implements UnboundFunction {
 
     @Override
     public String name() {
-        return "path_to_descriptor";
+        return "descriptor_to_string";
     }
 }

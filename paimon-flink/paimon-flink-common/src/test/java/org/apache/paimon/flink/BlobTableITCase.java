@@ -111,7 +111,7 @@ public class BlobTableITCase extends CatalogITCaseBase {
 
         BlobDescriptor blobDescriptor = new BlobDescriptor(uri, 0, blobData.length);
         batchSql(
-                "INSERT INTO blob_table_descriptor VALUES (1, 'paimon', path_to_descriptor('"
+                "INSERT INTO blob_table_descriptor VALUES (1, 'paimon', sys.path_to_descriptor('"
                         + uri
                         + "'))");
         byte[] newDescriptorBytes =
