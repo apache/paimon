@@ -72,19 +72,28 @@ class SplitGeneratorTest(unittest.TestCase):
         self.catalog.create_table(f'default.{table_name}', schema, False)
         return self.catalog.get_table(f'default.{table_name}')
 
+    def _create_test_data(self, id_ranges):
+        return [
+            {'id': list(range(start, end)) if isinstance(start, int) else start,
+             'value': [f'v{i}' for i in (range(start, end) if isinstance(start, int) else start)]}
+            for start, end in id_ranges
+        ]
+    
     def _write_data(self, table, data_list):
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('value', pa.string())
+        ])
         for data in data_list:
             write_builder = table.new_batch_write_builder()
             writer = write_builder.new_write()
-            batch = pa.Table.from_pydict(data, schema=pa.schema([
-                ('id', pa.int64()),
-                ('value', pa.string())
-            ]))
-            writer.write_arrow(batch)
-            commit_messages = writer.prepare_commit()
             commit = write_builder.new_commit()
-            commit.commit(commit_messages)
-            writer.close()
+            try:
+                batch = pa.Table.from_pydict(data, schema=pa_schema)
+                writer.write_arrow(batch)
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
 
     def _get_splits_info(self, table):
         read_builder = table.new_read_builder()
@@ -98,21 +107,12 @@ class SplitGeneratorTest(unittest.TestCase):
         return result
 
     def test_merge_tree(self):
-        table1 = self._create_table('test_merge_tree_1', split_target_size='1kb', split_open_file_cost='100b')
-        self._write_data(table1, [
-            {'id': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'value': [f'v{i}' for i in range(11)]},
-            {'id': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 'value': [f'v{i}' for i in range(13)]},
-            {'id': [15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
-                    29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
-                    43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56,
-                    57, 58, 59, 60],
-             'value': [f'v{i}' for i in range(15, 61)]},
-            {'id': [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
-                    32, 33, 34, 35, 36, 37, 38, 39, 40],
-             'value': [f'v{i}' for i in range(18, 41)]},
-            {'id': [82, 83, 84, 85], 'value': [f'v{i}' for i in range(82, 86)]},
-            {'id': list(range(100, 201)), 'value': [f'v{i}' for i in range(100, 201)]},
+        test_data = self._create_test_data([
+            (0, 11), (0, 13), (15, 61), (18, 41), (82, 86), (100, 201)
         ])
+        
+        table1 = self._create_table('test_merge_tree_1', split_target_size='1kb', split_open_file_cost='100b')
+        self._write_data(table1, test_data)
         splits_info1 = self._get_splits_info(table1)
         self.assertGreater(len(splits_info1), 0)
         total_files1 = sum(len(files) for files, _ in splits_info1)
@@ -120,20 +120,7 @@ class SplitGeneratorTest(unittest.TestCase):
         self.assertLessEqual(len(splits_info1), 6)
         
         table2 = self._create_table('test_merge_tree_2', split_target_size='1kb', split_open_file_cost='1kb')
-        self._write_data(table2, [
-            {'id': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'value': [f'v{i}' for i in range(11)]},
-            {'id': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 'value': [f'v{i}' for i in range(13)]},
-            {'id': [15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
-                    29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
-                    43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56,
-                    57, 58, 59, 60],
-             'value': [f'v{i}' for i in range(15, 61)]},
-            {'id': [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
-                    32, 33, 34, 35, 36, 37, 38, 39, 40],
-             'value': [f'v{i}' for i in range(18, 41)]},
-            {'id': [82, 83, 84, 85], 'value': [f'v{i}' for i in range(82, 86)]},
-            {'id': list(range(100, 201)), 'value': [f'v{i}' for i in range(100, 201)]},
-        ])
+        self._write_data(table2, test_data)
         splits_info2 = self._get_splits_info(table2)
         self.assertGreater(len(splits_info2), 0)
         total_files2 = sum(len(files) for files, _ in splits_info2)
@@ -183,14 +170,9 @@ class SplitGeneratorTest(unittest.TestCase):
 
     def test_merge_tree_split_raw_convertible(self):
         table = self._create_table('test_mixed_levels')
-        self._write_data(table, [
-            {'id': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'value': [f'v{i}' for i in range(11)]},
-            {'id': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 'value': [f'v{i}' for i in range(13)]},
-            {'id': [13, 14, 15, 16, 17, 18, 19, 20], 'value': [f'v{i}' for i in range(13, 21)]},
-            {'id': list(range(21, 221)), 'value': [f'v{i}' for i in range(21, 221)]},
-            {'id': list(range(201, 211)), 'value': [f'v{i}' for i in range(201, 211)]},
-            {'id': list(range(211, 221)), 'value': [f'v{i}' for i in range(211, 221)]},
-        ])
+        self._write_data(table, self._create_test_data([
+            (0, 11), (0, 13), (13, 21), (21, 221), (201, 211), (211, 221)
+        ]))
         splits = table.new_read_builder().new_scan().plan().splits()
         self.assertGreater(len(splits), 0)
         
