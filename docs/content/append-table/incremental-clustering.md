@@ -39,12 +39,15 @@ gradually converges to an optimal state, significantly reducing the decision-mak
 
 
 Incremental Clustering supports:
-- Support incremental clustering; minimizing write amplification as possible.
-- Support small-file compaction; during rewrites, respect target-file-size.
-- Support changing clustering keys; newly ingested data is clustered according to the latest clustering keys.
-- Provide a full mode; when selected, the entire dataset will be reclustered.
+- Support incremental clustering: minimizing write amplification as possible.
+- Support small-file compaction: during rewrites, respect target-file-size.
+- Support changing clustering keys: newly ingested data is clustered according to the latest clustering keys.
+- Provide a full mode: when in full mode, the entire dataset will be reclustered.
 
-**Only append unaware-bucket table supports Incremental Clustering.**
+
+**Note**: If data ordering within bucketed tables is not a concern, you can set `'bucket-append-ordered'` to `false` 
+to disable this ordering requirement. This allows you to enable Incremental Clustering for bucketed tables, 
+which can significantly improve query performance for specific query keys.
 
 ## Enable Incremental Clustering
 
@@ -84,6 +87,30 @@ To enable Incremental Clustering, the following configuration needs to be set fo
     </tbody>
 
 </table>
+
+For bucketed tables, you also need to set the following configuration:
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 20%">Option</th>
+      <th class="text-left" style="width: 10%">Value</th>
+      <th class="text-left" style="width: 5%">Required</th>
+      <th class="text-left" style="width: 10%">Type</th>
+      <th class="text-left" style="width: 55%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>bucket-append-ordered</h5></td>
+      <td>false</td>
+      <td style="word-wrap: break-word;">Yes</td>
+      <td>Boolean</td>
+      <td>Must be set to false to disable the ordering requirement for bucketed tables. Default is true.</td>
+    </tr>
+    </tbody>
+
+</table>
+
 
 Once Incremental Clustering for a table is enabled, you can run Incremental Clustering in batch mode periodically 
 to continuously optimizes data layout of the table and deliver better query performance.

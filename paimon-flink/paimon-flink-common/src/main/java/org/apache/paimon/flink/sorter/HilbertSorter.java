@@ -61,7 +61,12 @@ public class HilbertSorter extends TableSorter {
 
     @Override
     public DataStream<RowData> sort() {
-        return sortStreamByHilbert(origin, table);
+        return sortStreamByHilbert(origin, table, true);
+    }
+
+    @Override
+    public DataStream<RowData> sortInLocal() {
+        return sortStreamByHilbert(origin, table, false);
     }
 
     /**
@@ -71,7 +76,7 @@ public class HilbertSorter extends TableSorter {
      * @return the sorted data stream
      */
     private DataStream<RowData> sortStreamByHilbert(
-            DataStream<RowData> inputStream, FileStoreTable table) {
+            DataStream<RowData> inputStream, FileStoreTable table, boolean isGlobalSort) {
         final HilbertIndexer hilbertIndexer = new HilbertIndexer(table.rowType(), orderColNames);
         return SortUtils.sortStreamByKey(
                 inputStream,
@@ -102,6 +107,7 @@ public class HilbertSorter extends TableSorter {
                     }
                 },
                 GenericRow::of,
-                tableSortInfo);
+                tableSortInfo,
+                isGlobalSort);
     }
 }

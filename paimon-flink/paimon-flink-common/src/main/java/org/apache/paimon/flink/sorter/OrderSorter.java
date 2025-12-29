@@ -49,13 +49,23 @@ public class OrderSorter extends TableSorter {
 
     @Override
     public DataStream<RowData> sort() {
+        return sortStreamByOrder(origin, table, true);
+    }
+
+    @Override
+    public DataStream<RowData> sortInLocal() {
+        return sortStreamByOrder(origin, table, false);
+    }
+
+    private DataStream<RowData> sortStreamByOrder(
+            DataStream<RowData> inputStream, FileStoreTable table, boolean isGlobalSort) {
         final RowType valueRowType = table.rowType();
         final int[] keyProjectionMap = table.schema().projection(orderColNames);
         final RowType keyRowType =
                 addKeyNamePrefix(Projection.of(keyProjectionMap).project(valueRowType));
 
         return SortUtils.sortStreamByKey(
-                origin,
+                inputStream,
                 table,
                 keyRowType,
                 InternalTypeInfo.fromRowType(keyRowType),
@@ -77,6 +87,7 @@ public class OrderSorter extends TableSorter {
                     }
                 },
                 row -> row,
-                tableSortInfo);
+                tableSortInfo,
+                isGlobalSort);
     }
 }
