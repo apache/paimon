@@ -19,13 +19,10 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.StartupMode;
-import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.Projection;
-import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
 import org.apache.paimon.flink.source.operator.MonitorSource;
@@ -42,9 +39,7 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
-import org.apache.flink.connector.base.source.hybrid.HybridSource;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -66,7 +61,6 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
-import static org.apache.paimon.CoreOptions.StreamingReadMode.FILE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_SUFFIX;
 import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
@@ -92,7 +86,6 @@ public class FlinkSourceBuilder {
     @Nullable private int[][] projectedFields;
     @Nullable private Predicate predicate;
     @Nullable private PartitionPredicate partitionPredicate;
-    @Nullable private LogSourceProvider logSourceProvider;
     @Nullable private Integer parallelism;
     @Nullable private Long limit;
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
@@ -190,12 +183,6 @@ public class FlinkSourceBuilder {
                             ((FileStoreTable) table).schema().logicalPartitionType(),
                             dynamicPartitionFilteringFields);
         }
-        return this;
-    }
-
-    @Deprecated
-    FlinkSourceBuilder logSourceProvider(LogSourceProvider logSourceProvider) {
-        this.logSourceProvider = logSourceProvider;
         return this;
     }
 
@@ -338,38 +325,14 @@ public class FlinkSourceBuilder {
         }
         TableScanUtils.streamingReadingValidate(table);
 
-        // TODO visit all options through CoreOptions
-        StartupMode startupMode = CoreOptions.startupMode(conf);
-        StreamingReadMode streamingReadMode = CoreOptions.streamReadType(conf);
-
-        if (logSourceProvider != null && streamingReadMode != FILE) {
-            logSourceProvider.preCreateSource();
-            if (startupMode != StartupMode.LATEST_FULL) {
-                return toDataStream(logSourceProvider.createSource(null));
-            } else {
-                return toDataStream(
-                        HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                        LogHybridSourceFactory.buildHybridFirstSource(
-                                                table,
-                                                projectedRowType(),
-                                                predicate,
-                                                partitionPredicate,
-                                                outerProject()))
-                                .addSource(
-                                        new LogHybridSourceFactory(logSourceProvider),
-                                        Boundedness.CONTINUOUS_UNBOUNDED)
-                                .build());
-            }
+        if (conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_ENABLED)) {
+            return buildAlignedContinuousFileSource();
+        } else if (conf.contains(CoreOptions.CONSUMER_ID)
+                && conf.get(CoreOptions.CONSUMER_CONSISTENCY_MODE)
+                        == CoreOptions.ConsumerMode.EXACTLY_ONCE) {
+            return buildDedicatedSplitGenSource(false);
         } else {
-            if (conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_ENABLED)) {
-                return buildAlignedContinuousFileSource();
-            } else if (conf.contains(CoreOptions.CONSUMER_ID)
-                    && conf.get(CoreOptions.CONSUMER_CONSISTENCY_MODE)
-                            == CoreOptions.ConsumerMode.EXACTLY_ONCE) {
-                return buildDedicatedSplitGenSource(false);
-            } else {
-                return buildContinuousFileSource();
-            }
+            return buildContinuousFileSource();
         }
     }
 

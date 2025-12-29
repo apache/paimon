@@ -148,7 +148,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 sql(
                         "SELECT snapshot_id, total_record_count, delta_record_count, changelog_record_count FROM T$snapshots");
         assertThat(result)
-                .containsExactlyInAnyOrder(Row.of(1L, 1L, 1L, 0L), Row.of(2L, 2L, 1L, 0L));
+                .containsExactlyInAnyOrder(Row.of(1L, 1L, 1L, null), Row.of(2L, 2L, 1L, null));
     }
 
     @Test

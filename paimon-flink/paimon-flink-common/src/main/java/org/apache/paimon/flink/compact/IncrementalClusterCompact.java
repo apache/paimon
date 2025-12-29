@@ -150,7 +150,7 @@ public class IncrementalClusterCompact {
 
         // 2.3 write and then reorganize the committable
         // set parallelism to null, and it'll forward parallelism when doWrite()
-        RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
+        RowAppendTableSink sink = new RowAppendTableSink(table, null, null);
         boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
         DataStream<Committable> written =
                 sink.doWrite(
@@ -184,7 +184,7 @@ public class IncrementalClusterCompact {
     }
 
     protected void buildCommitOperator(List<DataStream<Committable>> dataStreams) {
-        RowAppendTableSink sink = new RowAppendTableSink(table, null, null, null);
+        RowAppendTableSink sink = new RowAppendTableSink(table, null, null);
         DataStream<Committable> dataStream = dataStreams.get(0);
         for (int i = 1; i < dataStreams.size(); i++) {
             dataStream = dataStream.union(dataStreams.get(i));
