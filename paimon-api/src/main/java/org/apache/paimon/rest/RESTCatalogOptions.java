@@ -103,4 +103,11 @@ public class RESTCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog DLF OSS endpoint.");
+
+    public static final ConfigOption<Boolean> DLF_FILE_IO_CACHE_ENABLED =
+            ConfigOptions.key("dlf.file-io.cache.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable cache for visiting files using file io (currently only JindoFileIO supports cache).");
 }

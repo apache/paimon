@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jindo;
 
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -27,15 +28,23 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.utils.Pair;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_FILE_IO_CACHE_ENABLED;
+import static org.apache.paimon.rest.RESTTokenFileIO.FILE_IO_CACHE_POLICY;
 
 /**
  * Hadoop {@link FileIO}.
@@ -43,15 +52,71 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Important: copy this class from HadoopFileIO here to avoid class loader conflicts.
  */
 public abstract class HadoopCompliantFileIO implements FileIO {
+    private static final Logger LOG = LoggerFactory.getLogger(HadoopCompliantFileIO.class);
 
     private static final long serialVersionUID = 1L;
 
+    /// Detailed cache strategies are retrieved from REST server.
+    private static final String META_CACHE_ENABLED_TAG = "meta";
+    private static final String READ_CACHE_ENABLED_TAG = "read";
+    private static final String WRITE_CACHE_ENABLED_TAG = "write";
+
+    private boolean metaCacheEnabled = false;
+    private boolean readCacheEnabled = false;
+    private boolean writeCacheEnabled = false;
+
     protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> fsMap;
+    protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> jindoCacheFsMap;
+
+    // Only enable cache for path which is generated with uuid
+    private static final List<String> CACHE_WHITELIST_PATH_PATTERN =
+            Lists.newArrayList("bucket-", "manifest");
+
+    private boolean shouldCache(Path path) {
+        String pathStr = path.toUri().getPath();
+        for (String pattern : CACHE_WHITELIST_PATH_PATTERN) {
+            if (pathStr.contains(pattern)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public void configure(CatalogContext context) {
+        if (context.options().get(DLF_FILE_IO_CACHE_ENABLED)
+                && context.options().get(FILE_IO_CACHE_POLICY) != null) {
+            if (context.options().get("fs.jindocache.namespace.rpc.address") == null) {
+                LOG.info(
+                        "FileIO cache is enabled but JindoCache RPC address is not set, fallback to no-cache");
+            } else {
+                metaCacheEnabled =
+                        context.options()
+                                .get(FILE_IO_CACHE_POLICY)
+                                .contains(META_CACHE_ENABLED_TAG);
+                readCacheEnabled =
+                        context.options()
+                                .get(FILE_IO_CACHE_POLICY)
+                                .contains(READ_CACHE_ENABLED_TAG);
+                writeCacheEnabled =
+                        context.options()
+                                .get(FILE_IO_CACHE_POLICY)
+                                .contains(WRITE_CACHE_ENABLED_TAG);
+                LOG.info(
+                        "Cache enabled with cache policy: meta cache enabled {}, read cache enabled {}, write cache enabled {}",
+                        metaCacheEnabled,
+                        readCacheEnabled,
+                        writeCacheEnabled);
+            }
+        }
+    }
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
-        Pair<JindoHadoopSystem, String> pair = getFileSystemPair(hadoopPath);
+        boolean shouldCache = readCacheEnabled && shouldCache(path);
+        LOG.debug("InputStream should cache {} for path {}", shouldCache, path);
+        Pair<JindoHadoopSystem, String> pair = getFileSystemPair(hadoopPath, shouldCache);
         JindoHadoopSystem fs = pair.getKey();
         String sysType = pair.getValue();
         FSDataInputStream fsInput = fs.open(hadoopPath);
@@ -63,14 +128,19 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
+        boolean shouldCache = writeCacheEnabled && shouldCache(path);
+        LOG.debug("OutputStream should cache {} for path {}", shouldCache, path);
         return new HadoopPositionOutputStream(
-                getFileSystem(hadoopPath).create(hadoopPath, overwrite));
+                getFileSystem(hadoopPath, shouldCache).create(hadoopPath, overwrite));
     }
 
     @Override
     public FileStatus getFileStatus(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
-        return new HadoopFileStatus(getFileSystem(hadoopPath).getFileStatus(hadoopPath));
+        boolean shouldCache = metaCacheEnabled && shouldCache(path);
+        LOG.debug("GetFileStatus should cache {} for path {}", shouldCache, path);
+        return new HadoopFileStatus(
+                getFileSystem(hadoopPath, shouldCache).getFileStatus(hadoopPath));
     }
 
     @Override
@@ -78,7 +148,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         FileStatus[] statuses = new FileStatus[0];
         org.apache.hadoop.fs.FileStatus[] hadoopStatuses =
-                getFileSystem(hadoopPath).listStatus(hadoopPath);
+                getFileSystem(hadoopPath, false).listStatus(hadoopPath);
         if (hadoopStatuses != null) {
             statuses = new FileStatus[hadoopStatuses.length];
             for (int i = 0; i < hadoopStatuses.length; i++) {
@@ -93,7 +163,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
             throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         org.apache.hadoop.fs.RemoteIterator<org.apache.hadoop.fs.LocatedFileStatus> hadoopIter =
-                getFileSystem(hadoopPath).listFiles(hadoopPath, recursive);
+                getFileSystem(hadoopPath, false).listFiles(hadoopPath, recursive);
         return new RemoteIterator<FileStatus>() {
             @Override
             public boolean hasNext() throws IOException {
@@ -111,26 +181,28 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     @Override
     public boolean exists(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
-        return getFileSystem(hadoopPath).exists(hadoopPath);
+        boolean shouldCache = metaCacheEnabled && shouldCache(path);
+        LOG.debug("Exists should cache {} for path {}", shouldCache, path);
+        return getFileSystem(hadoopPath, shouldCache).exists(hadoopPath);
     }
 
     @Override
     public boolean delete(Path path, boolean recursive) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
-        return getFileSystem(hadoopPath).delete(hadoopPath, recursive);
+        return getFileSystem(hadoopPath, false).delete(hadoopPath, recursive);
     }
 
     @Override
     public boolean mkdirs(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
-        return getFileSystem(hadoopPath).mkdirs(hadoopPath);
+        return getFileSystem(hadoopPath, false).mkdirs(hadoopPath);
     }
 
     @Override
     public boolean rename(Path src, Path dst) throws IOException {
         org.apache.hadoop.fs.Path hadoopSrc = path(src);
         org.apache.hadoop.fs.Path hadoopDst = path(dst);
-        return getFileSystem(hadoopSrc).rename(hadoopSrc, hadoopDst);
+        return getFileSystem(hadoopSrc, false).rename(hadoopSrc, hadoopDst);
     }
 
     protected org.apache.hadoop.fs.Path path(Path path) {
@@ -141,21 +213,33 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         return new org.apache.hadoop.fs.Path(path.toUri());
     }
 
-    protected JindoHadoopSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
-        return getFileSystemPair(path).getKey();
+    protected JindoHadoopSystem getFileSystem(org.apache.hadoop.fs.Path path, boolean enableCache)
+            throws IOException {
+        return getFileSystemPair(path, enableCache).getKey();
     }
 
-    protected Pair<JindoHadoopSystem, String> getFileSystemPair(org.apache.hadoop.fs.Path path)
-            throws IOException {
-        if (fsMap == null) {
-            synchronized (this) {
-                if (fsMap == null) {
-                    fsMap = new ConcurrentHashMap<>();
+    protected Pair<JindoHadoopSystem, String> getFileSystemPair(
+            org.apache.hadoop.fs.Path path, boolean enableCache) throws IOException {
+        Map<String, Pair<JindoHadoopSystem, String>> map;
+        if (enableCache) {
+            if (jindoCacheFsMap == null) {
+                synchronized (this) {
+                    if (jindoCacheFsMap == null) {
+                        jindoCacheFsMap = new ConcurrentHashMap<>();
+                    }
                 }
             }
+            map = jindoCacheFsMap;
+        } else {
+            if (fsMap == null) {
+                synchronized (this) {
+                    if (fsMap == null) {
+                        fsMap = new ConcurrentHashMap<>();
+                    }
+                }
+            }
+            map = fsMap;
         }
-
-        Map<String, Pair<JindoHadoopSystem, String>> map = fsMap;
 
         String authority = path.toUri().getAuthority();
         if (authority == null) {
@@ -166,7 +250,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
                     authority,
                     k -> {
                         try {
-                            return createFileSystem(path);
+                            return createFileSystem(path, enableCache);
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
@@ -177,7 +261,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     }
 
     protected abstract Pair<JindoHadoopSystem, String> createFileSystem(
-            org.apache.hadoop.fs.Path path) throws IOException;
+            org.apache.hadoop.fs.Path path, boolean enableCache) throws IOException;
 
     private static class HadoopSeekableInputStream extends SeekableInputStream {
 
