@@ -76,7 +76,7 @@ public class KafkaDebeziumAvroDeserializationSchema
             key = (GenericRecord) keyContainerWithVersion.container();
         }
         GenericRecord value = (GenericRecord) valueContainerWithVersion.container();
-        return new CdcSourceRecord(topic, key, value);
+        return new CdcSourceRecord(topic, key, value, message.partition(), message.offset());
     }
 
     @Override

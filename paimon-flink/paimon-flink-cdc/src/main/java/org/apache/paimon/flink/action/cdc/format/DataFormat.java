@@ -38,11 +38,32 @@ public interface DataFormat {
      * Creates a new instance of {@link AbstractRecordParser} for this data format with the
      * specified configurations.
      *
+     * @param typeMapping Type mapping options.
      * @param computedColumns List of computed columns to be considered by the parser.
      * @return A new instance of {@link AbstractRecordParser}.
      */
     AbstractRecordParser createParser(
             TypeMapping typeMapping, List<ComputedColumn> computedColumns);
+
+    /**
+     * Creates a new instance of {@link AbstractRecordParser} for this data format with the
+     * specified configurations and corrupt record handling options.
+     *
+     * @param typeMapping Type mapping options.
+     * @param computedColumns List of computed columns to be considered by the parser.
+     * @param skipCorruptRecord Whether to skip corrupt records instead of throwing exceptions.
+     * @param logCorruptRecord Whether to log corrupt record details (may contain PII).
+     * @return A new instance of {@link AbstractRecordParser}.
+     */
+    default AbstractRecordParser createParser(
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            boolean skipCorruptRecord,
+            boolean logCorruptRecord) {
+        return createParser(typeMapping, computedColumns)
+                .withSkipCorruptRecord(skipCorruptRecord)
+                .withLogCorruptRecord(logCorruptRecord);
+    }
 
     KafkaDeserializationSchema<CdcSourceRecord> createKafkaDeserializer(
             Configuration cdcSourceConfig);
