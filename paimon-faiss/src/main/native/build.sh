@@ -407,6 +407,75 @@ else
     fi
 fi
 
+# Copy dependent shared libraries that couldn't be statically linked
+if [ "$PLATFORM" = "linux" ] && [ "$FAT_LIBRARY" = true ]; then
+    echo ""
+    echo "Copying dependent shared libraries..."
+    
+    # Get list of dependencies
+    DEPS=$(ldd "${NATIVE_OUTPUT_DIR}/libpaimon_faiss_jni.so" 2>/dev/null || echo "")
+    
+    # Function to copy a library and its symlinks
+    copy_lib() {
+        local lib_path=$1
+        local lib_name=$(basename "$lib_path")
+        
+        if [ -f "$lib_path" ]; then
+            # Copy the actual library file
+            cp -L "$lib_path" "${NATIVE_OUTPUT_DIR}/" 2>/dev/null || true
+            echo "  Copied: $lib_name"
+            
+            # If it's a symlink, also get the real file
+            if [ -L "$lib_path" ]; then
+                local real_path=$(readlink -f "$lib_path")
+                local real_name=$(basename "$real_path")
+                if [ "$real_name" != "$lib_name" ] && [ -f "$real_path" ]; then
+                    cp "$real_path" "${NATIVE_OUTPUT_DIR}/" 2>/dev/null || true
+                    echo "  Copied: $real_name (real file)"
+                fi
+            fi
+        fi
+    }
+    
+    # Copy libopenblas if needed
+    if echo "$DEPS" | grep -q "libopenblas"; then
+        OPENBLAS_SO=$(echo "$DEPS" | grep "libopenblas" | awk '{print $3}' | head -1)
+        if [ -n "$OPENBLAS_SO" ] && [ -f "$OPENBLAS_SO" ]; then
+            copy_lib "$OPENBLAS_SO"
+            # Also copy with the .so.0 name that some systems expect
+            OPENBLAS_BASENAME=$(basename "$OPENBLAS_SO")
+            if [[ "$OPENBLAS_BASENAME" != *".so.0"* ]]; then
+                # Create a symlink with .so.0 suffix
+                ln -sf "$OPENBLAS_BASENAME" "${NATIVE_OUTPUT_DIR}/libopenblas.so.0" 2>/dev/null || true
+            fi
+        fi
+    fi
+    
+    # Copy libgomp if needed
+    if echo "$DEPS" | grep -q "libgomp"; then
+        GOMP_SO=$(echo "$DEPS" | grep "libgomp" | awk '{print $3}' | head -1)
+        if [ -n "$GOMP_SO" ] && [ -f "$GOMP_SO" ]; then
+            copy_lib "$GOMP_SO"
+        fi
+    fi
+    
+    # Copy libgfortran if needed
+    if echo "$DEPS" | grep -q "libgfortran"; then
+        GFORTRAN_SO=$(echo "$DEPS" | grep "libgfortran" | awk '{print $3}' | head -1)
+        if [ -n "$GFORTRAN_SO" ] && [ -f "$GFORTRAN_SO" ]; then
+            copy_lib "$GFORTRAN_SO"
+        fi
+    fi
+    
+    # Copy libquadmath if needed
+    if echo "$DEPS" | grep -q "libquadmath"; then
+        QUADMATH_SO=$(echo "$DEPS" | grep "libquadmath" | awk '{print $3}' | head -1)
+        if [ -n "$QUADMATH_SO" ] && [ -f "$QUADMATH_SO" ]; then
+            copy_lib "$QUADMATH_SO"
+        fi
+    fi
+fi
+
 echo ""
 echo "============================================================"
 echo "  Build Complete!"

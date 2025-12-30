@@ -128,6 +128,9 @@ public class FaissJNI {
         String osArch = System.getProperty("os.arch").toLowerCase();
         String platformDir = getPlatformDir(osName, osArch);
 
+        // First, extract and load all bundled dependency libraries
+        extractBundledDependencies(platformDir);
+
         // Try to load libfaiss.so from bundled resources
         String faissResourcePath = "/native/" + platformDir + "/libfaiss.so";
         LOG.debug("Trying to load bundled libfaiss from: {}", faissResourcePath);
@@ -160,6 +163,71 @@ public class FaissJNI {
             LOG.debug("Failed to load bundled libfaiss.so: {}", e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Extract and load bundled dependency libraries (OpenBLAS, gomp, gfortran, etc.). These must be
+     * loaded before loading the main JNI library so that the dynamic linker can resolve symbols.
+     */
+    private static void extractBundledDependencies(String platformDir) {
+        // List of potential dependency libraries that might be bundled
+        // Order matters: load dependencies first (gfortran, quadmath before openblas)
+        String[][] dependencyLibs = {
+            // {resource name, alternative names...}
+            {"libquadmath.so.0", "libquadmath.so"},
+            {"libgfortran.so.5", "libgfortran.so.4", "libgfortran.so.3", "libgfortran.so"},
+            {"libgomp.so.1", "libgomp.so"},
+            {"libopenblas.so.0", "libopenblas.so"}
+        };
+
+        for (String[] libAliases : dependencyLibs) {
+            extractAndLoadBundledLibrary(platformDir, libAliases);
+        }
+    }
+
+    /**
+     * Extract and load a single bundled library from resources. Tries multiple aliases in order.
+     *
+     * @param platformDir the platform-specific directory (e.g., "linux-x86_64")
+     * @param libAliases array of library file names to try (in order)
+     * @return true if extracted and loaded successfully
+     */
+    private static boolean extractAndLoadBundledLibrary(String platformDir, String[] libAliases) {
+        for (String libName : libAliases) {
+            String resourcePath = "/native/" + platformDir + "/" + libName;
+
+            try (InputStream is = FaissJNI.class.getResourceAsStream(resourcePath)) {
+                if (is == null) {
+                    LOG.debug("Bundled {} not found in resources", libName);
+                    continue;
+                }
+
+                // Create temp directory if not already created
+                if (extractedLibDir == null) {
+                    extractedLibDir = Files.createTempDirectory("paimon-faiss-");
+                    extractedLibDir.toFile().deleteOnExit();
+                }
+
+                File tempFile = new File(extractedLibDir.toFile(), libName);
+                tempFile.deleteOnExit();
+
+                Files.copy(is, tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                LOG.debug("Extracted {} to: {}", libName, tempFile.getAbsolutePath());
+
+                // Try to load the library
+                try {
+                    System.load(tempFile.getAbsolutePath());
+                    LOG.info("Loaded bundled dependency: {}", libName);
+                    return true;
+                } catch (UnsatisfiedLinkError e) {
+                    LOG.debug("Failed to load {}: {}", libName, e.getMessage());
+                    // Continue to next alias
+                }
+            } catch (IOException e) {
+                LOG.debug("Failed to extract bundled {}: {}", libName, e.getMessage());
+            }
+        }
+        return false;
     }
 
     /** Check if the native library is loaded successfully. */
@@ -238,6 +306,9 @@ public class FaissJNI {
         // Try to load bundled library from resources
         String resourcePath = "/native/" + platformDir + "/" + libraryFileName;
         LOG.debug("Trying to load from resources: {}", resourcePath);
+
+        // First, extract all bundled dependency libraries
+        extractBundledDependencies(platformDir);
 
         try (InputStream is = FaissJNI.class.getResourceAsStream(resourcePath)) {
             if (is == null) {
