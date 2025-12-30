@@ -352,7 +352,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     changedPartitions(
                                             changes.appendTableFiles,
                                             changes.compactTableFiles,
-                                            changes.appendIndexFiles)));
+                                            changes.appendIndexFiles,
+                                            changes.compactIndexFiles)));
                     if (discardDuplicate) {
                         Set<FileEntry.Identifier> baseIdentifiers =
                                 baseEntries.stream()
@@ -897,7 +898,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
             List<BinaryRow> changedPartitions =
-                    changedPartitions(deltaFiles, Collections.emptyList(), indexFiles);
+                    changedPartitions(deltaFiles, emptyList(), indexFiles, emptyList());
             if (retryResult != null && retryResult.latestSnapshot != null) {
                 baseDataFiles = new ArrayList<>(retryResult.baseDataFiles);
                 List<SimpleFileEntry> incremental =
