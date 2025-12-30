@@ -50,6 +50,7 @@ import org.apache.paimon.operation.commit.ConflictDetection.ConflictCheck;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RowTrackingCommitUtils.RowTrackingAssigned;
+import org.apache.paimon.operation.commit.StrictModeChecker;
 import org.apache.paimon.operation.commit.SuccessCommitResult;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.operation.metrics.CommitStats;
@@ -158,10 +159,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final long commitMinRetryWait;
     private final long commitMaxRetryWait;
     private final int commitMaxRetries;
-    @Nullable private Long strictModeLastSafeSnapshot;
     private final InternalRowPartitionComputer partitionComputer;
     private final boolean rowTrackingEnabled;
     private final boolean discardDuplicateFiles;
+    @Nullable private final StrictModeChecker strictModeChecker;
     private final ConflictDetection conflictDetection;
     private final CommitCleaner commitCleaner;
 
@@ -198,10 +199,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long commitTimeout,
             long commitMinRetryWait,
             long commitMaxRetryWait,
-            @Nullable Long strictModeLastSafeSnapshot,
             boolean rowTrackingEnabled,
             boolean discardDuplicateFiles,
-            ConflictDetection conflictDetection) {
+            ConflictDetection conflictDetection,
+            @Nullable StrictModeChecker strictModeChecker) {
         this.snapshotCommit = snapshotCommit;
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
@@ -228,7 +229,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitTimeout = commitTimeout;
         this.commitMinRetryWait = commitMinRetryWait;
         this.commitMaxRetryWait = commitMaxRetryWait;
-        this.strictModeLastSafeSnapshot = strictModeLastSafeSnapshot;
         this.partitionComputer =
                 new InternalRowPartitionComputer(
                         options.partitionDefaultName(),
@@ -241,6 +241,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.bucketMode = bucketMode;
         this.rowTrackingEnabled = rowTrackingEnabled;
         this.discardDuplicateFiles = discardDuplicateFiles;
+        this.strictModeChecker = strictModeChecker;
         this.conflictDetection = conflictDetection;
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
@@ -873,10 +874,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
-        if (strictModeLastSafeSnapshot != null && strictModeLastSafeSnapshot >= 0) {
-            conflictDetection.commitStrictModeCheck(
-                    strictModeLastSafeSnapshot, newSnapshotId, commitKind, snapshotManager);
-            strictModeLastSafeSnapshot = newSnapshotId - 1;
+        if (strictModeChecker != null) {
+            strictModeChecker.check(newSnapshotId, commitKind);
+            strictModeChecker.update(newSnapshotId - 1);
         }
 
         if (LOG.isDebugEnabled()) {
@@ -1084,8 +1084,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 commitUser,
                 identifier,
                 commitKind.name());
-        if (strictModeLastSafeSnapshot != null) {
-            strictModeLastSafeSnapshot = newSnapshot.id();
+        if (strictModeChecker != null) {
+            strictModeChecker.update(newSnapshotId);
         }
         final List<SimpleFileEntry> finalBaseFiles = baseDataFiles;
         final List<ManifestEntry> finalDeltaFiles = deltaFiles;
