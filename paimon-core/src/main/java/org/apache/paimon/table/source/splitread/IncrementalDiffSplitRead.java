@@ -117,7 +117,7 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                     ProjectedRow.from(readType, mergeRead.tableSchema().logicalRowType());
             reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
         }
-        return KeyValueTableRead.unwrap(reader);
+        return KeyValueTableRead.unwrap(reader, mergeRead.tableSchema().options());
     }
 
     private static RecordReader<KeyValue> readDiff(

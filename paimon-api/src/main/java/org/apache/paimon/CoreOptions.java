@@ -827,6 +827,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.");
 
+    public static final ConfigOption<Boolean> CHANGELOG_READ_SEQUENCE_NUMBER_ENABLED =
+            key("changelog-read.sequence-number.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to include _SEQUENCE_NUMBER field in audit_log and binlog system tables. "
+                                    + "This is only valid for primary key tables.");
+
     public static final ConfigOption<String> SEQUENCE_FIELD =
             key("sequence.field")
                     .stringType()
@@ -2739,6 +2747,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS)
                 .map(s -> Arrays.asList(s.split(",")))
                 .orElse(Collections.emptyList());
+    }
+
+    public boolean changelogReadSequenceNumberEnabled() {
+        return options.get(CHANGELOG_READ_SEQUENCE_NUMBER_ENABLED);
     }
 
     public boolean scanPlanSortPartition() {

@@ -1054,6 +1054,108 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testAuditLogTableWithSequenceNumberEnabled() {
+        // Create primary key table with changelog-read.sequence-number.enabled option
+        sql(
+                "CREATE TABLE test_table_seq (a int PRIMARY KEY NOT ENFORCED, b int, c AS a + b) "
+                        + "WITH ('changelog-read.sequence-number.enabled'='true');");
+        sql("INSERT INTO test_table_seq VALUES (1, 2)");
+        sql("INSERT INTO test_table_seq VALUES (3, 4)");
+
+        // Test SELECT * from original table
+        assertThat(sql("SELECT * FROM `test_table_seq`"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, 3), Row.of(3, 4, 7));
+
+        // Test SELECT * includes _SEQUENCE_NUMBER
+        assertThat(sql("SELECT * FROM `test_table_seq$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of("+I", 0L, 1, 2, 3), Row.of("+I", 1L, 3, 4, 7));
+
+        // Test out-of-order select with _SEQUENCE_NUMBER
+        assertThat(sql("SELECT b, c, _SEQUENCE_NUMBER FROM `test_table_seq$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of(2, 3, 0L), Row.of(4, 7, 1L));
+
+        // Test selecting only _SEQUENCE_NUMBER, rowkind
+        assertThat(sql("SELECT _SEQUENCE_NUMBER, rowkind FROM `test_table_seq$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of(0L, "+I"), Row.of(1L, "+I"));
+    }
+
+    @Test
+    public void testAuditLogTableWithSequenceNumberAlterTable() {
+        // Create primary key table without sequence-number option
+        sql("CREATE TABLE test_table_dyn (a int PRIMARY KEY NOT ENFORCED, b int, c AS a + b);");
+        sql("INSERT INTO test_table_dyn VALUES (1, 2)");
+        sql("INSERT INTO test_table_dyn VALUES (3, 4)");
+
+        // Add changelog-read.sequence-number.enabled option via ALTER TABLE
+        sql("ALTER TABLE test_table_dyn SET ('changelog-read.sequence-number.enabled'='true')");
+
+        // Test SELECT * includes _SEQUENCE_NUMBER (same as
+        // testAuditLogTableWithSequenceNumberEnabled)
+        assertThat(sql("SELECT * FROM `test_table_dyn$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of("+I", 0L, 1, 2, 3), Row.of("+I", 1L, 3, 4, 7));
+
+        // Test out-of-order select with _SEQUENCE_NUMBER
+        assertThat(sql("SELECT b, c, _SEQUENCE_NUMBER FROM `test_table_dyn$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of(2, 3, 0L), Row.of(4, 7, 1L));
+
+        // Test selecting only _SEQUENCE_NUMBER, rowkind
+        assertThat(sql("SELECT _SEQUENCE_NUMBER, rowkind FROM `test_table_dyn$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of(0L, "+I"), Row.of(1L, "+I"));
+    }
+
+    @Test
+    public void testBinlogTableWithSequenceNumberEnabled() {
+        // Create primary key table with changelog-read.sequence-number.enabled option
+        sql(
+                "CREATE TABLE test_table_seq (a int PRIMARY KEY NOT ENFORCED, b int) "
+                        + "WITH ('changelog-read.sequence-number.enabled'='true');");
+        sql("INSERT INTO test_table_seq VALUES (1, 2)");
+        sql("INSERT INTO test_table_seq VALUES (3, 4)");
+
+        // Test SELECT * includes _SEQUENCE_NUMBER
+        assertThat(sql("SELECT * FROM `test_table_seq$binlog`"))
+                .containsExactlyInAnyOrder(
+                        Row.of("+I", 0L, new Integer[] {1}, new Integer[] {2}),
+                        Row.of("+I", 1L, new Integer[] {3}, new Integer[] {4}));
+
+        // Test out-of-order select with _SEQUENCE_NUMBER
+        assertThat(sql("SELECT b, _SEQUENCE_NUMBER FROM `test_table_seq$binlog`"))
+                .containsExactlyInAnyOrder(
+                        Row.of(new Integer[] {2}, 0L), Row.of(new Integer[] {4}, 1L));
+
+        // Test selecting only _SEQUENCE_NUMBER
+        assertThat(sql("SELECT _SEQUENCE_NUMBER, rowkind FROM `test_table_seq$binlog`"))
+                .containsExactlyInAnyOrder(Row.of(0L, "+I"), Row.of(1L, "+I"));
+    }
+
+    @Test
+    public void testBinlogTableWithSequenceNumberAlterTable() {
+        // Create primary key table without sequence-number option
+        sql("CREATE TABLE test_table_dyn (a int PRIMARY KEY NOT ENFORCED, b int);");
+        sql("INSERT INTO test_table_dyn VALUES (1, 2)");
+        sql("INSERT INTO test_table_dyn VALUES (3, 4)");
+
+        // Add changelog-read.sequence-number.enabled option via ALTER TABLE
+        sql("ALTER TABLE test_table_dyn SET ('changelog-read.sequence-number.enabled'='true')");
+
+        // Test SELECT * includes _SEQUENCE_NUMBER (same as
+        // testBinlogTableWithSequenceNumberEnabled)
+        assertThat(sql("SELECT * FROM `test_table_dyn$binlog`"))
+                .containsExactlyInAnyOrder(
+                        Row.of("+I", 0L, new Integer[] {1}, new Integer[] {2}),
+                        Row.of("+I", 1L, new Integer[] {3}, new Integer[] {4}));
+
+        // Test out-of-order select with _SEQUENCE_NUMBER
+        assertThat(sql("SELECT b, _SEQUENCE_NUMBER FROM `test_table_dyn$binlog`"))
+                .containsExactlyInAnyOrder(
+                        Row.of(new Integer[] {2}, 0L), Row.of(new Integer[] {4}, 1L));
+
+        // Test selecting only _SEQUENCE_NUMBER
+        assertThat(sql("SELECT _SEQUENCE_NUMBER, rowkind FROM `test_table_dyn$binlog`"))
+                .containsExactlyInAnyOrder(Row.of(0L, "+I"), Row.of(1L, "+I"));
+    }
+
+    @Test
     public void testBatchReadSourceWithSnapshot() {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222), (3, 33, 333), (4, 44, 444)");
         assertThat(

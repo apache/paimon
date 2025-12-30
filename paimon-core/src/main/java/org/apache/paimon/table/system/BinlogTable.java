@@ -56,11 +56,8 @@ public class BinlogTable extends AuditLogTable {
 
     public static final String BINLOG = "binlog";
 
-    private final FileStoreTable wrapped;
-
     public BinlogTable(FileStoreTable wrapped) {
         super(wrapped);
-        this.wrapped = wrapped;
     }
 
     @Override
@@ -72,6 +69,9 @@ public class BinlogTable extends AuditLogTable {
     public RowType rowType() {
         List<DataField> fields = new ArrayList<>();
         fields.add(SpecialFields.ROW_KIND);
+        if (specialFieldCount > 1) {
+            fields.add(SpecialFields.SEQUENCE_NUMBER);
+        }
         for (DataField field : wrapped.rowType().getFields()) {
             // convert to nullable
             fields.add(field.newType(new ArrayType(field.type().nullable())));
@@ -102,7 +102,7 @@ public class BinlogTable extends AuditLogTable {
             List<DataField> fields = new ArrayList<>();
             List<DataField> wrappedReadFields = new ArrayList<>();
             for (DataField field : readType.getFields()) {
-                if (field.name().equals(SpecialFields.ROW_KIND.name())) {
+                if (SpecialFields.isSystemField(field.name())) {
                     fields.add(field);
                 } else {
                     DataField origin = field.newType(((ArrayType) field.type()).getElementType());
@@ -117,12 +117,16 @@ public class BinlogTable extends AuditLogTable {
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             DataSplit dataSplit = (DataSplit) split;
+            // When sequence number is enabled, the underlying data layout is:
+            // [_SEQUENCE_NUMBER, pk, pt, col1, ...]
+            // We need to offset the field index to skip the sequence number field.
+            int offset = specialFieldCount - 1;
             InternalRow.FieldGetter[] fieldGetters =
                     IntStream.range(0, wrappedReadType.getFieldCount())
                             .mapToObj(
                                     i ->
                                             InternalRow.createFieldGetter(
-                                                    wrappedReadType.getTypeAt(i), i))
+                                                    wrappedReadType.getTypeAt(i), i + offset))
                             .toArray(InternalRow.FieldGetter[]::new);
 
             if (dataSplit.isStreaming()) {
@@ -146,15 +150,23 @@ public class BinlogTable extends AuditLogTable {
                 InternalRow row1,
                 @Nullable InternalRow row2,
                 InternalRow.FieldGetter[] fieldGetters) {
-            GenericRow row = new GenericRow(row1.getFieldCount());
-            for (int i = 0; i < row1.getFieldCount(); i++) {
+            // seqOffset is 1 if sequence number is enabled, 0 otherwise
+            int seqOffset = specialFieldCount - 1;
+            GenericRow row = new GenericRow(fieldGetters.length + seqOffset);
+
+            // Copy sequence number if enabled (it's at index 0 in input row)
+            if (seqOffset > 0) {
+                row.setField(0, row1.getLong(0));
+            }
+
+            for (int i = 0; i < fieldGetters.length; i++) {
                 Object o1 = fieldGetters[i].getFieldOrNull(row1);
                 Object o2;
                 if (row2 != null) {
                     o2 = fieldGetters[i].getFieldOrNull(row2);
-                    row.setField(i, new GenericArray(new Object[] {o1, o2}));
+                    row.setField(i + seqOffset, new GenericArray(new Object[] {o1, o2}));
                 } else {
-                    row.setField(i, new GenericArray(new Object[] {o1}));
+                    row.setField(i + seqOffset, new GenericArray(new Object[] {o1}));
                 }
             }
             // If no row2 provided, then follow the row1 kind.

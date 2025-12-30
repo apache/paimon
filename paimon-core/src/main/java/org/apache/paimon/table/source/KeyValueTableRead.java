@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 /**
@@ -161,14 +162,17 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         throw new RuntimeException("Should not happen.");
     }
 
-    public static RecordReader<InternalRow> unwrap(RecordReader<KeyValue> reader) {
+    public static RecordReader<InternalRow> unwrap(
+            RecordReader<KeyValue> reader, Map<String, String> schemaOptions) {
         return new RecordReader<InternalRow>() {
 
             @Nullable
             @Override
             public RecordIterator<InternalRow> readBatch() throws IOException {
                 RecordIterator<KeyValue> batch = reader.readBatch();
-                return batch == null ? null : new ValueContentRowDataRecordIterator(batch);
+                return batch == null
+                        ? null
+                        : new ValueContentRowDataRecordIterator(batch, schemaOptions);
             }
 
             @Override

@@ -35,7 +35,6 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -88,30 +87,37 @@ import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 public class AuditLogTable implements DataTable, ReadonlyTable {
 
     public static final String AUDIT_LOG = "audit_log";
+    public static final String AUDIT_LOG_ENABLED = "audit.log.enabled";
 
-    public static final PredicateReplaceVisitor PREDICATE_CONVERTER =
-            p -> {
-                Optional<FieldRef> fieldRefOptional = p.fieldRefOptional();
-                if (!fieldRefOptional.isPresent()) {
-                    return Optional.empty();
-                }
-                FieldRef fieldRef = fieldRefOptional.get();
-                if (fieldRef.index() == 0) {
-                    return Optional.empty();
-                }
-                return Optional.of(
-                        new LeafPredicate(
-                                p.function(),
-                                fieldRef.type(),
-                                fieldRef.index() - 1,
-                                fieldRef.name(),
-                                p.literals()));
-            };
+    protected final FileStoreTable wrapped;
 
-    private final FileStoreTable wrapped;
+    /** Number of special fields (rowkind, and optionally _SEQUENCE_NUMBER). */
+    protected final int specialFieldCount;
 
     public AuditLogTable(FileStoreTable wrapped) {
         this.wrapped = wrapped;
+        this.wrapped.schema().options().put(AUDIT_LOG_ENABLED, "true");
+        this.specialFieldCount =
+                coreOptions().changelogReadSequenceNumberEnabled()
+                                && !wrapped.primaryKeys().isEmpty()
+                        ? 2
+                        : 1;
+    }
+
+    /** Creates a PredicateReplaceVisitor that adjusts field indices by systemFieldCount. */
+    private PredicateReplaceVisitor createPredicateConverter() {
+        return p -> {
+            if (p.index() < specialFieldCount) {
+                return Optional.empty();
+            }
+            return Optional.of(
+                    new LeafPredicate(
+                            p.function(),
+                            p.type(),
+                            p.index() - specialFieldCount,
+                            p.fieldName(),
+                            p.literals()));
+        };
     }
 
     @Override
@@ -148,6 +154,9 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     public RowType rowType() {
         List<DataField> fields = new ArrayList<>();
         fields.add(SpecialFields.ROW_KIND);
+        if (specialFieldCount > 1) {
+            fields.add(SpecialFields.SEQUENCE_NUMBER);
+        }
         fields.addAll(wrapped.rowType().getFields());
         return new RowType(fields);
     }
@@ -244,9 +253,10 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     /** Push down predicate to dataScan and dataRead. */
     private Optional<Predicate> convert(Predicate predicate) {
+        PredicateReplaceVisitor converter = createPredicateConverter();
         List<Predicate> result =
                 PredicateBuilder.splitAnd(predicate).stream()
-                        .map(p -> p.visit(PREDICATE_CONVERTER))
+                        .map(p -> p.visit(converter))
                         .filter(Optional::isPresent)
                         .map(Optional::get)
                         .collect(Collectors.toList());
@@ -636,6 +646,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     class AuditLogRead implements InnerTableRead {
 
+        // Special index for rowkind field
+        protected static final int ROW_KIND_INDEX = -1;
+        // Special index for _SEQUENCE_NUMBER field
+        protected static final int SEQUENCE_NUMBER_INDEX = -2;
+
         protected final InnerTableRead dataRead;
 
         protected int[] readProjection;
@@ -645,13 +660,36 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             this.readProjection = defaultProjection();
         }
 
-        /** Default projection, just add row kind to the first. */
+        /** Default projection, add system fields (rowkind, and optionally _SEQUENCE_NUMBER). */
         private int[] defaultProjection() {
             int dataFieldCount = wrapped.rowType().getFieldCount();
-            int[] projection = new int[dataFieldCount + 1];
-            projection[0] = -1;
+            int[] projection = new int[dataFieldCount + specialFieldCount];
+            projection[0] = ROW_KIND_INDEX;
+            if (specialFieldCount > 1) {
+                projection[1] = SEQUENCE_NUMBER_INDEX;
+            }
             for (int i = 0; i < dataFieldCount; i++) {
-                projection[i + 1] = i;
+                projection[specialFieldCount + i] = i + specialFieldCount - 1;
+            }
+            return projection;
+        }
+
+        /** Build projection array from readType. */
+        private int[] buildProjection(RowType readType) {
+            List<DataField> fields = readType.getFields();
+            int[] projection = new int[fields.size()];
+            int dataFieldIndex = 0;
+
+            for (int i = 0; i < fields.size(); i++) {
+                String fieldName = fields.get(i).name();
+                if (fieldName.equals(SpecialFields.ROW_KIND.name())) {
+                    projection[i] = ROW_KIND_INDEX;
+                } else if (fieldName.equals(SpecialFields.SEQUENCE_NUMBER.name())) {
+                    projection[i] = SEQUENCE_NUMBER_INDEX;
+                } else {
+                    projection[i] = dataFieldIndex + specialFieldCount - 1;
+                    dataFieldIndex++;
+                }
             }
             return projection;
         }
@@ -664,31 +702,17 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
         @Override
         public InnerTableRead withReadType(RowType readType) {
-            // data projection to push down to dataRead
-            List<DataField> dataReadFields = new ArrayList<>();
-
-            // read projection to handle record returned by dataRead
-            List<DataField> fields = readType.getFields();
-            int[] readProjection = new int[fields.size()];
-
-            boolean rowKindAppeared = false;
-            for (int i = 0; i < fields.size(); i++) {
-                String fieldName = fields.get(i).name();
-                if (fieldName.equals(SpecialFields.ROW_KIND.name())) {
-                    rowKindAppeared = true;
-                    readProjection[i] = -1;
-                } else {
-                    dataReadFields.add(fields.get(i));
-                    // There is no row kind field. Keep it as it is
-                    // Row kind field has occurred, and the following fields are offset by 1
-                    // position
-                    readProjection[i] = rowKindAppeared ? i - 1 : i;
-                }
-            }
-
-            this.readProjection = readProjection;
-            dataRead.withReadType(new RowType(readType.isNullable(), dataReadFields));
+            this.readProjection = buildProjection(readType);
+            List<DataField> dataFields = extractDataFields(readType);
+            dataRead.withReadType(new RowType(readType.isNullable(), dataFields));
             return this;
+        }
+
+        /** Extract data fields (non-system fields) from readType. */
+        private List<DataField> extractDataFields(RowType readType) {
+            return readType.getFields().stream()
+                    .filter(f -> !SpecialFields.isSystemField(f.name()))
+                    .collect(Collectors.toList());
         }
 
         @Override
@@ -707,7 +731,10 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
     }
 
-    /** A {@link ProjectedRow} which returns row kind when mapping index is negative. */
+    /**
+     * A {@link ProjectedRow} which returns row kind and sequence number when mapping index is
+     * negative.
+     */
     static class AuditLogRow extends ProjectedRow {
 
         AuditLogRow(int[] indexMapping, InternalRow row) {
@@ -729,15 +756,26 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public boolean isNullAt(int pos) {
             if (indexMapping[pos] < 0) {
-                // row kind is always not null
+                // row kind and sequence num are always not null
                 return false;
             }
             return super.isNullAt(pos);
         }
 
         @Override
+        public long getLong(int pos) {
+            int index = indexMapping[pos];
+            if (index == AuditLogRead.SEQUENCE_NUMBER_INDEX) {
+                // _SEQUENCE_NUMBER is at index 0 in bottom output
+                return row.getLong(0);
+            }
+            return super.getLong(pos);
+        }
+
+        @Override
         public BinaryString getString(int pos) {
-            if (indexMapping[pos] < 0) {
+            int index = indexMapping[pos];
+            if (index == AuditLogRead.ROW_KIND_INDEX) {
                 return BinaryString.fromString(row.getRowKind().shortString());
             }
             return super.getString(pos);
