@@ -237,7 +237,9 @@ public class ManifestsTableTest extends TableTestBase {
                                             manifestFileMeta
                                                     .partitionStats()
                                                     .maxValues()
-                                                    .getInt(0)))));
+                                                    .getInt(0))),
+                            manifestFileMeta.minRowId(),
+                            manifestFileMeta.maxRowId()));
         }
         return expectedRow;
     }
