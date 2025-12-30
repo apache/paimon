@@ -366,7 +366,6 @@ public class BTreeIndexReader implements GlobalIndexReader {
         SstFileReader.SstFileIterator fileIter = reader.createIterator();
         fileIter.seekTo(keySerializer.serialize(from));
 
-        boolean skipped = false;
         RoaringNavigableMap64 result = new RoaringNavigableMap64();
         BlockIterator dataIter;
         Map.Entry<MemorySlice, MemorySlice> entry;
@@ -375,9 +374,7 @@ public class BTreeIndexReader implements GlobalIndexReader {
                 entry = dataIter.next();
                 Object key = keySerializer.deserialize(entry.getKey());
 
-                if (!fromInclusive && !skipped && comparator.compare(key, from) == 0) {
-                    // this is correct only if the underlying file do not have duplicated keys.
-                    skipped = true;
+                if (!fromInclusive && comparator.compare(key, from) == 0) {
                     continue;
                 }
 
