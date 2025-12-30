@@ -248,6 +248,17 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testManifestsTableWihRowId() {
+        sql(
+                "CREATE TABLE T (a INT, b INT) WITH ('data-evolution.enabled'='true', 'row-tracking.enabled'='true')");
+        sql("INSERT INTO T VALUES (1, 2), (3, 4)");
+        sql("INSERT INTO T VALUES (5, 6), (7, 8)");
+
+        List<Row> result = sql("SELECT min_row_id, max_row_id FROM T$manifests");
+        assertThat(result).containsExactlyInAnyOrder(Row.of(0L, 1L), Row.of(2L, 3L));
+    }
+
+    @Test
     public void testSchemasTable() {
         sql(
                 "CREATE TABLE T(a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
