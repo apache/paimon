@@ -532,21 +532,4 @@ public class ConflictDetection {
             return Objects.hash(partition, bucket, level);
         }
     }
-
-    /** Should do conflict check. */
-    public interface ConflictCheck {
-        boolean shouldCheck(long latestSnapshot);
-    }
-
-    public static ConflictCheck hasConflictChecked(@Nullable Long checkedLatestSnapshotId) {
-        return latestSnapshot -> !Objects.equals(latestSnapshot, checkedLatestSnapshotId);
-    }
-
-    public static ConflictCheck noConflictCheck() {
-        return latestSnapshot -> false;
-    }
-
-    public static ConflictCheck mustConflictCheck() {
-        return latestSnapshot -> true;
-    }
 }
