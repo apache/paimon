@@ -147,6 +147,12 @@ under the License.
             <td>Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.</td>
         </tr>
         <tr>
+            <td><h5>changelog-read.sequence-number.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to include _SEQUENCE_NUMBER field in audit_log and binlog system tables. This is only valid for primary key tables.</td>
+        </tr>
+        <tr>
             <td><h5>changelog.num-retained.max</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>

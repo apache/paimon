@@ -75,7 +75,7 @@ public class IncrementalChangelogReadProvider implements SplitReadProvider {
                                                     dataSplit.dataFiles(),
                                                     dataSplit.deletionFiles().orElse(null),
                                                     false));
-                    return unwrap(reader);
+                    return unwrap(reader, read.tableSchema().options());
                 };
 
         return SplitRead.convert(read, convertedFactory);
