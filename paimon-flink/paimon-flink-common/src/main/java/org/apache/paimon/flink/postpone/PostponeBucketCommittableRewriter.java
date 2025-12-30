@@ -76,7 +76,6 @@ public class PostponeBucketCommittableRewriter {
                 Committable committable =
                         new Committable(
                                 checkpointId,
-                                Committable.Kind.FILE,
                                 bucketFiles.makeMessage(
                                         partitionEntry.getKey(), bucketEntry.getKey()));
                 result.add(committable);

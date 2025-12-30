@@ -26,12 +26,12 @@ import org.apache.paimon.sst.BloomFilterHandle;
 
 import javax.annotation.Nullable;
 
-import static org.apache.paimon.sst.SstFileWriter.MAGIC_NUMBER;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Footer for a sorted file. */
 public class SortLookupStoreFooter {
 
+    public static final int MAGIC_NUMBER = 1481571681;
     public static final int ENCODED_LENGTH = 36;
 
     @Nullable private final BloomFilterHandle bloomFilterHandle;

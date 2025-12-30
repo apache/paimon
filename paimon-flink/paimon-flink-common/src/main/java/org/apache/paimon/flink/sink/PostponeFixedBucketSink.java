@@ -50,7 +50,7 @@ public class PostponeFixedBucketSink extends FlinkWriteSink<InternalRow> {
     @Override
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new RowDataStoreWriteOperator.Factory(table, null, writeProvider, commitUser) {
+        return new RowDataStoreWriteOperator.Factory(table, writeProvider, commitUser) {
             @Override
             @SuppressWarnings("unchecked, rawtypes")
             public StreamOperator createStreamOperator(StreamOperatorParameters parameters) {

@@ -376,6 +376,11 @@ public static class BitmapContainsUDF extends ScalarFunction {
 
   {{< /tabs >}}
 
+### nested_partial_update
+  The nested_partial_update function collects multiple rows into one array<row> (so-called 'nested table'). It supports
+  ARRAY<ROW> data types. You need to use `fields.<field-name>.nested-key=pk0,pk1,...` to specify the primary keys of the
+  nested table. The values in each row are written by partial updating some columns.
+
 ### collect
   The collect function collects elements into an Array. You can set `fields.<field-name>.distinct=true` to deduplicate elements.
   It only supports ARRAY type.

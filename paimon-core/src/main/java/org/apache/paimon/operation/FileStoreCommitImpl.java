@@ -63,6 +63,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -97,7 +98,7 @@ import java.util.stream.Collectors;
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
-import static org.apache.paimon.manifest.ManifestEntry.recordCount;
+import static org.apache.paimon.manifest.ManifestEntry.nullableRecordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
 import static org.apache.paimon.operation.commit.ConflictDetection.hasConflictChecked;
@@ -388,7 +389,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                         changes.appendIndexFiles),
                                 committable.identifier(),
                                 committable.watermark(),
-                                committable.logOffsets(),
                                 committable.properties(),
                                 CommitKindProvider.provider(commitKind),
                                 conflictCheck,
@@ -426,7 +426,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                         changes.compactIndexFiles),
                                 committable.identifier(),
                                 committable.watermark(),
-                                committable.logOffsets(),
                                 committable.properties(),
                                 CommitKindProvider.provider(CommitKind.COMPACT),
                                 hasConflictChecked(safeLatestSnapshotId),
@@ -582,7 +581,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 changes.appendIndexFiles,
                                 committable.identifier(),
                                 committable.watermark(),
-                                committable.logOffsets(),
                                 committable.properties());
                 generatedSnapshot += 1;
             }
@@ -596,7 +594,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                         changes.compactIndexFiles),
                                 committable.identifier(),
                                 committable.watermark(),
-                                committable.logOffsets(),
                                 committable.properties(),
                                 CommitKindProvider.provider(CommitKind.COMPACT),
                                 mustConflictCheck(),
@@ -696,25 +693,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         tryOverwritePartition(
-                partitionFilter,
-                emptyList(),
-                emptyList(),
-                commitIdentifier,
-                null,
-                new HashMap<>(),
-                new HashMap<>());
+                partitionFilter, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
     }
 
     @Override
     public void truncateTable(long commitIdentifier) {
         tryOverwritePartition(
-                null,
-                emptyList(),
-                emptyList(),
-                commitIdentifier,
-                null,
-                new HashMap<>(),
-                new HashMap<>());
+                null, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
     }
 
     @Override
@@ -749,7 +734,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 commitIdentifier,
                 null,
                 Collections.emptyMap(),
-                Collections.emptyMap(),
                 CommitKindProvider.provider(CommitKind.ANALYZE),
                 noConflictCheck(),
                 statsFileName);
@@ -776,7 +760,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             CommitChangesProvider changesProvider,
             long identifier,
             @Nullable Long watermark,
-            Map<Integer, Long> logOffsets,
             Map<String, String> properties,
             CommitKindProvider commitKindProvider,
             ConflictCheck conflictCheck,
@@ -822,7 +805,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             changes.indexFiles,
                             identifier,
                             watermark,
-                            logOffsets,
                             properties,
                             commitKind,
                             latestSnapshot,
@@ -865,7 +847,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<IndexManifestEntry> indexFiles,
             long identifier,
             @Nullable Long watermark,
-            Map<Integer, Long> logOffsets,
             Map<String, String> properties) {
         CommitKindProvider commitKindProvider =
                 commitChanges ->
@@ -879,7 +860,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 numBucket, changes, indexFiles, latestSnapshot, partitionFilter),
                 identifier,
                 watermark,
-                logOffsets,
                 properties,
                 commitKindProvider,
                 mustConflictCheck(),
@@ -894,7 +874,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<IndexManifestEntry> indexFiles,
             long identifier,
             @Nullable Long watermark,
-            Map<Integer, Long> logOffsets,
             Map<String, String> properties,
             CommitKind commitKind,
             @Nullable Snapshot latestSnapshot,
@@ -1039,15 +1018,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long previousTotalRecordCount = 0L;
             Long currentWatermark = watermark;
             if (latestSnapshot != null) {
-                previousTotalRecordCount = scanner.totalRecordCount(latestSnapshot);
+                previousTotalRecordCount = latestSnapshot.totalRecordCount();
                 // read all previous manifest files
                 mergeBeforeManifests = manifestList.readDataManifests(latestSnapshot);
-                // read the last snapshot to complete the bucket's offsets when logOffsets does not
-                // contain all buckets
-                Map<Integer, Long> latestLogOffsets = latestSnapshot.logOffsets();
-                if (latestLogOffsets != null) {
-                    latestLogOffsets.forEach(logOffsets::putIfAbsent);
-                }
                 Long latestWatermark = latestSnapshot.watermark();
                 if (latestWatermark != null) {
                     currentWatermark =
@@ -1133,10 +1106,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             identifier,
                             commitKind,
                             System.currentTimeMillis(),
-                            logOffsets,
                             totalRecordCount,
                             deltaRecordCount,
-                            recordCount(changelogFiles),
+                            nullableRecordCount(changelogFiles),
                             currentWatermark,
                             statsFileName,
                             // if empty properties, just set to null
@@ -1234,10 +1206,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         Long.MAX_VALUE,
                         CommitKind.OVERWRITE,
                         System.currentTimeMillis(),
-                        latest.logOffsets(),
                         totalRecordCount,
                         0L,
-                        0L,
+                        null,
                         latest.watermark(),
                         latest.statistics(),
                         // if empty properties, just set to null
@@ -1261,8 +1232,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             checkArgument(
                     entry.file().fileSource().isPresent(),
                     "This is a bug, file source field for row-tracking table must present.");
+            boolean containsRowId =
+                    entry.file().writeCols() != null
+                            && entry.file().writeCols().contains(SpecialFields.ROW_ID.name());
             if (entry.file().fileSource().get().equals(FileSource.APPEND)
-                    && entry.file().firstRowId() == null) {
+                    && entry.file().firstRowId() == null
+                    && !containsRowId) {
                 if (isBlobFile(entry.file().fileName())) {
                     if (blobStart >= start) {
                         throw new IllegalStateException(
@@ -1362,10 +1337,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         Long.MAX_VALUE,
                         CommitKind.COMPACT,
                         System.currentTimeMillis(),
-                        latestSnapshot.logOffsets(),
                         latestSnapshot.totalRecordCount(),
                         0L,
-                        0L,
+                        null,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
                         latestSnapshot.properties(),

@@ -172,6 +172,7 @@ public class DataFileIndexWriterTest {
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
                         null,
+                        CoreOptions.ExternalPathStrategy.NONE,
                         false);
 
         Table table = fileSystemCatalog.getTable(Identifier.create(tableName, tableName));

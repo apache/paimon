@@ -57,11 +57,12 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
             schema_id=0,
             base_manifest_list="manifest-list-1",
             delta_manifest_list="manifest-list-1",
+            total_record_count=1,
+            delta_record_count=1,
             commit_user="test_user",
             commit_identifier=12345,
             commit_kind="APPEND",
-            time_millis=int(time.time() * 1000),
-            log_offsets={}
+            time_millis=int(time.time() * 1000)
         )
 
         # Create test statistics

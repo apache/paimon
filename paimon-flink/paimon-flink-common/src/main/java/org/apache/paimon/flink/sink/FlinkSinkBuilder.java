@@ -87,7 +87,6 @@ public class FlinkSinkBuilder {
     // ============== for extension ==============
 
     protected boolean compactSink = false;
-    @Nullable protected LogSinkFunction logSinkFunction;
 
     public FlinkSinkBuilder(Table table) {
         if (!(table instanceof FileStoreTable)) {
@@ -262,7 +261,6 @@ public class FlinkSinkBuilder {
 
     protected DataStreamSink<?> buildDynamicBucketSink(
             DataStream<InternalRow> input, boolean globalIndex) {
-        checkArgument(logSinkFunction == null, "Dynamic bucket mode can not work with log system.");
         return compactSink && !globalIndex
                 // todo support global index sort compact
                 ? new DynamicBucketCompactSink(table, overwritePartition).build(input, parallelism)
@@ -285,11 +283,8 @@ public class FlinkSinkBuilder {
             parallelism = bucketNums;
         }
         DataStream<InternalRow> partitioned =
-                partition(
-                        input,
-                        new RowDataChannelComputer(table.schema(), logSinkFunction != null),
-                        parallelism);
-        FixedBucketSink sink = new FixedBucketSink(table, overwritePartition, logSinkFunction);
+                partition(input, new RowDataChannelComputer(table.schema()), parallelism);
+        FixedBucketSink sink = new FixedBucketSink(table, overwritePartition);
         return sink.sinkFrom(partitioned);
     }
 
@@ -335,8 +330,7 @@ public class FlinkSinkBuilder {
                             parallelism);
         }
 
-        return new RowAppendTableSink(table, overwritePartition, logSinkFunction, parallelism)
-                .sinkFrom(input);
+        return new RowAppendTableSink(table, overwritePartition, parallelism).sinkFrom(input);
     }
 
     private DataStream<RowData> trySortInput(DataStream<RowData> input) {

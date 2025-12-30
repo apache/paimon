@@ -24,7 +24,10 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.RowIdPredicateVisitor;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.table.FileStoreTable;
@@ -47,6 +50,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.globalindex.GlobalIndexScanBuilder.parallelScan;
+import static org.apache.paimon.table.SpecialFields.ROW_ID;
 
 /** Scan for data evolution table. */
 public class DataEvolutionBatchScan implements DataTableScan {
@@ -71,9 +75,41 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
+        if (predicate == null) {
+            return this;
+        }
+
+        predicate.visit(new RowIdPredicateVisitor()).ifPresent(this::withRowRanges);
+        predicate = removeRowIdFilter(predicate);
         this.filter = predicate;
         batchScan.withFilter(predicate);
         return this;
+    }
+
+    private Predicate removeRowIdFilter(Predicate filter) {
+        if (filter instanceof LeafPredicate
+                && ROW_ID.name().equals(((LeafPredicate) filter).fieldName())) {
+            return null;
+        } else if (filter instanceof CompoundPredicate) {
+            CompoundPredicate compoundPredicate = (CompoundPredicate) filter;
+
+            List<Predicate> newChildren = new ArrayList<>();
+            for (Predicate child : compoundPredicate.children()) {
+                Predicate newChild = removeRowIdFilter(child);
+                if (newChild != null) {
+                    newChildren.add(newChild);
+                }
+            }
+
+            if (newChildren.isEmpty()) {
+                return null;
+            } else if (newChildren.size() == 1) {
+                return newChildren.get(0);
+            } else {
+                return new CompoundPredicate(compoundPredicate.function(), newChildren);
+            }
+        }
+        return filter;
     }
 
     @Override
@@ -157,9 +193,13 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public InnerTableScan withRowRanges(List<Range> rowRanges) {
+        if (rowRanges == null) {
+            return this;
+        }
+
         this.pushedRowRanges = rowRanges;
         if (globalIndexResult != null) {
-            throw new IllegalStateException("");
+            throw new IllegalStateException("Cannot push row ranges after global index eval.");
         }
         return this;
     }

@@ -58,7 +58,6 @@ import org.apache.paimon.view.ViewImpl;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
-import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -1382,10 +1381,8 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private static boolean isPaimonTable(Table table) {
-        boolean isPaimonTable =
-                INPUT_FORMAT_CLASS_NAME.equals(table.getSd().getInputFormat())
-                        && OUTPUT_FORMAT_CLASS_NAME.equals(table.getSd().getOutputFormat());
-        return isPaimonTable || LegacyHiveClasses.isPaimonTable(table);
+        return INPUT_FORMAT_CLASS_NAME.equals(table.getSd().getInputFormat())
+                && OUTPUT_FORMAT_CLASS_NAME.equals(table.getSd().getOutputFormat());
     }
 
     private boolean isFormatTable(Table table) {

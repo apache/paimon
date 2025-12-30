@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PredicateConverter;
-import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor;
 import org.apache.paimon.predicate.Predicate;
@@ -66,17 +65,13 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     @Nullable protected Predicate deletePredicate;
 
     public SupportsRowLevelOperationFlinkTableSink(
-            ObjectIdentifier tableIdentifier,
-            Table table,
-            DynamicTableFactory.Context context,
-            @Nullable LogStoreTableFactory logStoreTableFactory) {
-        super(tableIdentifier, table, context, logStoreTableFactory);
+            ObjectIdentifier tableIdentifier, Table table, DynamicTableFactory.Context context) {
+        super(tableIdentifier, table, context);
     }
 
     @Override
     public DynamicTableSink copy() {
-        FlinkTableSink copied =
-                new FlinkTableSink(tableIdentifier, table, context, logStoreTableFactory);
+        FlinkTableSink copied = new FlinkTableSink(tableIdentifier, table, context);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.deletePredicate = deletePredicate;

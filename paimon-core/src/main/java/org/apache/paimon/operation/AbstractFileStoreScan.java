@@ -243,6 +243,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withRowRanges(List<Range> rowRanges) {
         this.rowRanges = rowRanges;
+        manifestsReader.withRowRanges(rowRanges);
         return this;
     }
 
@@ -274,7 +275,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         ManifestsReader.Result manifestsResult = readManifests();
         Snapshot snapshot = manifestsResult.snapshot;
         List<ManifestFileMeta> manifests = manifestsResult.filteredManifests;
-        manifests = postFilterManifests(manifests);
 
         Iterator<ManifestEntry> iterator = readManifestEntries(manifests, false);
         if (supportsLimitPushManifestEntries()) {
@@ -433,10 +433,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     /** Note: Keep this thread-safe. */
     protected abstract boolean filterByStats(ManifestEntry entry);
-
-    protected List<ManifestFileMeta> postFilterManifests(List<ManifestFileMeta> manifests) {
-        return manifests;
-    }
 
     protected boolean postFilterManifestEntriesEnabled() {
         return false;

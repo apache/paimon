@@ -70,7 +70,12 @@ case class PaimonSparkWriter(
 
   private val writeType = {
     if (writeRowTracking) {
-      SpecialFields.rowTypeWithRowTracking(table.rowType(), true)
+      // The historical data and new data are processed separately.
+      // 1. The historical data contains the non-null RowId, but its sequenceNumber may not have been generated yet,
+      //    will be generated according to the Snapshot id when committing. (But the previously updated data included
+      //    the sequenceNumber value).
+      // 2. The new data will be written to the branch without writeRowTracking.
+      SpecialFields.rowTypeWithRowTracking(table.rowType(), false, true)
     } else {
       table.rowType()
     }

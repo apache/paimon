@@ -199,7 +199,7 @@ class FileStoreCommit:
         new_snapshot_id = self._generate_snapshot_id()
         total_record_count += delta_record_count
         snapshot_data = Snapshot(
-            version=1,
+            version=3,
             id=new_snapshot_id,
             schema_id=self.table.table_schema.id,
             base_manifest_list=base_manifest_list,

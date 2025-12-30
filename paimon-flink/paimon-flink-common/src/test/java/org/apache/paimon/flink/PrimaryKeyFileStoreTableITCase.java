@@ -142,11 +142,21 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                         return;
                                     }
                                 } catch (Exception e) {
-                                    client.cancel();
-                                    throw new RuntimeException(e);
+                                    // If we can't get job status, assume the job has terminated.
+                                    // This handles cases where MiniCluster has already shut down.
+                                    // Similar to Flink's CollectResultFetcher behavior.
+                                    return;
                                 }
                             }
-                            client.cancel();
+                            // Only cancel if job is not already terminated
+                            try {
+                                if (!client.getJobStatus().get().isGloballyTerminalState()) {
+                                    client.cancel();
+                                }
+                            } catch (Exception e) {
+                                // If we can't check status or cancel, assume job has terminated.
+                                // This handles IllegalStateException when MiniCluster is shut down.
+                            }
                         });
         timeoutThread.start();
         return result.collect();

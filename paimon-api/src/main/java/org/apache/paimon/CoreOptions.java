@@ -21,7 +21,6 @@ package org.apache.paimon;
 import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fs.Path;
@@ -983,42 +982,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The delay duration of stream read when scan incremental snapshots.");
 
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<LogConsistency> LOG_CONSISTENCY =
-            key("log.consistency")
-                    .enumType(LogConsistency.class)
-                    .defaultValue(LogConsistency.TRANSACTIONAL)
-                    .withDescription("Specify the log consistency mode for table.");
-
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<LogChangelogMode> LOG_CHANGELOG_MODE =
-            key("log.changelog-mode")
-                    .enumType(LogChangelogMode.class)
-                    .defaultValue(LogChangelogMode.AUTO)
-                    .withDescription("Specify the log changelog mode for table.");
-
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<String> LOG_KEY_FORMAT =
-            key("log.key.format")
-                    .stringType()
-                    .defaultValue("json")
-                    .withDescription(
-                            "Specify the key message format of log system with primary key.");
-
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<String> LOG_FORMAT =
-            key("log.format")
-                    .stringType()
-                    .defaultValue("debezium-json")
-                    .withDescription("Specify the message format of log system.");
-
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<Boolean> LOG_IGNORE_DELETE =
-            key("log.ignore-delete")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Specify whether the log system ignores delete records.");
-
     public static final ConfigOption<Boolean> AUTO_CREATE =
             key("auto-create")
                     .booleanType()
@@ -1285,13 +1248,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Only used to force TableScan to construct suitable 'StartingUpScanner' and 'FollowUpScanner' "
                                     + "dedicated internal streaming scan.");
-
-    public static final ConfigOption<StreamingReadMode> STREAMING_READ_MODE =
-            key("streaming-read-mode")
-                    .enumType(StreamingReadMode.class)
-                    .noDefaultValue()
-                    .withDescription(
-                            "The mode of streaming read that specifies to read the data of table file or log.");
 
     @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<BatchScanMode> BATCH_SCAN_MODE =
@@ -2792,10 +2748,6 @@ public class CoreOptions implements Serializable {
     }
 
     public StartupMode startupMode() {
-        return startupMode(options);
-    }
-
-    public static StartupMode startupMode(Options options) {
         StartupMode mode = options.get(SCAN_MODE);
         if (mode == StartupMode.DEFAULT) {
             if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()
@@ -3021,10 +2973,6 @@ public class CoreOptions implements Serializable {
     @Nullable
     public Integer fullCompactionDeltaCommits() {
         return options.get(FULL_COMPACTION_DELTA_COMMITS);
-    }
-
-    public static StreamingReadMode streamReadType(Options options) {
-        return options.get(STREAMING_READ_MODE);
     }
 
     public Duration consumerExpireTime() {
@@ -3493,67 +3441,6 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    /** Specifies the log consistency mode for table. */
-    public enum LogConsistency implements DescribedEnum {
-        TRANSACTIONAL(
-                "transactional",
-                "Only the data after the checkpoint can be seen by readers, the latency depends on checkpoint interval."),
-
-        EVENTUAL(
-                "eventual",
-                "Immediate data visibility, you may see some intermediate states, "
-                        + "but eventually the right results will be produced, only works for table with primary key.");
-
-        private final String value;
-        private final String description;
-
-        LogConsistency(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
-
-    /** Specifies the log changelog mode for table. */
-    public enum LogChangelogMode implements DescribedEnum {
-        AUTO("auto", "Upsert for table with primary key, all for table without primary key."),
-
-        ALL("all", "The log system stores all changes including UPDATE_BEFORE."),
-
-        UPSERT(
-                "upsert",
-                "The log system does not store the UPDATE_BEFORE changes, the log consumed job"
-                        + " will automatically add the normalized node, relying on the state"
-                        + " to generate the required update_before.");
-
-        private final String value;
-        private final String description;
-
-        LogChangelogMode(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
-
     /** Specifies the changelog producer for table. */
     public enum ChangelogProducer implements DescribedEnum {
         NONE("none", "No changelog file."),
@@ -3582,49 +3469,6 @@ public class CoreOptions implements Serializable {
         @Override
         public InlineElement getDescription() {
             return text(description);
-        }
-    }
-
-    /** Specifies the type for streaming read. */
-    public enum StreamingReadMode implements DescribedEnum {
-        LOG("log", "Read from the data of table log store."),
-        FILE("file", "Read from the data of table file store.");
-
-        private final String value;
-        private final String description;
-
-        StreamingReadMode(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-
-        public String getValue() {
-            return value;
-        }
-
-        @VisibleForTesting
-        public static StreamingReadMode fromValue(String value) {
-            for (StreamingReadMode formatType : StreamingReadMode.values()) {
-                if (formatType.value.equals(value)) {
-                    return formatType;
-                }
-            }
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Invalid format type %s, only support [%s]",
-                            value,
-                            StringUtils.join(
-                                    Arrays.stream(StreamingReadMode.values()).iterator(), ",")));
         }
     }
 
@@ -3958,7 +3802,11 @@ public class CoreOptions implements Serializable {
 
         ROUND_ROBIN(
                 "round-robin",
-                "When writing a new file, a path is chosen from data-file.external-paths in turn.");
+                "When writing a new file, a path is chosen from data-file.external-paths in turn."),
+
+        ENTROPY_INJECT(
+                "entropy-inject",
+                "When writing a new file, a path is chosen based on the hash value of the file's content.");
 
         private final String value;
 

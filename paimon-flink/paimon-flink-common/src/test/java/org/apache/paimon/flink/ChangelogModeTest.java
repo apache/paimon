@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.fs.Path;
@@ -40,6 +39,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collections;
 
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.ChangelogProducer.INPUT;
+import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for changelog mode with flink source and sink. */
@@ -68,10 +70,10 @@ public class ChangelogModeTest {
                                 ""));
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), path);
 
-        DataTableSource source = new DataTableSource(identifier, table, true, null, null);
+        DataTableSource source = new DataTableSource(identifier, table, true, null);
         assertThat(source.getChangelogMode()).isEqualTo(expectSource);
 
-        FlinkTableSink sink = new FlinkTableSink(identifier, table, null, null);
+        FlinkTableSink sink = new FlinkTableSink(identifier, table, null);
         assertThat(sink.getChangelogMode(ChangelogMode.all())).isEqualTo(expectSink);
     }
 
@@ -90,14 +92,22 @@ public class ChangelogModeTest {
     @Test
     public void testInputChangelogProducer() throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
+        options.set(CHANGELOG_PRODUCER, INPUT);
         test(options, ChangelogMode.all(), ChangelogMode.all());
     }
 
     @Test
-    public void testChangelogModeAll() throws Exception {
+    public void testLookupChangelogProducer() throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.LOG_CHANGELOG_MODE, CoreOptions.LogChangelogMode.ALL);
-        test(options, ChangelogMode.all(), ChangelogMode.all());
+        options.set(CHANGELOG_PRODUCER, LOOKUP);
+
+        // Compatible to Flink 2.0 (keyOnlyDeletes)
+        ChangelogMode.Builder upsertBuilder = ChangelogMode.newBuilder();
+        for (RowKind kind : ChangelogMode.all().getContainedKinds()) {
+            if (kind != RowKind.UPDATE_BEFORE) {
+                upsertBuilder.addContainedKind(kind);
+            }
+        }
+        test(options, ChangelogMode.all(), upsertBuilder.build());
     }
 }

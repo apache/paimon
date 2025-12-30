@@ -136,6 +136,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.fileCompression(),
                 options.dataFilePathDirectory(),
                 createExternalPaths(),
+                options.externalPathStrategy(),
                 options.indexFileInDataFileDir());
     }
 
@@ -169,7 +170,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 paths.add(path);
             }
         }
-
         checkArgument(!paths.isEmpty(), "External paths should not be empty");
         return paths;
     }

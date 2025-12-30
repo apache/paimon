@@ -47,7 +47,7 @@ public class MultiTableCommittableSerializer
 
     @Override
     public int getVersion() {
-        return 2;
+        return 3;
     }
 
     @Override
@@ -101,26 +101,11 @@ public class MultiTableCommittableSerializer
     }
 
     public byte[] serializeCommittable(MultiTableCommittable committable) throws IOException {
-        byte[] wrapped;
-        int version;
-        switch (committable.kind()) {
-            case FILE:
-                version = commitMessageSerializer.getVersion();
-                wrapped =
-                        commitMessageSerializer.serialize(
-                                (CommitMessage) committable.wrappedCommittable());
-                break;
-            case LOG_OFFSET:
-                version = 1;
-                wrapped = ((LogOffsetCommittable) committable.wrappedCommittable()).toBytes();
-                break;
-            default:
-                throw new UnsupportedOperationException("Unsupported kind: " + committable.kind());
-        }
+        int version = commitMessageSerializer.getVersion();
+        byte[] wrapped = commitMessageSerializer.serialize(committable.commitMessage());
 
-        return ByteBuffer.allocate(8 + 1 + wrapped.length + 4)
+        return ByteBuffer.allocate(8 + wrapped.length + 4)
                 .putLong(committable.checkpointId())
-                .put(committable.kind().toByteValue())
                 .put(wrapped)
                 .putInt(version)
                 .array();
@@ -134,22 +119,10 @@ public class MultiTableCommittableSerializer
 
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         long checkpointId = buffer.getLong();
-        Committable.Kind kind = Committable.Kind.fromByteValue(buffer.get());
-        byte[] wrapped = new byte[bytes.length - 13];
+        byte[] wrapped = new byte[bytes.length - 12];
         buffer.get(wrapped);
         int version = buffer.getInt();
-
-        Object wrappedCommittable;
-        switch (kind) {
-            case FILE:
-                wrappedCommittable = commitMessageSerializer.deserialize(version, wrapped);
-                break;
-            case LOG_OFFSET:
-                wrappedCommittable = LogOffsetCommittable.fromBytes(wrapped);
-                break;
-            default:
-                throw new UnsupportedOperationException("Unsupported kind: " + kind);
-        }
-        return new Committable(checkpointId, kind, wrappedCommittable);
+        CommitMessage commitMessage = commitMessageSerializer.deserialize(version, wrapped);
+        return new Committable(checkpointId, commitMessage);
     }
 }

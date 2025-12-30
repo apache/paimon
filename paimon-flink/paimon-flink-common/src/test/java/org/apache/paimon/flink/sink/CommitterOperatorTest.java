@@ -101,8 +101,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
         long timestamp = 1;
         for (CommitMessage committable : write.prepareCommit(false, 8)) {
-            testHarness.processElement(
-                    new Committable(8, Committable.Kind.FILE, committable), timestamp++);
+            testHarness.processElement(new Committable(8, committable), timestamp++);
         }
         // checkpoint is completed but not notified, so no snapshot is committed
         OperatorSubtaskState snapshot = testHarness.snapshot(0, timestamp++);
@@ -151,8 +150,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
             write.write(GenericRow.of(1, 10L));
             write.write(GenericRow.of(2, 20L));
             for (CommitMessage committable : write.prepareCommit(false, cpId)) {
-                testHarness.processElement(
-                        new Committable(cpId, Committable.Kind.FILE, committable), 1);
+                testHarness.processElement(new Committable(cpId, committable), 1);
             }
         }
 
@@ -188,8 +186,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         write.write(GenericRow.of(1, 10L));
         write.write(GenericRow.of(2, 20L));
         for (CommitMessage committable : write.prepareCommit(false, 1)) {
-            testHarness.processElement(
-                    new Committable(1, Committable.Kind.FILE, committable), timestamp++);
+            testHarness.processElement(new Committable(1, committable), timestamp++);
         }
         testHarness.snapshot(1, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(1);
@@ -198,8 +195,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         write.write(GenericRow.of(3, 30L));
         write.write(GenericRow.of(4, 40L));
         for (CommitMessage committable : write.prepareCommit(false, 2)) {
-            testHarness.processElement(
-                    new Committable(2, Committable.Kind.FILE, committable), timestamp++);
+            testHarness.processElement(new Committable(2, committable), timestamp++);
         }
         OperatorSubtaskState snapshot = testHarness.snapshot(2, timestamp++);
 
@@ -216,8 +212,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         write.write(GenericRow.of(5, 50L));
         write.write(GenericRow.of(6, 60L));
         for (CommitMessage committable : write.prepareCommit(false, 3)) {
-            testHarness.processElement(
-                    new Committable(3, Committable.Kind.FILE, committable), timestamp++);
+            testHarness.processElement(new Committable(3, committable), timestamp++);
         }
         testHarness.snapshot(3, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(3);
@@ -332,7 +327,6 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                             testHarness.processElement(
                                     new Committable(
                                             Long.MAX_VALUE,
-                                            Committable.Kind.FILE,
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
@@ -350,7 +344,6 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                             testHarness.processElement(
                                     new Committable(
                                             Long.MAX_VALUE,
-                                            Committable.Kind.FILE,
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
@@ -367,7 +360,6 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                             testHarness.processElement(
                                     new Committable(
                                             Long.MAX_VALUE,
-                                            Committable.Kind.FILE,
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
@@ -403,7 +395,6 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                             testHarness.processElement(
                                     new Committable(
                                             0L,
-                                            Committable.Kind.FILE,
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
@@ -421,7 +412,6 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                             testHarness.processElement(
                                     new Committable(
                                             0L,
-                                            Committable.Kind.FILE,
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
@@ -438,7 +428,6 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                             testHarness.processElement(
                                     new Committable(
                                             Long.MAX_VALUE,
-                                            Committable.Kind.FILE,
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
@@ -472,8 +461,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         StreamTableWrite write = streamWriteBuilder.withCommitUser(commitUser).newWrite();
         write.write(GenericRow.of(1, 10L));
         for (CommitMessage committable : write.prepareCommit(false, 1)) {
-            testHarness.processElement(
-                    new Committable(checkpoint, Committable.Kind.FILE, committable), ++timestamp);
+            testHarness.processElement(new Committable(checkpoint, committable), ++timestamp);
         }
         OperatorSubtaskState snapshot = testHarness.snapshot(checkpoint, ++timestamp);
         return snapshot;
@@ -493,9 +481,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         long cpId = 1;
         write.write(GenericRow.of(1, 10L));
         testHarness.processElement(
-                new Committable(
-                        cpId, Committable.Kind.FILE, write.prepareCommit(true, cpId).get(0)),
-                timestamp++);
+                new Committable(cpId, write.prepareCommit(true, cpId).get(0)), timestamp++);
         testHarness.processWatermark(new Watermark(1024));
         testHarness.snapshot(cpId, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(cpId);
@@ -504,9 +490,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         cpId = 2;
         write.write(GenericRow.of(1, 20L));
         testHarness.processElement(
-                new Committable(
-                        cpId, Committable.Kind.FILE, write.prepareCommit(true, cpId).get(0)),
-                timestamp++);
+                new Committable(cpId, write.prepareCommit(true, cpId).get(0)), timestamp++);
         testHarness.processWatermark(new Watermark(Long.MAX_VALUE));
         testHarness.snapshot(cpId, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(cpId);
@@ -705,9 +689,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         long cpId = 1;
         write.write(GenericRow.of(1, 100L));
         testHarness.processElement(
-                new Committable(
-                        cpId, Committable.Kind.FILE, write.prepareCommit(false, cpId).get(0)),
-                timestamp++);
+                new Committable(cpId, write.prepareCommit(false, cpId).get(0)), timestamp++);
         testHarness.snapshot(cpId, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(cpId);
 
@@ -742,9 +724,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         // real compaction
         write.compact(BinaryRow.EMPTY_ROW, 0, true);
         testHarness.processElement(
-                new Committable(
-                        cpId, Committable.Kind.FILE, write.prepareCommit(true, cpId).get(0)),
-                timestamp++);
+                new Committable(cpId, write.prepareCommit(true, cpId).get(0)), timestamp++);
         testHarness.snapshot(cpId, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(cpId);
 

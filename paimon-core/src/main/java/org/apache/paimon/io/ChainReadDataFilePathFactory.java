@@ -18,8 +18,8 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.RoundRobinExternalPathProvider;
 import org.apache.paimon.manifest.FileEntry;
 
 import javax.annotation.Nullable;
@@ -38,7 +38,7 @@ public class ChainReadDataFilePathFactory extends DataFilePathFactory {
             String changelogFilePrefix,
             boolean fileSuffixIncludeCompression,
             String fileCompression,
-            @Nullable ExternalPathProvider externalPathProvider,
+            @Nullable RoundRobinExternalPathProvider externalPathProvider,
             ChainReadContext chainReadContext) {
         super(
                 parent,

@@ -18,8 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.annotation.VisibleForTesting;
-
 import org.roaringbitmap.longlong.Roaring64NavigableMap;
 
 import java.io.ByteArrayInputStream;
@@ -27,7 +25,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -63,6 +60,10 @@ public class RoaringNavigableMap64 implements Iterable<Long> {
 
     public void and(RoaringNavigableMap64 other) {
         roaring64NavigableMap.and(other.roaring64NavigableMap);
+    }
+
+    public void andNot(RoaringNavigableMap64 other) {
+        roaring64NavigableMap.andNot(other.roaring64NavigableMap);
     }
 
     public boolean isEmpty() {
@@ -131,42 +132,16 @@ public class RoaringNavigableMap64 implements Iterable<Long> {
         }
     }
 
-    @VisibleForTesting
     /**
      * Converts this bitmap to a list of contiguous ranges.
      *
      * <p>This is useful for interoperability with APIs that expect List&lt;Range&gt;.
      */
     public List<Range> toRangeList() {
-        List<Range> ranges = new ArrayList<>();
-        Iterator<Long> iterator = roaring64NavigableMap.iterator();
-
-        if (!iterator.hasNext()) {
-            return ranges;
-        }
-
-        long rangeStart = iterator.next();
-        long rangeEnd = rangeStart;
-
-        while (iterator.hasNext()) {
-            long current = iterator.next();
-            if (current == rangeEnd + 1) {
-                // Extend the current range
-                rangeEnd = current;
-            } else {
-                // Save the current range and start a new one
-                ranges.add(new Range(rangeStart, rangeEnd));
-                rangeStart = current;
-                rangeEnd = current;
-            }
-        }
-        // Add the last range
-        ranges.add(new Range(rangeStart, rangeEnd));
-
-        return ranges;
+        // TODO Optimize this to avoid iterator all ids
+        return Range.toRanges(roaring64NavigableMap::iterator);
     }
 
-    @VisibleForTesting
     public static RoaringNavigableMap64 bitmapOf(long... dat) {
         RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
         for (long ele : dat) {

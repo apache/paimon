@@ -22,12 +22,11 @@ import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan, RepartitionByExpression, Sort}
+import org.apache.spark.sql.catalyst.plans.logical.{Deduplicate, Join, LogicalPlan, MergeRows, RepartitionByExpression, Sort}
 import org.apache.spark.sql.execution.QueryExecution
 import org.apache.spark.sql.util.QueryExecutionListener
 
-import scala.collection.JavaConverters._
-import scala.collection.mutable
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 
 abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
@@ -142,6 +141,22 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(1, 22, 0, 2), Row(2, 22, 1, 2), Row(3, 22, 2, 2))
+      )
+    }
+  }
+
+  test("Row Tracking: update") {
+    withTable("s", "t") {
+      spark.sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      spark.sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+
+      spark.sql("UPDATE t SET data = 22 WHERE id = 2")
+
+      spark.sql("INSERT INTO t VALUES (4, 4), (5, 5)")
+
+      checkAnswer(
+        spark.sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+        Seq(Row(1, 1, 0, 1), Row(2, 22, 1, 2), Row(3, 3, 2, 1), Row(4, 4, 3, 3), Row(5, 5, 4, 3))
       )
     }
   }
@@ -397,13 +412,20 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       sql(
         "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
 
-      val capturedPlans: mutable.ListBuffer[LogicalPlan] = mutable.ListBuffer.empty
+      var findSplitsPlan: LogicalPlan = null
+      val latch = new CountDownLatch(1)
       val listener = new QueryExecutionListener {
         override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
-          capturedPlans += qe.analyzed
+          if (qe.analyzed.collectFirst { case _: Deduplicate => true }.nonEmpty) {
+            latch.countDown()
+            findSplitsPlan = qe.analyzed
+          }
         }
         override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
-          capturedPlans += qe.analyzed
+          if (qe.analyzed.collectFirst { case _: Deduplicate => true }.nonEmpty) {
+            latch.countDown()
+            findSplitsPlan = qe.analyzed
+          }
         }
       }
       spark.listenerManager.register(listener)
@@ -416,9 +438,10 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
              |WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (target_ROW_ID, b * 1.1, c)
              |WHEN NOT MATCHED THEN INSERT (a, b, c) VALUES (target_ROW_ID, b, c)
              |""".stripMargin)
+      assert(latch.await(10, TimeUnit.SECONDS), "await timeout")
       // Assert that no Join operator was used during
       // `org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.targetRelatedSplits`
-      assert(capturedPlans.head.collect { case plan: Join => plan }.isEmpty)
+      assert(findSplitsPlan != null && findSplitsPlan.collect { case plan: Join => plan }.isEmpty)
       spark.listenerManager.unregister(listener)
 
       checkAnswer(
@@ -442,13 +465,20 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       sql(
         "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
 
-      val capturedPlans = new java.util.concurrent.CopyOnWriteArrayList[LogicalPlan]()
+      var updatePlan: LogicalPlan = null
+      val latch = new CountDownLatch(1)
       val listener = new QueryExecutionListener {
         override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
-          capturedPlans.add(qe.analyzed)
+          if (qe.analyzed.collectFirst { case _: MergeRows => true }.nonEmpty) {
+            latch.countDown()
+            updatePlan = qe.analyzed
+          }
         }
         override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
-          capturedPlans.add(qe.analyzed)
+          if (qe.analyzed.collectFirst { case _: MergeRows => true }.nonEmpty) {
+            latch.countDown()
+            updatePlan = qe.analyzed
+          }
         }
       }
       spark.listenerManager.register(listener)
@@ -460,17 +490,17 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
              |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET b = source.b * 3,
              |c = concat(target.c, source.c)
              |""".stripMargin).collect()
+      assert(latch.await(10, TimeUnit.SECONDS), "await timeout")
       // Assert no shuffle/join/sort was used in
       // 'org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.updateActionInvoke'
       assert(
-        capturedPlans.asScala.forall(
-          plan =>
-            plan.collectFirst {
-              case p: Join => p
-              case p: Sort => p
-              case p: RepartitionByExpression => p
-            }.isEmpty),
-        s"Found unexpected Join/Sort/Exchange in plan:\n$capturedPlans"
+        updatePlan != null &&
+          updatePlan.collectFirst {
+            case p: Join => p
+            case p: Sort => p
+            case p: RepartitionByExpression => p
+          }.isEmpty,
+        s"Found unexpected Join/Sort/Exchange in plan: $updatePlan"
       )
       spark.listenerManager.unregister(listener)
 
@@ -543,8 +573,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
             Row(2, 200, "c2", 1, 2),
             Row(3, 300, "c33", 2, 2),
             Row(5, 550, "c5", 4, 2),
-            Row(7, 700, "c77", 9, 2),
-            Row(9, 990, "c99", 10, 2))
+            Row(7, 700, "c77", 5, 2),
+            Row(9, 990, "c99", 6, 2))
         )
       }
     }
