@@ -42,6 +42,9 @@ public class FaissJNI {
     private static volatile boolean loaded = false;
     private static Throwable loadError = null;
 
+    // Directory where we extract native libraries (shared across dependency and JNI libs)
+    private static Path extractedLibDir = null;
+
     static {
         try {
             // Try to load libfaiss dependency first (required on Linux)
@@ -61,6 +64,19 @@ public class FaissJNI {
     }
 
     private static void tryLoadFaissDependency() {
+        String osName = System.getProperty("os.name").toLowerCase();
+
+        // On macOS, FAISS is typically installed via Homebrew with proper rpath
+        if (osName.contains("mac") || osName.contains("darwin")) {
+            LOG.debug("On macOS, skipping manual libfaiss loading (uses rpath)");
+            return;
+        }
+
+        // First, try to load from bundled resources (preferred for distributed environments)
+        if (tryLoadBundledFaissLibrary()) {
+            return;
+        }
+
         // Try to load libfaiss.so from common locations
         String[] faissPaths = {
             System.getenv("FAISS_BUILD_DIR") != null
@@ -105,6 +121,45 @@ public class FaissJNI {
 
         // FAISS might already be loaded or available via rpath in the JNI library
         LOG.debug("libfaiss not loaded directly, will try to load JNI library anyway");
+    }
+
+    private static boolean tryLoadBundledFaissLibrary() {
+        String osName = System.getProperty("os.name").toLowerCase();
+        String osArch = System.getProperty("os.arch").toLowerCase();
+        String platformDir = getPlatformDir(osName, osArch);
+
+        // Try to load libfaiss.so from bundled resources
+        String faissResourcePath = "/native/" + platformDir + "/libfaiss.so";
+        LOG.debug("Trying to load bundled libfaiss from: {}", faissResourcePath);
+
+        try (InputStream is = FaissJNI.class.getResourceAsStream(faissResourcePath)) {
+            if (is == null) {
+                LOG.debug("Bundled libfaiss.so not found in resources: {}", faissResourcePath);
+                return false;
+            }
+
+            // Create temp directory if not already created
+            if (extractedLibDir == null) {
+                extractedLibDir = Files.createTempDirectory("paimon-faiss-");
+                extractedLibDir.toFile().deleteOnExit();
+            }
+
+            File tempFile = new File(extractedLibDir.toFile(), "libfaiss.so");
+            tempFile.deleteOnExit();
+
+            Files.copy(is, tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            LOG.debug("Extracted libfaiss.so to: {}", tempFile.getAbsolutePath());
+
+            System.load(tempFile.getAbsolutePath());
+            LOG.info("Loaded bundled libfaiss.so from resources");
+            return true;
+        } catch (IOException e) {
+            LOG.debug("Failed to extract bundled libfaiss.so: {}", e.getMessage());
+            return false;
+        } catch (UnsatisfiedLinkError e) {
+            LOG.debug("Failed to load bundled libfaiss.so: {}", e.getMessage());
+            return false;
+        }
     }
 
     /** Check if the native library is loaded successfully. */
@@ -200,10 +255,18 @@ public class FaissJNI {
                 throw new UnsatisfiedLinkError(errors.toString());
             }
 
-            Path tempDir = Files.createTempDirectory("paimon-faiss-");
+            // Reuse the same temp directory if we already extracted libfaiss.so there
+            Path tempDir;
+            if (extractedLibDir != null) {
+                tempDir = extractedLibDir;
+            } else {
+                tempDir = Files.createTempDirectory("paimon-faiss-");
+                tempDir.toFile().deleteOnExit();
+                extractedLibDir = tempDir;
+            }
+
             File tempFile = new File(tempDir.toFile(), libraryFileName);
             tempFile.deleteOnExit();
-            tempDir.toFile().deleteOnExit();
 
             Files.copy(is, tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
 

@@ -139,12 +139,49 @@ cmake --build . --config Release
 # Create output directory
 mkdir -p "${NATIVE_OUTPUT_DIR}"
 
-# Copy the library
+# Copy the JNI library
 if [ "$PLATFORM" = "darwin" ]; then
     cp "${BUILD_DIR}/lib/libpaimon_faiss_jni.dylib" "${NATIVE_OUTPUT_DIR}/"
+    echo "JNI library copied to: ${NATIVE_OUTPUT_DIR}/libpaimon_faiss_jni.dylib"
 else
     cp "${BUILD_DIR}/lib/libpaimon_faiss_jni.so" "${NATIVE_OUTPUT_DIR}/"
+    echo "JNI library copied to: ${NATIVE_OUTPUT_DIR}/libpaimon_faiss_jni.so"
+    
+    # On Linux, also copy libfaiss.so for bundled deployment
+    # This ensures the library works in distributed environments (Spark, Flink)
+    echo "Looking for libfaiss.so to bundle..."
+    FAISS_LIB_FOUND=""
+    
+    # Check common FAISS library locations
+    FAISS_LIB_PATHS=(
+        "${FAISS_BUILD_DIR}/faiss/libfaiss.so"
+        "${FAISS_HOME}/build/faiss/libfaiss.so"
+        "${FAISS_HOME}/lib/libfaiss.so"
+        "/root/faiss/faiss/build/faiss/libfaiss.so"
+        "/usr/local/lib/libfaiss.so"
+        "/usr/lib/libfaiss.so"
+        "/usr/lib64/libfaiss.so"
+        "/usr/lib/x86_64-linux-gnu/libfaiss.so"
+    )
+    
+    for lib_path in "${FAISS_LIB_PATHS[@]}"; do
+        if [ -f "$lib_path" ]; then
+            FAISS_LIB_FOUND="$lib_path"
+            break
+        fi
+    done
+    
+    if [ -n "$FAISS_LIB_FOUND" ]; then
+        cp "$FAISS_LIB_FOUND" "${NATIVE_OUTPUT_DIR}/"
+        echo "libfaiss.so copied from: $FAISS_LIB_FOUND"
+        echo "Bundled libfaiss.so to: ${NATIVE_OUTPUT_DIR}/libfaiss.so"
+    else
+        echo "WARNING: libfaiss.so not found. The JNI library will require libfaiss.so"
+        echo "         to be installed on target systems or set in LD_LIBRARY_PATH."
+        echo "         For distributed environments (Spark/Flink), consider installing FAISS"
+        echo "         on all worker nodes or rebuilding with FAISS available."
+    fi
 fi
 
-echo "Build complete. Native library copied to: ${NATIVE_OUTPUT_DIR}"
+echo "Build complete. Native libraries copied to: ${NATIVE_OUTPUT_DIR}"
 
