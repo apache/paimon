@@ -45,11 +45,14 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_FILE_IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 
 /** A {@link FileIO} to support getting token from REST Server. */
@@ -62,6 +65,13 @@ public class RESTTokenFileIO implements FileIO {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether to support data token provided by the REST server.");
+
+    public static final ConfigOption<String> FILE_IO_CACHE_POLICY =
+            ConfigOptions.key("dlf.file-io.cache.policy")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The cache policy of a table provided by the REST server, combined with: meta,read,write");
 
     private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
@@ -239,6 +249,27 @@ public class RESTTokenFileIO implements FileIO {
         if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
             newToken.put("fs.oss.endpoint", dlfOssEndpoint);
         }
+
+        // Process file io cache configuration
+        if (!catalogContext.options().get(DLF_FILE_IO_CACHE_ENABLED)) {
+            // Disable file io cache, remove the cache policy configs
+            newToken.remove(FILE_IO_CACHE_POLICY.key());
+        } else {
+            // Enable file io cache, reorder cache policy in fixed order,
+            // and allow user to override policy provided by REST server.
+            String cachePolicy = catalogContext.options().get(FILE_IO_CACHE_POLICY);
+            if (cachePolicy == null) {
+                cachePolicy = token.get(FILE_IO_CACHE_POLICY.key());
+            }
+            if (cachePolicy != null) {
+                Set<String> cachePolicySet = new TreeSet<>();
+                for (String policy : cachePolicy.split(",")) {
+                    cachePolicySet.add(policy.trim().toLowerCase());
+                }
+                newToken.put(FILE_IO_CACHE_POLICY.key(), String.join(",", cachePolicySet));
+            }
+        }
+
         return ImmutableMap.copyOf(newToken);
     }
 

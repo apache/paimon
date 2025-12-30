@@ -82,6 +82,7 @@ public class JindoFileIO extends HadoopCompliantFileIO {
             new ConcurrentHashMap<>();
 
     private Options hadoopOptions;
+    private Options hadoopOptionsWithCache;
     private boolean allowCache = true;
 
     @Override
@@ -91,6 +92,7 @@ public class JindoFileIO extends HadoopCompliantFileIO {
 
     @Override
     public void configure(CatalogContext context) {
+        super.configure(context);
         allowCache = context.options().get(FILE_IO_ALLOW_CACHE);
         hadoopOptions = new Options();
         // read all configuration with prefix 'CONFIG_PREFIXES'
@@ -127,6 +129,14 @@ public class JindoFileIO extends HadoopCompliantFileIO {
                     .iterator()
                     .forEachRemaining(entry -> hadoopOptions.set(entry.getKey(), entry.getValue()));
         }
+
+        // another config when enable cache
+        hadoopOptionsWithCache = new Options(hadoopOptions.toMap());
+        hadoopOptionsWithCache.set("fs.xengine", "jindocache");
+        // Workaround: following configurations to avoid bug in some JindoSDK versions
+        hadoopOptionsWithCache.set("fs.oss.read.profile.columnar.use-pread", "false");
+        hadoopOptionsWithCache.set(
+                "fs.jindocache.read.profile.columnar.readahead.pread.enable", "false");
     }
 
     public Options hadoopOptions() {
@@ -140,20 +150,22 @@ public class JindoFileIO extends HadoopCompliantFileIO {
             throw new IOException("File " + path + " already exists.");
         }
         org.apache.hadoop.fs.Path hadoopPath = path(path);
-        Pair<JindoHadoopSystem, String> pair = getFileSystemPair(hadoopPath);
+        Pair<JindoHadoopSystem, String> pair = getFileSystemPair(hadoopPath, false);
         JindoHadoopSystem fs = pair.getKey();
         return new JindoTwoPhaseOutputStream(
                 new JindoMultiPartUpload(fs, hadoopPath), hadoopPath, path);
     }
 
     @Override
-    protected Pair<JindoHadoopSystem, String> createFileSystem(org.apache.hadoop.fs.Path path) {
+    protected Pair<JindoHadoopSystem, String> createFileSystem(
+            org.apache.hadoop.fs.Path path, boolean enableCache) {
         final String scheme = path.toUri().getScheme();
         final String authority = path.toUri().getAuthority();
+        Options options = enableCache ? hadoopOptionsWithCache : hadoopOptions;
         Supplier<Pair<JindoHadoopSystem, String>> supplier =
                 () -> {
                     Configuration hadoopConf = new Configuration(false);
-                    hadoopOptions.toMap().forEach(hadoopConf::set);
+                    options.toMap().forEach(hadoopConf::set);
                     URI fsUri = path.toUri();
                     if (scheme == null && authority == null) {
                         fsUri = FileSystem.getDefaultUri(hadoopConf);
@@ -185,7 +197,7 @@ public class JindoFileIO extends HadoopCompliantFileIO {
 
         if (allowCache) {
             return CACHE.computeIfAbsent(
-                    new CacheKey(hadoopOptions, scheme, authority), key -> supplier.get());
+                    new CacheKey(options, scheme, authority), key -> supplier.get());
         } else {
             return supplier.get();
         }
