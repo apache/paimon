@@ -30,7 +30,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -50,6 +49,7 @@ import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ConflictDetection.ConflictCheck;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
+import org.apache.paimon.operation.commit.RowTrackingCommitUtils.RowTrackingAssigned;
 import org.apache.paimon.operation.commit.SuccessCommitResult;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.operation.metrics.CommitStats;
@@ -62,7 +62,6 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -95,7 +94,6 @@ import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
-import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestEntry.nullableRecordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
@@ -103,6 +101,7 @@ import static org.apache.paimon.operation.commit.ConflictDetection.hasConflictCh
 import static org.apache.paimon.operation.commit.ConflictDetection.mustConflictCheck;
 import static org.apache.paimon.operation.commit.ConflictDetection.noConflictCheck;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
+import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRowTracking;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -971,14 +970,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             if (rowTrackingEnabled) {
-                // assigned snapshot id to delta files
-                List<ManifestEntry> snapshotAssigned = new ArrayList<>();
-                assignSnapshotId(newSnapshotId, deltaFiles, snapshotAssigned);
-                // assign row id for new files
-                List<ManifestEntry> rowIdAssigned = new ArrayList<>();
-                nextRowIdStart =
-                        assignRowTrackingMeta(firstRowIdStart, snapshotAssigned, rowIdAssigned);
-                deltaFiles = rowIdAssigned;
+                RowTrackingAssigned assigned =
+                        assignRowTracking(newSnapshotId, firstRowIdStart, deltaFiles);
+                nextRowIdStart = assigned.nextRowIdStart;
+                deltaFiles = assigned.assignedEntries;
             }
 
             // the added records subtract the deleted records from
@@ -1130,57 +1125,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.nextRowId());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
-    }
-
-    private long assignRowTrackingMeta(
-            long firstRowIdStart,
-            List<ManifestEntry> deltaFiles,
-            List<ManifestEntry> rowIdAssigned) {
-        if (deltaFiles.isEmpty()) {
-            return firstRowIdStart;
-        }
-        // assign row id for new files
-        long start = firstRowIdStart;
-        long blobStart = firstRowIdStart;
-        for (ManifestEntry entry : deltaFiles) {
-            checkArgument(
-                    entry.file().fileSource().isPresent(),
-                    "This is a bug, file source field for row-tracking table must present.");
-            boolean containsRowId =
-                    entry.file().writeCols() != null
-                            && entry.file().writeCols().contains(SpecialFields.ROW_ID.name());
-            if (entry.file().fileSource().get().equals(FileSource.APPEND)
-                    && entry.file().firstRowId() == null
-                    && !containsRowId) {
-                if (isBlobFile(entry.file().fileName())) {
-                    if (blobStart >= start) {
-                        throw new IllegalStateException(
-                                String.format(
-                                        "This is a bug, blobStart %d should be less than start %d when assigning a blob entry file.",
-                                        blobStart, start));
-                    }
-                    long rowCount = entry.file().rowCount();
-                    rowIdAssigned.add(entry.assignFirstRowId(blobStart));
-                    blobStart += rowCount;
-                } else {
-                    long rowCount = entry.file().rowCount();
-                    rowIdAssigned.add(entry.assignFirstRowId(start));
-                    blobStart = start;
-                    start += rowCount;
-                }
-            } else {
-                // for compact file, do not assign first row id.
-                rowIdAssigned.add(entry);
-            }
-        }
-        return start;
-    }
-
-    private void assignSnapshotId(
-            long snapshotId, List<ManifestEntry> deltaFiles, List<ManifestEntry> snapshotAssigned) {
-        for (ManifestEntry entry : deltaFiles) {
-            snapshotAssigned.add(entry.assignSequenceNumber(snapshotId, snapshotId));
-        }
     }
 
     public void compactManifest() {
