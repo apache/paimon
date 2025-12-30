@@ -1,0 +1,242 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.spark.catalyst.optimizer
+
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.predicate.VectorSearch
+import org.apache.paimon.spark.PaimonScan
+import org.apache.paimon.spark.catalog.functions.PaimonFunctions
+import org.apache.paimon.table.FileStoreTable
+
+import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
+import org.apache.spark.sql.types.{ArrayType, FloatType}
+
+/**
+ * An optimization rule that detects `ORDER BY cosine_similarity(embedding_col, vector) DESC LIMIT
+ * N` pattern and pushes down vector search to Paimon's global vector index.
+ *
+ * This rule only applies when:
+ *   - The table has `data-evolution.enabled=true` and `row-tracking.enabled=true`
+ *   - A global vector index exists on the embedding column
+ *   - The ORDER BY uses cosine_similarity with DESC ordering
+ *   - A LIMIT clause is present
+ */
+object PushDownVectorSearch extends Rule[LogicalPlan] {
+
+  override def apply(plan: LogicalPlan): LogicalPlan = {
+    plan.transformDown {
+      // Pattern: GlobalLimit -> LocalLimit -> Sort -> Project -> DataSourceV2ScanRelation
+      case globalLimit @ GlobalLimit(
+            limitExpr,
+            LocalLimit(_, sort @ Sort(sortOrders, true, project @ Project(projectList, relation))))
+          if isPaimonScanRelation(relation) && canPushVectorSearch(
+            getPaimonScan(relation)) && isVectorSearchPattern(sortOrders) =>
+        val scanRelation = relation.asInstanceOf[DataSourceV2ScanRelation]
+        val scan = scanRelation.scan.asInstanceOf[PaimonScan]
+        val limit = extractLimit(limitExpr)
+        extractVectorSearchInfo(sortOrders, projectList, scanRelation) match {
+          case Some((fieldName, queryVector)) if limit.isDefined =>
+            val vectorSearch = new VectorSearch(queryVector, limit.get, fieldName)
+            val newScan = scan.copy(pushedVectorSearch = Some(vectorSearch))
+            val newRelation = copyRelationWithNewScan(scanRelation, newScan)
+            val newProject = project.copy(child = newRelation)
+            val newSort = sort.copy(child = newProject)
+            globalLimit.copy(child = LocalLimit(limitExpr, newSort))
+          case _ => globalLimit
+        }
+
+      // Pattern: GlobalLimit -> LocalLimit -> Sort -> DataSourceV2ScanRelation (no project)
+      case globalLimit @ GlobalLimit(
+            limitExpr,
+            LocalLimit(_, sort @ Sort(sortOrders, true, relation)))
+          if isPaimonScanRelation(relation) && canPushVectorSearch(
+            getPaimonScan(relation)) && isVectorSearchPattern(sortOrders) =>
+        val scanRelation = relation.asInstanceOf[DataSourceV2ScanRelation]
+        val scan = scanRelation.scan.asInstanceOf[PaimonScan]
+        val limit = extractLimit(limitExpr)
+        extractVectorSearchInfoDirect(sortOrders, scanRelation) match {
+          case Some((fieldName, queryVector)) if limit.isDefined =>
+            val vectorSearch = new VectorSearch(queryVector, limit.get, fieldName)
+            val newScan = scan.copy(pushedVectorSearch = Some(vectorSearch))
+            val newRelation = copyRelationWithNewScan(scanRelation, newScan)
+            val newSort = sort.copy(child = newRelation)
+            globalLimit.copy(child = LocalLimit(limitExpr, newSort))
+          case _ => globalLimit
+        }
+    }
+  }
+
+  private def isPaimonScanRelation(plan: LogicalPlan): Boolean = {
+    plan match {
+      case r: DataSourceV2ScanRelation => r.scan.isInstanceOf[PaimonScan]
+      case _ => false
+    }
+  }
+
+  private def getPaimonScan(plan: LogicalPlan): PaimonScan = {
+    plan.asInstanceOf[DataSourceV2ScanRelation].scan.asInstanceOf[PaimonScan]
+  }
+
+  private def copyRelationWithNewScan(
+      relation: DataSourceV2ScanRelation,
+      newScan: PaimonScan): DataSourceV2ScanRelation = {
+    relation.copy(scan = newScan)
+  }
+
+  private def canPushVectorSearch(scan: PaimonScan): Boolean = {
+    // Already has vector search pushed, don't do it again
+    if (scan.pushedVectorSearch.isDefined) {
+      return false
+    }
+
+    scan.table match {
+      case fileStoreTable: FileStoreTable =>
+        val options = CoreOptions.fromMap(fileStoreTable.options())
+        options.dataEvolutionEnabled() && options.rowTrackingEnabled() && options
+          .globalIndexEnabled()
+      case _ => false
+    }
+  }
+
+  private def isVectorSearchPattern(sortOrders: Seq[SortOrder]): Boolean = {
+    sortOrders.headOption.exists {
+      sortOrder =>
+        // Must be descending order for cosine similarity (higher is better)
+        sortOrder.direction == Descending && isCosineSimilarityExpression(sortOrder.child)
+    }
+  }
+
+  private def isCosineSimilarityExpression(expr: Expression): Boolean = {
+    expr match {
+      case ApplyFunctionExpression(func, _)
+          if func.name() == PaimonFunctions.COSINE_SIMILARITY &&
+            func.canonicalName().startsWith("paimon") =>
+        true
+      case Alias(child, _) => isCosineSimilarityExpression(child)
+      case _ => false
+    }
+  }
+
+  private def extractLimit(limitExpr: Expression): Option[Int] = {
+    limitExpr match {
+      case Literal(value: Int, _) => Some(value)
+      case Literal(value: Long, _) => Some(value.toInt)
+      case _ => None
+    }
+  }
+
+  private def extractVectorSearchInfo(
+      sortOrders: Seq[SortOrder],
+      projectList: Seq[NamedExpression],
+      relation: DataSourceV2ScanRelation): Option[(String, Array[Float])] = {
+    sortOrders.headOption.flatMap {
+      sortOrder => extractFromExpression(sortOrder.child, projectList, relation)
+    }
+  }
+
+  private def extractVectorSearchInfoDirect(
+      sortOrders: Seq[SortOrder],
+      relation: DataSourceV2ScanRelation): Option[(String, Array[Float])] = {
+    sortOrders.headOption.flatMap {
+      sortOrder => extractFromExpression(sortOrder.child, Seq.empty, relation)
+    }
+  }
+
+  private def extractFromExpression(
+      expr: Expression,
+      projectList: Seq[NamedExpression],
+      relation: DataSourceV2ScanRelation): Option[(String, Array[Float])] = {
+    expr match {
+      case ApplyFunctionExpression(func, args)
+          if func.name() == PaimonFunctions.COSINE_SIMILARITY &&
+            func.canonicalName().startsWith("paimon") =>
+        extractFromArgs(args, projectList, relation)
+      case Alias(child, _) => extractFromExpression(child, projectList, relation)
+      case _ => None
+    }
+  }
+
+  private def extractFromArgs(
+      args: Seq[Expression],
+      projectList: Seq[NamedExpression],
+      relation: DataSourceV2ScanRelation): Option[(String, Array[Float])] = {
+    if (args.size != 2) {
+      return None
+    }
+
+    // First arg is the column reference, second is the query vector
+    val (columnExpr, vectorExpr) = (args(0), args(1))
+
+    // Extract field name from the column reference
+    val fieldName = extractFieldName(columnExpr, projectList, relation)
+
+    // Extract the query vector from the literal
+    val queryVector = extractQueryVector(vectorExpr)
+
+    for {
+      field <- fieldName
+      vector <- queryVector
+    } yield (field, vector)
+  }
+
+  private def extractFieldName(
+      expr: Expression,
+      projectList: Seq[NamedExpression],
+      relation: DataSourceV2ScanRelation): Option[String] = {
+    expr match {
+      case attr: AttributeReference =>
+        // Try to find in project list first
+        projectList
+          .collectFirst {
+            case a @ Alias(child: AttributeReference, _) if a.exprId == attr.exprId =>
+              child.name
+            case a: AttributeReference if a.exprId == attr.exprId =>
+              a.name
+          }
+          .orElse(Some(attr.name))
+      case _ => None
+    }
+  }
+
+  private def extractQueryVector(expr: Expression): Option[Array[Float]] = {
+    expr match {
+      case Literal(arrayData, ArrayType(FloatType, _)) if arrayData != null =>
+        val arr = arrayData.asInstanceOf[org.apache.spark.sql.catalyst.util.ArrayData]
+        Some(arr.toFloatArray())
+      case CreateArray(elements, _) =>
+        val floats = elements.flatMap(extractFloatValue)
+        if (floats.size == elements.size) Some(floats.toArray) else None
+      case _ => None
+    }
+  }
+
+  private def extractFloatValue(expr: Expression): Option[Float] = {
+    expr match {
+      case Literal(v: Float, _) => Some(v)
+      case Literal(v: Double, _) => Some(v.toFloat)
+      case Literal(v: java.lang.Float, _) if v != null => Some(v.floatValue())
+      case Literal(v: java.lang.Double, _) if v != null => Some(v.floatValue())
+      case c: Cast if c.dataType == FloatType => extractFloatValue(c.child)
+      case _ => None
+    }
+  }
+}

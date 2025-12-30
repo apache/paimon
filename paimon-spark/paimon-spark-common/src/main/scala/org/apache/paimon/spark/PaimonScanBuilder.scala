@@ -134,7 +134,8 @@ class PaimonScanBuilder(val table: InnerTable)
           pushedPartitionFilters,
           pushedDataFilters,
           pushedLimit,
-          pushedTopN)
+          pushedTopN,
+          pushedVectorSearch)
     }
   }
 }
