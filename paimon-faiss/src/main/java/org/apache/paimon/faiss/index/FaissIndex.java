@@ -18,7 +18,11 @@
 
 package org.apache.paimon.faiss.index;
 
-import org.apache.paimon.faiss.jni.FaissJNI;
+import org.apache.paimon.faiss.Index;
+import org.apache.paimon.faiss.IndexFactory;
+import org.apache.paimon.faiss.IndexHNSW;
+import org.apache.paimon.faiss.IndexIVF;
+import org.apache.paimon.faiss.MetricType;
 
 import java.io.Closeable;
 
@@ -27,18 +31,20 @@ import java.io.Closeable;
  *
  * <p>This class provides a safe Java API for interacting with native FAISS indices, including
  * automatic resource management through the {@link Closeable} interface.
+ *
+ * <p>This implementation uses the paimon-faiss-jni library for native FAISS bindings.
  */
 public class FaissIndex implements Closeable {
 
-    private long indexPtr;
+    private final Index index;
     private final int dimension;
     private final FaissVectorMetric metric;
     private final FaissIndexType indexType;
     private volatile boolean closed = false;
 
     private FaissIndex(
-            long indexPtr, int dimension, FaissVectorMetric metric, FaissIndexType indexType) {
-        this.indexPtr = indexPtr;
+            Index index, int dimension, FaissVectorMetric metric, FaissIndexType indexType) {
+        this.index = index;
         this.dimension = dimension;
         this.metric = metric;
         this.indexType = indexType;
@@ -52,9 +58,9 @@ public class FaissIndex implements Closeable {
      * @return the created index
      */
     public static FaissIndex createFlatIndex(int dimension, FaissVectorMetric metric) {
-        FaissJNI.ensureLoaded();
-        long ptr = FaissJNI.createIndex(dimension, "Flat", metric.getValue());
-        return new FaissIndex(ptr, dimension, metric, FaissIndexType.FLAT);
+        MetricType metricType = toMetricType(metric);
+        Index index = IndexFactory.create(dimension, "IDMap,Flat", metricType);
+        return new FaissIndex(index, dimension, metric, FaissIndexType.FLAT);
     }
 
     /**
@@ -68,9 +74,11 @@ public class FaissIndex implements Closeable {
      */
     public static FaissIndex createHnswIndex(
             int dimension, int m, int efConstruction, FaissVectorMetric metric) {
-        FaissJNI.ensureLoaded();
-        long ptr = FaissJNI.createHnswIndex(dimension, m, efConstruction, metric.getValue());
-        return new FaissIndex(ptr, dimension, metric, FaissIndexType.HNSW);
+        MetricType metricType = toMetricType(metric);
+        // Use IDMap2 wrapper to support addWithIds and get efConstruction
+        String description = String.format("IDMap2,HNSW%d", m);
+        Index index = IndexFactory.create(dimension, description, metricType);
+        return new FaissIndex(index, dimension, metric, FaissIndexType.HNSW);
     }
 
     /**
@@ -82,9 +90,10 @@ public class FaissIndex implements Closeable {
      * @return the created index
      */
     public static FaissIndex createIvfIndex(int dimension, int nlist, FaissVectorMetric metric) {
-        FaissJNI.ensureLoaded();
-        long ptr = FaissJNI.createIvfIndex(dimension, nlist, metric.getValue());
-        return new FaissIndex(ptr, dimension, metric, FaissIndexType.IVF);
+        MetricType metricType = toMetricType(metric);
+        String description = String.format("IDMap,IVF%d,Flat", nlist);
+        Index index = IndexFactory.create(dimension, description, metricType);
+        return new FaissIndex(index, dimension, metric, FaissIndexType.IVF);
     }
 
     /**
@@ -99,9 +108,10 @@ public class FaissIndex implements Closeable {
      */
     public static FaissIndex createIvfPqIndex(
             int dimension, int nlist, int m, int nbits, FaissVectorMetric metric) {
-        FaissJNI.ensureLoaded();
-        long ptr = FaissJNI.createIvfPqIndex(dimension, nlist, m, nbits, metric.getValue());
-        return new FaissIndex(ptr, dimension, metric, FaissIndexType.IVF_PQ);
+        MetricType metricType = toMetricType(metric);
+        String description = String.format("IDMap,IVF%d,PQ%dx%d", nlist, m, nbits);
+        Index index = IndexFactory.create(dimension, description, metricType);
+        return new FaissIndex(index, dimension, metric, FaissIndexType.IVF_PQ);
     }
 
     /**
@@ -111,11 +121,10 @@ public class FaissIndex implements Closeable {
      * @return the loaded index
      */
     public static FaissIndex fromBytes(byte[] data) {
-        FaissJNI.ensureLoaded();
-        long ptr = FaissJNI.readIndex(data);
-        int dimension = FaissJNI.getIndexDimension(ptr);
+        Index index = Index.deserialize(data);
+        int dimension = index.getDimension();
         // Note: metric and type are not stored in serialized form, use defaults
-        return new FaissIndex(ptr, dimension, FaissVectorMetric.L2, FaissIndexType.UNKNOWN);
+        return new FaissIndex(index, dimension, FaissVectorMetric.L2, FaissIndexType.UNKNOWN);
     }
 
     /**
@@ -129,7 +138,7 @@ public class FaissIndex implements Closeable {
             return;
         }
         float[] flattened = flatten(vectors);
-        FaissJNI.addVectors(indexPtr, flattened, vectors.length);
+        index.add(flattened);
     }
 
     /**
@@ -151,7 +160,7 @@ public class FaissIndex implements Closeable {
                             + ids.length);
         }
         float[] flattened = flatten(vectors);
-        FaissJNI.addVectorsWithIds(indexPtr, flattened, ids, vectors.length);
+        index.addWithIds(flattened, ids);
     }
 
     /**
@@ -162,7 +171,7 @@ public class FaissIndex implements Closeable {
     public void add(float[] vector) {
         ensureOpen();
         checkDimension(vector);
-        FaissJNI.addVectors(indexPtr, vector, 1);
+        index.addSingle(vector);
     }
 
     /**
@@ -174,7 +183,7 @@ public class FaissIndex implements Closeable {
     public void addWithId(float[] vector, long id) {
         ensureOpen();
         checkDimension(vector);
-        FaissJNI.addVectorsWithIds(indexPtr, vector, new long[] {id}, 1);
+        index.addWithIds(vector, new long[] {id});
     }
 
     /**
@@ -188,7 +197,7 @@ public class FaissIndex implements Closeable {
             return;
         }
         float[] flattened = flatten(trainingVectors);
-        FaissJNI.trainIndex(indexPtr, flattened, trainingVectors.length);
+        index.train(flattened);
     }
 
     /**
@@ -198,7 +207,7 @@ public class FaissIndex implements Closeable {
      */
     public boolean isTrained() {
         ensureOpen();
-        return FaissJNI.isTrained(indexPtr);
+        return index.isTrained();
     }
 
     /**
@@ -214,10 +223,8 @@ public class FaissIndex implements Closeable {
             return new SearchResult(new float[0], new long[0], 0, k);
         }
         float[] flattened = flatten(queries);
-        float[] distances = new float[queries.length * k];
-        long[] labels = new long[queries.length * k];
-        FaissJNI.search(indexPtr, flattened, queries.length, k, distances, labels);
-        return new SearchResult(distances, labels, queries.length, k);
+        org.apache.paimon.faiss.SearchResult result = index.search(flattened, k);
+        return new SearchResult(result.getDistances(), result.getLabels(), queries.length, k);
     }
 
     /**
@@ -230,10 +237,8 @@ public class FaissIndex implements Closeable {
     public SearchResult search(float[] query, int k) {
         ensureOpen();
         checkDimension(query);
-        float[] distances = new float[k];
-        long[] labels = new long[k];
-        FaissJNI.search(indexPtr, query, 1, k, distances, labels);
-        return new SearchResult(distances, labels, 1, k);
+        org.apache.paimon.faiss.SearchResult result = index.searchSingle(query, k);
+        return new SearchResult(result.getDistances(), result.getLabels(), 1, k);
     }
 
     /**
@@ -243,7 +248,7 @@ public class FaissIndex implements Closeable {
      */
     public void setHnswEfSearch(int efSearch) {
         ensureOpen();
-        FaissJNI.setHnswEfSearch(indexPtr, efSearch);
+        IndexHNSW.setEfSearch(index, efSearch);
     }
 
     /**
@@ -253,7 +258,7 @@ public class FaissIndex implements Closeable {
      */
     public void setIvfNprobe(int nprobe) {
         ensureOpen();
-        FaissJNI.setIvfNprobe(indexPtr, nprobe);
+        IndexIVF.setNprobe(index, nprobe);
     }
 
     /**
@@ -263,7 +268,7 @@ public class FaissIndex implements Closeable {
      */
     public long size() {
         ensureOpen();
-        return FaissJNI.getIndexSize(indexPtr);
+        return index.getCount();
     }
 
     /**
@@ -300,13 +305,13 @@ public class FaissIndex implements Closeable {
      */
     public byte[] toBytes() {
         ensureOpen();
-        return FaissJNI.writeIndex(indexPtr);
+        return index.serialize();
     }
 
     /** Reset the index (remove all vectors). */
     public void reset() {
         ensureOpen();
-        FaissJNI.resetIndex(indexPtr);
+        index.reset();
     }
 
     @Override
@@ -314,8 +319,7 @@ public class FaissIndex implements Closeable {
         if (!closed) {
             synchronized (this) {
                 if (!closed) {
-                    FaissJNI.freeIndex(indexPtr);
-                    indexPtr = 0;
+                    index.close();
                     closed = true;
                 }
             }
@@ -352,6 +356,17 @@ public class FaissIndex implements Closeable {
             System.arraycopy(vectors[i], 0, result, i * d, d);
         }
         return result;
+    }
+
+    private static MetricType toMetricType(FaissVectorMetric metric) {
+        switch (metric) {
+            case L2:
+                return MetricType.L2;
+            case INNER_PRODUCT:
+                return MetricType.INNER_PRODUCT;
+            default:
+                throw new IllegalArgumentException("Unknown metric: " + metric);
+        }
     }
 
     /** Result of a search operation. */

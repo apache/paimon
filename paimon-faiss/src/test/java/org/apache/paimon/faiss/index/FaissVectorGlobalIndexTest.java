@@ -18,7 +18,8 @@
 
 package org.apache.paimon.faiss.index;
 
-import org.apache.paimon.faiss.jni.FaissJNI;
+import org.apache.paimon.faiss.Faiss;
+import org.apache.paimon.faiss.FaissException;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -65,21 +66,20 @@ public class FaissVectorGlobalIndexTest {
     @BeforeEach
     public void setup() {
         // Skip tests if FAISS native library is not available
-        if (!FaissJNI.isLoaded()) {
-            Throwable error = FaissJNI.getLoadError();
-            StringBuilder errorMsg = new StringBuilder("FAISS native library not available.");
-            if (error != null) {
-                errorMsg.append("\nError: ").append(error.getMessage());
-                if (error.getCause() != null) {
-                    errorMsg.append("\nCause: ").append(error.getCause().getMessage());
+        if (!Faiss.isLibraryLoaded()) {
+            try {
+                Faiss.loadLibrary();
+            } catch (FaissException e) {
+                StringBuilder errorMsg = new StringBuilder("FAISS native library not available.");
+                errorMsg.append("\nError: ").append(e.getMessage());
+                if (e.getCause() != null) {
+                    errorMsg.append("\nCause: ").append(e.getCause().getMessage());
                 }
+                errorMsg.append(
+                        "\n\nTo run FAISS tests, ensure the paimon-faiss-jni JAR"
+                                + " with native libraries is available in the classpath.");
+                Assumptions.assumeTrue(false, errorMsg.toString());
             }
-            errorMsg.append(
-                    "\n\nTo run FAISS tests on Linux:"
-                            + "\n1. Build native library: cd paimon-faiss/src/main/native && ./build.sh"
-                            + "\n2. Set LD_LIBRARY_PATH: export LD_LIBRARY_PATH=/root/faiss/faiss/build/faiss:$LD_LIBRARY_PATH"
-                            + "\n3. Run tests: mvn test -pl paimon-faiss -Ppaimon-faiss");
-            Assumptions.assumeTrue(false, errorMsg.toString());
         }
 
         fileIO = new LocalFileIO();

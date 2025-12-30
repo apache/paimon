@@ -523,6 +523,12 @@ under the License.
                 <jdk>11</jdk>
             </activation>
         </profile>
+        <profile>
+            <id>paimon-faiss-jni</id>
+            <modules>
+                <module>paimon-faiss-jni</module>
+            </modules>
+        </profile>
     </profiles>
 
     <build>

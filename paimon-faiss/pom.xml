@@ -38,6 +38,12 @@ under the License.
             <version>${project.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-faiss-jni</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- test dependencies -->
 
         <dependency>
