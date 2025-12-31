@@ -18,7 +18,10 @@
 
 import unittest
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from unittest.mock import Mock, patch
+
+import dateutil
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
@@ -367,7 +370,8 @@ class TestFileStoreCommit(unittest.TestCase):
             creation_time=None
         )
         creation_time = file_meta.creation_time
-        self.assertEqual(creation_time, Timestamp.now())
+        now = Timestamp.from_date_time(datetime.now(ZoneInfo("Asia/Shanghai")))
+        self.assertEqual(round((now.get_millisecond() - creation_time.get_millisecond()) / 60 / 60 / 1000), 8)
 
     def test_generate_partition_statistics_mismatched_partition_keys(
             self, mock_manifest_list_manager, mock_manifest_file_manager, mock_snapshot_manager):
