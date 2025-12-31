@@ -18,8 +18,8 @@
 
 import unittest
 
-from common.options import Options
-from common.options.config import OssOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import OssOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.read.reader.lance_utils import to_lance_specified
 
