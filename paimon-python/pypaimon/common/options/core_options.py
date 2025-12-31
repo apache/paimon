@@ -153,6 +153,13 @@ class CoreOptions:
         .with_description("Define the data block size.")
     )
 
+    METADATA_STATS_MODE: ConfigOption[str] = (
+        ConfigOptions.key("metadata.stats-mode")
+        .string_type()
+        .default_value("none")
+        .with_description("Stats Mode, Python by default is none. Java is truncate(16).")
+    )
+
     BLOB_AS_DESCRIPTOR: ConfigOption[bool] = (
         ConfigOptions.key("blob-as-descriptor")
         .boolean_type()
@@ -316,6 +323,9 @@ class CoreOptions:
 
     def file_block_size(self, default=None):
         return self.options.get(CoreOptions.FILE_BLOCK_SIZE, default)
+
+    def metadata_stats_enabled(self, default=None):
+        return self.options.get(CoreOptions.METADATA_STATS_MODE, default) == "full"
 
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
