@@ -172,6 +172,35 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     )
   }
 
+  test("Paimon Variant: read and write shredded and unshredded variant") {
+    sql(
+      """
+        |CREATE TABLE T
+        |(id INT, v1 VARIANT, v2 VARIANT, v3 VARIANT)
+        |TBLPROPERTIES
+        |('parquet.variant.shreddingSchema' =
+        |'{"type":"ROW","fields":[{"name":"v1","type":{"type":"ROW","fields":[{"name":"age","type":"INT"},{"name":"city","type":"STRING"}]}}]}'
+        |)
+        |""".stripMargin)
+    sql(
+      """
+        |INSERT INTO T VALUES
+        | (1, parse_json('{"age":26,"city":"Beijing"}'), parse_json('{"age":26,"city":"Beijing"}'), parse_json('{"age":26,"city":"Beijing"}'))
+        | """.stripMargin)
+
+    checkAnswer(
+      sql("SELECT * FROM T"),
+      sql(
+        """SELECT 1, parse_json('{"age":26,"city":"Beijing"}'), parse_json('{"age":26,"city":"Beijing"}'), parse_json('{"age":26,"city":"Beijing"}')""")
+    )
+
+    checkAnswer(
+      sql(
+        "SELECT variant_get(v1, '$.age', 'int'), variant_get(v2, '$.age', 'int'), variant_get(v3, '$.age', 'int') FROM T"),
+      Seq(Row(26, 26, 26))
+    )
+  }
+
   test("Paimon Variant: read and write shredded variant with all types") {
     for (isPkTable <- Seq(true, false)) {
       val pkProps = if (isPkTable) "'primary-key' = 'id'," else ""
