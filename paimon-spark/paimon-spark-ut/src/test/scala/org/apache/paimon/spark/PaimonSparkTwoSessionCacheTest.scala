@@ -29,7 +29,7 @@ import org.apache.spark.sql.Row
  */
 class PaimonSparkTwoSessionCacheTest extends PaimonSparkTestWithRestCatalogBase {
 
-  test("Two sessions: stale cache commit fails before fix") {
+  test("Two sessions: stale cache commit fails") {
     val db = "sku"
     val tbl = "sku_detail_twosession"
 
@@ -75,11 +75,9 @@ class PaimonSparkTwoSessionCacheTest extends PaimonSparkTestWithRestCatalogBase 
 
   override protected def sparkConf: SparkConf = {
     super.sparkConf
-      // Keep caching enabled to exercise CachingCatalog
       .set("spark.sql.catalog.paimon.cache-enabled", "true")
       .set("spark.sql.catalog.paimon.cache-expire-after-access", "5m")
       .set("spark.sql.catalog.paimon.cache-expire-after-write", "10m")
-      // Avoid plugin/codegen instability in UT while still exercising commitSnapshot
       .set("spark.sql.catalog.paimon.codegen-enabled", "false")
       .set("spark.sql.catalog.paimon.plugin-enabled", "false")
       .set("spark.sql.catalog.paimon.plugin-dir", warehouse)
