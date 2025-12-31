@@ -472,7 +472,8 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         self.assertEqual(result.to_dict(), test_df.to_dict())
 
     def test_append_only_reader_with_filter(self):
-        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        options = {'metadata.stats-mode': 'full'}
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options=options)
         self.rest_catalog.create_table('default.test_append_only_filter', schema, False)
         table = self.rest_catalog.get_table('default.test_append_only_filter')
         self._write_test_table(table)
