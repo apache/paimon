@@ -133,12 +133,12 @@ public class ManifestEntryChanges {
                                                 commitMessage.partition(),
                                                 commitMessage.bucket(),
                                                 m)));
-
     }
 
     public void collectMetrics(CommitMessage message, FileStorePathFactory factory) {
         CommitMessageImpl commitMessage = (CommitMessageImpl) message;
-        buckets.add(factory.bucketPath(commitMessage.partition(), commitMessage.bucket()).toString());
+        buckets.add(
+                factory.bucketPath(commitMessage.partition(), commitMessage.bucket()).toString());
         if (commitMessage.compactMetricIncrement() != null
                 && commitMessage.compactMetricIncrement().metric() != null
                 && !commitMessage.compactMetricIncrement().metric().isNullable()) {
