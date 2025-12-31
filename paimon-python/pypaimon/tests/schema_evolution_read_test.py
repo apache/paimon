@@ -210,7 +210,8 @@ class SchemaEvolutionReadTest(unittest.TestCase):
             ('item_id', pa.int64()),
             ('dt', pa.string())
         ])
-        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        options = {'metadata.stats-mode': 'full'}
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'], options=options)
         self.catalog.create_table('default.test_schema_evolution1', schema, False)
         table1 = self.catalog.get_table('default.test_schema_evolution1')
         write_builder = table1.new_batch_write_builder()
@@ -275,7 +276,8 @@ class SchemaEvolutionReadTest(unittest.TestCase):
             ('item_id', pa.int64()),
             ('dt', pa.string())
         ])
-        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        options = {'metadata.stats-mode': 'full'}
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'], options=options)
         self.catalog.create_table('default.test_schema_evolution_with_filter', schema, False)
         table1 = self.catalog.get_table('default.test_schema_evolution_with_filter')
         write_builder = table1.new_batch_write_builder()
@@ -299,7 +301,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
             ('dt', pa.string()),
             ('behavior', pa.string())
         ])
-        schema2 = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        schema2 = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'], options=options)
         self.catalog.create_table('default.test_schema_evolution_with_filter2', schema2, False)
         table2 = self.catalog.get_table('default.test_schema_evolution_with_filter2')
         table2.table_schema.id = 1

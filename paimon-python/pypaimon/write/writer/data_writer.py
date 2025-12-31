@@ -26,6 +26,7 @@ from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
 
@@ -189,14 +190,22 @@ class DataWriter(ABC):
         min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
         max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
 
-        key_column_stats = {
+        # key stats & value stats
+        value_stats_enabled = self.options.metadata_stats_enabled()
+        stats_fields = PyarrowFieldParser.to_paimon_schema(data.schema) if value_stats_enabled\
+            else self.table.trimmed_primary_keys_fields
+        column_stats = {
             field.name: self._get_column_stats(data, field.name)
-            for field in self.table.trimmed_primary_keys_fields
+            for field in stats_fields
         }
+        data_fields = stats_fields if value_stats_enabled else []
+        min_value_stats = [column_stats[field.name]['min_values'] for field in data_fields]
+        max_value_stats = [column_stats[field.name]['max_values'] for field in data_fields]
+        value_null_counts = [column_stats[field.name]['null_counts'] for field in data_fields]
         key_fields = self.trimmed_primary_keys_fields
-        min_key_stats = [key_column_stats[field.name]['min_values'] for field in key_fields]
-        max_key_stats = [key_column_stats[field.name]['max_values'] for field in key_fields]
-        key_null_counts = [key_column_stats[field.name]['null_counts'] for field in key_fields]
+        min_key_stats = [column_stats[field.name]['min_values'] for field in key_fields]
+        max_key_stats = [column_stats[field.name]['max_values'] for field in key_fields]
+        key_null_counts = [column_stats[field.name]['null_counts'] for field in key_fields]
         if not all(count == 0 for count in key_null_counts):
             raise RuntimeError("Primary key should not be null")
 
@@ -214,7 +223,11 @@ class DataWriter(ABC):
                 GenericRow(max_key_stats, self.trimmed_primary_keys_fields),
                 key_null_counts,
             ),
-            value_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats(
+                GenericRow(min_value_stats, data_fields),
+                GenericRow(max_value_stats, data_fields),
+                value_null_counts,
+            ),
             min_sequence_number=min_seq,
             max_sequence_number=max_seq,
             schema_id=self.table.table_schema.id,
@@ -223,7 +236,7 @@ class DataWriter(ABC):
             creation_time=Timestamp.now(),
             delete_row_count=0,
             file_source=0,
-            value_stats_cols=[],
+            value_stats_cols=None if value_stats_enabled else [],
             external_path=external_path_str,  # Set external path if using external paths
             first_row_id=None,
             write_cols=self.write_cols,

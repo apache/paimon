@@ -85,6 +85,7 @@ class DataBlobWriter(DataWriter):
         # Split schema into normal and blob columns
         all_column_names = self.table.field_names
         self.normal_column_names = [col for col in all_column_names if col != self.blob_column_name]
+        self.normal_columns = [field for field in self.table.table_schema.fields if field.name != self.blob_column_name]
         self.write_cols = self.normal_column_names
 
         # State management for blob writer
@@ -272,15 +273,34 @@ class DataBlobWriter(DataWriter):
 
     def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table,
                                external_path: Optional[str] = None) -> DataFileMeta:
+        # Column stats (only for normal columns)
+        metadata_stats_enabled = self.options.metadata_stats_enabled()
+        stats_columns = self.normal_columns if metadata_stats_enabled else []
+        column_stats = {
+            field.name: self._get_column_stats(data, field.name)
+            for field in stats_columns
+        }
+
+        min_value_stats = [column_stats[field.name]['min_values'] for field in stats_columns]
+        max_value_stats = [column_stats[field.name]['max_values'] for field in stats_columns]
+        value_null_counts = [column_stats[field.name]['null_counts'] for field in stats_columns]
+
         self.sequence_generator.start = self.sequence_generator.current
+
         return DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
             row_count=data.num_rows,
             min_key=GenericRow([], []),
             max_key=GenericRow([], []),
-            key_stats=SimpleStats.empty_stats(),
-            value_stats=SimpleStats.empty_stats(),
+            key_stats=SimpleStats(
+                GenericRow([], []),
+                GenericRow([], []),
+                []),
+            value_stats=SimpleStats(
+                GenericRow(min_value_stats, stats_columns),
+                GenericRow(max_value_stats, stats_columns),
+                value_null_counts),
             min_sequence_number=-1,
             max_sequence_number=-1,
             schema_id=self.table.table_schema.id,
@@ -289,7 +309,7 @@ class DataBlobWriter(DataWriter):
             creation_time=Timestamp.now(),
             delete_row_count=0,
             file_source=0,
-            value_stats_cols=[],
+            value_stats_cols=[column.name for column in stats_columns],
             external_path=external_path,
             file_path=file_path,
             write_cols=self.write_cols)

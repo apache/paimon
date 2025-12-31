@@ -21,6 +21,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import random
 from datetime import date, datetime, time
 from decimal import Decimal
 from unittest.mock import Mock
@@ -178,7 +179,9 @@ class ReaderBasicTest(unittest.TestCase):
             ('f12', pa.date32()),
             ('f13', pa.time64('us')),
         ])
-        schema = Schema.from_pyarrow_schema(simple_pa_schema)
+        stats_enabled = random.random() < 0.5
+        options = {'metadata.stats-mode': 'full'} if stats_enabled else {}
+        schema = Schema.from_pyarrow_schema(simple_pa_schema, options=options)
         self.catalog.create_table('default.test_full_data_types', schema, False)
         table = self.catalog.get_table('default.test_full_data_types')
 
@@ -226,14 +229,26 @@ class ReaderBasicTest(unittest.TestCase):
         manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
             manifest_files[0].file_name, lambda row: table_scan.starting_scanner._filter_manifest_entry(row), False)
-        min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
-                                                            table.fields).values
-        max_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.max_values.data,
-                                                            table.fields).values
-        expected_min_values = [col[0].as_py() for col in expect_data]
-        expected_max_values = [col[1].as_py() for col in expect_data]
-        self.assertEqual(min_value_stats, expected_min_values)
-        self.assertEqual(max_value_stats, expected_max_values)
+
+        # Python write does not produce value stats
+        if stats_enabled:
+            self.assertEqual(manifest_entries[0].file.value_stats_cols, None)
+            min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
+                                                                table.fields).values
+            max_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.max_values.data,
+                                                                table.fields).values
+            expected_min_values = [col[0].as_py() for col in expect_data]
+            expected_max_values = [col[1].as_py() for col in expect_data]
+            self.assertEqual(min_value_stats, expected_min_values)
+            self.assertEqual(max_value_stats, expected_max_values)
+        else:
+            self.assertEqual(manifest_entries[0].file.value_stats_cols, [])
+            min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
+                                                                []).values
+            max_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.max_values.data,
+                                                                []).values
+            self.assertEqual(min_value_stats, [])
+            self.assertEqual(max_value_stats, [])
 
     def test_write_wrong_schema(self):
         self.catalog.create_table('default.test_wrong_schema',
