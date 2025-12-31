@@ -367,8 +367,7 @@ class TestFileStoreCommit(unittest.TestCase):
             creation_time=None
         )
         creation_time = file_meta.creation_time
-        now = Timestamp.from_date_time(datetime.now())
-        self.assertEqual(round((now.get_millisecond() - creation_time.get_millisecond()) / 60 / 60 / 1000), 8)
+        self.assertEqual(creation_time, Timestamp.now())
 
     def test_generate_partition_statistics_mismatched_partition_keys(
             self, mock_manifest_list_manager, mock_manifest_file_manager, mock_snapshot_manager):
