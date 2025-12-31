@@ -54,7 +54,7 @@ class LanceUtilsTest(unittest.TestCase):
     def test_oss_url_with_security_token(self):
         file_path = "oss://my-bucket/path/to/file.lance"
 
-        properties =  Options({
+        properties = Options({
             OssOptions.OSS_ENDPOINT.key(): "oss-example-region.example.com",
             OssOptions.OSS_ACCESS_KEY_ID.key(): "test-access-key",
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): "test-secret-key",
