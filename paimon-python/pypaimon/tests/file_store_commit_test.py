@@ -21,8 +21,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from unittest.mock import Mock, patch
 
-import dateutil
-
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
