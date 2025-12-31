@@ -196,13 +196,15 @@ class DataBlobWriter(DataWriter):
 
         return normal_data, blob_data
 
-    def _process_normal_data(self, data: pa.RecordBatch) -> pa.Table:
+    @staticmethod
+    def _process_normal_data(data: pa.RecordBatch) -> pa.Table:
         """Process normal data (similar to base DataWriter)."""
         if data is None or data.num_rows == 0:
             return pa.Table.from_batches([])
         return pa.Table.from_batches([data])
 
-    def _merge_normal_data(self, existing_data: pa.Table, new_data: pa.Table) -> pa.Table:
+    @staticmethod
+    def _merge_normal_data(existing_data: pa.Table, new_data: pa.Table) -> pa.Table:
         return pa.concat_tables([existing_data, new_data])
 
     def _should_roll_normal(self) -> bool:
@@ -243,7 +245,7 @@ class DataBlobWriter(DataWriter):
         logger.info(f"Closed both writers - normal: {normal_meta.file_name}, "
                     f"added {len(blob_metas)} blob file metadata after normal metadata")
 
-    def _write_normal_data_to_file(self, data: pa.Table) -> DataFileMeta:
+    def _write_normal_data_to_file(self, data: pa.Table) -> Optional[DataFileMeta]:
         if data.num_rows == 0:
             return None
 
@@ -270,37 +272,15 @@ class DataBlobWriter(DataWriter):
 
     def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table,
                                external_path: Optional[str] = None) -> DataFileMeta:
-        # Column stats (only for normal columns)
-        column_stats = {
-            field.name: self._get_column_stats(data, field.name)
-            for field in self.table.table_schema.fields
-            if field.name != self.blob_column_name
-        }
-
-        # Get normal fields only
-        normal_fields = [field for field in self.table.table_schema.fields
-                         if field.name != self.blob_column_name]
-
-        min_value_stats = [column_stats[field.name]['min_values'] for field in normal_fields]
-        max_value_stats = [column_stats[field.name]['max_values'] for field in normal_fields]
-        value_null_counts = [column_stats[field.name]['null_counts'] for field in normal_fields]
-
         self.sequence_generator.start = self.sequence_generator.current
-
         return DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
             row_count=data.num_rows,
             min_key=GenericRow([], []),
             max_key=GenericRow([], []),
-            key_stats=SimpleStats(
-                GenericRow([], []),
-                GenericRow([], []),
-                []),
-            value_stats=SimpleStats(
-                GenericRow(min_value_stats, normal_fields),
-                GenericRow(max_value_stats, normal_fields),
-                value_null_counts),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
             min_sequence_number=-1,
             max_sequence_number=-1,
             schema_id=self.table.table_schema.id,
@@ -309,7 +289,7 @@ class DataBlobWriter(DataWriter):
             creation_time=Timestamp.now(),
             delete_row_count=0,
             file_source=0,
-            value_stats_cols=self.normal_column_names,
+            value_stats_cols=[],
             external_path=external_path,
             file_path=file_path,
             write_cols=self.write_cols)
