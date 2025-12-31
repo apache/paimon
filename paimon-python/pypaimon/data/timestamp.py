@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 class Timestamp:
@@ -117,8 +117,9 @@ class Timestamp:
 
     @staticmethod
     def now() -> 'Timestamp':
-        """Creates an instance of Timestamp for now."""
-        return Timestamp.from_local_date_time(datetime.now())
+        """Creates an instance of Timestamp for now (utc)."""
+        dt = datetime.now(timezone.utc)
+        return Timestamp.from_date_time(dt)
 
     @staticmethod
     def from_epoch_millis(milliseconds: int, nanos_of_millisecond: int = 0) -> 'Timestamp':
@@ -131,15 +132,13 @@ class Timestamp:
         return Timestamp(milliseconds, nanos_of_millisecond)
 
     @staticmethod
-    def from_local_date_time(date_time: datetime) -> 'Timestamp':
+    def from_date_time(date_time: datetime) -> 'Timestamp':
         """
-        Creates an instance of Timestamp from a datetime (timezone-free).
+        Creates an instance of Timestamp from a datetime
 
         Args:
-            date_time: a datetime object (should be naive, without timezone)
+            date_time: a datetime object
         """
-        if date_time.tzinfo is not None:
-            raise ValueError("datetime must be naive (no timezone)")
 
         epoch_date = datetime(1970, 1, 1).date()
         date_time_date = date_time.date()

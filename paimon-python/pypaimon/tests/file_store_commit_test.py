@@ -65,7 +65,7 @@ class TestFileStoreCommit(unittest.TestCase):
         from pypaimon.data.timestamp import Timestamp
         from pypaimon.table.row.generic_row import GenericRow
         from pypaimon.manifest.schema.simple_stats import SimpleStats
-        creation_time = Timestamp.from_local_date_time(creation_time_dt)
+        creation_time = Timestamp.from_date_time(creation_time_dt)
         file_meta = DataFileMeta.create(
             file_name="test_file_1.parquet",
             file_size=1024 * 1024,  # 1MB
@@ -115,8 +115,8 @@ class TestFileStoreCommit(unittest.TestCase):
         from pypaimon.data.timestamp import Timestamp
         from pypaimon.table.row.generic_row import GenericRow
         from pypaimon.manifest.schema.simple_stats import SimpleStats
-        creation_time_1 = Timestamp.from_local_date_time(datetime(2024, 1, 15, 10, 30, 0))
-        creation_time_2 = Timestamp.from_local_date_time(datetime(2024, 1, 15, 11, 30, 0))  # Later time
+        creation_time_1 = Timestamp.from_date_time(datetime(2024, 1, 15, 10, 30, 0))
+        creation_time_2 = Timestamp.from_date_time(datetime(2024, 1, 15, 11, 30, 0))  # Later time
 
         file_meta_1 = DataFileMeta.create(
             file_name="test_file_1.parquet",
@@ -180,7 +180,7 @@ class TestFileStoreCommit(unittest.TestCase):
         from pypaimon.data.timestamp import Timestamp
         from pypaimon.table.row.generic_row import GenericRow
         from pypaimon.manifest.schema.simple_stats import SimpleStats
-        creation_time = Timestamp.from_local_date_time(creation_time_dt)
+        creation_time = Timestamp.from_date_time(creation_time_dt)
 
         # File for partition 1
         file_meta_1 = DataFileMeta.create(
@@ -271,7 +271,7 @@ class TestFileStoreCommit(unittest.TestCase):
         from pypaimon.data.timestamp import Timestamp
         from pypaimon.table.row.generic_row import GenericRow
         from pypaimon.manifest.schema.simple_stats import SimpleStats
-        creation_time = Timestamp.from_local_date_time(creation_time_dt)
+        creation_time = Timestamp.from_date_time(creation_time_dt)
         file_meta = DataFileMeta.create(
             file_name="test_file_1.parquet",
             file_size=1024 * 1024,
@@ -346,6 +346,30 @@ class TestFileStoreCommit(unittest.TestCase):
         # Should have a valid timestamp (current time)
         self.assertGreater(stat.last_file_creation_time, 0)
 
+    def test_creation_time(
+            self, mock_manifest_list_manager, mock_manifest_file_manager, mock_snapshot_manager):
+        from pypaimon.data.timestamp import Timestamp
+        from pypaimon.table.row.generic_row import GenericRow
+        from pypaimon.manifest.schema.simple_stats import SimpleStats
+        file_meta = DataFileMeta.create(
+            file_name="test_file_1.parquet",
+            file_size=1024 * 1024,
+            row_count=10000,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
+            min_sequence_number=1,
+            max_sequence_number=100,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            creation_time=None
+        )
+        creation_time = file_meta.creation_time
+        now = Timestamp.from_date_time(datetime.now())
+        self.assertEqual(round((now.get_millisecond() - creation_time.get_millisecond()) / 60 / 60 / 1000), 8)
+
     def test_generate_partition_statistics_mismatched_partition_keys(
             self, mock_manifest_list_manager, mock_manifest_file_manager, mock_snapshot_manager):
         """Test partition statistics generation when partition tuple doesn't match partition keys."""
@@ -369,7 +393,7 @@ class TestFileStoreCommit(unittest.TestCase):
             schema_id=0,
             level=0,
             extra_files=[],
-            creation_time=Timestamp.from_local_date_time(datetime(2024, 1, 15, 10, 30, 0))
+            creation_time=Timestamp.from_date_time(datetime(2024, 1, 15, 10, 30, 0))
         )
 
         commit_message = CommitMessage(

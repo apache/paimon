@@ -117,7 +117,7 @@ class ManifestFileManager:
                         epoch_millis = int(creation_time_value.timestamp() * 1000)
                         creation_time_ts = Timestamp.from_epoch_millis(epoch_millis)
                     else:
-                        creation_time_ts = Timestamp.from_local_date_time(creation_time_value)
+                        creation_time_ts = Timestamp.from_date_time(creation_time_value)
                 elif isinstance(creation_time_value, (int, float)):
                     creation_time_ts = Timestamp.from_epoch_millis(int(creation_time_value))
                 else:
