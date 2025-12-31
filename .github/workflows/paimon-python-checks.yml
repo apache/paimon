@@ -102,7 +102,7 @@ jobs:
           chmod +x paimon-python/dev/lint-python.sh
           ./paimon-python/dev/lint-python.sh
 
-  ray_version_compatible_test:
+  requirement_version_compatible_test:
     runs-on: ubuntu-latest
     container: "python:3.10-slim"
 
@@ -166,14 +166,17 @@ jobs:
             parameterized==0.9.0 \
             packaging
 
-      - name: Test Ray version compatibility
+      - name: Test requirement version compatibility
         shell: bash
         run: |
           cd paimon-python
+          
+          # Test Ray version compatibility
+          echo "=========================================="
+          echo "Testing Ray version compatibility"
+          echo "=========================================="
           for ray_version in 2.44.0 2.48.0 2.53.0; do
-            echo "=========================================="
             echo "Testing Ray version: $ray_version"
-            echo "=========================================="
             
             # Install specific Ray version
             python -m pip install -q ray==$ray_version
@@ -191,5 +194,14 @@ jobs:
             # Uninstall Ray to avoid conflicts
             python -m pip uninstall -y ray
           done
+          
+          # Add other dependency version tests here in the future
+          # Example:
+          # echo "=========================================="
+          # echo "Testing PyArrow version compatibility"
+          # echo "=========================================="
+          # for pyarrow_version in 16.0.0 17.0.0 18.0.0; do
+          #   ...
+          # done
         env:
           PYTHONPATH: ${{ github.workspace }}/paimon-python
