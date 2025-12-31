@@ -34,6 +34,10 @@ from pypaimon.schema.data_types import PyarrowFieldParser
 
 logger = logging.getLogger(__name__)
 
+# Ray version constants for compatibility
+RAY_VERSION_SCHEMA_IN_READ_TASK = "2.48.0"  # Schema moved from BlockMetadata to ReadTask
+RAY_VERSION_PER_TASK_ROW_LIMIT = "2.52.0"  # per_task_row_limit parameter introduced
+
 from ray.data.datasource import Datasource
 
 
@@ -202,17 +206,21 @@ class PaimonDatasource(Datasource):
                 'exec_stats': None,  # Will be populated by Ray during execution
             }
 
-            if parse(ray.__version__) < parse("2.48.0"):
+            if parse(ray.__version__) < parse(RAY_VERSION_SCHEMA_IN_READ_TASK):
                 metadata_kwargs['schema'] = schema
 
             metadata = BlockMetadata(**metadata_kwargs)
 
-            # per_task_row_limit parameter was introduced in Ray 2.52.0
+            read_fn = partial(get_read_task, chunk_splits)
             read_task_kwargs = {
-                'read_fn': lambda splits=chunk_splits: get_read_task(splits),
+                'read_fn': read_fn,
                 'metadata': metadata,
             }
-            if parse(ray.__version__) >= parse("2.52.0") and per_task_row_limit is not None:
+            
+            if parse(ray.__version__) >= parse(RAY_VERSION_SCHEMA_IN_READ_TASK):
+                read_task_kwargs['schema'] = schema
+            
+            if parse(ray.__version__) >= parse(RAY_VERSION_PER_TASK_ROW_LIMIT) and per_task_row_limit is not None:
                 read_task_kwargs['per_task_row_limit'] = per_task_row_limit
 
             read_tasks.append(ReadTask(**read_task_kwargs))
