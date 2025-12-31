@@ -208,49 +208,97 @@ if [ "$FAT_LIB" = true ] && [ "$OS" = "Linux" ]; then
     
     JNI_LIB="$OUTPUT_DIR/libpaimon_faiss_jni.so"
     if [ -f "$JNI_LIB" ]; then
-        # Check if libopenblas is a dynamic dependency
-        if ldd "$JNI_LIB" 2>/dev/null | grep -q "libopenblas"; then
-            echo "Found OpenBLAS dynamic dependency, bundling..."
+        # Function to bundle a library and its dependencies
+        bundle_lib() {
+            local lib_path="$1"
+            local target_name="$2"
             
-            # Find libopenblas.so.0 on the system
-            OPENBLAS_PATH=$(ldd "$JNI_LIB" 2>/dev/null | grep libopenblas | awk '{print $3}')
-            if [ -n "$OPENBLAS_PATH" ] && [ -f "$OPENBLAS_PATH" ]; then
-                # Resolve symlinks and copy
-                OPENBLAS_REAL=$(readlink -f "$OPENBLAS_PATH")
-                cp "$OPENBLAS_REAL" "$OUTPUT_DIR/libopenblas.so.0"
-                echo "Bundled: $OPENBLAS_REAL -> $OUTPUT_DIR/libopenblas.so.0"
+            if [ -z "$lib_path" ] || [ ! -f "$lib_path" ]; then
+                return 1
+            fi
+            
+            local real_path=$(readlink -f "$lib_path")
+            if [ -f "$OUTPUT_DIR/$target_name" ]; then
+                echo "  Already bundled: $target_name"
+                return 0
+            fi
+            
+            cp "$real_path" "$OUTPUT_DIR/$target_name"
+            chmod +x "$OUTPUT_DIR/$target_name"
+            echo "  Bundled: $real_path -> $target_name"
+            return 0
+        }
+        
+        # Libraries to bundle (pattern -> target name)
+        # We check the JNI lib and all bundled libs recursively
+        LIBS_TO_CHECK="$JNI_LIB"
+        LIBS_CHECKED=""
+        
+        while [ -n "$LIBS_TO_CHECK" ]; do
+            CURRENT_LIB=$(echo "$LIBS_TO_CHECK" | awk '{print $1}')
+            LIBS_TO_CHECK=$(echo "$LIBS_TO_CHECK" | cut -d' ' -f2-)
+            [ "$LIBS_TO_CHECK" = "$CURRENT_LIB" ] && LIBS_TO_CHECK=""
+            
+            # Skip if already checked
+            echo "$LIBS_CHECKED" | grep -q "$CURRENT_LIB" && continue
+            LIBS_CHECKED="$LIBS_CHECKED $CURRENT_LIB"
+            
+            echo "Checking dependencies of: $(basename "$CURRENT_LIB")"
+            
+            # Get all dependencies
+            DEPS=$(ldd "$CURRENT_LIB" 2>/dev/null | grep "=>" | awk '{print $1 " " $3}')
+            
+            while IFS= read -r dep_line; do
+                [ -z "$dep_line" ] && continue
+                DEP_NAME=$(echo "$dep_line" | awk '{print $1}')
+                DEP_PATH=$(echo "$dep_line" | awk '{print $2}')
                 
-                # Also check for gfortran dependency of openblas
-                if ldd "$OPENBLAS_REAL" 2>/dev/null | grep -q "libgfortran"; then
-                    GFORTRAN_PATH=$(ldd "$OPENBLAS_REAL" 2>/dev/null | grep libgfortran | awk '{print $3}')
-                    if [ -n "$GFORTRAN_PATH" ] && [ -f "$GFORTRAN_PATH" ]; then
-                        GFORTRAN_REAL=$(readlink -f "$GFORTRAN_PATH")
-                        GFORTRAN_NAME=$(basename "$GFORTRAN_PATH")
-                        cp "$GFORTRAN_REAL" "$OUTPUT_DIR/$GFORTRAN_NAME"
-                        echo "Bundled: $GFORTRAN_REAL -> $OUTPUT_DIR/$GFORTRAN_NAME"
-                    fi
-                fi
-            else
-                echo "WARNING: OpenBLAS found in ldd but library file not accessible"
-                echo "Please install libopenblas-dev and rebuild, or install libopenblas on target systems"
-            fi
-        fi
+                # Skip system libraries that are universally available
+                case "$DEP_NAME" in
+                    linux-vdso.so*|libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|ld-linux*)
+                        continue
+                        ;;
+                esac
+                
+                # Bundle specific libraries we know are problematic
+                case "$DEP_NAME" in
+                    libopenblas*)
+                        if bundle_lib "$DEP_PATH" "libopenblas.so.0"; then
+                            LIBS_TO_CHECK="$LIBS_TO_CHECK $OUTPUT_DIR/libopenblas.so.0"
+                        fi
+                        ;;
+                    libgfortran*)
+                        # Keep the original versioned name
+                        bundle_lib "$DEP_PATH" "$DEP_NAME"
+                        ;;
+                    libgomp*)
+                        bundle_lib "$DEP_PATH" "libgomp.so.1"
+                        ;;
+                    libquadmath*)
+                        bundle_lib "$DEP_PATH" "$DEP_NAME"
+                        ;;
+                    libgcc_s*)
+                        bundle_lib "$DEP_PATH" "$DEP_NAME"
+                        ;;
+                    libblas*|liblapack*)
+                        bundle_lib "$DEP_PATH" "$DEP_NAME"
+                        ;;
+                esac
+            done <<< "$DEPS"
+        done
         
-        # Check if libgomp is a dynamic dependency
-        if ldd "$JNI_LIB" 2>/dev/null | grep -q "libgomp"; then
-            GOMP_PATH=$(ldd "$JNI_LIB" 2>/dev/null | grep libgomp | awk '{print $3}')
-            if [ -n "$GOMP_PATH" ] && [ -f "$GOMP_PATH" ]; then
-                GOMP_REAL=$(readlink -f "$GOMP_PATH")
-                cp "$GOMP_REAL" "$OUTPUT_DIR/libgomp.so.1"
-                echo "Bundled: $GOMP_REAL -> $OUTPUT_DIR/libgomp.so.1"
-            fi
-        fi
-        
-        # Set rpath to $ORIGIN so bundled libs are found
+        # Set rpath to $ORIGIN for all bundled libraries
         if command -v patchelf &>/dev/null; then
-            patchelf --set-rpath '$ORIGIN' "$JNI_LIB"
-            echo "Set rpath to \$ORIGIN"
+            echo ""
+            echo "Setting rpath to \$ORIGIN for all libraries..."
+            for lib in "$OUTPUT_DIR"/*.so*; do
+                if [ -f "$lib" ]; then
+                    patchelf --set-rpath '$ORIGIN' "$lib" 2>/dev/null || true
+                fi
+            done
+            echo "Done setting rpath"
         else
+            echo ""
             echo "WARNING: patchelf not found, cannot set rpath"
             echo "Install with: sudo apt-get install patchelf"
         fi

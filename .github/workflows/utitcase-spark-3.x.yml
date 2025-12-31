@@ -54,11 +54,8 @@ jobs:
           distribution: 'temurin'
 
       - name: Build Spark 3 with ${{ matrix.scala_version }}
-        run: |
-          cd paimon-faiss-jni/ 
-          mvn -T 2C -B clean install -DskipTests
-          cd ..
-          mvn -T 2C -B clean install -DskipTests -Pspark3,flink1,scala-${{ matrix.scala_version }}
+        run: mvn -T 2C -B clean install -DskipTests -Ppaimon-faiss,spark3,flink1,scala-${{ matrix.scala_version }}
+
 
       - name: Test Spark 3 with ${{ matrix.scala_version }}
         timeout-minutes: 60
@@ -72,6 +69,6 @@ jobs:
           test_modules+="org.apache.paimon:paimon-spark-${suffix}_${{ matrix.scala_version }},"
           done
           test_modules="${test_modules%,}"
-          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Pspark3,flink1,scala-${{ matrix.scala_version }}
+          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Ppaimon-faiss,spark3,flink1,scala-${{ matrix.scala_version }}
         env:
           MAVEN_OPTS: -Xmx4096m

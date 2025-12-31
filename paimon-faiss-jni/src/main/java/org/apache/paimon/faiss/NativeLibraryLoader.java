@@ -54,13 +54,25 @@ public class NativeLibraryLoader {
     /**
      * Dependency libraries that need to be loaded before the main JNI library. These are bundled in
      * the JAR when the main library cannot be statically linked.
+     *
+     * <p>Order matters! Libraries must be loaded before the libraries that depend on them.
      */
     private static final String[] DEPENDENCY_LIBRARIES = {
-        "libopenblas.so.0", // OpenBLAS for FAISS
-        "libgomp.so.1", // OpenMP runtime
-        "libgfortran.so.5", // Fortran runtime (needed by OpenBLAS)
+        // GCC runtime libraries (must be loaded first as others depend on them)
+        "libgcc_s.so.1",
+        // Quadmath library (needed by gfortran)
+        "libquadmath.so.0",
+        // Fortran runtime (needed by OpenBLAS) - try multiple versions
+        "libgfortran.so.5",
         "libgfortran.so.4",
         "libgfortran.so.3",
+        // OpenMP runtime
+        "libgomp.so.1",
+        // BLAS/LAPACK
+        "libblas.so.3",
+        "liblapack.so.3",
+        // OpenBLAS for FAISS (load last as it depends on above)
+        "libopenblas.so.0",
     };
 
     /** Whether the native library has been loaded. */
