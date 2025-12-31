@@ -752,6 +752,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private ManifestEntryChanges collectChanges(List<CommitMessage> commitMessages) {
         ManifestEntryChanges changes = new ManifestEntryChanges(numBucket);
         commitMessages.forEach(changes::collect);
+        commitMessages.forEach(commitMessage -> changes.collectMetrics(commitMessage, pathFactory));
         LOG.info("Finished collecting changes, including: {}", changes);
         return changes;
     }
@@ -768,7 +769,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 changesProvider,
                 identifier,
                 watermark,
-                logOffsets,
                 properties,
                 commitKindProvider,
                 conflictCheck,
@@ -782,7 +782,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             CommitChangesProvider changesProvider,
             long identifier,
             @Nullable Long watermark,
-            Map<Integer, Long> logOffsets,
             Map<String, String> properties,
             CommitKindProvider commitKindProvider,
             ConflictCheck conflictCheck,
@@ -886,7 +885,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 indexFiles,
                 identifier,
                 watermark,
-                logOffsets,
                 properties,
                 commitKind,
                 latestSnapshot,
@@ -905,7 +903,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<IndexManifestEntry> indexFiles,
             long identifier,
             @Nullable Long watermark,
-            Map<Integer, Long> logOffsets,
             Map<String, String> properties,
             CommitKind commitKind,
             @Nullable Snapshot latestSnapshot,

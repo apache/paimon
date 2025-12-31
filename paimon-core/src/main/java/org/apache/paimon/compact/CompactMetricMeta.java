@@ -24,6 +24,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import java.util.Arrays;
+import java.util.Objects;
 
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
@@ -44,14 +45,20 @@ public class CompactMetricMeta {
 
     private final String type;
     private final long duration;
+    private final boolean isNullable;
 
     public CompactMetricMeta() {
-        this(null, -1L);
+        this("", -1L, true);
     }
 
     public CompactMetricMeta(String type, long duration) {
+        this(type, duration, false);
+    }
+
+    public CompactMetricMeta(String type, long duration, boolean isNullable) {
         this.type = type;
         this.duration = duration;
+        this.isNullable = isNullable;
     }
 
     public String type() {
@@ -60,5 +67,42 @@ public class CompactMetricMeta {
 
     public long duration() {
         return duration;
+    }
+
+    public boolean isNullable() {
+        return isNullable;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(type, duration, isNullable);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+
+        CompactMetricMeta that = (CompactMetricMeta) obj;
+        return Objects.equals(duration, that.duration)
+                && Objects.equals(type, that.type)
+                && isNullable == that.isNullable;
+    }
+
+    @Override
+    public String toString() {
+        return "CompactMetricMeta{"
+                + "type='"
+                + type
+                + '\''
+                + ", duration="
+                + duration
+                + ", isNullable="
+                + isNullable
+                + '}';
     }
 }

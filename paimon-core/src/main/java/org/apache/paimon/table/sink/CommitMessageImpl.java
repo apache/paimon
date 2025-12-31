@@ -56,7 +56,13 @@ public class CommitMessageImpl implements CommitMessage {
             @Nullable Integer totalBuckets,
             DataIncrement dataIncrement,
             CompactIncrement compactIncrement) {
-        this(partition, bucket, totalBuckets, dataIncrement, compactIncrement, null);
+        this(
+                partition,
+                bucket,
+                totalBuckets,
+                dataIncrement,
+                compactIncrement,
+                new CompactMetricIncrement());
     }
 
     public CommitMessageImpl(
@@ -163,7 +169,7 @@ public class CommitMessageImpl implements CommitMessage {
                         + "totalBuckets = %s, "
                         + "newFilesIncrement = %s, "
                         + "compactIncrement = %s, "
-                        + "compactMetricIncrement = $s}",
+                        + "compactMetricIncrement = %s}",
                 partition,
                 bucket,
                 totalBuckets,

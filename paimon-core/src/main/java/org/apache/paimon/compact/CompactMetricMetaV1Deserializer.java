@@ -25,6 +25,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
@@ -44,7 +45,8 @@ public class CompactMetricMetaV1Deserializer implements Serializable {
                     true,
                     Arrays.asList(
                             new DataField(0, "_TYPE", newStringType(true)),
-                            new DataField(1, "_DURATION", new BigIntType(true))));
+                            new DataField(1, "_DURATION", new BigIntType(true)),
+                            new DataField(2, "_IS_NULL", new BooleanType(true))));
 
     protected final InternalRowSerializer rowSerializer;
 
@@ -56,7 +58,8 @@ public class CompactMetricMetaV1Deserializer implements Serializable {
         if (row == null) {
             return new CompactMetricMeta();
         }
-        return new CompactMetricMeta(row.getString(0).toString(), row.getLong(1));
+        return new CompactMetricMeta(
+                row.getString(0).toString(), row.getLong(1), row.getBoolean(2));
     }
 
     public CompactMetricMeta deserialize(DataInputView in) throws IOException {

@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.utils.FileStorePathFactory;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -132,17 +133,15 @@ public class ManifestEntryChanges {
                                                 commitMessage.partition(),
                                                 commitMessage.bucket(),
                                                 m)));
-        if (commitMessage.partition().getFieldCount() == 0) {
-            buckets.add("bucket-" + commitMessage.bucket());
-        } else {
-            StringBuilder builder = new StringBuilder();
-            for (int i = 0; i < commitMessage.partition().getFieldCount(); i++) {
-                builder.append(commitMessage.partition().getString(i)).append("/");
-            }
-            buckets.add(builder + "bucket-" + commitMessage.bucket());
-        }
+
+    }
+
+    public void collectMetrics(CommitMessage message, FileStorePathFactory factory) {
+        CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+        buckets.add(factory.bucketPath(commitMessage.partition(), commitMessage.bucket()).toString());
         if (commitMessage.compactMetricIncrement() != null
-                && commitMessage.compactMetricIncrement().metric() != null) {
+                && commitMessage.compactMetricIncrement().metric() != null
+                && !commitMessage.compactMetricIncrement().metric().isNullable()) {
             types.add(commitMessage.compactMetricIncrement().metric().type());
             compactionDurationTime.add(commitMessage.compactMetricIncrement().metric().duration());
         }

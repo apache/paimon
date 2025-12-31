@@ -20,29 +20,23 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.compact.CompactMetricMeta;
 
-import javax.annotation.Nullable;
-
 import java.util.Objects;
 
 /** Compact metric. */
 public class CompactMetricIncrement {
 
-    @Nullable private final CompactMetricMeta metric;
+    private final CompactMetricMeta metric;
 
     public CompactMetricIncrement() {
-        this(null);
+        this.metric = new CompactMetricMeta();
     }
 
-    public CompactMetricIncrement(@Nullable CompactMetricMeta metric) {
+    public CompactMetricIncrement(CompactMetricMeta metric) {
         this.metric = metric;
     }
 
     public CompactMetricMeta metric() {
         return metric;
-    }
-
-    public CompactMetricMeta empty() {
-        return new CompactMetricMeta();
     }
 
     public boolean isEmpty() {
