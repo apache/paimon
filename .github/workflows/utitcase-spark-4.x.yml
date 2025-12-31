@@ -51,7 +51,11 @@ jobs:
           distribution: 'temurin'
 
       - name: Build Spark
-        run:  mvn -T 2C -B clean install -DskipTests -Pspark4,flink1,paimon-lucene
+        run: |
+          cd paimon-faiss-jni/ 
+          mvn -T 2C -B clean install -DskipTests
+          cd ..
+          mvn -T 2C -B clean install -DskipTests -Pspark4,flink1,paimon-lucene
 
       - name: Test Spark
         timeout-minutes: 60

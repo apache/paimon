@@ -182,9 +182,84 @@ echo ""
 echo "============================================"
 echo "Build completed successfully!"
 echo "============================================"
+
+# Determine output directory based on platform
+if [ "$OS" = "Linux" ]; then
+    PLATFORM_OS="linux"
+    if [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then
+        PLATFORM_ARCH="amd64"
+    else
+        PLATFORM_ARCH="aarch64"
+    fi
+elif [ "$OS" = "Darwin" ]; then
+    PLATFORM_OS="darwin"
+    if [ "$ARCH" = "arm64" ]; then
+        PLATFORM_ARCH="aarch64"
+    else
+        PLATFORM_ARCH="amd64"
+    fi
+fi
+OUTPUT_DIR="$PROJECT_DIR/src/main/resources/$PLATFORM_OS/$PLATFORM_ARCH"
+
+# Bundle dependency libraries if building fat lib and they're dynamically linked
+if [ "$FAT_LIB" = true ] && [ "$OS" = "Linux" ]; then
+    echo ""
+    echo "Checking for dynamic dependencies to bundle..."
+    
+    JNI_LIB="$OUTPUT_DIR/libpaimon_faiss_jni.so"
+    if [ -f "$JNI_LIB" ]; then
+        # Check if libopenblas is a dynamic dependency
+        if ldd "$JNI_LIB" 2>/dev/null | grep -q "libopenblas"; then
+            echo "Found OpenBLAS dynamic dependency, bundling..."
+            
+            # Find libopenblas.so.0 on the system
+            OPENBLAS_PATH=$(ldd "$JNI_LIB" 2>/dev/null | grep libopenblas | awk '{print $3}')
+            if [ -n "$OPENBLAS_PATH" ] && [ -f "$OPENBLAS_PATH" ]; then
+                # Resolve symlinks and copy
+                OPENBLAS_REAL=$(readlink -f "$OPENBLAS_PATH")
+                cp "$OPENBLAS_REAL" "$OUTPUT_DIR/libopenblas.so.0"
+                echo "Bundled: $OPENBLAS_REAL -> $OUTPUT_DIR/libopenblas.so.0"
+                
+                # Also check for gfortran dependency of openblas
+                if ldd "$OPENBLAS_REAL" 2>/dev/null | grep -q "libgfortran"; then
+                    GFORTRAN_PATH=$(ldd "$OPENBLAS_REAL" 2>/dev/null | grep libgfortran | awk '{print $3}')
+                    if [ -n "$GFORTRAN_PATH" ] && [ -f "$GFORTRAN_PATH" ]; then
+                        GFORTRAN_REAL=$(readlink -f "$GFORTRAN_PATH")
+                        GFORTRAN_NAME=$(basename "$GFORTRAN_PATH")
+                        cp "$GFORTRAN_REAL" "$OUTPUT_DIR/$GFORTRAN_NAME"
+                        echo "Bundled: $GFORTRAN_REAL -> $OUTPUT_DIR/$GFORTRAN_NAME"
+                    fi
+                fi
+            else
+                echo "WARNING: OpenBLAS found in ldd but library file not accessible"
+                echo "Please install libopenblas-dev and rebuild, or install libopenblas on target systems"
+            fi
+        fi
+        
+        # Check if libgomp is a dynamic dependency
+        if ldd "$JNI_LIB" 2>/dev/null | grep -q "libgomp"; then
+            GOMP_PATH=$(ldd "$JNI_LIB" 2>/dev/null | grep libgomp | awk '{print $3}')
+            if [ -n "$GOMP_PATH" ] && [ -f "$GOMP_PATH" ]; then
+                GOMP_REAL=$(readlink -f "$GOMP_PATH")
+                cp "$GOMP_REAL" "$OUTPUT_DIR/libgomp.so.1"
+                echo "Bundled: $GOMP_REAL -> $OUTPUT_DIR/libgomp.so.1"
+            fi
+        fi
+        
+        # Set rpath to $ORIGIN so bundled libs are found
+        if command -v patchelf &>/dev/null; then
+            patchelf --set-rpath '$ORIGIN' "$JNI_LIB"
+            echo "Set rpath to \$ORIGIN"
+        else
+            echo "WARNING: patchelf not found, cannot set rpath"
+            echo "Install with: sudo apt-get install patchelf"
+        fi
+    fi
+fi
+
 echo ""
 echo "Native library location:"
-BUILT_LIBS=$(find "$PROJECT_DIR/src/main/resources" -type f \( -name "*.so" -o -name "*.dylib" \) 2>/dev/null)
+BUILT_LIBS=$(find "$PROJECT_DIR/src/main/resources" -type f \( -name "*.so" -o -name "*.so.*" -o -name "*.dylib" \) 2>/dev/null)
 
 if [ -n "$BUILT_LIBS" ]; then
     for lib in $BUILT_LIBS; do

@@ -51,6 +51,18 @@ public class NativeLibraryLoader {
     /** System property to specify a custom path to the native library. */
     private static final String LIBRARY_PATH_PROPERTY = "paimon.faiss.lib.path";
 
+    /**
+     * Dependency libraries that need to be loaded before the main JNI library. These are bundled in
+     * the JAR when the main library cannot be statically linked.
+     */
+    private static final String[] DEPENDENCY_LIBRARIES = {
+        "libopenblas.so.0", // OpenBLAS for FAISS
+        "libgomp.so.1", // OpenMP runtime
+        "libgfortran.so.5", // Fortran runtime (needed by OpenBLAS)
+        "libgfortran.so.4",
+        "libgfortran.so.3",
+    };
+
     /** Whether the native library has been loaded. */
     private static volatile boolean libraryLoaded = false;
 
@@ -132,9 +144,12 @@ public class NativeLibraryLoader {
         try (InputStream is = NativeLibraryLoader.class.getResourceAsStream(libraryPath)) {
             if (is == null) {
                 throw new IOException(
-                        "Native library not found in JAR: " + libraryPath + ". "
+                        "Native library not found in JAR: "
+                                + libraryPath
+                                + ". "
                                 + "Make sure you are using the correct JAR for your platform ("
-                                + getPlatformIdentifier() + ")");
+                                + getPlatformIdentifier()
+                                + ")");
             }
 
             // Create temp directory if needed
@@ -142,6 +157,9 @@ public class NativeLibraryLoader {
                 tempDir = Files.createTempDirectory("paimon-faiss-native");
                 tempDir.toFile().deleteOnExit();
             }
+
+            // First, extract and load dependency libraries (if bundled)
+            loadDependencyLibraries();
 
             // Extract native library to temp file
             String fileName = System.mapLibraryName(JNI_LIBRARY_NAME);
@@ -164,6 +182,49 @@ public class NativeLibraryLoader {
             // Load the library
             System.load(tempFile.getAbsolutePath());
             LOG.info("Loaded Faiss native library from JAR: {}", libraryPath);
+        }
+    }
+
+    /**
+     * Extract and load dependency libraries that are bundled in the JAR. These must be loaded
+     * before the main JNI library to satisfy its dynamic linking requirements.
+     */
+    private static void loadDependencyLibraries() {
+        String os = getOsName();
+        String arch = getArchName();
+
+        for (String depLib : DEPENDENCY_LIBRARIES) {
+            String resourcePath = "/" + os + "/" + arch + "/" + depLib;
+            try (InputStream is = NativeLibraryLoader.class.getResourceAsStream(resourcePath)) {
+                if (is == null) {
+                    LOG.debug("Dependency library not bundled: {}", depLib);
+                    continue;
+                }
+
+                File tempFile = new File(tempDir.toFile(), depLib);
+                tempFile.deleteOnExit();
+
+                try (OutputStream fos = new FileOutputStream(tempFile)) {
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = is.read(buffer)) != -1) {
+                        fos.write(buffer, 0, bytesRead);
+                    }
+                }
+
+                if (!tempFile.setExecutable(true)) {
+                    LOG.warn("Could not set executable permission on: {}", depLib);
+                }
+
+                // Load the dependency library
+                System.load(tempFile.getAbsolutePath());
+                LOG.info("Loaded bundled dependency library: {}", depLib);
+            } catch (UnsatisfiedLinkError e) {
+                // Library might already be loaded or not needed
+                LOG.debug("Could not load dependency {}: {}", depLib, e.getMessage());
+            } catch (IOException e) {
+                LOG.debug("Could not extract dependency {}: {}", depLib, e.getMessage());
+            }
         }
     }
 

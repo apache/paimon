@@ -152,56 +152,113 @@ endif()
 
 # Find BLAS/LAPACK for static linking (Faiss depends on them)
 if(BUILD_FAT_LIB)
+    # Save original suffixes
+    set(_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
+    
+    # Force static library search only
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+    
     # Try to find OpenBLAS static library
-    find_library(OPENBLAS_LIBRARY
-        NAMES libopenblas.a openblas
+    find_library(OPENBLAS_STATIC_LIBRARY
+        NAMES openblas openblas_static
         PATHS
             /usr/local/lib
             /usr/lib
             /usr/local/lib64
             /usr/lib64
             /usr/lib/x86_64-linux-gnu
+            /usr/lib/aarch64-linux-gnu
             ${OPENBLAS_ROOT}/lib
             $ENV{OPENBLAS_ROOT}/lib
+        NO_DEFAULT_PATH
     )
     
-    if(OPENBLAS_LIBRARY)
-        message(STATUS "Found OpenBLAS: ${OPENBLAS_LIBRARY}")
-        list(APPEND FAISS_EXTRA_LIBS ${OPENBLAS_LIBRARY})
+    # Also try default paths
+    if(NOT OPENBLAS_STATIC_LIBRARY)
+        find_library(OPENBLAS_STATIC_LIBRARY
+            NAMES openblas openblas_static
+        )
+    endif()
+    
+    if(OPENBLAS_STATIC_LIBRARY AND OPENBLAS_STATIC_LIBRARY MATCHES "\\.a$")
+        message(STATUS "Found OpenBLAS static library: ${OPENBLAS_STATIC_LIBRARY}")
+        set(OPENBLAS_USE_STATIC TRUE)
+        list(APPEND FAISS_STATIC_LIBS ${OPENBLAS_STATIC_LIBRARY})
     else()
-        # Try to find any BLAS
-        find_package(BLAS QUIET)
-        if(BLAS_FOUND)
-            list(APPEND FAISS_EXTRA_LIBS ${BLAS_LIBRARIES})
-            message(STATUS "Found BLAS: ${BLAS_LIBRARIES}")
-        endif()
-    endif()
-    
-    # Find LAPACK
-    find_package(LAPACK QUIET)
-    if(LAPACK_FOUND)
-        list(APPEND FAISS_EXTRA_LIBS ${LAPACK_LIBRARIES})
-        message(STATUS "Found LAPACK: ${LAPACK_LIBRARIES}")
-    endif()
-    
-    # On Linux, we may need pthread, dl, and m
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        find_library(PTHREAD_LIBRARY pthread)
-        find_library(DL_LIBRARY dl)
-        find_library(M_LIBRARY m)
-        find_library(GFORTRAN_LIBRARY gfortran)
+        message(STATUS "OpenBLAS static library not found, trying shared library")
+        set(OPENBLAS_USE_STATIC FALSE)
         
-        if(PTHREAD_LIBRARY)
-            list(APPEND FAISS_EXTRA_LIBS ${PTHREAD_LIBRARY})
+        # Restore suffixes and find shared library
+        set(CMAKE_FIND_LIBRARY_SUFFIXES ${_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
+        find_library(OPENBLAS_SHARED_LIBRARY
+            NAMES openblas
+            PATHS
+                /usr/local/lib
+                /usr/lib
+                /usr/local/lib64
+                /usr/lib64
+                /usr/lib/x86_64-linux-gnu
+                /usr/lib/aarch64-linux-gnu
+                ${OPENBLAS_ROOT}/lib
+                $ENV{OPENBLAS_ROOT}/lib
+        )
+        if(OPENBLAS_SHARED_LIBRARY)
+            message(STATUS "Found OpenBLAS shared library: ${OPENBLAS_SHARED_LIBRARY}")
+            list(APPEND FAISS_EXTRA_LIBS ${OPENBLAS_SHARED_LIBRARY})
+            # Mark that we need to bundle this library
+            set(BUNDLE_OPENBLAS TRUE)
+            set(BUNDLE_OPENBLAS_PATH ${OPENBLAS_SHARED_LIBRARY})
+        else()
+            # Try to find any BLAS
+            find_package(BLAS QUIET)
+            if(BLAS_FOUND)
+                list(APPEND FAISS_EXTRA_LIBS ${BLAS_LIBRARIES})
+                message(STATUS "Found BLAS: ${BLAS_LIBRARIES}")
+            endif()
         endif()
-        if(DL_LIBRARY)
-            list(APPEND FAISS_EXTRA_LIBS ${DL_LIBRARY})
-        endif()
-        if(M_LIBRARY)
-            list(APPEND FAISS_EXTRA_LIBS ${M_LIBRARY})
-        endif()
-        if(GFORTRAN_LIBRARY)
-            list(APPEND FAISS_EXTRA_LIBS ${GFORTRAN_LIBRARY})
+    endif()
+    
+    # Restore suffixes for static search
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+    
+    # Find LAPACK static library
+    find_library(LAPACK_STATIC_LIBRARY
+        NAMES lapack
+        PATHS
+            /usr/local/lib
+            /usr/lib
+            /usr/local/lib64
+            /usr/lib64
+            /usr/lib/x86_64-linux-gnu
+            /usr/lib/aarch64-linux-gnu
+    )
+    if(LAPACK_STATIC_LIBRARY AND LAPACK_STATIC_LIBRARY MATCHES "\\.a$")
+        message(STATUS "Found LAPACK static library: ${LAPACK_STATIC_LIBRARY}")
+        list(APPEND FAISS_STATIC_LIBS ${LAPACK_STATIC_LIBRARY})
+    endif()
+    
+    # Find gfortran static library (needed by OpenBLAS)
+    find_library(GFORTRAN_STATIC_LIBRARY
+        NAMES gfortran
+    )
+    if(GFORTRAN_STATIC_LIBRARY AND GFORTRAN_STATIC_LIBRARY MATCHES "\\.a$")
+        message(STATUS "Found gfortran static library: ${GFORTRAN_STATIC_LIBRARY}")
+        list(APPEND FAISS_STATIC_LIBS ${GFORTRAN_STATIC_LIBRARY})
+    endif()
+    
+    # Restore original suffixes
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
+    
+    # On Linux, we may need pthread, dl, and m (these are typically dynamically linked)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        list(APPEND FAISS_EXTRA_LIBS pthread dl m)
+        
+        # Try to find gfortran shared if static not found
+        if(NOT GFORTRAN_STATIC_LIBRARY)
+            find_library(GFORTRAN_LIBRARY gfortran)
+            if(GFORTRAN_LIBRARY)
+                list(APPEND FAISS_EXTRA_LIBS ${GFORTRAN_LIBRARY})
+            endif()
         endif()
     endif()
 endif()
@@ -246,9 +303,30 @@ else()
 endif()
 
 # Link extra libraries for fat lib (BLAS, LAPACK, etc.)
-if(BUILD_FAT_LIB AND FAISS_EXTRA_LIBS)
-    target_link_libraries(paimon_faiss_jni PRIVATE ${FAISS_EXTRA_LIBS})
-    message(STATUS "Linking extra libraries: ${FAISS_EXTRA_LIBS}")
+if(BUILD_FAT_LIB)
+    # Link static libraries with --whole-archive to embed all symbols
+    if(FAISS_STATIC_LIBS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(STATUS "Linking static libraries with --whole-archive: ${FAISS_STATIC_LIBS}")
+        target_link_options(paimon_faiss_jni PRIVATE
+            "-Wl,--whole-archive"
+        )
+        target_link_libraries(paimon_faiss_jni PRIVATE ${FAISS_STATIC_LIBS})
+        target_link_options(paimon_faiss_jni PRIVATE
+            "-Wl,--no-whole-archive"
+        )
+    elseif(FAISS_STATIC_LIBS)
+        # macOS doesn't use --whole-archive, use -force_load instead
+        foreach(static_lib ${FAISS_STATIC_LIBS})
+            target_link_options(paimon_faiss_jni PRIVATE "-Wl,-force_load,${static_lib}")
+        endforeach()
+        message(STATUS "Linking static libraries with -force_load: ${FAISS_STATIC_LIBS}")
+    endif()
+    
+    # Link remaining shared libraries
+    if(FAISS_EXTRA_LIBS)
+        target_link_libraries(paimon_faiss_jni PRIVATE ${FAISS_EXTRA_LIBS})
+        message(STATUS "Linking extra libraries: ${FAISS_EXTRA_LIBS}")
+    endif()
 endif()
 
 # Link OpenMP - always use dynamic linking for OpenMP (static libgomp.a often lacks -fPIC)
@@ -328,6 +406,35 @@ elseif(FAISS_OPT_LEVEL STREQUAL "avx512")
     message(STATUS "Building with AVX-512 optimizations")
 else()
     message(STATUS "Building with generic optimizations")
+endif()
+
+# Copy bundled shared libraries to output directory and set rpath
+if(BUILD_FAT_LIB AND BUNDLE_OPENBLAS AND BUNDLE_OPENBLAS_PATH)
+    message(STATUS "Will bundle OpenBLAS shared library: ${BUNDLE_OPENBLAS_PATH}")
+    
+    # Get the actual library file (resolve symlinks)
+    get_filename_component(OPENBLAS_REALPATH ${BUNDLE_OPENBLAS_PATH} REALPATH)
+    get_filename_component(OPENBLAS_FILENAME ${OPENBLAS_REALPATH} NAME)
+    
+    # Copy OpenBLAS to output directory after build
+    add_custom_command(TARGET paimon_faiss_jni POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${OPENBLAS_REALPATH}
+            ${OUTPUT_DIR}/libopenblas.so.0
+        COMMENT "Bundling OpenBLAS shared library"
+    )
+    
+    # Set rpath to look in the same directory as the library
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(paimon_faiss_jni PRIVATE
+            "-Wl,-rpath,$ORIGIN"
+        )
+        # Also patch the library after build to use the bundled libopenblas
+        add_custom_command(TARGET paimon_faiss_jni POST_BUILD
+            COMMAND patchelf --set-rpath "$$ORIGIN" ${OUTPUT_DIR}/libpaimon_faiss_jni.so || true
+            COMMENT "Setting rpath to $ORIGIN"
+        )
+    endif()
 endif()
 
 # Install target

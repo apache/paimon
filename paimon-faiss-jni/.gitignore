@@ -31,15 +31,6 @@ CMakeCache.txt
 Makefile
 cmake_install.cmake
 
-# Native libraries (built ones, not bundled)
-*.so
-*.dylib
-*.dll
-*.jnilib
-!src/main/resources/**/*.so
-!src/main/resources/**/*.dylib
-!src/main/resources/**/*.dll
-
 # OS
 .DS_Store
 Thumbs.db
