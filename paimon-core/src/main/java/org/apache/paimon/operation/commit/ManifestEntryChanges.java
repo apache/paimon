@@ -25,7 +25,6 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.utils.ListUtils;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -164,15 +163,12 @@ public class ManifestEntryChanges {
     }
 
     public static List<BinaryRow> changedPartitions(
-            List<ManifestEntry> appendTableFiles,
-            List<ManifestEntry> compactTableFiles,
-            List<IndexManifestEntry> appendIndexFiles,
-            List<IndexManifestEntry> compactIndexFiles) {
+            List<ManifestEntry> dataFileChanges, List<IndexManifestEntry> indexFileChanges) {
         Set<BinaryRow> changedPartitions = new HashSet<>();
-        for (ManifestEntry file : ListUtils.union(appendTableFiles, compactTableFiles)) {
+        for (ManifestEntry file : dataFileChanges) {
             changedPartitions.add(file.partition());
         }
-        for (IndexManifestEntry file : ListUtils.union(appendIndexFiles, compactIndexFiles)) {
+        for (IndexManifestEntry file : indexFileChanges) {
             if (file.indexFile().indexType().equals(DELETION_VECTORS_INDEX)) {
                 changedPartitions.add(file.partition());
             }
