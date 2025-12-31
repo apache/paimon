@@ -191,7 +191,7 @@ class DataWriter(ABC):
 
         key_column_stats = {
             field.name: self._get_column_stats(data, field.name)
-            for field in self.table.trimmed_primary_keys
+            for field in self.table.trimmed_primary_keys_fields
         }
         key_fields = self.trimmed_primary_keys_fields
         min_key_stats = [key_column_stats[field.name]['min_values'] for field in key_fields]
