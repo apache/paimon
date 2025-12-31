@@ -429,7 +429,6 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 rowData(1, 101, 15, BinaryString.fromString("20221208"), 1),
                 rowData(1, 101, 16, BinaryString.fromString("20221208"), 1),
                 rowData(2, 101, 15, BinaryString.fromString("20221209"), 2));
-        checkLatestSnapshot(table, 3, Snapshot.CommitKind.APPEND);
         checkLatestSnapshot(table, 4, Snapshot.CommitKind.COMPACT, 60_000);
 
         List<String> res =

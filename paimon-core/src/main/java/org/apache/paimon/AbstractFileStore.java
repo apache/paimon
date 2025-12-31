@@ -44,6 +44,7 @@ import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.operation.commit.ConflictDetection;
+import org.apache.paimon.operation.commit.StrictModeChecker;
 import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -280,8 +281,13 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                         newKeyComparator(),
                         bucketMode(),
                         options.deletionVectorsEnabled(),
-                        newIndexFileHandler(),
-                        newScan());
+                        newIndexFileHandler());
+        StrictModeChecker strictModeChecker =
+                StrictModeChecker.create(
+                        snapshotManager,
+                        commitUser,
+                        this::newScan,
+                        options.commitStrictModeLastSafeSnapshot().orElse(null));
         return new FileStoreCommitImpl(
                 snapshotCommit,
                 fileIO,
@@ -312,10 +318,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.commitTimeout(),
                 options.commitMinRetryWait(),
                 options.commitMaxRetryWait(),
-                options.commitStrictModeLastSafeSnapshot().orElse(null),
                 options.rowTrackingEnabled(),
                 options.commitDiscardDuplicateFiles(),
-                conflictDetection);
+                conflictDetection,
+                strictModeChecker);
     }
 
     @Override

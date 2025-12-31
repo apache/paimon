@@ -55,7 +55,7 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitIsNotNull(FieldRef fieldRef) {
-        return Optional.of(filter(meta -> true));
+        return Optional.of(filter(meta -> !meta.onlyNulls()));
     }
 
     @Override
@@ -87,7 +87,12 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
     public Optional<List<GlobalIndexIOMeta>> visitLessThan(FieldRef fieldRef, Object literal) {
         // `<` means file.minKey < literal
         return Optional.of(
-                filter(meta -> comparator.compare(deserialize(meta.getFirstKey()), literal) < 0));
+                filter(
+                        meta ->
+                                !meta.onlyNulls()
+                                        && comparator.compare(
+                                                        deserialize(meta.getFirstKey()), literal)
+                                                < 0));
     }
 
     @Override
@@ -95,7 +100,12 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
             FieldRef fieldRef, Object literal) {
         // `>=` means file.maxKey >= literal
         return Optional.of(
-                filter(meta -> comparator.compare(deserialize(meta.getLastKey()), literal) >= 0));
+                filter(
+                        meta ->
+                                !meta.onlyNulls()
+                                        && comparator.compare(
+                                                        deserialize(meta.getLastKey()), literal)
+                                                >= 0));
     }
 
     @Override
@@ -107,7 +117,12 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
     public Optional<List<GlobalIndexIOMeta>> visitLessOrEqual(FieldRef fieldRef, Object literal) {
         // `<=` means file.minKey <= literal
         return Optional.of(
-                filter(meta -> comparator.compare(deserialize(meta.getFirstKey()), literal) <= 0));
+                filter(
+                        meta ->
+                                !meta.onlyNulls()
+                                        && comparator.compare(
+                                                        deserialize(meta.getFirstKey()), literal)
+                                                <= 0));
     }
 
     @Override
@@ -115,6 +130,9 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
         return Optional.of(
                 filter(
                         meta -> {
+                            if (meta.onlyNulls()) {
+                                return false;
+                            }
                             Object minKey = deserialize(meta.getFirstKey());
                             Object maxKey = deserialize(meta.getLastKey());
                             return comparator.compare(literal, minKey) >= 0
@@ -126,7 +144,12 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
     public Optional<List<GlobalIndexIOMeta>> visitGreaterThan(FieldRef fieldRef, Object literal) {
         // `>` means file.maxKey > literal
         return Optional.of(
-                filter(meta -> comparator.compare(deserialize(meta.getLastKey()), literal) > 0));
+                filter(
+                        meta ->
+                                !meta.onlyNulls()
+                                        && comparator.compare(
+                                                        deserialize(meta.getLastKey()), literal)
+                                                > 0));
     }
 
     @Override
@@ -134,6 +157,9 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
         return Optional.of(
                 filter(
                         meta -> {
+                            if (meta.onlyNulls()) {
+                                return false;
+                            }
                             Object minKey = deserialize(meta.getFirstKey());
                             Object maxKey = deserialize(meta.getLastKey());
                             for (Object literal : literals) {

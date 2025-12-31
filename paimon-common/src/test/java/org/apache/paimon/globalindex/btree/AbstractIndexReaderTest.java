@@ -28,16 +28,13 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
-import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
-import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -59,73 +56,49 @@ import org.apache.paimon.utils.DecimalUtils;
 import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.TestTemplate;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Objects;
 import java.util.Random;
-import java.util.TreeSet;
+import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link BTreeGlobalIndexer}. */
-@ExtendWith(ParameterizedTestExtension.class)
-public class BTreeGlobalIndexerTest {
-    private DataType dataType;
-    private int dataNum;
-    private List<Pair<Object, Long>> data;
-    private KeySerializer keySerializer;
-    private Comparator<Object> comparator;
-    private FileIO fileIO;
-    private GlobalIndexFileReader fileReader;
-    private GlobalIndexFileWriter fileWriter;
-    private BTreeGlobalIndexer globalIndexer;
-    private Options options;
+/** Common test class for BTreeIndexReader. */
+public class AbstractIndexReaderTest {
+    protected static final CacheManager CACHE_MANAGER = new CacheManager(MemorySize.VALUE_8_MB);
 
-    @TempDir java.nio.file.Path tempPath;
+    protected DataType dataType;
+    protected int dataNum;
+    protected List<Pair<Object, Long>> data;
+    protected KeySerializer keySerializer;
+    protected Comparator<Object> comparator;
+    protected FileIO fileIO;
+    protected GlobalIndexFileReader fileReader;
+    protected GlobalIndexFileWriter fileWriter;
+    protected BTreeGlobalIndexer globalIndexer;
+    protected Options options;
 
-    public BTreeGlobalIndexerTest(List<Object> args) {
+    @TempDir protected java.nio.file.Path tempPath;
+
+    AbstractIndexReaderTest(List<Object> args) {
         this.dataType = (DataType) args.get(0);
         this.dataNum = (Integer) args.get(1);
     }
 
-    @SuppressWarnings("unused")
-    @Parameters(name = "dataType&recordNum-{0}")
-    public static List<List<Object>> getVarSeg() {
-        return Arrays.asList(
-                Arrays.asList(new IntType(), 10000),
-                Arrays.asList(new VarCharType(VarCharType.MAX_LENGTH), 10000),
-                Arrays.asList(new CharType(100), 10000),
-                Arrays.asList(new FloatType(), 10000),
-                Arrays.asList(new DecimalType(), 10000),
-                Arrays.asList(new DoubleType(), 10000),
-                Arrays.asList(new BooleanType(), 10000),
-                Arrays.asList(new TinyIntType(), 10000),
-                Arrays.asList(new SmallIntType(), 10000),
-                Arrays.asList(new BigIntType(), 10000),
-                Arrays.asList(new DateType(), 10000),
-                Arrays.asList(new TimestampType(), 10000));
-    }
-
-    @BeforeEach
     public void setUp() throws Exception {
         fileIO = LocalFileIO.create();
         fileWriter =
                 new GlobalIndexFileWriter() {
                     @Override
                     public String newFileName(String prefix) {
-                        return "test-btree-" + prefix;
+                        return "test-btree-" + UUID.randomUUID() + prefix;
                     }
 
                     @Override
@@ -163,107 +136,7 @@ public class BTreeGlobalIndexerTest {
         data.sort((p1, p2) -> comparator.compare(p1.getKey(), p2.getKey()));
     }
 
-    @TestTemplate
-    public void testRangePredicate() throws Exception {
-        GlobalIndexIOMeta written = writeData();
-        FieldRef ref = new FieldRef(1, "testField", dataType);
-
-        try (GlobalIndexReader reader =
-                globalIndexer.createReader(fileReader, Collections.singletonList(written))) {
-            GlobalIndexResult result;
-            Random random = new Random();
-
-            for (int i = 0; i < 5; i++) {
-                Object literal = data.get(random.nextInt(dataNum)).getKey();
-
-                // 1. test <= literal
-                result = reader.visitLessOrEqual(ref, literal).get();
-                assertResult(result, filter(obj -> comparator.compare(obj, literal) <= 0));
-
-                // 2. test < literal
-                result = reader.visitLessThan(ref, literal).get();
-                assertResult(result, filter(obj -> comparator.compare(obj, literal) < 0));
-
-                // 3. test >= literal
-                result = reader.visitGreaterOrEqual(ref, literal).get();
-                assertResult(result, filter(obj -> comparator.compare(obj, literal) >= 0));
-
-                // 4. test > literal
-                result = reader.visitGreaterThan(ref, literal).get();
-                assertResult(result, filter(obj -> comparator.compare(obj, literal) > 0));
-
-                // 5. test equal
-                result = reader.visitEqual(ref, literal).get();
-                assertResult(result, filter(obj -> comparator.compare(obj, literal) == 0));
-
-                // 6. test not equal
-                result = reader.visitNotEqual(ref, literal).get();
-                assertResult(result, filter(obj -> comparator.compare(obj, literal) != 0));
-            }
-
-            // 7. test < min
-            Object literal7 = data.get(0).getKey();
-            result = reader.visitLessThan(ref, literal7).get();
-            Assertions.assertTrue(result.results().isEmpty());
-
-            // 8. test > max
-            Object literal8 = data.get(dataNum - 1).getKey();
-            result = reader.visitGreaterThan(ref, literal8).get();
-            Assertions.assertTrue(result.results().isEmpty());
-        }
-    }
-
-    @TestTemplate
-    public void testIsNull() throws Exception {
-        // set nulls
-        for (int i = dataNum - 1; i >= dataNum * 0.9; i--) {
-            data.get(i).setLeft(null);
-        }
-        GlobalIndexIOMeta written = writeData();
-        FieldRef ref = new FieldRef(1, "testField", dataType);
-
-        try (GlobalIndexReader reader =
-                globalIndexer.createReader(fileReader, Collections.singletonList(written))) {
-            GlobalIndexResult result;
-
-            result = reader.visitIsNull(ref).get();
-            assertResult(result, filter(Objects::isNull));
-
-            result = reader.visitIsNotNull(ref).get();
-            assertResult(result, filter(Objects::nonNull));
-        }
-    }
-
-    @TestTemplate
-    public void testInPredicate() throws Exception {
-        GlobalIndexIOMeta written = writeData();
-        FieldRef ref = new FieldRef(1, "testField", dataType);
-
-        try (GlobalIndexReader reader =
-                globalIndexer.createReader(fileReader, Collections.singletonList(written))) {
-            GlobalIndexResult result;
-            for (int i = 0; i < 10; i++) {
-                Random random = new Random(System.currentTimeMillis());
-                List<Object> literals =
-                        data.stream().map(Pair::getKey).collect(Collectors.toList());
-                Collections.shuffle(literals, random);
-                literals = literals.subList(0, (int) (dataNum * 0.1));
-
-                TreeSet<Object> set = new TreeSet<>(comparator);
-                set.addAll(literals);
-
-                // 1. test in
-                result = reader.visitIn(ref, literals).get();
-                assertResult(result, filter(set::contains));
-
-                // 2. test not in
-                result = reader.visitNotIn(ref, literals).get();
-                assertResult(result, filter(obj -> !set.contains(obj)));
-            }
-        }
-    }
-
-    private GlobalIndexIOMeta writeData() throws IOException {
+    protected GlobalIndexIOMeta writeData(List<Pair<Object, Long>> data) throws IOException {
         GlobalIndexParallelWriter indexWriter = globalIndexer.createWriter(fileWriter);
         for (Pair<Object, Long> pair : data) {
             indexWriter.write(pair.getKey(), pair.getValue());
@@ -279,14 +152,14 @@ public class BTreeGlobalIndexerTest {
                 resultEntry.meta());
     }
 
-    private List<Long> filter(Predicate<Object> filter) {
+    protected List<Long> filter(Predicate<Object> filter) {
         return data.stream()
                 .filter(pair -> filter.test(pair.getKey()))
                 .map(Pair::getValue)
                 .collect(Collectors.toList());
     }
 
-    private void assertResult(GlobalIndexResult indexResult, List<Long> expected) {
+    protected void assertResult(GlobalIndexResult indexResult, List<Long> expected) {
         Iterator<Long> iter = indexResult.results().iterator();
         List<Long> result = new ArrayList<>();
         while (iter.hasNext()) {
