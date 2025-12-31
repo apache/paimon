@@ -54,12 +54,6 @@ def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[D
 
             if file_io.properties.contains(OssOptions.OSS_ACCESS_KEY_ID):
                 storage_options['access_key_id'] = file_io.properties.get(OssOptions.OSS_ACCESS_KEY_ID)
-            if file_io.properties.contains(OssOptions.OSS_ACCESS_KEY_SECRET):
-                storage_options['secret_access_key'] = file_io.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET)
-            if file_io.properties.contains(OssOptions.OSS_SECURITY_TOKEN):
-                storage_options['session_token'] = file_io.properties.get(OssOptions.OSS_SECURITY_TOKEN)
-            if file_io.properties.contains(OssOptions.OSS_ACCESS_KEY_ID):
-                storage_options['access_key_id'] = file_io.properties.get(OssOptions.OSS_ACCESS_KEY_ID)
                 storage_options['oss_access_key_id'] = file_io.properties.get(OssOptions.OSS_ACCESS_KEY_ID)
             if file_io.properties.contains(OssOptions.OSS_ACCESS_KEY_SECRET):
                 storage_options['secret_access_key'] = file_io.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET)
