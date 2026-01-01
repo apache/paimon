@@ -16,6 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import time
 import unittest
 import requests
 from requests.exceptions import ConnectionError, ConnectTimeout, Timeout
@@ -46,13 +47,12 @@ class TestExponentialRetryStrategy(unittest.TestCase):
         session.mount("https://", self.retry_strategy.adapter)
         session.timeout = (1, 1)
 
-        import time
         start_time = time.time()
         
         try:
             session.get("http://192.168.255.255:9999", timeout=(1, 1))
             self.fail("Expected ConnectionError")
-        except (ConnectionError, ConnectTimeout, Timeout, NewConnectionError, MaxRetryError) as e:
+        except (ConnectionError, ConnectTimeout, Timeout, NewConnectionError, MaxRetryError):
             elapsed = time.time() - start_time
             self.assertLess(
                 elapsed, 5.0,
@@ -62,4 +62,3 @@ class TestExponentialRetryStrategy(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
