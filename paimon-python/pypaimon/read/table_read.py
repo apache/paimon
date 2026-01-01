@@ -15,7 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import pandas
 import pyarrow
@@ -128,8 +128,30 @@ class TableRead:
         con.register(table_name, self.to_arrow(splits))
         return con
 
-    def to_ray(self, splits: List[Split], parallelism: int = 1) -> "ray.data.dataset.Dataset":
-        """Convert Paimon table data to Ray Dataset."""
+    def to_ray(
+        self,
+        splits: List[Split],
+        *,
+        parallelism: int = -1,
+        ray_remote_args: Optional[Dict[str, Any]] = None,
+        concurrency: Optional[int] = None,
+        override_num_blocks: Optional[int] = None,
+        **read_args,
+    ) -> "ray.data.dataset.Dataset":
+        """Convert Paimon table data to Ray Dataset.
+        Args:
+            splits: List of splits to read from the Paimon table.
+            parallelism: .. deprecated:: 2.10.0
+                Use ``override_num_blocks`` instead.
+            ray_remote_args: Optional kwargs passed to :func:`ray.remote` in read tasks.
+            concurrency: Optional max number of Ray tasks to run concurrently.
+                By default, dynamically decided based on available resources.
+            override_num_blocks: Optional override for the number of output blocks. You needn't manually set this in most cases.
+            **read_args: Additional kwargs passed to the datasource.
+        See `Ray Data API <https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html>`_
+        for details.
+        """
+        import warnings
         import ray
 
         if not splits:
@@ -140,13 +162,33 @@ class TableRead:
             )
             return ray.data.from_arrow(empty_table)
 
-        # Validate parallelism parameter
-        if parallelism < 1:
-            raise ValueError(f"parallelism must be at least 1, got {parallelism}")
+        if parallelism != -1:
+            warnings.warn(
+                "The 'parallelism' parameter is deprecated. "
+                "Use 'override_num_blocks' instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            if override_num_blocks is None:
+                override_num_blocks = parallelism
+            elif parallelism != override_num_blocks:
+                warnings.warn(
+                    f"Both 'parallelism' ({parallelism}) and 'override_num_blocks' "
+                    f"({override_num_blocks}) are provided. 'override_num_blocks' "
+                    "will be used.",
+                    UserWarning,
+                    stacklevel=2
+                )
 
         from pypaimon.read.ray_datasource import PaimonDatasource
         datasource = PaimonDatasource(self, splits)
-        return ray.data.read_datasource(datasource, parallelism=parallelism)
+        return ray.data.read_datasource(
+            datasource,
+            ray_remote_args=ray_remote_args,
+            concurrency=concurrency,
+            override_num_blocks=override_num_blocks,
+            **read_args
+        )
 
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
