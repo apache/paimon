@@ -18,11 +18,14 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.utils.Pair;
 
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static org.apache.paimon.data.BinaryString.fromString;
 
 /** Try to optimize like to startsWith, endsWith, contains or equals. */
 public class LikeOptimization {
@@ -53,13 +56,17 @@ public class LikeOptimization {
         Matcher middleMatcher = MIDDLE_PATTERN.matcher(pattern);
 
         if (noneMatcher.matches()) {
-            return Optional.of(Pair.of(Equal.INSTANCE, pattern));
+            BinaryString equals = fromString(pattern);
+            return Optional.of(Pair.of(Equal.INSTANCE, equals));
         } else if (beginMatcher.matches()) {
-            return Optional.of(Pair.of(StartsWith.INSTANCE, beginMatcher.group(1)));
+            BinaryString begin = fromString(beginMatcher.group(1));
+            return Optional.of(Pair.of(StartsWith.INSTANCE, begin));
         } else if (endMatcher.matches()) {
-            return Optional.of(Pair.of(EndsWith.INSTANCE, endMatcher.group(1)));
+            BinaryString end = fromString(endMatcher.group(1));
+            return Optional.of(Pair.of(EndsWith.INSTANCE, end));
         } else if (middleMatcher.matches()) {
-            return Optional.of(Pair.of(Contains.INSTANCE, middleMatcher.group(1)));
+            BinaryString middle = fromString(middleMatcher.group(1));
+            return Optional.of(Pair.of(Contains.INSTANCE, middle));
         } else {
             return Optional.empty();
         }

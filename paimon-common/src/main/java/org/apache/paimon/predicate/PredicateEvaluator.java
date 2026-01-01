@@ -539,8 +539,7 @@ public class PredicateEvaluator {
         }
         List<Object> converted = new ArrayList<>(literals.size());
         for (Object literal : literals) {
-            Object internal = PredicateUtils.convertJavaObject(type, literal);
-            converted.add(InternalSerializers.create(type).copy(internal));
+            converted.add(InternalSerializers.create(type).copy(literal));
         }
         return converted;
     }

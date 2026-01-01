@@ -39,7 +39,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.predicate.PredicateUtils.convertJavaObject;
+import static org.apache.paimon.predicate.PredicateBuilder.convertJavaObject;
 
 /** Converts {@link SearchArgument} to {@link Predicate} with the best effort. */
 public class SearchArgumentToPredicateConverter {
