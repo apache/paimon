@@ -26,6 +26,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.reader.DataEvolutionArray;
 import org.apache.paimon.reader.DataEvolutionRow;
 import org.apache.paimon.schema.SchemaManager;
@@ -146,8 +147,12 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     private boolean filterByStats(List<ManifestEntry> entries) {
         EvolutionStats stats = evolutionStats(schema, this::scanTableSchema, entries);
-        return inputFilter.test(
-                stats.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
+        return PredicateEvaluator.test(
+                inputFilter,
+                stats.rowCount(),
+                stats.minValues(),
+                stats.maxValues(),
+                stats.nullCounts());
     }
 
     /** TODO: Optimize implementation of this method. */

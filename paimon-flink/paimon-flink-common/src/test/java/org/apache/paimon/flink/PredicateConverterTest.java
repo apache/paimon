@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.predicate.SimpleColStatsTestUtils;
 
 import org.apache.flink.table.api.DataTypes;
@@ -285,7 +286,10 @@ public class PredicateConverterTest {
         IntStream.range(0, valuesList.size())
                 .forEach(
                         i ->
-                                assertThat(predicate.test(GenericRow.of(valuesList.get(i))))
+                                assertThat(
+                                                PredicateEvaluator.test(
+                                                        predicate,
+                                                        GenericRow.of(valuesList.get(i))))
                                         .isEqualTo(expectedForValues.get(i)));
         IntStream.range(0, rowCountList.size())
                 .forEach(

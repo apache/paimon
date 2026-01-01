@@ -27,6 +27,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.StringUtils;
@@ -81,7 +82,7 @@ public class RewriteFileIndexProcedure extends ProcedureBase {
                             partitionList.stream()
                                     .map(
                                             p ->
-                                                    PredicateBuilder.partition(
+                                                    PredicateUtils.partition(
                                                             p,
                                                             ((FileStoreTable) table)
                                                                     .schema()

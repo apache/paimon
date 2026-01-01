@@ -52,8 +52,7 @@ public class RowIdPredicateVisitor implements PredicateVisitor<Optional<List<Ran
                 for (Object literal : predicate.literals()) {
                     rowIds.add((Long) literal);
                 }
-                // The list output by getRangesFromList is already sorted,
-                // and has no overlap
+                // The list output by getRangesFromList is already sorted, and has no overlap
                 return Optional.of(Range.toRanges(rowIds));
             }
         }

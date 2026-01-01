@@ -24,6 +24,7 @@ import org.apache.paimon.lookup.ValueBulkLoader;
 import org.apache.paimon.lookup.ValueState;
 import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.KeyProjectedRow;
@@ -105,7 +106,7 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
         }
 
         if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-            if (predicate == null || predicate.test(row)) {
+            if (predicate == null || PredicateEvaluator.test(predicate, row)) {
                 tableState.put(primaryKeyRow, row);
             } else {
                 // The new record under primary key is filtered

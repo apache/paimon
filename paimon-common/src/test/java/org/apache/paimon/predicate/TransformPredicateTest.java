@@ -37,7 +37,8 @@ class TransformPredicateTest {
     public void testReturnTrue() {
         TransformPredicate predicate = create();
         boolean result =
-                predicate.test(
+                PredicateEvaluator.test(
+                        predicate,
                         GenericRow.of(
                                 BinaryString.fromString("ha"), BinaryString.fromString("-he")));
         assertThat(result).isTrue();
@@ -47,7 +48,8 @@ class TransformPredicateTest {
     public void testReturnFalse() {
         TransformPredicate predicate = create();
         boolean result =
-                predicate.test(
+                PredicateEvaluator.test(
+                        predicate,
                         GenericRow.of(
                                 BinaryString.fromString("he"), BinaryString.fromString("-he")));
         assertThat(result).isFalse();
@@ -56,7 +58,7 @@ class TransformPredicateTest {
     @Test
     public void testMinMax() {
         TransformPredicate predicate = create();
-        boolean result = predicate.test(1, null, null, null);
+        boolean result = PredicateEvaluator.test(predicate, 1, null, null, null);
         assertThat(result).isTrue();
     }
 

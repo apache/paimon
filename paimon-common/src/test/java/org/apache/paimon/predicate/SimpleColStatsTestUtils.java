@@ -35,7 +35,8 @@ public class SimpleColStatsTestUtils {
             nullCounts[i] = fieldStats[i].nullCount();
         }
 
-        return predicate.test(
+        return PredicateEvaluator.test(
+                predicate,
                 rowCount,
                 GenericRow.of(min),
                 GenericRow.of(max),

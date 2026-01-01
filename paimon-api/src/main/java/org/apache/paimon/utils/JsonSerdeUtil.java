@@ -18,6 +18,8 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateJsonSerde;
 import org.apache.paimon.schema.SchemaSerializer;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
@@ -193,6 +195,8 @@ public class JsonSerdeUtil {
                 DataTypeJsonParser::parseDataField);
         registerJsonObjects(
                 module, DataType.class, DataType::serializeJson, DataTypeJsonParser::parseDataType);
+        registerJsonObjects(
+                module, Predicate.class, PredicateJsonSerde.INSTANCE, PredicateJsonSerde.INSTANCE);
         return module;
     }
 

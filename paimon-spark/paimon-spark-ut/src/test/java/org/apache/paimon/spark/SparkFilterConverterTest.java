@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DateType;
@@ -164,18 +165,19 @@ public class SparkFilterConverterTest {
         GenericRow row = GenericRow.of(fromString("aabc"));
         GenericRow max = GenericRow.of(fromString("xasxwsa"));
         GenericRow min = GenericRow.of(fromString("aaaaa"));
-        boolean test = endsWithPre.test(row);
+        boolean test = PredicateEvaluator.test(endsWithPre, row);
         Integer[] nullCount = {null};
-        boolean test1 = endsWithPre.test(10, min, max, new GenericArray(nullCount));
+        boolean test1 =
+                PredicateEvaluator.test(endsWithPre, 10, min, max, new GenericArray(nullCount));
         assertThat(test).isEqualTo(true);
         assertThat(test1).isEqualTo(true);
 
         // StringContains
         StringContains stringContains = StringContains.apply("id", "aa");
         Predicate contains = converter01.convert(stringContains);
-        assertThat(contains.test(row)).isEqualTo(true);
-        assertThat(contains.test(max)).isEqualTo(false);
-        assertThat(contains.test(min)).isEqualTo(true);
+        assertThat(PredicateEvaluator.test(contains, row)).isEqualTo(true);
+        assertThat(PredicateEvaluator.test(contains, max)).isEqualTo(false);
+        assertThat(PredicateEvaluator.test(contains, min)).isEqualTo(true);
     }
 
     @Test
@@ -206,7 +208,7 @@ public class SparkFilterConverterTest {
         StringEndsWith endsWith = StringEndsWith.apply("id", "abc");
         Predicate endsWithPre = converter.convert(endsWith);
         GenericRow row = GenericRow.of(fromString("aabc"));
-        boolean test = endsWithPre.test(row);
+        boolean test = PredicateEvaluator.test(endsWithPre, row);
         assertThat(test).isEqualTo(true);
     }
 

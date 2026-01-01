@@ -35,6 +35,7 @@ import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -264,14 +265,16 @@ public class FilesTable implements ReadonlyTable {
                 scan.withBucketFilter(
                         bucket -> {
                             // bucket index: 1
-                            return bucketPredicate.test(GenericRow.of(null, bucket));
+                            return PredicateEvaluator.test(
+                                    bucketPredicate, GenericRow.of(null, bucket));
                         });
             }
             if (levelPredicate != null) {
                 scan.withLevelFilter(
                         level -> {
                             // level index: 5
-                            return levelPredicate.test(
+                            return PredicateEvaluator.test(
+                                    levelPredicate,
                                     GenericRow.of(null, null, null, null, null, level));
                         });
             } else {

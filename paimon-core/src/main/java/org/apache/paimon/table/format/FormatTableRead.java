@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
@@ -104,7 +105,7 @@ public class FormatTableRead implements TableRead {
         }
 
         Predicate finalFilter = predicate;
-        return reader.filter(finalFilter::test);
+        return reader.filter(row -> PredicateEvaluator.test(finalFilter, row));
     }
 
     private RecordReader<InternalRow> applyLimit(RecordReader<InternalRow> reader, int limit) {
