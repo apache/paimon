@@ -2373,6 +2373,68 @@ class DataBlobWriterTest(unittest.TestCase):
         actual = pa.concat_tables([actual1, actual2, actual3]).sort_by('id')
         self.assertEqual(actual, expected)
 
+    def test_data_blob_writer_with_row_range(self):
+        """Test DataBlobWriter with mixed data types in blob column."""
+
+        # Create schema with blob column
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('type', pa.string()),
+            ('data', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table('test_db.with_row_range_test', schema, False)
+        table = self.catalog.get_table('test_db.with_row_range_test')
+
+        # Use proper table API to create writer
+        write_builder = table.new_batch_write_builder()
+        blob_writer = write_builder.new_write()
+
+        # Test data with different types of blob content
+        test_data = pa.Table.from_pydict({
+            'id': [0, 1, 2, 3, 4],
+            'type': ['text', 'json', 'binary', 'image', 'pdf'],
+            'data': [
+                b'This is text content',
+                b'{"key": "value", "number": 42}',
+                b'\x00\x01\x02\x03\xff\xfe\xfd',
+                b'PNG_IMAGE_DATA_PLACEHOLDER',
+                b'%PDF-1.4\nPDF_CONTENT_PLACEHOLDER'
+            ]
+        }, schema=pa_schema)
+
+        # Write mixed data
+        total_rows = 0
+        for batch in test_data.to_batches():
+            blob_writer.write_arrow_batch(batch)
+            total_rows += batch.num_rows
+
+        # Test prepare commit
+        commit_messages = blob_writer.prepare_commit()
+        # Create commit and commit the data
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        blob_writer.close()
+
+        # Read data back using table API
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan().with_row_range(2, 4)
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        result = table_read.to_arrow(splits)
+
+        # Verify the data was read back correctly
+        self.assertEqual(result.num_rows, 2, "Should have 2 rows")
+        self.assertEqual(result.num_columns, 3, "Should have 3 columns")
+        self.assertEqual(result["id"].unique().to_pylist(), [2, 3], "Get incorrect column ID")
+
     def test_data_blob_writer_with_shard(self):
         """Test DataBlobWriter with mixed data types in blob column."""
 

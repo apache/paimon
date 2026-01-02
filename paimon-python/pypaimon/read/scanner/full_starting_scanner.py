@@ -63,6 +63,8 @@ class FullStartingScanner(StartingScanner):
 
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
+        self.start_row_of_this_subtask = None
+        self.end_row_of_this_subtask = None
 
         self.only_read_real_buckets = True if options.bucket() == BucketMode.POSTPONE_BUCKET.value else False
         self.data_evolution = options.data_evolution_enabled()
@@ -121,37 +123,24 @@ class FullStartingScanner(StartingScanner):
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'FullStartingScanner':
         if idx_of_this_subtask >= number_of_para_subtasks:
             raise Exception("idx_of_this_subtask must be less than number_of_para_subtasks")
+        if self.start_row_of_this_subtask is not None:
+            raise Exception("with_shard and with_row_range cannot be used simultaneously")
         self.idx_of_this_subtask = idx_of_this_subtask
         self.number_of_para_subtasks = number_of_para_subtasks
         return self
 
-    def _append_only_filter_by_shard(self, partitioned_files: defaultdict) -> (defaultdict, int, int):
-        """
-        Filter file entries by shard. Only keep the files within the range, which means
-        that only the starting and ending files need to be further divided subsequently
-        """
-        total_row = 0
-        # Sort by file creation time to ensure consistent sharding
-        for key, file_entries in partitioned_files.items():
-            for entry in file_entries:
-                total_row += entry.file.row_count
+    def with_row_range(self, start_row, end_row) -> 'FullStartingScanner':
+        if start_row >= end_row:
+            raise Exception("start_row must be less than end_row")
+        if self.idx_of_this_subtask is not None:
+            raise Exception("with_row_range and with_shard cannot be used simultaneously")
+        self.start_row_of_this_subtask = start_row
+        self.end_row_of_this_subtask = end_row
+        return self
 
-        # Calculate number of rows this shard should process using balanced distribution
-        # Distribute remainder evenly among first few shards to avoid last shard overload
-        base_rows_per_shard = total_row // self.number_of_para_subtasks
-        remainder = total_row % self.number_of_para_subtasks
-
-        # Each of the first 'remainder' shards gets one extra row
-        if self.idx_of_this_subtask < remainder:
-            num_row = base_rows_per_shard + 1
-            start_row = self.idx_of_this_subtask * (base_rows_per_shard + 1)
-        else:
-            num_row = base_rows_per_shard
-            start_row = (remainder * (base_rows_per_shard + 1) +
-                         (self.idx_of_this_subtask - remainder) * base_rows_per_shard)
-
-        end_row = start_row + num_row
-
+    def _append_only_filter_by_row_range(self, partitioned_files: defaultdict,
+                                         start_row: int,
+                                         end_row: int) -> (defaultdict, int, int):
         plan_start_row = 0
         plan_end_row = 0
         entry_end_row = 0  # end row position of current file in all data
@@ -183,12 +172,16 @@ class FullStartingScanner(StartingScanner):
 
         return filtered_partitioned_files, plan_start_row, plan_end_row
 
-    def _data_evolution_filter_by_shard(self, partitioned_files: defaultdict) -> (defaultdict, int, int):
+    def _append_only_filter_by_shard(self, partitioned_files: defaultdict) -> (defaultdict, int, int):
+        """
+        Filter file entries by shard. Only keep the files within the range, which means
+        that only the starting and ending files need to be further divided subsequently
+        """
         total_row = 0
+        # Sort by file creation time to ensure consistent sharding
         for key, file_entries in partitioned_files.items():
             for entry in file_entries:
-                if not self._is_blob_file(entry.file.file_name):
-                    total_row += entry.file.row_count
+                total_row += entry.file.row_count
 
         # Calculate number of rows this shard should process using balanced distribution
         # Distribute remainder evenly among first few shards to avoid last shard overload
@@ -206,6 +199,11 @@ class FullStartingScanner(StartingScanner):
 
         end_row = start_row + num_row
 
+        return self._append_only_filter_by_row_range(partitioned_files, start_row, end_row)
+
+    def _data_evolution_filter_by_row_range(self, partitioned_files: defaultdict,
+                                            start_row: int,
+                                            end_row: int) -> (defaultdict, int, int):
         plan_start_row = 0
         plan_end_row = 0
         entry_end_row = 0  # end row position of current file in all data
@@ -243,6 +241,30 @@ class FullStartingScanner(StartingScanner):
                 filtered_partitioned_files[key] = filtered_entries
 
         return filtered_partitioned_files, plan_start_row, plan_end_row
+
+    def _data_evolution_filter_by_shard(self, partitioned_files: defaultdict) -> (defaultdict, int, int):
+        total_row = 0
+        for key, file_entries in partitioned_files.items():
+            for entry in file_entries:
+                if not self._is_blob_file(entry.file.file_name):
+                    total_row += entry.file.row_count
+
+        # Calculate number of rows this shard should process using balanced distribution
+        # Distribute remainder evenly among first few shards to avoid last shard overload
+        base_rows_per_shard = total_row // self.number_of_para_subtasks
+        remainder = total_row % self.number_of_para_subtasks
+
+        # Each of the first 'remainder' shards gets one extra row
+        if self.idx_of_this_subtask < remainder:
+            num_row = base_rows_per_shard + 1
+            start_row = self.idx_of_this_subtask * (base_rows_per_shard + 1)
+        else:
+            num_row = base_rows_per_shard
+            start_row = (remainder * (base_rows_per_shard + 1) +
+                         (self.idx_of_this_subtask - remainder) * base_rows_per_shard)
+
+        end_row = start_row + num_row
+        return self._data_evolution_filter_by_row_range(partitioned_files, start_row, end_row)
 
     def _compute_split_start_end_row(self, splits: List[Split], plan_start_row, plan_end_row):
         """
@@ -451,7 +473,13 @@ class FullStartingScanner(StartingScanner):
         for entry in file_entries:
             partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
-        if self.idx_of_this_subtask is not None:
+        if self.start_row_of_this_subtask is not None:
+            # shard data range: [plan_start_row, plan_end_row)
+            partitioned_files, plan_start_row, plan_end_row = \
+                self._append_only_filter_by_row_range(partitioned_files,
+                                                      self.start_row_of_this_subtask,
+                                                      self.end_row_of_this_subtask)
+        elif self.idx_of_this_subtask is not None:
             partitioned_files, plan_start_row, plan_end_row = self._append_only_filter_by_shard(partitioned_files)
 
         def weight_func(f: DataFileMeta) -> int:
@@ -467,7 +495,7 @@ class FullStartingScanner(StartingScanner):
             packed_files: List[List[DataFileMeta]] = self._pack_for_ordered(data_files, weight_func,
                                                                             self.target_split_size)
             splits += self._build_split_from_pack(packed_files, file_entries, False, deletion_files_map)
-        if self.idx_of_this_subtask is not None:
+        if self.start_row_of_this_subtask is not None or self.idx_of_this_subtask is not None:
             # When files are combined into splits, it is necessary to find files that needs to be divided for each split
             self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
         return splits
@@ -555,7 +583,13 @@ class FullStartingScanner(StartingScanner):
         for entry in sorted_entries:
             partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
-        if self.idx_of_this_subtask is not None:
+        if self.start_row_of_this_subtask is not None:
+            # shard data range: [plan_start_row, plan_end_row)
+            partitioned_files, plan_start_row, plan_end_row = \
+                self._data_evolution_filter_by_row_range(partitioned_files,
+                                                         self.start_row_of_this_subtask,
+                                                         self.end_row_of_this_subtask)
+        elif self.idx_of_this_subtask is not None:
             # shard data range: [plan_start_row, plan_end_row)
             partitioned_files, plan_start_row, plan_end_row = self._data_evolution_filter_by_shard(partitioned_files)
 
@@ -584,7 +618,7 @@ class FullStartingScanner(StartingScanner):
 
             splits += self._build_split_from_pack(flatten_packed_files, sorted_entries, False, deletion_files_map)
 
-        if self.idx_of_this_subtask is not None:
+        if self.start_row_of_this_subtask is not None or self.idx_of_this_subtask is not None:
             self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
         return splits
 
