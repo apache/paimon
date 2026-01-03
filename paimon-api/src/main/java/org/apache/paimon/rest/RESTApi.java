@@ -147,6 +147,7 @@ public class RESTApi {
     public static final String VIEW_NAME_PATTERN = "viewNamePattern";
     public static final String FUNCTION_NAME_PATTERN = "functionNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
+    public static final String TAG_NAME_PREFIX = "tagNamePrefix";
 
     public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
 
@@ -917,18 +918,23 @@ public class RESTApi {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
+     * @param tagNamePrefix A prefix for tag names. All tags will be returned if not set or empty.
      * @return {@link PagedList}: elements and nextPageToken.
      * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
     public PagedList<String> listTagsPaged(
-            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix) {
         ListTagsResponse response =
                 client.get(
                         resourcePaths.tags(
                                 identifier.getDatabaseName(), identifier.getObjectName()),
-                        buildPagedQueryParams(maxResults, pageToken),
+                        buildPagedQueryParams(
+                                maxResults, pageToken, Pair.of(TAG_NAME_PREFIX, tagNamePrefix)),
                         ListTagsResponse.class,
                         restAuthFunction);
         List<String> tags = response.tags();
