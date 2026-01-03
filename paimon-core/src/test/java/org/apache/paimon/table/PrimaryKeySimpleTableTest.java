@@ -101,6 +101,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -142,6 +143,7 @@ import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
+import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -248,6 +250,33 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         file = ((DataSplit) table.newScan().plan().splits().get(0)).dataFiles().get(0);
         assertThat(file.level()).isEqualTo(5);
         assertThat(file.valueStats().maxValues().getFieldCount()).isGreaterThan(4);
+
+        if (file.valueStatsCols() == null) {
+            int expectedFieldCount = table.schema().fields().size();
+            int actualFieldCount = file.valueStats().minValues().getFieldCount();
+            assertThat(actualFieldCount)
+                    .as(
+                            "When value_stats_cols is null, value_stats field count should match table.fields count. "
+                                    + "This ensures value_stats does NOT contain system fields.")
+                    .isEqualTo(expectedFieldCount);
+        } else {
+            for (String fieldName : Objects.requireNonNull(file.valueStatsCols())) {
+                boolean isSystemField =
+                        fieldName.startsWith(KEY_FIELD_PREFIX)
+                                || SpecialFields.isSystemField(fieldName);
+                assertThat(isSystemField)
+                        .as("value_stats_cols should NOT contain system field: " + fieldName)
+                        .isFalse();
+            }
+            assertThat(file.valueStats().minValues().getFieldCount())
+                    .as("value_stats field count should match value_stats_cols size")
+                    .isEqualTo(Objects.requireNonNull(file.valueStatsCols()).size());
+        }
+
+        assertThat(file.valueStats().minValues().getFieldCount())
+                .isEqualTo(file.valueStats().maxValues().getFieldCount());
+        assertThat(file.valueStats().nullCounts().size())
+                .isEqualTo(file.valueStats().minValues().getFieldCount());
     }
 
     @Test
