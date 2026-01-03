@@ -146,7 +146,8 @@ class TableRead:
             ray_remote_args: Optional kwargs passed to :func:`ray.remote` in read tasks.
             concurrency: Optional max number of Ray tasks to run concurrently.
                 By default, dynamically decided based on available resources.
-            override_num_blocks: Optional override for the number of output blocks. You needn't manually set this in most cases.
+            override_num_blocks: Optional override for the number of output blocks.
+                You needn't manually set this in most cases.
             **read_args: Additional kwargs passed to the datasource.
         See `Ray Data API <https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html>`_
         for details.
