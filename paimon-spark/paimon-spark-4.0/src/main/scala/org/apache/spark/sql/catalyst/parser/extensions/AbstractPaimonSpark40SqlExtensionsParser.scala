@@ -52,7 +52,7 @@ import scala.collection.JavaConverters._
  * @param delegate
  *   The extension parser.
  */
-abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterface)
+abstract class AbstractPaimonSpark40SqlExtensionsParser(val delegate: ParserInterface)
   extends org.apache.spark.sql.catalyst.parser.ParserInterface
   with Logging {
 

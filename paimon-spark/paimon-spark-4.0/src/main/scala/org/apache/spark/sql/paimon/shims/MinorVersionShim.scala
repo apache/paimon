@@ -18,7 +18,7 @@
 
 package org.apache.spark.sql.paimon.shims
 
-import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensionsParser
+import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark40SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4InternalRowWithBlob, SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
@@ -38,7 +38,7 @@ import scala.collection.JavaConverters._
 object MinorVersionShim {
 
   def createSparkParser(delegate: ParserInterface): ParserInterface = {
-    new PaimonSpark4SqlExtensionsParser(delegate)
+    new PaimonSpark40SqlExtensionsParser(delegate)
   }
 
   def createKeep(context: String, condition: Expression, output: Seq[Expression]): Instruction = {

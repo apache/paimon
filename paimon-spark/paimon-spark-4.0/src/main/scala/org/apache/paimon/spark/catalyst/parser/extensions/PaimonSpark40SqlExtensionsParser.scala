@@ -19,11 +19,11 @@
 package org.apache.paimon.spark.catalyst.parser.extensions
 
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.parser.extensions.AbstractPaimonSparkSqlExtensionsParser
+import org.apache.spark.sql.catalyst.parser.extensions.AbstractPaimonSpark40SqlExtensionsParser
 import org.apache.spark.sql.types.StructType
 
-class PaimonSpark4SqlExtensionsParser(override val delegate: ParserInterface)
-  extends AbstractPaimonSparkSqlExtensionsParser(delegate) {
+class PaimonSpark40SqlExtensionsParser(override val delegate: ParserInterface)
+  extends AbstractPaimonSpark40SqlExtensionsParser(delegate) {
 
   override def parseRoutineParam(sqlText: String): StructType = delegate.parseRoutineParam(sqlText)
 }
