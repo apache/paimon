@@ -252,7 +252,9 @@ class ParseException private (
       queryContext.foreach(ctx => builder ++= ctx.summary())
     } else {
       start match {
-        case Origin(Some(l), Some(p), _, _, _, _, _, _, _) =>
+        case a: Origin if a.line.isDefined && a.startPosition.isDefined =>
+          val l = a.line.get
+          val p = a.startPosition.get
           builder ++= s" (line $l, pos $p)\n"
           command.foreach {
             cmd =>
