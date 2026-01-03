@@ -783,7 +783,7 @@ class ReaderBasicTest(unittest.TestCase):
         as self.table.fields (same count and same field names).
         """
         self.assertFalse(table.is_primary_key_table,
-                        "Table should be append-only (no primary keys)")
+                         "Table should be append-only (no primary keys)")
 
         test_data = pa.Table.from_pydict({
             'id': [1, 2, 3],
@@ -806,15 +806,15 @@ class ReaderBasicTest(unittest.TestCase):
 
         # Verify field count matches
         self.assertEqual(len(data_fields_from_schema), len(table_fields),
-                        f"Field count mismatch: data.schema has {len(data_fields_from_schema)} fields, "
-                        f"but table.fields has {len(table_fields)} fields")
+                         f"Field count mismatch: data.schema has {len(data_fields_from_schema)} fields, "
+                         f"but table.fields has {len(table_fields)} fields")
 
         # Verify field names match (order may differ, but names should match)
         data_field_names = {field.name for field in data_fields_from_schema}
         table_field_names = {field.name for field in table_fields}
         self.assertEqual(data_field_names, table_field_names,
-                        f"Field names mismatch: data.schema has {data_field_names}, "
-                        f"but table.fields has {table_field_names}")
+                         f"Field names mismatch: data.schema has {data_field_names}, "
+                         f"but table.fields has {table_field_names}")
 
         # Read manifest to verify value_stats_cols is None (all fields included)
         read_builder = table.new_read_builder()
@@ -830,7 +830,7 @@ class ReaderBasicTest(unittest.TestCase):
         if len(manifest_entries) > 0:
             file_meta = manifest_entries[0].file
             self.assertIsNone(file_meta.value_stats_cols,
-                             "value_stats_cols should be None when all table fields are included")
+                              "value_stats_cols should be None when all table fields are included")
 
     def test_split_target_size(self):
         """Test source.split.target-size configuration effect on split generation."""
