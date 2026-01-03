@@ -192,8 +192,11 @@ class DataWriter(ABC):
 
         # key stats & value stats
         value_stats_enabled = self.options.metadata_stats_enabled()
-        stats_fields = PyarrowFieldParser.to_paimon_schema(data.schema) if value_stats_enabled\
-            else self.table.trimmed_primary_keys_fields
+        if value_stats_enabled:
+            stats_fields = self.table.fields if self.table.is_primary_key_table \
+                else PyarrowFieldParser.to_paimon_schema(data.schema)
+        else:
+            stats_fields = self.table.trimmed_primary_keys_fields
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
             for field in stats_fields
