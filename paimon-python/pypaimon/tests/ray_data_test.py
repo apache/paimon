@@ -109,7 +109,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Verify Ray dataset
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
@@ -169,7 +169,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Verify filtered results
         self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows after filtering")
@@ -215,7 +215,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Verify projection
         self.assertEqual(ray_dataset.count(), 3, "Should have 3 rows")
@@ -256,7 +256,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Apply map operation (double the value)
         def double_value(row):
@@ -303,7 +303,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Apply filter operation (score >= 80)
         filtered_dataset = ray_dataset.filter(lambda row: row['score'] >= 80)
@@ -346,8 +346,8 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset_distributed = table_read.to_ray(splits, parallelism=2)
-        ray_dataset_simple = table_read.to_ray(splits, parallelism=1)
+        ray_dataset_distributed = table_read.to_ray(splits, override_num_blocks=2)
+        ray_dataset_simple = table_read.to_ray(splits, override_num_blocks=1)
 
         # Both should produce the same results
         self.assertEqual(ray_dataset_distributed.count(), 3, "Distributed mode should have 3 rows")
@@ -394,7 +394,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=1)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=1)
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 5, "Should have 5 rows")
 
@@ -453,7 +453,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 4, "Should have 4 rows after upsert")
@@ -510,7 +510,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=1)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=1)
 
         # Verify filtered results
         self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows after filtering")
@@ -528,7 +528,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=1)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=1)
 
         # Verify filtered results by partition
         self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows in partition 2024-01-01")
@@ -588,7 +588,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 4, "Should have 4 rows after upsert")
@@ -604,7 +604,6 @@ class RayDataTest(unittest.TestCase):
         self.assertEqual(list(df_sorted['value']), [150, 250, 300, 400], "Value column should reflect updates")
 
     def test_ray_data_invalid_parallelism(self):
-        """Test that invalid parallelism values raise ValueError."""
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
@@ -633,20 +632,74 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        # Test with parallelism = 0
         with self.assertRaises(ValueError) as context:
-            table_read.to_ray(splits, parallelism=0)
-        self.assertIn("parallelism must be at least 1", str(context.exception))
+            table_read.to_ray(splits, override_num_blocks=0)
+        self.assertIn("override_num_blocks must be at least 1", str(context.exception))
 
-        # Test with parallelism < 0
         with self.assertRaises(ValueError) as context:
-            table_read.to_ray(splits, parallelism=-1)
-        self.assertIn("parallelism must be at least 1", str(context.exception))
+            table_read.to_ray(splits, override_num_blocks=-1)
+        self.assertIn("override_num_blocks must be at least 1", str(context.exception))
 
-        # Test with parallelism = -10
         with self.assertRaises(ValueError) as context:
-            table_read.to_ray(splits, parallelism=-10)
-        self.assertIn("parallelism must be at least 1", str(context.exception))
+            table_read.to_ray(splits, override_num_blocks=-10)
+        self.assertIn("override_num_blocks must be at least 1", str(context.exception))
+
+    def test_auto_adjust_ray_block_size(self):
+        from ray.data import DataContext
+
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table('default.test_auto_adjust_ray_block_size', schema, False)
+        table = self.catalog.get_table('default.test_auto_adjust_ray_block_size')
+
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        splits = table.new_read_builder().new_scan().plan().splits()
+        self.assertGreater(len(splits), 0)
+
+        large_split_size = 150 * 1024 * 1024
+        for split in splits:
+            split._file_size = large_split_size
+
+        ctx = DataContext.get_current()
+        original_size = ctx.target_max_block_size
+        adjusted_values = []
+
+        def track_set(_, value):
+            adjusted_values.append(value)
+
+        original_prop = type(ctx).target_max_block_size
+        type(ctx).target_max_block_size = property(lambda self: original_size, track_set)
+
+        try:
+            ray_dataset = table.new_read_builder().new_read().to_ray(splits)
+            self.assertEqual(ray_dataset.count(), 3)
+            self.assertGreater(len(adjusted_values), 0, "Should adjust block size")
+            adjusted_size = adjusted_values[-1]
+            self.assertGreater(adjusted_size, original_size)
+            self.assertGreaterEqual(adjusted_size, large_split_size)
+            self.assertLessEqual(adjusted_size, 512 * 1024 * 1024)
+
+            adjusted_values.clear()
+            ray_dataset_no_adjust = table.new_read_builder().new_read().to_ray(
+                splits, auto_adjust_ray_block_size=False
+            )
+            self.assertEqual(ray_dataset_no_adjust.count(), 3)
+            self.assertEqual([v for v in adjusted_values if v > original_size], [],
+                             "Should not adjust when disabled")
+        finally:
+            type(ctx).target_max_block_size = original_prop
+            ctx.target_max_block_size = original_size
 
 
 if __name__ == '__main__':

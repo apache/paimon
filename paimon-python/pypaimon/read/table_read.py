@@ -132,7 +132,7 @@ class TableRead:
         self,
         splits: List[Split],
         *,
-        parallelism: int = -1,
+        auto_adjust_ray_block_size: bool = True,
         ray_remote_args: Optional[Dict[str, Any]] = None,
         concurrency: Optional[int] = None,
         override_num_blocks: Optional[int] = None,
@@ -141,19 +141,25 @@ class TableRead:
         """Convert Paimon table data to Ray Dataset.
         Args:
             splits: List of splits to read from the Paimon table.
-            parallelism: .. deprecated:: 2.10.0
-                Use ``override_num_blocks`` instead.
+            auto_adjust_ray_block_size: If True (default), dynamically adjust
+                Ray's ``target_max_block_size`` based on split sizes to avoid unnecessary
+                splitBlock operations. If False, use the current DataContext setting.
             ray_remote_args: Optional kwargs passed to :func:`ray.remote` in read tasks.
+                For example, ``{"num_cpus": 2, "max_retries": 3}``.
             concurrency: Optional max number of Ray tasks to run concurrently.
                 By default, dynamically decided based on available resources.
             override_num_blocks: Optional override for the number of output blocks.
                 You needn't manually set this in most cases.
             **read_args: Additional kwargs passed to the datasource.
+                For example, ``per_task_row_limit`` (Ray 2.52.0+).
+        
         See `Ray Data API <https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html>`_
         for details.
         """
-        import warnings
         import ray
+        import logging
+
+        logger = logging.getLogger(__name__)
 
         if not splits:
             schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
@@ -163,38 +169,48 @@ class TableRead:
             )
             return ray.data.from_arrow(empty_table)
 
-        if parallelism != -1:
-            warnings.warn(
-                "The 'parallelism' parameter is deprecated. "
-                "Use 'override_num_blocks' instead.",
-                DeprecationWarning,
-                stacklevel=2
-            )
-            if parallelism < 1:
-                raise ValueError(f"parallelism must be at least 1 (or -1 for auto-detect), got {parallelism}")
-            if override_num_blocks is None:
-                override_num_blocks = parallelism
-            elif parallelism != override_num_blocks:
-                warnings.warn(
-                    f"Both 'parallelism' ({parallelism}) and 'override_num_blocks' "
-                    f"({override_num_blocks}) are provided. 'override_num_blocks' "
-                    "will be used.",
-                    UserWarning,
-                    stacklevel=2
-                )
-        
         if override_num_blocks is not None and override_num_blocks < 1:
             raise ValueError(f"override_num_blocks must be at least 1, got {override_num_blocks}")
 
-        from pypaimon.read.ray_datasource import PaimonDatasource
-        datasource = PaimonDatasource(self, splits)
-        return ray.data.read_datasource(
-            datasource,
-            ray_remote_args=ray_remote_args,
-            concurrency=concurrency,
-            override_num_blocks=override_num_blocks,
-            **read_args
-        )
+        from ray.data import DataContext
+
+        ctx = DataContext.get_current()
+        current_size = ctx.target_max_block_size
+        current_new_size = None
+
+        if auto_adjust_ray_block_size:
+            max_split_size = max(
+                (split.file_size for split in splits
+                 if hasattr(split, 'file_size') and split.file_size > 0),
+                default=0
+            )
+
+            if max_split_size > current_size:
+                new_size = min(int(max_split_size * 1.2), 512 * 1024 * 1024)
+                new_size = ((new_size + 1024 * 1024 - 1) // (1024 * 1024)) * 1024 * 1024
+
+                logger.info(
+                    f"Auto-adjusting target_max_block_size from "
+                    f"{current_size / (1024*1024):.1f}MB to {new_size / (1024*1024):.1f}MB "
+                    f"to accommodate split size {max_split_size / (1024*1024):.1f}MB"
+                )
+
+                ctx.target_max_block_size = new_size
+                current_new_size = new_size
+
+        try:
+            from pypaimon.read.ray_datasource import PaimonDatasource
+            datasource = PaimonDatasource(self, splits)
+            return ray.data.read_datasource(
+                datasource,
+                ray_remote_args=ray_remote_args,
+                concurrency=concurrency,
+                override_num_blocks=override_num_blocks,
+                **read_args
+            )
+        finally:
+            if current_new_size is not None and ctx.target_max_block_size == current_new_size:
+                ctx.target_max_block_size = current_size
 
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
