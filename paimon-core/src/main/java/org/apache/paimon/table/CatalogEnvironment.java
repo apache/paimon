@@ -37,8 +37,9 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.Collections;
 import java.util.Optional;
+
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Catalog environment in table which contains log factory, metastore client factory. */
 public class CatalogEnvironment implements Serializable {
@@ -154,10 +155,11 @@ public class CatalogEnvironment implements Serializable {
 
     public TableQueryAuth tableQueryAuth(CoreOptions options) {
         if (!options.queryAuthEnabled() || catalogLoader == null) {
-            return select -> Collections.emptyList();
+            return select -> null;
         }
+        final CatalogLoader loader = checkNotNull(catalogLoader);
         return select -> {
-            try (Catalog catalog = catalogLoader.load()) {
+            try (Catalog catalog = loader.load()) {
                 return catalog.authTableQuery(identifier, select);
             } catch (Exception e) {
                 throw new RuntimeException(e);

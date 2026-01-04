@@ -37,7 +37,10 @@ import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.PredicateJsonSerde;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -47,14 +50,17 @@ import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -244,6 +250,32 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         restCatalog.createTable(identifier, schema, false);
 
         catalog.dropTable(identifier, true);
+    }
+
+    @Test
+    void testRowFilter() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_filter");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Collections.singletonList(new DataField(0, "col1", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+        batchWrite(table, Arrays.asList(1, 2, 3, 4));
+
+        // Only allow rows with col1 > 2
+        restCatalogServer.addTableFilter(
+                identifier,
+                PredicateJsonSerde.transformPredicateEntryJson(
+                        0, "col1", DataTypes.INT(), "GREATER_THAN", Collections.singletonList(2)));
+
+        assertThat(batchRead(table)).containsExactly("+I[3]", "+I[4]");
     }
 
     private void checkHeader(String headerName, String headerValue) {

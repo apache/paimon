@@ -30,8 +30,13 @@ import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
 import org.apache.paimon.lookup.rocksdb.RocksDBState;
 import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateProjectionConverter;
+import org.apache.paimon.predicate.PredicateVisitor;
+import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
@@ -55,6 +60,7 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -104,6 +110,9 @@ public abstract class FullCacheLookupTable implements LookupTable {
             sequenceFields = coreOptions.sequenceField();
         }
         RowType projectedType = TypeUtils.project(table.rowType(), context.projection);
+        FieldsComparator seqComparator = null;
+        int appendFieldNumber = 0;
+
         if (sequenceFields.size() > 0) {
             RowType.Builder builder = RowType.builder();
             projectedType.getFields().forEach(f -> builder.field(f.name(), f.type()));
@@ -119,17 +128,58 @@ public abstract class FullCacheLookupTable implements LookupTable {
                             });
             projectedType = builder.build();
             context = context.copy(table.rowType().getFieldIndices(projectedType.getFieldNames()));
-            this.userDefinedSeqComparator =
+            seqComparator =
                     UserDefinedSeqComparator.create(
                             projectedType,
                             sequenceFields,
                             coreOptions.sequenceFieldSortOrderIsAscending());
-            this.appendUdsFieldNumber = appendUdsFieldNumber.get();
+            appendFieldNumber += appendUdsFieldNumber.get();
         } else {
-            this.userDefinedSeqComparator = null;
-            this.appendUdsFieldNumber = 0;
+            seqComparator = null;
+            appendFieldNumber = 0;
         }
 
+        if (context.tablePredicate != null) {
+            Set<Integer> referenced =
+                    referencedFieldIndices(context.tablePredicate, table.rowType().getFieldNames());
+            if (!referenced.isEmpty()) {
+                Set<Integer> projected = new HashSet<>();
+                for (int idx : context.projection) {
+                    projected.add(idx);
+                }
+                List<Integer> missing = new ArrayList<>();
+                for (Integer idx : referenced) {
+                    if (!projected.contains(idx)) {
+                        missing.add(idx);
+                    }
+                }
+                if (!missing.isEmpty()) {
+                    Collections.sort(missing);
+                    RowType rowType = table.rowType();
+                    RowType.Builder builder = RowType.builder();
+                    projectedType.getFields().forEach(f -> builder.field(f.name(), f.type()));
+                    for (int idx : missing) {
+                        org.apache.paimon.types.DataField f = rowType.getFields().get(idx);
+                        if (projectedType.notContainsField(f.name())) {
+                            builder.field(f.name(), f.type());
+                        }
+                    }
+                    projectedType = builder.build();
+
+                    int[] newProjection =
+                            table.rowType().getFieldIndices(projectedType.getFieldNames());
+                    Predicate newProjectedPredicate =
+                            context.tablePredicate
+                                    .visit(new PredicateProjectionConverter(newProjection))
+                                    .orElse(null);
+                    context = context.copy(newProjection, newProjectedPredicate);
+                    appendFieldNumber += missing.size();
+                }
+            }
+        }
+
+        this.userDefinedSeqComparator = seqComparator;
+        this.appendUdsFieldNumber = appendFieldNumber;
         this.context = context;
 
         Options options = Options.fromMap(context.table.options());
@@ -333,6 +383,39 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     public abstract TableBulkLoader createBulkLoader();
 
+    private static Set<Integer> referencedFieldIndices(
+            Predicate predicate, List<String> fieldNames) {
+        Set<Integer> indices = new HashSet<>();
+        predicate.visit(
+                new PredicateVisitor<Void>() {
+                    @Override
+                    public Void visit(LeafPredicate predicate) {
+                        indices.add(predicate.index());
+                        return null;
+                    }
+
+                    @Override
+                    public Void visit(CompoundPredicate predicate) {
+                        for (Predicate child : predicate.children()) {
+                            child.visit(this);
+                        }
+                        return null;
+                    }
+
+                    @Override
+                    public Void visit(TransformPredicate predicate) {
+                        for (String name : predicate.fieldNames()) {
+                            int idx = fieldNames.indexOf(name);
+                            if (idx >= 0) {
+                                indices.add(idx);
+                            }
+                        }
+                        return null;
+                    }
+                });
+        return indices;
+    }
+
     @Override
     public void close() throws IOException {
         try {
@@ -400,11 +483,15 @@ public abstract class FullCacheLookupTable implements LookupTable {
         }
 
         public Context copy(int[] newProjection) {
+            return copy(newProjection, projectedPredicate);
+        }
+
+        public Context copy(int[] newProjection, @Nullable Predicate newProjectedPredicate) {
             return new Context(
                     table.wrapped(),
                     newProjection,
                     tablePredicate,
-                    projectedPredicate,
+                    newProjectedPredicate,
                     tempPath,
                     joinKey,
                     requiredCachedBucketIds);
