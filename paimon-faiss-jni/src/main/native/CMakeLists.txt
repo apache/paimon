@@ -14,8 +14,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.30.1)
 project(paimon_faiss_jni VERSION 0.1.0 LANGUAGES CXX)
+
+# Check GCC version (must be >= 9.3.0)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.3.0")
+        message(FATAL_ERROR "GCC version must be >= 9.3.0. Found: ${CMAKE_CXX_COMPILER_VERSION}")
+    endif()
+    message(STATUS "Using GCC ${CMAKE_CXX_COMPILER_VERSION}")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

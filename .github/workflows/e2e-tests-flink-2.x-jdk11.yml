@@ -53,7 +53,7 @@ jobs:
 
       - name: Build Flink
         run:  |
-          mvn -T 2C -B clean install -DskipTests -Ppaimon-faiss,flink2,spark3 -pl paimon-e2e-tests -am -Pflink-${{ matrix.flink_version }},java11
+          mvn -T 2C -B clean install -DskipTests -Pflink2,spark3 -pl paimon-e2e-tests -am -Pflink-${{ matrix.flink_version }},java11
 
       - name: Test Flink
         run: |
@@ -63,9 +63,9 @@ jobs:
           echo "JVM timezone is set to $jvm_timezone"
           profile="flink-${{ matrix.flink_version }}"
           if [ "${{ matrix.flink_version }}" = "${{ matrix.flink_version[-1] }}" ]; then
-            mvn -T 1C -B test -Ppaimon-faiss,flink2,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -Pjava11
+            mvn -T 1C -B test -Pflink2,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -Pjava11
           else
-            mvn -T 1C -B test -Ppaimon-faiss,flink2,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -P${profile},java11
+            mvn -T 1C -B test -Pflink2,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -P${profile},java11
           fi
         env:
           MAVEN_OPTS: -Xmx4096m

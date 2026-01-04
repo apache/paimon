@@ -73,8 +73,6 @@ under the License.
         <module>tools/ci/paimon-ci-tools</module>
         <module>paimon-hudi</module>
         <module>paimon-api</module>
-        <module>paimon-faiss</module>
-        <module>paimon-faiss-jni</module>
     </modules>
 
     <properties>
