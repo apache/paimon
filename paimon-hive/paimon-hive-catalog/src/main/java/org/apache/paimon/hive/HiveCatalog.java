@@ -988,7 +988,7 @@ public class HiveCatalog extends AbstractCatalog {
                                     identifier.getTableName(),
                                     !externalTable,
                                     false,
-                                    true));
+                                    false));
 
             // When drop a Hive external table, only the hive metadata is deleted and the data files
             // are not deleted.
@@ -1002,7 +1002,15 @@ public class HiveCatalog extends AbstractCatalog {
             Path path = getTableLocation(identifier);
             try {
                 if (fileIO.exists(path)) {
-                    fileIO.deleteDirectoryQuietly(path);
+                    try {
+                        LOG.info("Move to trash, path: {}", path);
+                        fileIO.moveToTrash(path);
+                    } catch (UnsupportedOperationException e) {
+                        LOG.warn(
+                                "Catch UnsupportedOperationException and delete directory quietly, path: {}",
+                                path);
+                        fileIO.deleteDirectoryQuietly(path);
+                    }
                 }
                 for (Path externalPath : externalPaths) {
                     if (fileIO.exists(externalPath)) {
