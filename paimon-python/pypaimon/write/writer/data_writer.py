@@ -197,40 +197,38 @@ class DataWriter(ABC):
                 else PyarrowFieldParser.to_paimon_schema(data.schema)
         else:
             stats_fields = self.table.trimmed_primary_keys_fields
+        stats_fields = self.table.fields if self.table.is_primary_key_table \
+            else PyarrowFieldParser.to_paimon_schema(data.schema)
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
             for field in stats_fields
         }
-        data_fields = stats_fields if value_stats_enabled else []
-        min_value_stats = [column_stats[field.name]['min_values'] for field in data_fields]
-        max_value_stats = [column_stats[field.name]['max_values'] for field in data_fields]
-        value_null_counts = [column_stats[field.name]['null_counts'] for field in data_fields]
         key_fields = self.trimmed_primary_keys_fields
-        min_key_stats = [column_stats[field.name]['min_values'] for field in key_fields]
-        max_key_stats = [column_stats[field.name]['max_values'] for field in key_fields]
-        key_null_counts = [column_stats[field.name]['null_counts'] for field in key_fields]
-        if not all(count == 0 for count in key_null_counts):
+        key_stats = self._collect_value_stats(data, key_fields, column_stats)
+        if not all(count == 0 for count in key_stats.null_counts):
             raise RuntimeError("Primary key should not be null")
+        
+        value_fields = stats_fields if value_stats_enabled else []
+        value_stats = self._collect_value_stats(data, value_fields, column_stats) if value_stats_enabled else SimpleStats.empty_stats()
 
         min_seq = self.sequence_generator.start
         max_seq = self.sequence_generator.current
         self.sequence_generator.start = self.sequence_generator.current
+        if value_stats_enabled:
+            if len(value_fields) == len(self.table.fields):
+                value_stats_cols = None
+            else:
+                value_stats_cols = [field.name for field in value_fields]
+        else:
+            value_stats_cols = []
         self.committed_files.append(DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
             row_count=data.num_rows,
             min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
             max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
-            key_stats=SimpleStats(
-                GenericRow(min_key_stats, self.trimmed_primary_keys_fields),
-                GenericRow(max_key_stats, self.trimmed_primary_keys_fields),
-                key_null_counts,
-            ),
-            value_stats=SimpleStats(
-                GenericRow(min_value_stats, data_fields),
-                GenericRow(max_value_stats, data_fields),
-                value_null_counts,
-            ),
+            key_stats=key_stats,
+            value_stats=value_stats,
             min_sequence_number=min_seq,
             max_sequence_number=max_seq,
             schema_id=self.table.table_schema.id,
@@ -239,7 +237,7 @@ class DataWriter(ABC):
             creation_time=Timestamp.now(),
             delete_row_count=0,
             file_source=0,
-            value_stats_cols=None if value_stats_enabled else [],
+            value_stats_cols=value_stats_cols,
             external_path=external_path_str,  # Set external path if using external paths
             first_row_id=None,
             write_cols=self.write_cols,
@@ -278,6 +276,27 @@ class DataWriter(ABC):
 
         return best_split
 
+    def _collect_value_stats(self, data: pa.Table, fields: List,
+                             column_stats: Optional[Dict[str, Dict]] = None) -> SimpleStats:
+        if not fields:
+            return SimpleStats.empty_stats()
+        
+        if column_stats is None:
+            column_stats = {
+                field.name: self._get_column_stats(data, field.name)
+                for field in fields
+            }
+        
+        min_stats = [column_stats[field.name]['min_values'] for field in fields]
+        max_stats = [column_stats[field.name]['max_values'] for field in fields]
+        null_counts = [column_stats[field.name]['null_counts'] for field in fields]
+        
+        return SimpleStats(
+            GenericRow(min_stats, fields),
+            GenericRow(max_stats, fields),
+            null_counts
+        )
+
     @staticmethod
     def _get_column_stats(record_batch: pa.RecordBatch, column_name: str) -> Dict:
         column_array = record_batch.column(column_name)
@@ -287,6 +306,17 @@ class DataWriter(ABC):
                 "max_values": None,
                 "null_counts": column_array.null_count,
             }
+        
+        column_type = column_array.type
+        supports_minmax = not (pa.types.is_nested(column_type) or pa.types.is_map(column_type))
+        
+        if not supports_minmax:
+            return {
+                "min_values": None,
+                "max_values": None,
+                "null_counts": column_array.null_count,
+            }
+        
         min_values = pc.min(column_array).as_py()
         max_values = pc.max(column_array).as_py()
         null_counts = column_array.null_count
