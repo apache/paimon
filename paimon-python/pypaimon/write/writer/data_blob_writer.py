@@ -19,7 +19,7 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 import pyarrow as pa
 
@@ -75,8 +75,8 @@ class DataBlobWriter(DataWriter):
     # Constant for checking rolling condition periodically
     CHECK_ROLLING_RECORD_CNT = 1000
 
-    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int):
-        super().__init__(table, partition, bucket, max_seq_number)
+    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: Dict[str, str] = None):
+        super().__init__(table, partition, bucket, max_seq_number, options)
 
         # Determine blob column from table schema
         self.blob_column_name = self._get_blob_columns_from_schema()
@@ -100,7 +100,8 @@ class DataBlobWriter(DataWriter):
             partition=self.partition,
             bucket=self.bucket,
             max_seq_number=max_seq_number,
-            blob_column=self.blob_column_name
+            blob_column=self.blob_column_name,
+            options=options
         )
 
         logger.info(f"Initialized DataBlobWriter with blob column: {self.blob_column_name}")
@@ -245,7 +246,7 @@ class DataBlobWriter(DataWriter):
         if data.num_rows == 0:
             return None
 
-        file_name = f"data-{uuid.uuid4()}-0.{self.file_format}"
+        file_name = f"{CoreOptions.data_file_prefix(self.options)}{uuid.uuid4()}-0.{self.file_format}"
         file_path = self._generate_file_path(file_name)
 
         # Write file based on format
@@ -255,13 +256,19 @@ class DataBlobWriter(DataWriter):
             self.file_io.write_orc(file_path, data, compression=self.compression)
         elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
             self.file_io.write_avro(file_path, data)
+        elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
+            self.file_io.write_lance(file_path, data)
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
-        # Generate metadata
-        return self._create_data_file_meta(file_name, file_path, data)
+        # Determine if this is an external path
+        is_external_path = self.external_path_provider is not None
+        external_path_str = file_path if is_external_path else None
 
-    def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table) -> DataFileMeta:
+        return self._create_data_file_meta(file_name, file_path, data, external_path_str)
+
+    def _create_data_file_meta(self, file_name: str, file_path: str, data: pa.Table,
+                               external_path: Optional[str] = None) -> DataFileMeta:
         # Column stats (only for normal columns)
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
@@ -302,6 +309,7 @@ class DataBlobWriter(DataWriter):
             delete_row_count=0,
             file_source=0,
             value_stats_cols=self.normal_column_names,
+            external_path=external_path,
             file_path=file_path,
             write_cols=self.write_cols)
 

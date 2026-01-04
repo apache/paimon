@@ -54,7 +54,9 @@ public class ManifestFileMeta {
                             new DataField(6, "_MIN_BUCKET", new IntType(true)),
                             new DataField(7, "_MAX_BUCKET", new IntType(true)),
                             new DataField(8, "_MIN_LEVEL", new IntType(true)),
-                            new DataField(9, "_MAX_LEVEL", new IntType(true))));
+                            new DataField(9, "_MAX_LEVEL", new IntType(true)),
+                            new DataField(10, "_MIN_ROW_ID", new BigIntType(true)),
+                            new DataField(11, "_MAX_ROW_ID", new BigIntType(true))));
 
     private final String fileName;
     private final long fileSize;
@@ -66,6 +68,8 @@ public class ManifestFileMeta {
     private final @Nullable Integer maxBucket;
     private final @Nullable Integer minLevel;
     private final @Nullable Integer maxLevel;
+    private final @Nullable Long minRowId;
+    private final @Nullable Long maxRowId;
 
     public ManifestFileMeta(
             String fileName,
@@ -77,7 +81,9 @@ public class ManifestFileMeta {
             @Nullable Integer minBucket,
             @Nullable Integer maxBucket,
             @Nullable Integer minLevel,
-            @Nullable Integer maxLevel) {
+            @Nullable Integer maxLevel,
+            @Nullable Long minRowId,
+            @Nullable Long maxRowId) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.numAddedFiles = numAddedFiles;
@@ -88,6 +94,8 @@ public class ManifestFileMeta {
         this.maxBucket = maxBucket;
         this.minLevel = minLevel;
         this.maxLevel = maxLevel;
+        this.minRowId = minRowId;
+        this.maxRowId = maxRowId;
     }
 
     public String fileName() {
@@ -130,6 +138,14 @@ public class ManifestFileMeta {
         return maxLevel;
     }
 
+    public @Nullable Long minRowId() {
+        return minRowId;
+    }
+
+    public @Nullable Long maxRowId() {
+        return maxRowId;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof ManifestFileMeta)) {
@@ -145,7 +161,9 @@ public class ManifestFileMeta {
                 && Objects.equals(minBucket, that.minBucket)
                 && Objects.equals(maxBucket, that.maxBucket)
                 && Objects.equals(minLevel, that.minLevel)
-                && Objects.equals(maxLevel, that.maxLevel);
+                && Objects.equals(maxLevel, that.maxLevel)
+                && Objects.equals(minRowId, that.minRowId)
+                && Objects.equals(maxRowId, that.maxRowId);
     }
 
     @Override
@@ -160,13 +178,15 @@ public class ManifestFileMeta {
                 minBucket,
                 maxBucket,
                 minLevel,
-                maxLevel);
+                maxLevel,
+                minRowId,
+                maxRowId);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %d, %s, %d, %s, %s, %s, %s}",
+                "{%s, %d, %d, %d, %s, %d, %s, %s, %s, %s, %s, %s}",
                 fileName,
                 fileSize,
                 numAddedFiles,
@@ -176,7 +196,9 @@ public class ManifestFileMeta {
                 minBucket,
                 maxBucket,
                 minLevel,
-                maxLevel);
+                maxLevel,
+                minRowId,
+                maxRowId);
     }
 
     // ----------------------- Serialization -----------------------------

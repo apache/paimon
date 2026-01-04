@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
@@ -46,6 +47,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
@@ -90,6 +92,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     @Nullable private int[][] pushdownProjection;
     @Nullable private int[][] outerProjection;
+    @Nullable private VariantAccessInfo[] variantAccess;
 
     private boolean forceKeepDelete = false;
 
@@ -191,6 +194,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     @Override
+    public SplitRead<KeyValue> withVariantAccess(VariantAccessInfo[] variantAccess) {
+        this.variantAccess = variantAccess;
+        return this;
+    }
+
+    @Override
     public MergeFileSplitRead withIOManager(IOManager ioManager) {
         this.mergeSorter.setIOManager(ioManager);
         if (mfFactory instanceof LookupMergeFunction.Factory) {
@@ -245,7 +254,8 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     @Override
-    public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
+    public RecordReader<KeyValue> createReader(Split s) throws IOException {
+        DataSplit split = (DataSplit) s;
         if (!split.beforeFiles().isEmpty()) {
             throw new IllegalArgumentException("This read cannot accept split with before files.");
         }
@@ -278,9 +288,11 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         // So we cannot project keys or else the sorting will be incorrect.
         DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);
         KeyValueFileReaderFactory overlappedSectionFactory =
-                readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForKeys);
+                readerFactoryBuilder.build(
+                        partition, bucket, dvFactory, false, filtersForKeys, variantAccess);
         KeyValueFileReaderFactory nonOverlappedSectionFactory =
-                readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForAll);
+                readerFactoryBuilder.build(
+                        partition, bucket, dvFactory, false, filtersForAll, variantAccess);
 
         List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
         MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
@@ -320,7 +332,8 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                         bucket,
                         DeletionVector.factory(fileIO, files, deletionFiles),
                         true,
-                        onlyFilterKey ? filtersForKeys : filtersForAll);
+                        onlyFilterKey ? filtersForKeys : filtersForAll,
+                        variantAccess);
         List<ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
         for (DataFileMeta file : files) {
             suppliers.add(() -> readerFactory.createRecordReader(file));

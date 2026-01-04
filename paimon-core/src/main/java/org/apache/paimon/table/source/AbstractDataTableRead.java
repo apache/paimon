@@ -19,12 +19,14 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.util.List;
@@ -44,7 +46,9 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     public abstract void applyReadType(RowType readType);
 
-    public abstract void applyRowIds(List<Long> indices);
+    public abstract void applyVariantAccess(VariantAccessInfo[] variantAccess);
+
+    public abstract void applyRowRanges(List<Range> rowRanges);
 
     public abstract RecordReader<InternalRow> reader(Split split) throws IOException;
 
@@ -83,8 +87,14 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     }
 
     @Override
-    public InnerTableRead withRowIds(List<Long> indices) {
-        applyRowIds(indices);
+    public InnerTableRead withVariantAccess(VariantAccessInfo[] variantAccessInfo) {
+        applyVariantAccess(variantAccessInfo);
+        return this;
+    }
+
+    @Override
+    public InnerTableRead withRowRanges(List<Range> rowRange) {
+        applyRowRanges(rowRange);
         return this;
     }
 

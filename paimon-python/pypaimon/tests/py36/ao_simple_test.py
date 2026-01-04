@@ -86,10 +86,10 @@ class AOSimpleTest(RESTBaseTest):
         splits = read_builder.new_scan().with_shard(2, 3).plan().splits()
         actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected = pa.Table.from_pydict({
-            'user_id': [5, 7, 7, 8, 9, 11, 13],
-            'item_id': [1005, 1007, 1007, 1008, 1009, 1011, 1013],
-            'behavior': ['e', 'f', 'g', 'h', 'h', 'j', 'l'],
-            'dt': ['p2', 'p2', 'p2', 'p2', 'p2', 'p2', 'p2'],
+            'user_id': [5, 7, 8, 9, 11, 13],
+            'item_id': [1005, 1007, 1008, 1009, 1011, 1013],
+            'behavior': ['e', 'g', 'h', 'h', 'j', 'l'],
+            'dt': ['p2', 'p2', 'p2', 'p2', 'p2', 'p2'],
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
@@ -242,19 +242,19 @@ class AOSimpleTest(RESTBaseTest):
         splits = read_builder.new_scan().with_shard(0, 3).plan().splits()
         actual1 = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected1 = pa.Table.from_pydict({
-            'user_id': [1, 2],
-            'item_id': [1001, 1002],
-            'behavior': ['a', 'b'],
-            'dt': ['p1', 'p1'],
+            'user_id': [1, 2, 3],
+            'item_id': [1001, 1002, 1003],
+            'behavior': ['a', 'b', 'c'],
+            'dt': ['p1', 'p1', 'p1'],
         }, schema=self.pa_schema)
         self.assertEqual(actual1, expected1)
 
         splits = read_builder.new_scan().with_shard(1, 3).plan().splits()
         actual2 = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected2 = pa.Table.from_pydict({
-            'user_id': [3, 4],
-            'item_id': [1003, 1004],
-            'behavior': ['c', 'd'],
+            'user_id': [4, 5],
+            'item_id': [1004, 1005],
+            'behavior': ['d', 'e'],
             'dt': ['p1', 'p1'],
         }, schema=self.pa_schema)
         self.assertEqual(actual2, expected2)
@@ -262,10 +262,10 @@ class AOSimpleTest(RESTBaseTest):
         splits = read_builder.new_scan().with_shard(2, 3).plan().splits()
         actual3 = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected3 = pa.Table.from_pydict({
-            'user_id': [5, 6, 7],
-            'item_id': [1005, 1006, 1007],
-            'behavior': ['e', 'f', 'g'],
-            'dt': ['p1', 'p1', 'p1'],
+            'user_id': [6, 7],
+            'item_id': [1006, 1007],
+            'behavior': ['f', 'g'],
+            'dt': ['p1', 'p1'],
         }, schema=self.pa_schema)
         self.assertEqual(actual3, expected3)
 
@@ -327,7 +327,7 @@ class AOSimpleTest(RESTBaseTest):
         # Test first shard (0, 4) - should get 1 row (5//4 = 1)
         splits = read_builder.new_scan().with_shard(0, 4).plan().splits()
         actual = table_read.to_arrow(splits)
-        self.assertEqual(len(actual), 1)
+        self.assertEqual(len(actual), 2)
 
         # Test middle shard (1, 4) - should get 1 row
         splits = read_builder.new_scan().with_shard(1, 4).plan().splits()
@@ -337,7 +337,7 @@ class AOSimpleTest(RESTBaseTest):
         # Test last shard (3, 4) - should get 2 rows (remainder goes to last shard)
         splits = read_builder.new_scan().with_shard(3, 4).plan().splits()
         actual = table_read.to_arrow(splits)
-        self.assertEqual(len(actual), 2)
+        self.assertEqual(len(actual), 1)
 
     def test_create_drop_database_table(self):
         # test create database

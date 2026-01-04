@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
@@ -45,11 +46,13 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
 import org.apache.paimon.utils.IOExceptionSupplier;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.slf4j.Logger;
@@ -84,7 +87,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
     @Nullable private Integer limit;
-    @Nullable private List<Long> indices;
+    @Nullable private List<Range> rowRanges;
+    @Nullable private VariantAccessInfo[] variantAccess;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -123,6 +127,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
+    public SplitRead<InternalRow> withVariantAccess(VariantAccessInfo[] variantAccess) {
+        this.variantAccess = variantAccess;
+        return this;
+    }
+
+    @Override
     public RawFileSplitRead withFilter(Predicate predicate) {
         if (predicate != null) {
             this.filters = splitAnd(predicate);
@@ -143,13 +153,14 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withRowIds(@Nullable List<Long> indices) {
-        this.indices = indices;
+    public SplitRead<InternalRow> withRowRanges(@Nullable List<Range> rowRanges) {
+        this.rowRanges = rowRanges;
         return this;
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
+    public RecordReader<InternalRow> createReader(Split s) throws IOException {
+        DataSplit split = (DataSplit) s;
         if (!split.beforeFiles().isEmpty()) {
             LOG.info("Ignore split before files: {}", split.beforeFiles());
         }
@@ -187,7 +198,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         },
                         filters,
                         topN,
-                        limit);
+                        limit,
+                        variantAccess);
 
         for (DataFileMeta file : files) {
             suppliers.add(
@@ -258,8 +270,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         if (fileIndexResult instanceof BitmapIndexResult) {
             selection = ((BitmapIndexResult) fileIndexResult).get();
         }
-        if (indices != null) {
-            RoaringBitmap32 selectionRowIds = file.toFileSelection(indices);
+        if (rowRanges != null) {
+            RoaringBitmap32 selectionRowIds = file.toFileSelection(rowRanges);
             if (selection == null) {
                 selection = selectionRowIds;
             } else {

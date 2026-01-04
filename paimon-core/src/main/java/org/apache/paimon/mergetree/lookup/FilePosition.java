@@ -16,38 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.mergetree.lookup;
 
-import org.apache.paimon.utils.Range;
-
-/** Index meta for global index. */
-public class GlobalIndexMeta {
+/** File name and row position for DeletionVector. */
+public class FilePosition {
 
     private final String fileName;
-    private final long fileSize;
-    private final Range rowIdRange;
-    private final byte[] metadata;
+    private final long rowPosition;
 
-    public GlobalIndexMeta(String fileName, long fileSize, Range rowIdRange, byte[] metadata) {
+    public FilePosition(String fileName, long rowPosition) {
         this.fileName = fileName;
-        this.fileSize = fileSize;
-        this.rowIdRange = rowIdRange;
-        this.metadata = metadata;
+        this.rowPosition = rowPosition;
     }
 
     public String fileName() {
         return fileName;
     }
 
-    public long fileSize() {
-        return fileSize;
-    }
-
-    public Range rowIdRange() {
-        return rowIdRange;
-    }
-
-    public byte[] metadata() {
-        return metadata;
+    public long rowPosition() {
+        return rowPosition;
     }
 }

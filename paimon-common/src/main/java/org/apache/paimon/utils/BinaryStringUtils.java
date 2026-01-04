@@ -20,11 +20,13 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 
 import java.time.DateTimeException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.TimeZone;
@@ -418,5 +420,63 @@ public class BinaryStringUtils {
             }
         }
         return BinaryString.fromBytes(result);
+    }
+
+    public static BinaryString[] splitByWholeSeparatorPreserveAllTokens(
+            BinaryString str, BinaryString delimiter) {
+        int sizeInBytes = str.getSizeInBytes();
+        MemorySegment[] segments = str.getSegments();
+        int offset = str.getOffset();
+
+        if (sizeInBytes == 0) {
+            return EMPTY_STRING_ARRAY;
+        }
+
+        if (delimiter == null || BinaryString.EMPTY_UTF8.equals(delimiter)) {
+            // Split on whitespace.
+            return splitByWholeSeparatorPreserveAllTokens(str, fromString(" "));
+        }
+
+        int sepSize = delimiter.getSizeInBytes();
+        MemorySegment[] sepSegs = delimiter.getSegments();
+        int sepOffset = delimiter.getOffset();
+
+        final ArrayList<BinaryString> substrings = new ArrayList<>();
+        int beg = 0;
+        int end = 0;
+        while (end < sizeInBytes) {
+            end =
+                    MemorySegmentUtils.find(
+                                    segments,
+                                    offset + beg,
+                                    sizeInBytes - beg,
+                                    sepSegs,
+                                    sepOffset,
+                                    sepSize)
+                            - offset;
+
+            if (end > -1) {
+                if (end > beg) {
+
+                    // The following is OK, because String.substring( beg, end ) excludes
+                    // the character at the position 'end'.
+                    substrings.add(BinaryString.fromAddress(segments, offset + beg, end - beg));
+
+                    // Set the starting point for the next search.
+                    // The following is equivalent to beg = end + (separatorLength - 1) + 1,
+                    // which is the right calculation:
+                } else {
+                    // We found a consecutive occurrence of the separator.
+                    substrings.add(BinaryString.EMPTY_UTF8);
+                }
+                beg = end + sepSize;
+            } else {
+                // String.substring( beg ) goes from 'beg' to the end of the String.
+                substrings.add(BinaryString.fromAddress(segments, offset + beg, sizeInBytes - beg));
+                end = sizeInBytes;
+            }
+        }
+
+        return substrings.toArray(new BinaryString[0]);
     }
 }

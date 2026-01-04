@@ -49,6 +49,7 @@ import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DVMetaCache;
@@ -56,6 +57,7 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -307,8 +309,14 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
-    public SnapshotReader withRowIds(List<Long> indices) {
-        scan.withRowIds(indices);
+    public SnapshotReader withRowRanges(List<Range> rowRanges) {
+        scan.withRowRanges(rowRanges);
+        return this;
+    }
+
+    @Override
+    public SnapshotReader withReadType(RowType readType) {
+        scan.withReadType(readType);
         return this;
     }
 

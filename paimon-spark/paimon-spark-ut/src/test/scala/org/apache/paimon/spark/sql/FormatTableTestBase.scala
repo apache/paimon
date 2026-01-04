@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.{DelegateCatalog, Identifier}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.hive.HiveCatalog
 import org.apache.paimon.spark.PaimonHiveTestBase
+import org.apache.paimon.spark.PaimonHiveTestBase.hiveUri
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.utils.CompressUtils
 
@@ -51,8 +52,7 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
     withTable(tableName) {
       val hiveCatalog =
         paimonCatalog.asInstanceOf[DelegateCatalog].wrapped().asInstanceOf[HiveCatalog]
-      sql(
-        s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (`ds` bigint) TBLPROPERTIES ('metastore.partitioned-table'='true')")
+      sql(s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (`ds` bigint)")
       sql(s"INSERT INTO $tableName VALUES (1, 2023)")
       var ds = 2023L
       checkAnswer(sql(s"SELECT * FROM $tableName"), Seq(Row(1, ds)))
@@ -60,12 +60,21 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase {
       assert(partitions.size == 0)
       sql(s"DROP TABLE $tableName")
       sql(
-        s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (`ds` bigint) TBLPROPERTIES ('format-table.commit-hive-sync-url'='$hiveUri', 'metastore.partitioned-table'='true')")
+        s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (`ds` bigint, `hh` int) TBLPROPERTIES ('format-table.commit-hive-sync-url'='$hiveUri')")
       ds = 2024L
-      sql(s"INSERT INTO $tableName VALUES (1, $ds)")
-      checkAnswer(sql(s"SELECT * FROM $tableName"), Seq(Row(1, ds)))
+      val hh = 10
+      sql(s"INSERT OVERWRITE $tableName PARTITION(ds=$ds, hh) VALUES (1, $hh)")
+      checkAnswer(sql(s"SELECT * FROM $tableName"), Seq(Row(1, ds, hh)))
       partitions = hiveCatalog.listPartitionsFromHms(Identifier.create(hiveDbName, tableName))
       assert(partitions.get(0).getValues.get(0).equals(ds.toString))
+      assert(partitions.get(0).getSd.getLocation.split("/").last.equals(s"hh=$hh"))
+      sql(s"DROP TABLE $tableName")
+      sql(s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (`ds` bigint) " +
+        s"TBLPROPERTIES ('format-table.commit-hive-sync-url'='$hiveUri', 'format-table.partition-path-only-value'='true')")
+      ds = 2025L
+      sql(s"INSERT INTO $tableName VALUES (1, $ds)")
+      partitions = hiveCatalog.listPartitionsFromHms(Identifier.create(hiveDbName, tableName))
+      assert(partitions.get(0).getSd.getLocation.split("/").last.equals(ds.toString))
     }
   }
 

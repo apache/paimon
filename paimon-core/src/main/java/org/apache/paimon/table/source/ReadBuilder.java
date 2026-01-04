@@ -20,12 +20,14 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
 
 import java.io.Serializable;
 import java.util.List;
@@ -125,6 +127,14 @@ public interface ReadBuilder extends Serializable {
     ReadBuilder withReadType(RowType readType);
 
     /**
+     * Push variant access to the reader.
+     *
+     * @param variantAccessInfo variant access info
+     * @since 1.4.0
+     */
+    ReadBuilder withVariantAccess(VariantAccessInfo[] variantAccessInfo);
+
+    /**
      * Apply projection to the reader, if you need nested row pruning, use {@link
      * #withReadType(RowType)} instead.
      */
@@ -150,12 +160,12 @@ public interface ReadBuilder extends Serializable {
     ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
 
     /**
-     * Specify the row ids to be read. This is usually used to read specific rows in data-evolution
-     * table.
+     * Specify the row id ranges to be read. This is usually used to read specific rows in
+     * data-evolution table.
      *
-     * @param indices the row ids to be read
+     * @param rowRanges the row id ranges to be read
      */
-    ReadBuilder withRowIds(List<Long> indices);
+    ReadBuilder withRowRanges(List<Range> rowRanges);
 
     /** Delete stats in scan plan result. */
     ReadBuilder dropStats();

@@ -24,6 +24,7 @@ from pyarrow._fs import FileSystem
 
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.catalog.rest.rest_token import RESTToken
+from pypaimon.common.config import CatalogOptions, OssOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 
@@ -40,10 +41,34 @@ class RESTTokenFileIO(FileIO):
         self.log = logging.getLogger(__name__)
         super().__init__(path, catalog_options)
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Remove non-serializable objects
+        state.pop('lock', None)
+        state.pop('api_instance', None)
+        # token can be serialized, but we'll refresh it on deserialization
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Recreate lock after deserialization
+        self.lock = threading.Lock()
+        # api_instance will be recreated when needed
+        self.api_instance = None
+
     def _initialize_oss_fs(self, path) -> FileSystem:
         self.try_to_refresh_token()
-        self.properties.update(self.token.token)
+        merged_token = self._merge_token_with_catalog_options(self.token.token)
+        self.properties.update(merged_token)
         return super()._initialize_oss_fs(path)
+
+    def _merge_token_with_catalog_options(self, token: dict) -> dict:
+        """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""
+        merged_token = dict(token)
+        dlf_oss_endpoint = self.properties.get(CatalogOptions.DLF_OSS_ENDPOINT)
+        if dlf_oss_endpoint and dlf_oss_endpoint.strip():
+            merged_token[OssOptions.OSS_ENDPOINT] = dlf_oss_endpoint
+        return merged_token
 
     def new_output_stream(self, path: str):
         # Call parent class method to ensure path conversion and parent directory creation

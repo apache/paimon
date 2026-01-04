@@ -46,6 +46,8 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
 
     InnerTableCommit expireForEmptyCommit(boolean expireForEmptyCommit);
 
+    InnerTableCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
+
     @Override
     InnerTableCommit withMetricRegistry(MetricRegistry registry);
 }

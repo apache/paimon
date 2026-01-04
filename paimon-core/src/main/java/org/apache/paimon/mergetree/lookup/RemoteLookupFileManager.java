@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.mergetree.compact;
+package org.apache.paimon.mergetree.lookup;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -26,10 +26,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
-import org.apache.paimon.mergetree.LookupLevels.RemoteFileDownloader;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.types.RowType;
 
 import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
@@ -40,10 +36,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 
 /** Manager to manage remote files for lookup. */
 public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
@@ -52,27 +45,19 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
 
     private final FileIO fileIO;
     private final DataFilePathFactory pathFactory;
-    private final TableSchema schema;
     private final LookupLevels<T> lookupLevels;
     private final int levelThreshold;
-    private final SchemaManager schemaManager;
-    private final Map<Long, RowType> schemaRowTypes;
 
     public RemoteLookupFileManager(
             FileIO fileIO,
             DataFilePathFactory pathFactory,
-            TableSchema schema,
             LookupLevels<T> lookupLevels,
-            SchemaManager schemaManager,
             int levelThreshold) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
-        this.schema = schema;
         this.lookupLevels = lookupLevels;
         this.levelThreshold = levelThreshold;
         this.lookupLevels.setRemoteFileDownloader(this);
-        this.schemaManager = schemaManager;
-        this.schemaRowTypes = new HashMap<>();
     }
 
     public DataFileMeta genRemoteLookupFile(DataFileMeta file) throws IOException {
@@ -80,14 +65,14 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
             return file;
         }
 
-        if (remoteSst(file).isPresent()) {
+        if (lookupLevels.remoteSst(file).isPresent()) {
             // ignore existed
             return file;
         }
 
         LookupFile lookupFile = lookupLevels.createLookupFile(file);
         long length = lookupFile.localFile().length();
-        String remoteSstName = newRemoteSstName(file, length);
+        String remoteSstName = lookupLevels.newRemoteSst(file, length);
         Path sstFile = remoteSstPath(file, remoteSstName);
         try (FileInputStream is = new FileInputStream(lookupFile.localFile());
                 PositionOutputStream os = fileIO.newOutputStream(sstFile, false)) {
@@ -102,23 +87,8 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
     }
 
     @Override
-    public boolean tryToDownload(DataFileMeta dataFile, File localFile) {
-        long schemaId = dataFile.schemaId();
-        if (schemaId != schema.id()) {
-            if (!schemaRowTypes.containsKey(schemaId)) {
-                schemaRowTypes.put(schemaId, schemaManager.schema(schemaId).logicalRowType());
-            }
-            if (!schema.logicalRowType().equals(schemaRowTypes.get(schemaId))) {
-                return false;
-            }
-        }
-
-        Optional<String> remoteSst = remoteSst(dataFile);
-        if (!remoteSst.isPresent()) {
-            return false;
-        }
-
-        Path remoteSstPath = remoteSstPath(dataFile, remoteSst.get());
+    public boolean tryToDownload(DataFileMeta dataFile, String remoteSstFile, File localFile) {
+        Path remoteSstPath = remoteSstPath(dataFile, remoteSstFile);
         try (SeekableInputStream is = fileIO.newInputStream(remoteSstPath);
                 FileOutputStream os = new FileOutputStream(localFile)) {
             IOUtils.copy(is, os);
@@ -127,16 +97,6 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
             LOG.warn("Failed to download remote lookup file {}, skipping.", remoteSstPath, e);
             return false;
         }
-    }
-
-    private Optional<String> remoteSst(DataFileMeta file) {
-        return file.extraFiles().stream()
-                .filter(f -> f.endsWith(lookupLevels.remoteSstSuffix()))
-                .findFirst();
-    }
-
-    private String newRemoteSstName(DataFileMeta file, long length) {
-        return file.fileName() + "." + length + lookupLevels.remoteSstSuffix();
     }
 
     private Path remoteSstPath(DataFileMeta file, String remoteSstName) {

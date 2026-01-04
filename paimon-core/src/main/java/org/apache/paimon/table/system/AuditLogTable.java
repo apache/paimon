@@ -65,6 +65,7 @@ import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -426,8 +427,14 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public SnapshotReader withRowIds(List<Long> indices) {
-            wrapped.withRowIds(indices);
+        public SnapshotReader withRowRanges(List<Range> rowRanges) {
+            wrapped.withRowRanges(rowRanges);
+            return this;
+        }
+
+        @Override
+        public SnapshotReader withReadType(RowType readType) {
+            wrapped.withReadType(readType);
             return this;
         }
 

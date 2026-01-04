@@ -34,10 +34,12 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -110,7 +112,9 @@ public interface SnapshotReader {
 
     SnapshotReader withMetricRegistry(MetricRegistry registry);
 
-    SnapshotReader withRowIds(List<Long> indices);
+    SnapshotReader withRowRanges(List<Range> rowRanges);
+
+    SnapshotReader withReadType(RowType readType);
 
     /** Get splits plan from snapshot. */
     Plan read();

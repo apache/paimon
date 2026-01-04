@@ -159,6 +159,12 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
+    public TableCommitImpl appendCommitCheckConflict(boolean appendCommitCheckConflict) {
+        commit.appendCommitCheckConflict(appendCommitCheckConflict);
+        return this;
+    }
+
+    @Override
     public InnerTableCommit withMetricRegistry(MetricRegistry registry) {
         commit.withMetrics(new CommitMetrics(registry, tableName));
         return this;

@@ -47,8 +47,6 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.table.system.AllTableOptionsTable;
-import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -85,6 +83,7 @@ import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
+import static org.apache.paimon.table.system.SystemTableLoader.GLOBAL_SYSTEM_TABLES;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -1044,10 +1043,7 @@ public abstract class CatalogTestBase {
                         () -> catalog.getTable(Identifier.create(SYSTEM_DATABASE_NAME, "1111")));
 
         List<String> sysTables = catalog.listTables(SYSTEM_DATABASE_NAME);
-        assertThat(sysTables)
-                .containsExactlyInAnyOrder(
-                        AllTableOptionsTable.ALL_TABLE_OPTIONS,
-                        CatalogOptionsTable.CATALOG_OPTIONS);
+        assertThat(sysTables).containsAll(GLOBAL_SYSTEM_TABLES);
 
         assertThat(catalog.listViews(SYSTEM_DATABASE_NAME)).isEmpty();
     }

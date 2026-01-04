@@ -15,10 +15,12 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import random
 from typing import Dict, List, Tuple
 
 import pyarrow as pa
 
+from pypaimon.common.core_options import CoreOptions
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.data_blob_writer import DataBlobWriter
@@ -30,7 +32,7 @@ from pypaimon.table.bucket_mode import BucketMode
 class FileStoreWrite:
     """Base class for file store write operations."""
 
-    def __init__(self, table):
+    def __init__(self, table, commit_user):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -38,15 +40,21 @@ class FileStoreWrite:
         self.max_seq_numbers: dict = {}
         self.write_cols = None
         self.commit_identifier = 0
+        self.options = dict(table.options)
+        if (CoreOptions.BUCKET in table.options and
+                self.table.bucket_mode() == BucketMode.POSTPONE_MODE):
+            self.options[CoreOptions.DATA_FILE_PREFIX] = \
+                (f"{CoreOptions.data_file_prefix(table.options)}-u-{commit_user}"
+                 f"-s-{random.randint(0, 2 ** 31 - 2)}-w-")
 
     def write(self, partition: Tuple, bucket: int, data: pa.RecordBatch):
         key = (partition, bucket)
         if key not in self.data_writers:
-            self.data_writers[key] = self._create_data_writer(partition, bucket)
+            self.data_writers[key] = self._create_data_writer(partition, bucket, self.options)
         writer = self.data_writers[key]
         writer.write(data)
 
-    def _create_data_writer(self, partition: Tuple, bucket: int) -> DataWriter:
+    def _create_data_writer(self, partition: Tuple, bucket: int, options: Dict[str, str]) -> DataWriter:
         def max_seq_number():
             return self._seq_number_stats(partition).get(bucket, 1)
 
@@ -57,13 +65,15 @@ class FileStoreWrite:
                 partition=partition,
                 bucket=bucket,
                 max_seq_number=0,
+                options=options
             )
         elif self.table.is_primary_key_table:
             return KeyValueDataWriter(
                 table=self.table,
                 partition=partition,
                 bucket=bucket,
-                max_seq_number=max_seq_number())
+                max_seq_number=max_seq_number(),
+                options=options)
         else:
             seq_number = 0 if self.table.bucket_mode() == BucketMode.BUCKET_UNAWARE else max_seq_number()
             return AppendOnlyDataWriter(
@@ -71,6 +81,7 @@ class FileStoreWrite:
                 partition=partition,
                 bucket=bucket,
                 max_seq_number=seq_number,
+                options=options,
                 write_cols=self.write_cols
             )
 

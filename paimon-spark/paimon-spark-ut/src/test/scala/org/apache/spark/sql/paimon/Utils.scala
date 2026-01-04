@@ -23,9 +23,7 @@ import org.apache.spark.util.{Utils => SparkUtils}
 
 import java.io.File
 
-/**
- * A wrapper that some Objects or Classes is limited to access beyond [[org.apache.spark]] package.
- */
+/** A wrapper that some Objects or Classes is limited to access beyond [[org.apache.spark]] package. */
 object Utils {
 
   def createTempDir: File = SparkUtils.createTempDir(System.getProperty("java.io.tmpdir"), "spark")

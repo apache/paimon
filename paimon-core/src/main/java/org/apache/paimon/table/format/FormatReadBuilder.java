@@ -20,6 +20,7 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -41,6 +42,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -120,6 +122,11 @@ public class FormatReadBuilder implements ReadBuilder {
     public ReadBuilder withReadType(RowType readType) {
         this.readType = readType;
         return this;
+    }
+
+    @Override
+    public ReadBuilder withVariantAccess(VariantAccessInfo[] variantAccessInfo) {
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -237,8 +244,8 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     @Override
-    public ReadBuilder withRowIds(List<Long> indices) {
-        throw new UnsupportedOperationException("Format Table does not support withRowIds.");
+    public ReadBuilder withRowRanges(List<Range> rowRanges) {
+        throw new UnsupportedOperationException("Format Table does not support withRowRanges.");
     }
 
     @Override

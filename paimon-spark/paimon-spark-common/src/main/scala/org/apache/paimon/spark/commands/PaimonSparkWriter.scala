@@ -393,7 +393,8 @@ case class PaimonSparkWriter(
               java.util.Collections.emptyList(),
               java.util.Collections.emptyList(),
               added.map(_.indexFile).asJava,
-              deleted.map(_.indexFile).asJava),
+              deleted.map(_.indexFile).asJava
+            ),
             CompactIncrement.emptyIncrement()
           )
           val serializer = new CommitMessageSerializer
@@ -409,6 +410,8 @@ case class PaimonSparkWriter(
       writeBuilder
         .asInstanceOf[BatchWriteBuilderImpl]
         .copyWithNewTable(PostponeUtils.tableForCommit(table))
+        // Need to check conflict
+        .appendCommitCheckConflict(true)
     } else {
       writeBuilder
     }

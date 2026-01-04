@@ -156,7 +156,8 @@ case class DataEvolutionSparkTableWrite(
             java.util.Arrays.asList(dataFileMeta),
             Collections.emptyList(),
             Collections.emptyList()),
-          CompactIncrement.emptyIncrement())
+          CompactIncrement.emptyIncrement()
+        )
       } finally {
         recordWriter.close()
       }

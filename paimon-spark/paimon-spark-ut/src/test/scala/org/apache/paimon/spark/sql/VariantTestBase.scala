@@ -171,4 +171,190 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
       Seq(Row("Beijing"), Row(null), Row(null))
     )
   }
+
+  test("Paimon Variant: read and write shredded variant with all types") {
+    for (isPkTable <- Seq(true, false)) {
+      val pkProps = if (isPkTable) "'primary-key' = 'id'," else ""
+      withTable("t") {
+        sql(s"""
+               |CREATE TABLE t (id INT, v VARIANT) TBLPROPERTIES
+               |(
+               | $pkProps
+               |'parquet.variant.shreddingSchema' =
+               |'{"type":"ROW","fields":[{"name":"v","type":{"type":"ROW",
+               |"fields":
+               |  [ {
+               |    "name" : "object_col",
+               |    "type" : {
+               |      "type" : "ROW",
+               |      "fields" : [ {
+               |        "name" : "name",
+               |        "type" : "STRING"
+               |      }, {
+               |        "name" : "age",
+               |        "type" : "INT"
+               |      } ]
+               |    }
+               |  }, {
+               |    "name" : "array_col",
+               |    "type" : {
+               |      "type" : "ARRAY",
+               |      "element" : "INT"
+               |    }
+               |  }, {
+               |    "name" : "string_col",
+               |    "type" : "STRING"
+               |  }, {
+               |    "name" : "byte_col",
+               |    "type" : "TINYINT"
+               |  }, {
+               |    "name" : "short_col",
+               |    "type" : "SMALLINT"
+               |  }, {
+               |    "name" : "int_col",
+               |    "type" : "INT"
+               |  }, {
+               |    "name" : "long_col",
+               |    "type" : "BIGINT"
+               |  }, {
+               |    "name" : "float_col",
+               |    "type" : "FLOAT"
+               |  }, {
+               |    "name" : "double_col",
+               |    "type" : "DOUBLE"
+               |  }, {
+               |    "name" : "decimal_col",
+               |    "type" : "DECIMAL(5, 2)"
+               |  }, {
+               |    "name" : "boolean_col",
+               |    "type" : "BOOLEAN"
+               |  } ]
+               |}}]}'
+               |)
+               |""".stripMargin)
+
+        val json1 =
+          """
+            |{
+            |  "object_col": {
+            |    "name": "Apache Paimon",
+            |    "age": 3
+            |  },
+            |  "array_col": [1, 2, 3, 4, 5],
+            |  "string_col": "hello",
+            |  "byte_col": 1,
+            |  "short_col": 3000,
+            |  "int_col": 40000,
+            |  "long_col": 12345678901234,
+            |  "float_col": 5.2,
+            |  "double_col": 1.012345678901,
+            |  "decimal_col": 100.99,
+            |  "boolean_col": true
+            |}
+            |""".stripMargin
+
+        val json2 =
+          """
+            |{
+            |  "object_col": {
+            |    "name": "Tom",
+            |    "age": 35
+            |  },
+            |  "array_col": [6, 7, 8],
+            |  "string_col": "hi",
+            |  "byte_col": 2,
+            |  "short_col": 4000,
+            |  "int_col": 50000,
+            |  "long_col": 62345678901234,
+            |  "float_col": 7.2,
+            |  "double_col": 2.012345678901,
+            |  "decimal_col": 111.99,
+            |  "boolean_col": false
+            |}
+            |""".stripMargin
+
+        sql(
+          s"""
+             |INSERT INTO t
+             | SELECT
+             | /*+ REPARTITION(1) */
+             | id,
+             | CASE
+             | WHEN id = 0 THEN parse_json('$json1')
+             | WHEN id = 1 THEN parse_json('$json2')
+             | END v
+             | FROM range(2)
+             |""".stripMargin
+        )
+
+        checkAnswer(
+          sql("SELECT id, CAST(v AS STRING) FROM t ORDER BY id"),
+          Seq(
+            Row(
+              0,
+              """{"array_col":[1,2,3,4,5],"boolean_col":true,"byte_col":1,"decimal_col":100.99,"double_col":1.012345678901,"float_col":5.2,"int_col":40000,"long_col":12345678901234,"object_col":{"age":3,"name":"Apache Paimon"},"short_col":3000,"string_col":"hello"}"""
+            ),
+            Row(
+              1,
+              """{"array_col":[6,7,8],"boolean_col":false,"byte_col":2,"decimal_col":111.99,"double_col":2.012345678901,"float_col":7.2,"int_col":50000,"long_col":62345678901234,"object_col":{"age":35,"name":"Tom"},"short_col":4000,"string_col":"hi"}"""
+            )
+          )
+        )
+
+        checkAnswer(
+          sql("""
+                |SELECT
+                |variant_get(v, '$.object_col', 'struct<name string, age int>'),
+                |variant_get(v, '$.object_col.name', 'string'),
+                |variant_get(v, '$.array_col', 'array<int>'),
+                |variant_get(v, '$.array_col[2]', 'int'),
+                |variant_get(v, '$.array_col[3]', 'int'),
+                |variant_get(v, '$.string_col', 'string'),
+                |variant_get(v, '$.byte_col', 'byte'),
+                |variant_get(v, '$.short_col', 'short'),
+                |variant_get(v, '$.int_col', 'int'),
+                |variant_get(v, '$.long_col', 'long'),
+                |variant_get(v, '$.float_col', 'float'),
+                |variant_get(v, '$.double_col', 'double'),
+                |variant_get(v, '$.boolean_col', 'boolean'),
+                |variant_get(v, '$.decimal_col', 'decimal(5, 2)')
+                |FROM t ORDER BY id
+                |""".stripMargin),
+          Seq(
+            Row(
+              Row("Apache Paimon", 3),
+              "Apache Paimon",
+              Array(1, 2, 3, 4, 5),
+              3,
+              4,
+              "hello",
+              1.toByte,
+              3000.toShort,
+              40000,
+              12345678901234L,
+              5.2f,
+              1.012345678901d,
+              true,
+              BigDecimal.apply("100.99")
+            ),
+            Row(
+              Row("Tom", 35),
+              "Tom",
+              Array(6, 7, 8),
+              8,
+              null,
+              "hi",
+              2.toByte,
+              4000.toShort,
+              50000,
+              62345678901234L,
+              7.2f,
+              2.012345678901d,
+              false,
+              BigDecimal.apply("111.99"))
+          )
+        )
+      }
+    }
+  }
 }

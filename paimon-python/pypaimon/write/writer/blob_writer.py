@@ -19,7 +19,7 @@
 import logging
 import uuid
 import pyarrow as pa
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 
 from pypaimon.common.core_options import CoreOptions
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
@@ -32,8 +32,10 @@ CHECK_ROLLING_RECORD_CNT = 1000
 
 class BlobWriter(AppendOnlyDataWriter):
 
-    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, blob_column: str):
-        super().__init__(table, partition, bucket, max_seq_number, [blob_column])
+    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, blob_column: str,
+                 options: Dict[str, str] = None):
+        super().__init__(table, partition, bucket, max_seq_number,
+                         options, write_cols=[blob_column])
 
         # Override file format to "blob"
         self.file_format = CoreOptions.FILE_FORMAT_BLOB
@@ -42,7 +44,7 @@ class BlobWriter(AppendOnlyDataWriter):
         self.blob_column = blob_column
 
         options = self.table.options
-        self.blob_target_file_size = CoreOptions.get_blob_target_file_size(options)
+        self.blob_target_file_size = CoreOptions.blob_target_file_size(options)
 
         self.current_writer: Optional[BlobFileWriter] = None
         self.current_file_path: Optional[str] = None
@@ -95,7 +97,8 @@ class BlobWriter(AppendOnlyDataWriter):
         self.sequence_generator.next()
 
     def open_current_writer(self):
-        file_name = f"data-{self.file_uuid}-{self.file_count}.{self.file_format}"
+        file_name = (f"{CoreOptions.data_file_prefix(self.options)}"
+                     f"{self.file_uuid}-{self.file_count}.{self.file_format}")
         self.file_count += 1  # Increment counter for next file
         file_path = self._generate_file_path(file_name)
         self.current_file_path = file_path
@@ -117,7 +120,11 @@ class BlobWriter(AppendOnlyDataWriter):
         file_name = self.current_file_path.split('/')[-1]
         row_count = self.current_writer.row_count
 
-        self._add_file_metadata(file_name, self.current_file_path, row_count, file_size)
+        # Determine if this is an external path
+        is_external_path = self.external_path_provider is not None
+        external_path_str = self.current_file_path if is_external_path else None
+
+        self._add_file_metadata(file_name, self.current_file_path, row_count, file_size, external_path_str)
 
         self.current_writer = None
         self.current_file_path = None
@@ -143,10 +150,14 @@ class BlobWriter(AppendOnlyDataWriter):
 
         file_size = self.file_io.get_file_size(file_path)
 
-        # Reuse _add_file_metadata for consistency (blob table is append-only, no primary keys)
-        self._add_file_metadata(file_name, file_path, data, file_size)
+        is_external_path = self.external_path_provider is not None
+        external_path_str = file_path if is_external_path else None
 
-    def _add_file_metadata(self, file_name: str, file_path: str, data_or_row_count, file_size: int):
+        # Reuse _add_file_metadata for consistency (blob table is append-only, no primary keys)
+        self._add_file_metadata(file_name, file_path, data, file_size, external_path_str)
+
+    def _add_file_metadata(self, file_name: str, file_path: str, data_or_row_count, file_size: int,
+                           external_path: Optional[str] = None):
         """Add file metadata to committed_files."""
         from datetime import datetime
         from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -200,7 +211,7 @@ class BlobWriter(AppendOnlyDataWriter):
             delete_row_count=0,
             file_source=0,  # FileSource.APPEND = 0
             value_stats_cols=None,
-            external_path=None,
+            external_path=external_path,
             first_row_id=None,
             write_cols=self.write_cols,
             file_path=file_path,

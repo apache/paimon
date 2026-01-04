@@ -35,6 +35,9 @@ polars==1.8.0; python_version=="3.8"
 polars==1.32.0; python_version>"3.8"
 pyarrow==6.0.1; python_version < "3.8"
 pyarrow==16; python_version >= "3.8"
+ray==2.48.0
 readerwriterlock==1.0.9
 zstandard==0.19.0; python_version<"3.9"
 zstandard==0.24.0; python_version>="3.9"
+pylance==0.39.0; python_version>="3.9"
+pylance==0.10.18; python_version>="3.8" and python_version<"3.9"

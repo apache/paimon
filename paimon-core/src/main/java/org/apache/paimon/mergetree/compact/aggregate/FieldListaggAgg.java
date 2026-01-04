@@ -23,6 +23,11 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.BinaryStringUtils;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.apache.paimon.utils.BinaryStringUtils.splitByWholeSeparatorPreserveAllTokens;
+
 /** listagg aggregate a field of a row. */
 public class FieldListaggAgg extends FieldAggregator {
 
@@ -49,8 +54,34 @@ public class FieldListaggAgg extends FieldAggregator {
         BinaryString mergeFieldSD = (BinaryString) accumulator;
         BinaryString inFieldSD = (BinaryString) inputField;
 
-        if (distinct && inFieldSD.getSizeInBytes() > 0 && mergeFieldSD.contains(inFieldSD)) {
+        if (inFieldSD.getSizeInBytes() <= 0) {
             return mergeFieldSD;
+        }
+
+        if (mergeFieldSD.getSizeInBytes() <= 0) {
+            return inFieldSD;
+        }
+
+        if (distinct) {
+            BinaryString delimiterBinaryString = BinaryString.fromString(delimiter);
+
+            List<BinaryString> result = new ArrayList<>();
+            result.add(mergeFieldSD);
+            for (BinaryString str :
+                    splitByWholeSeparatorPreserveAllTokens(inFieldSD, delimiterBinaryString)) {
+                if (str.getSizeInBytes() == 0 || mergeFieldSD.contains(str)) {
+                    continue;
+                }
+
+                result.add(delimiterBinaryString);
+                result.add(str);
+            }
+
+            if (result.size() == 1) {
+                return result.get(0);
+            }
+
+            return BinaryStringUtils.concat(result);
         }
 
         return BinaryStringUtils.concat(

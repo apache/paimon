@@ -225,7 +225,8 @@ case object PaimonSqlExtensionsPostProcessor extends PaimonSqlExtensionsBaseList
       PaimonSqlExtensionsParser.IDENTIFIER,
       token.getChannel,
       token.getStartIndex + stripMargins,
-      token.getStopIndex - stripMargins)
+      token.getStopIndex - stripMargins
+    )
     parent.addChild(new TerminalNodeImpl(f(newToken)))
   }
 }

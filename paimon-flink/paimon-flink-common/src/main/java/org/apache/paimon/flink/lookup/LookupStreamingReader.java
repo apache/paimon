@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
@@ -29,7 +30,6 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.FunctionWithIOException;
@@ -61,14 +61,15 @@ public class LookupStreamingReader {
     @Nullable private final Filter<InternalRow> cacheRowFilter;
     private final ReadBuilder readBuilder;
     @Nullable private final Predicate projectedPredicate;
-    private final StreamTableScan scan;
+    private final LookupDataTableScan scan;
 
     public LookupStreamingReader(
             LookupFileStoreTable table,
             int[] projection,
             @Nullable Predicate predicate,
             Set<Integer> requireCachedBucketIds,
-            @Nullable Filter<InternalRow> cacheRowFilter) {
+            @Nullable Filter<InternalRow> cacheRowFilter,
+            @Nullable List<BinaryRow> scanPartitions) {
         this.table = table;
         this.projection = projection;
         this.cacheRowFilter = cacheRowFilter;
@@ -81,7 +82,8 @@ public class LookupStreamingReader {
                                 requireCachedBucketIds == null
                                         ? null
                                         : requireCachedBucketIds::contains);
-        scan = readBuilder.newStreamScan();
+        scan = (LookupDataTableScan) readBuilder.newStreamScan();
+        scan.setScanPartitions(scanPartitions);
 
         if (predicate != null) {
             List<String> fieldNames = table.rowType().getFieldNames();

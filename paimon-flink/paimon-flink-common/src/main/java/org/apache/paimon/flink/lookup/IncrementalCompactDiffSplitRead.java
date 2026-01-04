@@ -25,6 +25,7 @@ import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.splitread.IncrementalDiffSplitRead;
 
 import java.io.IOException;
@@ -39,11 +40,12 @@ public class IncrementalCompactDiffSplitRead extends IncrementalDiffSplitRead {
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
-        if (split.beforeFiles().stream().noneMatch(file -> file.level() == 0)) {
+    public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        DataSplit dataSplit = (DataSplit) split;
+        if (dataSplit.beforeFiles().stream().noneMatch(file -> file.level() == 0)) {
             return new EmptyRecordReader<>();
         }
-        return super.createReader(filterLevel0Files(split));
+        return super.createReader(filterLevel0Files(dataSplit));
     }
 
     private DataSplit filterLevel0Files(DataSplit split) {

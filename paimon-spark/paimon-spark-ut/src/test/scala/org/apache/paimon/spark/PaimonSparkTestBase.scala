@@ -96,11 +96,6 @@ class PaimonSparkTestBase
     }
   }
 
-  protected def reset(): Unit = {
-    afterAll()
-    beforeAll()
-  }
-
   /** Default is paimon catalog */
   override protected def beforeEach(): Unit = {
     super.beforeAll()

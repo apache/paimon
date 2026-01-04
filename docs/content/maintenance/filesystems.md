@@ -242,6 +242,7 @@ Place `paimon-oss-{{< version >}}.jar` together with `paimon-spark-{{< version >
 
 ```shell
 spark-sql \
+  --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=oss://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com \
@@ -344,6 +345,7 @@ Place `paimon-s3-{{< version >}}.jar` together with `paimon-spark-{{< version >}
 
 ```shell
 spark-sql \
+  --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=s3://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.s3.endpoint=your-endpoint-hostname \
@@ -498,6 +500,7 @@ Place `paimon-azure-{{< version >}}.jar` together with `paimon-spark-{{< version
 
 ```shell
 spark-sql \
+  --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=wasb://,<container>@<account>.blob.core.windows.net/<path> \
   --conf fs.azure.account.key.Account.blob.core.windows.net=yyy \
@@ -554,6 +557,7 @@ Place `paimon-obs-{{< version >}}.jar` together with `paimon-spark-{{< version >
 
 ```shell
 spark-sql \
+  --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=obs://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.fs.obs.endpoint=obs-endpoint-hostname \

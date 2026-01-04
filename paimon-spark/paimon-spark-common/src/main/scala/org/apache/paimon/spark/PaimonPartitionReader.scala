@@ -108,20 +108,23 @@ case class PaimonPartitionReader(
     }
   }
 
-  override def currentMetricsValues(): Array[CustomTaskMetric] = {
+  // Partition metrics need to be computed only once.
+  private lazy val partitionMetrics: Array[CustomTaskMetric] = {
     val dataSplits = partition.splits.collect { case ds: DataSplit => ds }
     val numSplits = dataSplits.length
-    val paimonMetricsValues: Array[CustomTaskMetric] = if (dataSplits.nonEmpty) {
+    if (dataSplits.nonEmpty) {
       val splitSize = dataSplits.map(_.dataFiles().asScala.map(_.fileSize).sum).sum
       Array(
         PaimonNumSplitsTaskMetric(numSplits),
-        PaimonSplitSizeTaskMetric(splitSize),
-        PaimonAvgSplitSizeTaskMetric(splitSize / numSplits)
+        PaimonPartitionSizeTaskMetric(splitSize)
       )
     } else {
       Array.empty[CustomTaskMetric]
     }
-    super.currentMetricsValues() ++ paimonMetricsValues
+  }
+
+  override def currentMetricsValues(): Array[CustomTaskMetric] = {
+    partitionMetrics
   }
 
   override def close(): Unit = {

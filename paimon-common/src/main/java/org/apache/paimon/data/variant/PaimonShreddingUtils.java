@@ -25,9 +25,12 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.columnar.RowColumnVector;
+import org.apache.paimon.data.columnar.RowToColumnConverter;
+import org.apache.paimon.data.columnar.heap.CastedRowColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableBytesVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.data.variant.VariantPathSegment.ArrayExtraction;
+import org.apache.paimon.data.variant.VariantPathSegment.ObjectExtraction;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -40,6 +43,10 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.data.variant.GenericVariantUtil.Type.ARRAY;
+import static org.apache.paimon.data.variant.GenericVariantUtil.Type.OBJECT;
+import static org.apache.paimon.data.variant.GenericVariantUtil.malformedVariant;
 
 /** Utils for paimon shredding. */
 public class PaimonShreddingUtils {
@@ -134,8 +141,76 @@ public class PaimonShreddingUtils {
         }
     }
 
+    /** The search result of a `VariantPathSegment` in a `VariantSchema`. */
+    public static class SchemaPathSegment {
+
+        private final VariantPathSegment rawPath;
+
+        // Whether this path segment is an object or array extraction.
+        private final boolean isObject;
+        // `schema.typedIdx`, if the path exists in the schema (for object extraction, the schema
+        // should contain an object `typed_value` containing the requested field; similar for array
+        // extraction). Negative otherwise.
+        private final int typedIdx;
+
+        // For object extraction, it is the index of the desired field in `schema.objectSchema`. If
+        // the
+        // requested field doesn't exist, both `extractionIdx/typedIdx` are set to negative.
+        // For array extraction, it is the array index. The information is already stored in
+        // `rawPath`,
+        // but accessing a raw int should be more efficient than `rawPath`, which is an `Either`.
+        private final int extractionIdx;
+
+        public SchemaPathSegment(
+                VariantPathSegment rawPath, boolean isObject, int typedIdx, int extractionIdx) {
+            this.rawPath = rawPath;
+            this.isObject = isObject;
+            this.typedIdx = typedIdx;
+            this.extractionIdx = extractionIdx;
+        }
+
+        public VariantPathSegment rawPath() {
+            return rawPath;
+        }
+
+        public boolean isObject() {
+            return isObject;
+        }
+
+        public int typedIdx() {
+            return typedIdx;
+        }
+
+        public int extractionIdx() {
+            return extractionIdx;
+        }
+    }
+
+    /**
+     * Represent a single field in a variant struct, that is a single requested field that the scan
+     * should produce by extracting from the variant column.
+     */
+    public static class FieldToExtract {
+
+        private final SchemaPathSegment[] path;
+        private final BaseVariantReader reader;
+
+        public FieldToExtract(SchemaPathSegment[] path, BaseVariantReader reader) {
+            this.path = path;
+            this.reader = reader;
+        }
+
+        public SchemaPathSegment[] path() {
+            return path;
+        }
+
+        public BaseVariantReader reader() {
+            return reader;
+        }
+    }
+
     public static RowType variantShreddingSchema(RowType rowType) {
-        return variantShreddingSchema(rowType, true);
+        return variantShreddingSchema(rowType, true, false);
     }
 
     /**
@@ -146,10 +221,11 @@ public class PaimonShreddingUtils {
      * binary, value: binary, typed_value: struct&lt; a: struct&lt;typed_value: int, value:
      * binary&gt;, b: struct&lt;typed_value: string, value: binary&gt;&gt;&gt;
      */
-    private static RowType variantShreddingSchema(DataType dataType, boolean topLevel) {
+    private static RowType variantShreddingSchema(
+            DataType dataType, boolean isTopLevel, boolean isObjectField) {
         RowType.Builder builder = RowType.builder();
-        if (topLevel) {
-            builder.field(METADATA_FIELD_NAME, DataTypes.BYTES());
+        if (isTopLevel) {
+            builder.field(METADATA_FIELD_NAME, DataTypes.BYTES().copy(false));
         }
         switch (dataType.getTypeRoot()) {
             case ARRAY:
@@ -157,7 +233,7 @@ public class PaimonShreddingUtils {
                 ArrayType shreddedArrayType =
                         new ArrayType(
                                 arrayType.isNullable(),
-                                variantShreddingSchema(arrayType.getElementType(), false));
+                                variantShreddingSchema(arrayType.getElementType(), false, false));
                 builder.field(VARIANT_VALUE_FIELD_NAME, DataTypes.BYTES());
                 builder.field(TYPED_VALUE_FIELD_NAME, shreddedArrayType);
                 break;
@@ -173,14 +249,21 @@ public class PaimonShreddingUtils {
                                                 field ->
                                                         field.newType(
                                                                 variantShreddingSchema(
-                                                                                field.type(), false)
+                                                                                field.type(),
+                                                                                false,
+                                                                                true)
                                                                         .notNull()))
                                         .collect(Collectors.toList()));
                 builder.field(VARIANT_VALUE_FIELD_NAME, DataTypes.BYTES());
                 builder.field(TYPED_VALUE_FIELD_NAME, shreddedRowType);
                 break;
             case VARIANT:
-                builder.field(VARIANT_VALUE_FIELD_NAME, DataTypes.BYTES());
+                // For Variant, we don't need a typed column. If there is no typed column, value is
+                // required
+                // for array elements or top-level fields, but optional for objects (where a null
+                // represents
+                // a missing field).
+                builder.field(VARIANT_VALUE_FIELD_NAME, DataTypes.BYTES().copy(isObjectField));
                 break;
             case CHAR:
             case VARCHAR:
@@ -345,6 +428,45 @@ public class PaimonShreddingUtils {
                 arraySchema);
     }
 
+    public static DataType scalarSchemaToPaimonType(VariantSchema.ScalarType scala) {
+        if (scala instanceof VariantSchema.StringType) {
+            return DataTypes.STRING();
+        } else if (scala instanceof VariantSchema.IntegralType) {
+            VariantSchema.IntegralType it = (VariantSchema.IntegralType) scala;
+            switch (it.size) {
+                case BYTE:
+                    return DataTypes.TINYINT();
+                case SHORT:
+                    return DataTypes.SMALLINT();
+                case INT:
+                    return DataTypes.INT();
+                case LONG:
+                    return DataTypes.BIGINT();
+                default:
+                    throw new UnsupportedOperationException();
+            }
+        } else if (scala instanceof VariantSchema.FloatType) {
+            return DataTypes.FLOAT();
+        } else if (scala instanceof VariantSchema.DoubleType) {
+            return DataTypes.DOUBLE();
+        } else if (scala instanceof VariantSchema.BooleanType) {
+            return DataTypes.BOOLEAN();
+        } else if (scala instanceof VariantSchema.BinaryType) {
+            return DataTypes.BYTES();
+        } else if (scala instanceof VariantSchema.DecimalType) {
+            VariantSchema.DecimalType dt = (VariantSchema.DecimalType) scala;
+            return DataTypes.DECIMAL(dt.precision, dt.scale);
+        } else if (scala instanceof VariantSchema.DateType) {
+            return DataTypes.DATE();
+        } else if (scala instanceof VariantSchema.TimestampType) {
+            return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE();
+        } else if (scala instanceof VariantSchema.TimestampNTZType) {
+            return DataTypes.TIMESTAMP();
+        } else {
+            throw new UnsupportedOperationException();
+        }
+    }
+
     private static RuntimeException invalidVariantShreddingSchema(DataType dataType) {
         return new RuntimeException("Invalid variant shredding schema: " + dataType);
     }
@@ -428,14 +550,193 @@ public class PaimonShreddingUtils {
                 .row;
     }
 
-    /** Rebuilds a variant from shredded components with the variant schema. */
-    public static Variant rebuild(InternalRow row, VariantSchema variantSchema) {
-        return ShreddingUtils.rebuild(new PaimonShreddedRow(row), variantSchema);
+    /** Assemble a variant (binary format) from a variant value. */
+    public static Variant assembleVariant(InternalRow row, VariantSchema schema) {
+        return ShreddingUtils.rebuild(new PaimonShreddedRow(row), schema);
+    }
+
+    /** Assemble a variant struct, in which each field is extracted from the variant value. */
+    public static InternalRow assembleVariantStruct(
+            InternalRow inputRow, VariantSchema schema, FieldToExtract[] fields) {
+        if (inputRow.isNullAt(schema.topLevelMetadataIdx)) {
+            throw malformedVariant();
+        }
+        byte[] topLevelMetadata = inputRow.getBinary(schema.topLevelMetadataIdx);
+        int numFields = fields.length;
+        GenericRow resultRow = new GenericRow(numFields);
+        int fieldIdx = 0;
+        while (fieldIdx < numFields) {
+            resultRow.setField(
+                    fieldIdx,
+                    extractField(
+                            inputRow,
+                            topLevelMetadata,
+                            schema,
+                            fields[fieldIdx].path(),
+                            fields[fieldIdx].reader()));
+            fieldIdx += 1;
+        }
+        return resultRow;
+    }
+
+    /**
+     * Return a list of fields to extract. `targetType` must be either variant or variant struct. If
+     * it is variant, return null because the target is the full variant and there is no field to
+     * extract. If it is variant struct, return a list of fields matching the variant struct fields.
+     */
+    public static FieldToExtract[] getFieldsToExtract(
+            List<VariantAccessInfo.VariantField> variantFields, VariantSchema variantSchema) {
+        if (variantFields != null) {
+            return variantFields.stream()
+                    .map(
+                            field ->
+                                    buildFieldsToExtract(
+                                            field.dataField().type(),
+                                            field.path(),
+                                            field.castArgs(),
+                                            variantSchema))
+                    .toArray(FieldToExtract[]::new);
+        }
+        return null;
+    }
+
+    /**
+     * According to the dataType, variant extraction path and variantSchema, build the
+     * FieldToExtract.
+     */
+    public static FieldToExtract buildFieldsToExtract(
+            DataType dataType, String path, VariantCastArgs castArgs, VariantSchema inputSchema) {
+        VariantPathSegment[] rawPath = VariantPathSegment.parse(path);
+        SchemaPathSegment[] schemaPath = new SchemaPathSegment[rawPath.length];
+        VariantSchema schema = inputSchema;
+        // Search `rawPath` in `schema` to produce `schemaPath`. If a raw path segment cannot be
+        // found at a certain level of the file type, then `typedIdx` will be -1 starting from
+        // this position, and the final `schema` will be null.
+        for (int i = 0; i < rawPath.length; i++) {
+            VariantPathSegment extraction = rawPath[i];
+            boolean isObject = extraction instanceof ObjectExtraction;
+            int typedIdx = -1;
+            int extractionIdx = -1;
+
+            if (extraction instanceof ObjectExtraction) {
+                ObjectExtraction objExtr = (ObjectExtraction) extraction;
+                if (schema != null && schema.objectSchemaMap != null) {
+                    Integer fieldIdx = schema.objectSchemaMap.get(objExtr.getKey());
+                    if (fieldIdx != null) {
+                        typedIdx = schema.typedIdx;
+                        extractionIdx = fieldIdx;
+                        schema = schema.objectSchema[fieldIdx].schema();
+                    } else {
+                        schema = null;
+                    }
+                } else {
+                    schema = null;
+                }
+            } else if (extraction instanceof ArrayExtraction) {
+                ArrayExtraction arrExtr = (ArrayExtraction) extraction;
+                if (schema != null && schema.arraySchema != null) {
+                    typedIdx = schema.typedIdx;
+                    extractionIdx = arrExtr.getIndex();
+                    schema = schema.arraySchema;
+                } else {
+                    schema = null;
+                }
+            } else {
+                schema = null;
+            }
+            schemaPath[i] = new SchemaPathSegment(extraction, isObject, typedIdx, extractionIdx);
+        }
+
+        BaseVariantReader reader =
+                BaseVariantReader.create(
+                        schema,
+                        dataType,
+                        castArgs,
+                        (schemaPath.length == 0) && inputSchema.isUnshredded());
+        return new FieldToExtract(schemaPath, reader);
+    }
+
+    /**
+     * Extract a single variant struct field from a variant value. It steps into `inputRow`
+     * according to the variant extraction path, and read the extracted value as the target type.
+     */
+    private static Object extractField(
+            InternalRow inputRow,
+            byte[] topLevelMetadata,
+            VariantSchema inputSchema,
+            SchemaPathSegment[] pathList,
+            BaseVariantReader reader) {
+        int pathIdx = 0;
+        int pathLen = pathList.length;
+        InternalRow row = inputRow;
+        VariantSchema schema = inputSchema;
+        while (pathIdx < pathLen) {
+            SchemaPathSegment path = pathList[pathIdx];
+
+            if (path.typedIdx() < 0) {
+                // The extraction doesn't exist in `typed_value`. Try to extract the remaining part
+                // of the
+                // path in `value`.
+                int variantIdx = schema.variantIdx;
+                if (variantIdx < 0 || row.isNullAt(variantIdx)) {
+                    return null;
+                }
+                GenericVariant v = new GenericVariant(row.getBinary(variantIdx), topLevelMetadata);
+                while (pathIdx < pathLen) {
+                    VariantPathSegment rowPath = pathList[pathIdx].rawPath();
+                    if (rowPath instanceof ObjectExtraction && v.getType() == OBJECT) {
+                        v = v.getFieldByKey(((ObjectExtraction) rowPath).getKey());
+                    } else if (rowPath instanceof ArrayExtraction && v.getType() == ARRAY) {
+                        v = v.getElementAtIndex(((ArrayExtraction) rowPath).getIndex());
+                    } else {
+                        v = null;
+                    }
+                    if (v == null) {
+                        return null;
+                    }
+                    pathIdx += 1;
+                }
+                return VariantGet.cast(v, reader.targetType(), reader.castArgs());
+            }
+
+            if (row.isNullAt(path.typedIdx())) {
+                return null;
+            }
+
+            if (path.isObject()) {
+                InternalRow obj = row.getRow(path.typedIdx(), schema.objectSchema.length);
+                // Object field must not be null.
+                if (obj.isNullAt(path.extractionIdx())) {
+                    throw malformedVariant();
+                }
+                schema = schema.objectSchema[path.extractionIdx()].schema();
+                row = obj.getRow(path.extractionIdx(), schema.numFields);
+                // Return null if the field is missing.
+                if ((schema.typedIdx < 0 || row.isNullAt(schema.typedIdx))
+                        && (schema.variantIdx < 0 || row.isNullAt(schema.variantIdx))) {
+                    return null;
+                }
+            } else {
+                InternalArray arr = row.getArray(path.typedIdx());
+                // Return null if the extraction index is out of bound.
+                if (path.extractionIdx() >= arr.size()) {
+                    return null;
+                }
+                // Array element must not be null.
+                if (arr.isNullAt(path.extractionIdx())) {
+                    throw malformedVariant();
+                }
+                schema = schema.arraySchema;
+                row = arr.getRow(path.extractionIdx(), schema.numFields);
+            }
+            pathIdx += 1;
+        }
+        return reader.read(row, topLevelMetadata);
     }
 
     /** Assemble a batch of variant (binary format) from a batch of variant values. */
     public static void assembleVariantBatch(
-            WritableColumnVector input, WritableColumnVector output, VariantSchema variantSchema) {
+            CastedRowColumnVector input, WritableColumnVector output, VariantSchema variantSchema) {
         int numRows = input.getElementsAppended();
         output.reset();
         output.reserve(numRows);
@@ -445,12 +746,38 @@ public class PaimonShreddingUtils {
             if (input.isNullAt(i)) {
                 output.setNullAt(i);
             } else {
-                Variant v = rebuild(((RowColumnVector) input).getRow(i), variantSchema);
+                Variant v = assembleVariant(input.getRow(i), variantSchema);
                 byte[] value = v.value();
                 byte[] metadata = v.metadata();
                 valueChild.putByteArray(i, value, 0, value.length);
                 metadataChild.putByteArray(i, metadata, 0, metadata.length);
             }
+        }
+    }
+
+    /** Assemble a batch of variant struct from a batch of variant values. */
+    public static void assembleVariantStructBatch(
+            CastedRowColumnVector input,
+            WritableColumnVector output,
+            VariantSchema variantSchema,
+            FieldToExtract[] fields,
+            DataType readType) {
+        int numRows = input.getElementsAppended();
+        output.reset();
+        output.reserve(numRows);
+        RowToColumnConverter converter =
+                new RowToColumnConverter(RowType.of(new DataField(0, "placeholder", readType)));
+        WritableColumnVector[] converterVectors = new WritableColumnVector[1];
+        converterVectors[0] = output;
+        GenericRow converterRow = new GenericRow(1);
+        for (int i = 0; i < numRows; ++i) {
+            if (input.isNullAt(i)) {
+                converterRow.setField(0, null);
+            } else {
+                converterRow.setField(
+                        0, assembleVariantStruct(input.getRow(i), variantSchema, fields));
+            }
+            converter.convert(converterRow, converterVectors);
         }
     }
 }
