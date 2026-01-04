@@ -35,6 +35,10 @@ public class CompactResult {
 
     @Nullable private CompactDeletionFile deletionFile;
 
+    @Nullable private String compactType;
+
+    private long compactTimeMillis;
+
     public CompactResult() {
         this(Collections.emptyList(), Collections.emptyList());
     }
@@ -73,6 +77,22 @@ public class CompactResult {
     @Nullable
     public CompactDeletionFile deletionFile() {
         return deletionFile;
+    }
+
+    public String compactionType() {
+        return compactType;
+    }
+
+    public void setCompactTimeMillis(long compactTimeMillis) {
+        this.compactTimeMillis = compactTimeMillis;
+    }
+
+    public long compactionTimeMillis() {
+        return compactTimeMillis;
+    }
+
+    public void setCompactType(@Nullable String compactType) {
+        this.compactType = compactType;
     }
 
     public void merge(CompactResult that) {

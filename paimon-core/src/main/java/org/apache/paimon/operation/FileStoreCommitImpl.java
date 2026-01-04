@@ -39,6 +39,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.metrics.CompactMetric;
 import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.CommitChangesProvider;
 import org.apache.paimon.operation.commit.CommitCleaner;
@@ -66,6 +67,7 @@ import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CompactMetricsManager;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
@@ -137,6 +139,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final String partitionDefaultName;
     private final FileStorePathFactory pathFactory;
     private final SnapshotManager snapshotManager;
+    private final CompactMetricsManager compactMetricsManager;
     private final ManifestFile manifestFile;
     private final ManifestList manifestList;
     private final IndexManifestFile indexManifestFile;
@@ -177,6 +180,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String partitionDefaultName,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
+            CompactMetricsManager compactMetricsManager,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             IndexManifestFile.Factory indexManifestFileFactory,
@@ -209,6 +213,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.partitionDefaultName = partitionDefaultName;
         this.pathFactory = pathFactory;
         this.snapshotManager = snapshotManager;
+        this.compactMetricsManager = compactMetricsManager;
         this.manifestFile = manifestFileFactory.create();
         this.manifestList = manifestListFactory.create();
         this.indexManifestFile = indexManifestFileFactory.create();
@@ -352,7 +357,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.properties(),
                                 CommitKindProvider.provider(CommitKind.COMPACT),
                                 true,
-                                null);
+                                null,
+                                changes.buckets,
+                                changes.types,
+                                changes.compactionDurationTime);
                 generatedSnapshot += 1;
             }
         } finally {
@@ -672,6 +680,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private ManifestEntryChanges collectChanges(List<CommitMessage> commitMessages) {
         ManifestEntryChanges changes = new ManifestEntryChanges(numBucket);
         commitMessages.forEach(changes::collect);
+        commitMessages.forEach(commitMessage -> changes.collectMetrics(commitMessage, pathFactory));
         LOG.info("Finished collecting changes, including: {}", changes);
         return changes;
     }
@@ -684,6 +693,30 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             CommitKindProvider commitKindProvider,
             boolean detectConflicts,
             @Nullable String statsFileName) {
+        return tryCommit(
+                changesProvider,
+                identifier,
+                watermark,
+                properties,
+                commitKindProvider,
+                detectConflicts,
+                statsFileName,
+                null,
+                null,
+                null);
+    }
+
+    private int tryCommit(
+            CommitChangesProvider changesProvider,
+            long identifier,
+            @Nullable Long watermark,
+            Map<String, String> properties,
+            CommitKindProvider commitKindProvider,
+            boolean detectConflicts,
+            @Nullable String statsFileName,
+            @Nullable List<String> buckets,
+            @Nullable List<String> compactTypes,
+            @Nullable List<Long> compactDurationTime) {
         int retryCount = 0;
         RetryCommitResult retryResult = null;
         long startMillis = System.currentTimeMillis();
@@ -703,7 +736,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             commitKind,
                             latestSnapshot,
                             detectConflicts,
-                            statsFileName);
+                            statsFileName,
+                            buckets,
+                            compactTypes,
+                            compactDurationTime);
 
             if (result.isSuccess()) {
                 break;
@@ -770,6 +806,39 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Snapshot latestSnapshot,
             boolean detectConflicts,
             @Nullable String newStatsFileName) {
+        return tryCommitOnce(
+                retryResult,
+                deltaFiles,
+                changelogFiles,
+                indexFiles,
+                identifier,
+                watermark,
+                properties,
+                commitKind,
+                latestSnapshot,
+                detectConflicts,
+                newStatsFileName,
+                null,
+                null,
+                null);
+    }
+
+    @VisibleForTesting
+    CommitResult tryCommitOnce(
+            @Nullable RetryCommitResult retryResult,
+            List<ManifestEntry> deltaFiles,
+            List<ManifestEntry> changelogFiles,
+            List<IndexManifestEntry> indexFiles,
+            long identifier,
+            @Nullable Long watermark,
+            Map<String, String> properties,
+            CommitKind commitKind,
+            @Nullable Snapshot latestSnapshot,
+            boolean detectConflicts,
+            @Nullable String newStatsFileName,
+            @Nullable List<String> buckets,
+            @Nullable List<String> compactTypes,
+            @Nullable List<Long> compactDurationTime) {
         long startMillis = System.currentTimeMillis();
 
         // Check if the commit has been completed. At this point, there will be no more repeated
@@ -857,6 +926,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         Snapshot newSnapshot;
+        CompactMetric compactMetric = null;
         Pair<String, Long> baseManifestList = null;
         Pair<String, Long> deltaManifestList = null;
         List<PartitionEntry> deltaStatistics;
@@ -962,6 +1032,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             // if empty properties, just set to null
                             properties.isEmpty() ? null : properties,
                             nextRowIdStart);
+            if (options.compactMetricsEnabled()) {
+                compactMetric =
+                        buildCompactMetric(
+                                newSnapshotId,
+                                commitKind,
+                                buckets,
+                                compactTypes,
+                                compactDurationTime,
+                                identifier);
+            }
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             commitCleaner.cleanUpReuseTmpManifests(
@@ -979,6 +1059,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         boolean success;
         try {
             success = commitSnapshotImpl(newSnapshot, deltaStatistics);
+            if (options.compactMetricsEnabled() && success && compactMetric != null) {
+                compactMetricsManager.commit(compactMetric);
+            }
         } catch (Exception e) {
             // commit exception, not sure about the situation and should not clean up the files
             LOG.warn("Retry commit for exception.", e);
@@ -1165,6 +1248,42 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             throw new RuntimeException(ie);
+        }
+    }
+
+    private CompactMetric buildCompactMetric(
+            long newSnapshotId,
+            CommitKind commitKind,
+            List<String> buckets,
+            List<String> compactTypes,
+            List<Long> compactDurationTime,
+            long identifier) {
+        if (commitKind.equals(CommitKind.COMPACT)
+                && compactDurationTime != null
+                && !compactDurationTime.isEmpty()) {
+            long maxDuration = compactDurationTime.stream().max(Long::compareTo).get();
+            long minDuration = compactDurationTime.stream().min(Long::compareTo).get();
+            long averageDuration =
+                    (long)
+                            compactDurationTime.stream()
+                                    .mapToLong(Long::longValue)
+                                    .average()
+                                    .getAsDouble();
+            String compParts = buckets == null ? "{}" : String.join(",", buckets);
+            String compTypes =
+                    compactTypes == null ? "" : String.join(",", new HashSet<>(compactTypes));
+            return new CompactMetric(
+                    newSnapshotId,
+                    System.currentTimeMillis(),
+                    averageDuration,
+                    maxDuration,
+                    minDuration,
+                    compParts,
+                    compTypes,
+                    identifier,
+                    commitUser);
+        } else {
+            return null;
         }
     }
 
