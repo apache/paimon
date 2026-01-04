@@ -37,6 +37,9 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -59,12 +62,14 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.PredicateJsonSerde;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
 import javax.annotation.Nullable;
@@ -524,11 +529,33 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public List<String> authTableQuery(Identifier identifier, @Nullable List<String> select)
+    public Predicate authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "authTable");
         try {
-            return api.authTableQuery(identifier, select);
+            List<String> predicateJsons = api.authTableQuery(identifier, select);
+            if (predicateJsons == null || predicateJsons.isEmpty()) {
+                return null;
+            }
+
+            List<Predicate> predicates = new ArrayList<>();
+            for (String json : predicateJsons) {
+                if (json == null || json.trim().isEmpty()) {
+                    continue;
+                }
+                Predicate predicate = PredicateJsonSerde.parse(json);
+                if (predicate != null) {
+                    predicates.add(predicate);
+                }
+            }
+
+            if (predicates.isEmpty()) {
+                return null;
+            }
+            if (predicates.size() == 1) {
+                return predicates.get(0);
+            }
+            return new CompoundPredicate(And.INSTANCE, predicates);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -539,6 +566,8 @@ public class RESTCatalog implements Catalog {
             throw new UnsupportedOperationException(e.getMessage());
         } catch (BadRequestException e) {
             throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
         }
     }
 

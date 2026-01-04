@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.predicate.Predicate;
+
 import javax.annotation.Nullable;
 
 import java.util.List;
@@ -25,5 +27,6 @@ import java.util.List;
 /** Table query auth. */
 public interface TableQueryAuth {
 
-    List<String> auth(@Nullable List<String> select);
+    @Nullable
+    Predicate auth(@Nullable List<String> select);
 }

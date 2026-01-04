@@ -26,6 +26,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -243,7 +244,29 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public TableRead newRead() {
-        InnerTableRead read = table.newRead().withFilter(filter);
+        Predicate readFilter = filter;
+        boolean executeFilter = false;
+        if (table instanceof FileStoreTable) {
+            CoreOptions options = new CoreOptions(table.options());
+            if (options.queryAuthEnabled()) {
+                TableQueryAuth queryAuth =
+                        ((FileStoreTable) table).catalogEnvironment().tableQueryAuth(options);
+                Predicate rowFilter =
+                        queryAuth.auth(readType == null ? null : readType.getFieldNames());
+                if (rowFilter != null) {
+                    readFilter =
+                            readFilter == null
+                                    ? rowFilter
+                                    : PredicateBuilder.and(readFilter, rowFilter);
+                    executeFilter = true;
+                }
+            }
+        }
+
+        InnerTableRead read = table.newRead().withFilter(readFilter);
+        if (executeFilter) {
+            read.executeFilter();
+        }
         if (readType != null) {
             read.withReadType(readType);
         }

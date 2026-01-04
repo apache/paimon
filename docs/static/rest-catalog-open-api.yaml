@@ -2921,6 +2921,7 @@ components:
       properties:
         filter:
           type: array
+          description: Additional row-level filter as JSON strings. Each element should be a JSON object containing a 'filter' field.
           items:
             type: string
     AlterDatabaseRequest:

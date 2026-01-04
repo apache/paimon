@@ -185,6 +185,7 @@ public class RESTCatalogServer {
     private final List<String> noPermissionTables = new ArrayList<>();
     private final Map<String, Function> functionStore = new HashMap<>();
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
+    private final Map<String, List<String>> rowFilterAuthHandler = new HashMap<>();
     public final ConfigResponse configResponse;
     public final String warehouse;
 
@@ -264,6 +265,10 @@ public class RESTCatalogServer {
 
     public void addTableColumnAuth(Identifier identifier, List<String> select) {
         columnAuthHandler.put(identifier.getFullName(), select);
+    }
+
+    public void addTableFilter(Identifier identifier, String filter) {
+        rowFilterAuthHandler.put(identifier.getFullName(), Collections.singletonList(filter));
     }
 
     public RESTToken getDataToken(Identifier identifier) {
@@ -829,7 +834,8 @@ public class RESTCatalogServer {
                         }
                     });
         }
-        AuthTableQueryResponse response = new AuthTableQueryResponse(Collections.emptyList());
+        List<String> predicates = rowFilterAuthHandler.get(identifier.getFullName());
+        AuthTableQueryResponse response = new AuthTableQueryResponse(predicates);
         return mockResponse(response, 200);
     }
 

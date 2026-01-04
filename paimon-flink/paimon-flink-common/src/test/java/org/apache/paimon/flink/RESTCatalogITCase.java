@@ -20,6 +20,8 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.RESTToken;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.PredicateJsonSerde;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -34,6 +36,7 @@ import org.apache.flink.table.resource.ResourceUri;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -79,6 +82,28 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         DATABASE_NAME, TABLE_NAME));
         assertThat(batchSql(String.format("SELECT * FROM %s.%s", DATABASE_NAME, TABLE_NAME)))
                 .containsExactlyInAnyOrder(Row.of("1", 11.0D), Row.of("2", 22.0D));
+    }
+
+    @Test
+    public void testRowFilter() {
+        String rowFilterTable = "row_filter_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (col1 INT) WITH ('query-auth.enabled' = 'true')",
+                        DATABASE_NAME, rowFilterTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1), (2), (3), (4)",
+                        DATABASE_NAME, rowFilterTable));
+
+        // Only allow rows with col1 > 2
+        restCatalogServer.addTableFilter(
+                Identifier.create(DATABASE_NAME, rowFilterTable),
+                PredicateJsonSerde.transformPredicateEntryJson(
+                        0, "col1", DataTypes.INT(), "GREATER_THAN", Collections.singletonList(2)));
+
+        assertThat(batchSql(String.format("SELECT col1 FROM %s.%s", DATABASE_NAME, rowFilterTable)))
+                .containsExactlyInAnyOrder(Row.of(3), Row.of(4));
     }
 
     @Test
