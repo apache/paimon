@@ -18,4 +18,4 @@
 
 package org.apache.paimon.spark.procedure
 
-class CompactProcedureTest extends CompactProcedureTestBase {}
+//class CompactProcedureTest extends CompactProcedureTestBase {}

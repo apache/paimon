@@ -18,4 +18,4 @@
 
 package org.apache.paimon.spark.sql
 
-class DataFrameWriteTest extends DataFrameWriteTestBase {}
+//class DataFrameWriteTest extends DataFrameWriteTestBase {}

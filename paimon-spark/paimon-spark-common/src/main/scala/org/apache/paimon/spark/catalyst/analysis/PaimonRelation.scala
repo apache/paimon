@@ -32,8 +32,10 @@ object PaimonRelation extends Logging {
 
   def unapply(plan: LogicalPlan): Option[SparkTable] =
     EliminateSubqueryAliases(plan) match {
-      case Project(_, DataSourceV2Relation(table: SparkTable, _, _, _, _)) => Some(table)
-      case DataSourceV2Relation(table: SparkTable, _, _, _, _) => Some(table)
+      case Project(_, d: DataSourceV2Relation) if d.table.isInstanceOf[SparkTable] =>
+        Some(d.table.asInstanceOf[SparkTable])
+      case d: DataSourceV2Relation if d.table.isInstanceOf[SparkTable] =>
+        Some(d.table.asInstanceOf[SparkTable])
       case ResolvedTable(_, _, table: SparkTable, _) => Some(table)
       case _ => None
     }
@@ -50,8 +52,8 @@ object PaimonRelation extends Logging {
 
   def getPaimonRelation(plan: LogicalPlan): DataSourceV2Relation = {
     EliminateSubqueryAliases(plan) match {
-      case Project(_, d @ DataSourceV2Relation(_: SparkTable, _, _, _, _)) => d
-      case d @ DataSourceV2Relation(_: SparkTable, _, _, _, _) => d
+      case Project(_, d: DataSourceV2Relation) if d.table.isInstanceOf[SparkTable] => d
+      case d: DataSourceV2Relation if d.table.isInstanceOf[SparkTable] => d
       case _ => throw new RuntimeException(s"It's not a paimon table, $plan")
     }
   }

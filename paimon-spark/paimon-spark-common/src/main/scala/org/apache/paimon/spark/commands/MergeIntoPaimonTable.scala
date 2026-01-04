@@ -259,7 +259,8 @@ case class MergeIntoPaimonTable(
 
     def processMergeActions(actions: Seq[MergeAction]): Seq[Seq[Expression]] = {
       val columnExprs = actions.map {
-        case UpdateAction(_, assignments) =>
+        case u: UpdateAction =>
+          val assignments = u.assignments
           var exprs = assignments.map(_.value)
           if (writeRowTracking) {
             exprs ++= Seq(rowIdAttr, Literal(null))

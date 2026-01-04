@@ -106,8 +106,8 @@ trait PaimonMergeIntoBase
       dataEvolutionEnabled: Boolean): MergeAction = {
     action match {
       case d @ DeleteAction(_) => d
-      case u @ UpdateAction(_, assignments) =>
-        u.copy(assignments = alignAssignments(targetOutput, assignments))
+      case u: UpdateAction =>
+        u.copy(assignments = alignAssignments(targetOutput, u.assignments))
 
       case i @ InsertAction(_, assignments) =>
         i.copy(assignments = alignAssignments(targetOutput, assignments))
