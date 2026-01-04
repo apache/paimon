@@ -26,56 +26,8 @@ import org.apache.spark.sql.streaming.StreamTest
 
 import scala.collection.JavaConverters._
 
-/**
- * Tests for vector search push down to Paimon's global vector index.
- */
-class VectorSearchPushDownTest extends PaimonSparkTestBase with StreamTest {
-
-  test("cosine_similarity function works correctly") {
-    withTable("T") {
-      spark.sql("""
-                  |CREATE TABLE T (id INT, v ARRAY<FLOAT>)
-                  |TBLPROPERTIES (
-                  |  'bucket' = '-1',
-                  |  'row-tracking.enabled' = 'true',
-                  |  'data-evolution.enabled' = 'true')
-                  |""".stripMargin)
-
-      // Insert data with known vectors
-      spark.sql("""
-                  |INSERT INTO T VALUES
-                  |(1, array(1.0, 0.0, 0.0)),
-                  |(2, array(0.0, 1.0, 0.0)),
-                  |(3, array(0.0, 0.0, 1.0)),
-                  |(4, array(1.0, 1.0, 0.0)),
-                  |(5, array(1.0, 1.0, 1.0))
-                  |""".stripMargin)
-
-      // Test cosine_similarity function
-      val result = spark.sql("""
-                               |SELECT id, cosine_similarity(v, array(1.0, 0.0, 0.0)) as similarity
-                               |FROM T
-                               |ORDER BY similarity DESC
-                               |""".stripMargin).collect()
-
-      // id=1 should have highest similarity (1.0) since it matches exactly
-      assert(result(0).getInt(0) == 1)
-      assert(math.abs(result(0).getDouble(1) - 1.0) < 0.001)
-
-      // id=4 should have similarity ~0.707 (1/sqrt(2))
-      assert(result(1).getInt(0) == 4)
-      assert(math.abs(result(1).getDouble(1) - 0.707) < 0.01)
-
-      // id=5 should have similarity ~0.577 (1/sqrt(3))
-      assert(result(2).getInt(0) == 5)
-      assert(math.abs(result(2).getDouble(1) - 0.577) < 0.01)
-
-      // id=2 and id=3 should have similarity 0.0
-      assert(result(3).getDouble(1) < 0.001)
-      assert(result(4).getDouble(1) < 0.001)
-    }
-  }
-
+/** Tests for vector search push down to Paimon's global vector index. */
+class VectorSearchPushDownTest extends BaseVectorSearchPushDownTest {
   test("vector search pushdown with global index") {
     withTable("T") {
       spark.sql("""
@@ -96,19 +48,20 @@ class VectorSearchPushDownTest extends PaimonSparkTestBase with StreamTest {
 
       // Create vector index
       val output = spark
-        .sql(
-          "CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => 'lucene-vector-knn', options => 'vector.dim=3')")
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => 'lucene-vector-knn', options => 'vector.dim=3')")
         .collect()
         .head
       assert(output.getBoolean(0))
 
       // Test vector search with ORDER BY cosine_similarity DESC LIMIT
-      val result = spark.sql("""
-                               |SELECT id
-                               |FROM T
-                               |ORDER BY cosine_similarity(v, array(50.0, 51.0, 52.0)) DESC
-                               |LIMIT 5
-                               |""".stripMargin).collect()
+      val result = spark
+        .sql("""
+               |SELECT id
+               |FROM T
+               |ORDER BY sys.cosine_similarity(v, array(50.0, 51.0, 52.0)) DESC
+               |LIMIT 5
+               |""".stripMargin)
+        .collect()
 
       // The result should contain 5 rows
       assert(result.length == 5)
@@ -143,14 +96,12 @@ class VectorSearchPushDownTest extends PaimonSparkTestBase with StreamTest {
       val df = spark.sql("""
                            |SELECT id
                            |FROM T
-                           |ORDER BY cosine_similarity(v, array(50.0, 51.0, 52.0)) DESC
+                           |ORDER BY sys.cosine_similarity(v, array(50.0, 51.0, 52.0)) DESC
                            |LIMIT 5
                            |""".stripMargin)
 
       val optimizedPlan = df.queryExecution.optimizedPlan
-      val scanRelations = optimizedPlan.collect {
-        case r: DataSourceV2ScanRelation => r
-      }
+      val scanRelations = optimizedPlan.collect { case r: DataSourceV2ScanRelation => r }
 
       assert(scanRelations.nonEmpty, "Should have a DataSourceV2ScanRelation")
       val paimonScans = scanRelations.filter(_.scan.isInstanceOf[PaimonScan])
@@ -158,9 +109,7 @@ class VectorSearchPushDownTest extends PaimonSparkTestBase with StreamTest {
 
       val paimonScan = paimonScans.head.scan.asInstanceOf[PaimonScan]
       assert(paimonScan.pushedVectorSearch.isDefined, "Vector search should be pushed down")
-      assert(
-        paimonScan.pushedVectorSearch.get.fieldName() == "v",
-        "Field name should be 'v'")
+      assert(paimonScan.pushedVectorSearch.get.fieldName() == "v", "Field name should be 'v'")
       assert(paimonScan.pushedVectorSearch.get.limit() == 5, "Limit should be 5")
     }
   }
@@ -179,10 +128,11 @@ class VectorSearchPushDownTest extends PaimonSparkTestBase with StreamTest {
       // Insert rows with distinct vectors
       // Vector at id=i is (i, i, i) normalized
       val values = (1 to 100)
-        .map { i =>
-          val v = math.sqrt(3.0 * i * i)
-          val normalized = i.toFloat / v.toFloat
-          s"($i, array($normalized, $normalized, $normalized))"
+        .map {
+          i =>
+            val v = math.sqrt(3.0 * i * i)
+            val normalized = i.toFloat / v.toFloat
+            s"($i, array($normalized, $normalized, $normalized))"
         }
         .mkString(",")
       spark.sql(s"INSERT INTO T VALUES $values")
@@ -193,19 +143,23 @@ class VectorSearchPushDownTest extends PaimonSparkTestBase with StreamTest {
 
       // Query for top 10 similar to (1, 1, 1) normalized
       // Since all vectors point in the same direction (1,1,1), they should all have similarity ~1.0
-      val result = spark.sql("""
-                               |SELECT id, cosine_similarity(v, array(0.577, 0.577, 0.577)) as sim
-                               |FROM T
-                               |ORDER BY cosine_similarity(v, array(0.577, 0.577, 0.577)) DESC
-                               |LIMIT 10
-                               |""".stripMargin).collect()
+      val result = spark
+        .sql("""
+               |SELECT id, sys.cosine_similarity(v, array(0.577, 0.577, 0.577)) as sim
+               |FROM T
+               |ORDER BY sys.cosine_similarity(v, array(0.577, 0.577, 0.577)) DESC
+               |LIMIT 10
+               |""".stripMargin)
+        .collect()
 
       assert(result.length == 10)
       // All similarities should be close to 1.0
-      result.foreach { row =>
-        assert(row.getDouble(1) > 0.99, s"Similarity should be close to 1.0, got ${row.getDouble(1)}")
+      result.foreach {
+        row =>
+          assert(
+            row.getDouble(1) > 0.99,
+            s"Similarity should be close to 1.0, got ${row.getDouble(1)}")
       }
     }
   }
 }
-

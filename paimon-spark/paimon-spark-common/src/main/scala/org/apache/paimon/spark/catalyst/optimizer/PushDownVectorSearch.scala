@@ -45,43 +45,75 @@ object PushDownVectorSearch extends Rule[LogicalPlan] {
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.transformDown {
       // Pattern: GlobalLimit -> LocalLimit -> Sort -> Project -> DataSourceV2ScanRelation
-      case globalLimit @ GlobalLimit(
-            limitExpr,
-            LocalLimit(_, sort @ Sort(sortOrders, true, project @ Project(projectList, relation))))
-          if isPaimonScanRelation(relation) && canPushVectorSearch(
-            getPaimonScan(relation)) && isVectorSearchPattern(sortOrders) =>
-        val scanRelation = relation.asInstanceOf[DataSourceV2ScanRelation]
-        val scan = scanRelation.scan.asInstanceOf[PaimonScan]
-        val limit = extractLimit(limitExpr)
-        extractVectorSearchInfo(sortOrders, projectList, scanRelation) match {
-          case Some((fieldName, queryVector)) if limit.isDefined =>
-            val vectorSearch = new VectorSearch(queryVector, limit.get, fieldName)
-            val newScan = scan.copy(pushedVectorSearch = Some(vectorSearch))
-            val newRelation = copyRelationWithNewScan(scanRelation, newScan)
-            val newProject = project.copy(child = newRelation)
-            val newSort = sort.copy(child = newProject)
-            globalLimit.copy(child = LocalLimit(limitExpr, newSort))
-          case _ => globalLimit
-        }
+      case globalLimit @ GlobalLimit(limitExpr, LocalLimit(_, sort: Sort))
+          if isSortWithProjectAndPaimonScan(sort) =>
+        handleSortWithProject(globalLimit, limitExpr, sort)
 
       // Pattern: GlobalLimit -> LocalLimit -> Sort -> DataSourceV2ScanRelation (no project)
-      case globalLimit @ GlobalLimit(
-            limitExpr,
-            LocalLimit(_, sort @ Sort(sortOrders, true, relation)))
-          if isPaimonScanRelation(relation) && canPushVectorSearch(
-            getPaimonScan(relation)) && isVectorSearchPattern(sortOrders) =>
-        val scanRelation = relation.asInstanceOf[DataSourceV2ScanRelation]
-        val scan = scanRelation.scan.asInstanceOf[PaimonScan]
-        val limit = extractLimit(limitExpr)
-        extractVectorSearchInfoDirect(sortOrders, scanRelation) match {
-          case Some((fieldName, queryVector)) if limit.isDefined =>
-            val vectorSearch = new VectorSearch(queryVector, limit.get, fieldName)
-            val newScan = scan.copy(pushedVectorSearch = Some(vectorSearch))
-            val newRelation = copyRelationWithNewScan(scanRelation, newScan)
-            val newSort = sort.copy(child = newRelation)
-            globalLimit.copy(child = LocalLimit(limitExpr, newSort))
-          case _ => globalLimit
-        }
+      case globalLimit @ GlobalLimit(limitExpr, LocalLimit(_, sort: Sort))
+          if isSortWithPaimonScan(sort) =>
+        handleSortWithoutProject(globalLimit, limitExpr, sort)
+    }
+  }
+
+  private def isSortWithProjectAndPaimonScan(sort: Sort): Boolean = {
+    if (!sort.global) return false
+    sort.child match {
+      case Project(_, relation) =>
+        isPaimonScanRelation(relation) &&
+        canPushVectorSearch(getPaimonScan(relation)) &&
+        isVectorSearchPattern(sort.order)
+      case _ => false
+    }
+  }
+
+  private def isSortWithPaimonScan(sort: Sort): Boolean = {
+    if (!sort.global) return false
+    sort.child match {
+      case _: Project => false // handled by isSortWithProjectAndPaimonScan
+      case relation if isPaimonScanRelation(relation) =>
+        canPushVectorSearch(getPaimonScan(relation)) && isVectorSearchPattern(sort.order)
+      case _ => false
+    }
+  }
+
+  private def handleSortWithProject(
+      globalLimit: GlobalLimit,
+      limitExpr: Expression,
+      sort: Sort): LogicalPlan = {
+    val project = sort.child.asInstanceOf[Project]
+    val relation = project.child.asInstanceOf[DataSourceV2ScanRelation]
+    val scan = relation.scan.asInstanceOf[PaimonScan]
+    val limit = extractLimit(limitExpr)
+
+    extractVectorSearchInfo(sort.order, project.projectList, relation) match {
+      case Some((fieldName, queryVector)) if limit.isDefined =>
+        val vectorSearch = new VectorSearch(queryVector, limit.get, fieldName)
+        val newScan = scan.copy(pushedVectorSearch = Some(vectorSearch))
+        val newRelation = copyRelationWithNewScan(relation, newScan)
+        val newProject = project.copy(child = newRelation)
+        val newSort = sort.copy(child = newProject)
+        globalLimit.copy(child = LocalLimit(limitExpr, newSort))
+      case _ => globalLimit
+    }
+  }
+
+  private def handleSortWithoutProject(
+      globalLimit: GlobalLimit,
+      limitExpr: Expression,
+      sort: Sort): LogicalPlan = {
+    val relation = sort.child.asInstanceOf[DataSourceV2ScanRelation]
+    val scan = relation.scan.asInstanceOf[PaimonScan]
+    val limit = extractLimit(limitExpr)
+
+    extractVectorSearchInfoDirect(sort.order, relation) match {
+      case Some((fieldName, queryVector)) if limit.isDefined =>
+        val vectorSearch = new VectorSearch(queryVector, limit.get, fieldName)
+        val newScan = scan.copy(pushedVectorSearch = Some(vectorSearch))
+        val newRelation = copyRelationWithNewScan(relation, newScan)
+        val newSort = sort.copy(child = newRelation)
+        globalLimit.copy(child = LocalLimit(limitExpr, newSort))
+      case _ => globalLimit
     }
   }
 
