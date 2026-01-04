@@ -46,19 +46,18 @@ object PaimonFunctions {
   val MAX_PT: String = "max_pt"
   val PATH_TO_DESCRIPTOR: String = "path_to_descriptor"
   val DESCRIPTOR_TO_STRING: String = "descriptor_to_string"
+  val COSINE_SIMILARITY: String = "cosine_similarity"
 
-  private val FUNCTIONS = ImmutableMap.of(
-    PAIMON_BUCKET,
-    new BucketFunction(PAIMON_BUCKET, BucketFunctionType.DEFAULT),
-    MOD_BUCKET,
-    new BucketFunction(MOD_BUCKET, BucketFunctionType.MOD),
-    MAX_PT,
-    new MaxPtFunction,
-    PATH_TO_DESCRIPTOR,
-    new PathToDescriptorUnbound,
-    DESCRIPTOR_TO_STRING,
-    new DescriptorToStringUnbound
-  )
+  private val FUNCTIONS: ImmutableMap[String, UnboundFunction] = {
+    val builder = ImmutableMap.builder[String, UnboundFunction]()
+    builder.put(PAIMON_BUCKET, new BucketFunction(PAIMON_BUCKET, BucketFunctionType.DEFAULT))
+    builder.put(MOD_BUCKET, new BucketFunction(MOD_BUCKET, BucketFunctionType.MOD))
+    builder.put(MAX_PT, new MaxPtFunction)
+    builder.put(PATH_TO_DESCRIPTOR, new PathToDescriptorUnbound)
+    builder.put(DESCRIPTOR_TO_STRING, new DescriptorToStringUnbound)
+    builder.put(COSINE_SIMILARITY, new CosineSimilarityFunction)
+    builder.build()
+  }
 
   /** The bucket function type to the function name mapping */
   private val TYPE_FUNC_MAPPING = ImmutableMap.of(
@@ -194,4 +193,109 @@ class MaxPtFunction extends UnboundFunction {
   override def description: String = name
 
   override def name: String = MAX_PT
+}
+
+/**
+ * Computes cosine similarity between two vectors. This function is designed to work with Paimon's
+ * global vector index for efficient similarity search.
+ *
+ * Usage: cosine_similarity(embedding_col, array(0.1, 0.2, ...))
+ */
+class CosineSimilarityFunction extends UnboundFunction {
+  import PaimonFunctions.COSINE_SIMILARITY
+  import org.apache.spark.sql.types.{ArrayType => SparkArrayType, DoubleType => SparkDoubleType, FloatType => SparkFloatType}
+
+  override def bind(inputType: StructType): BoundFunction = {
+    if (inputType.fields.length != 2)
+      throw new UnsupportedOperationException(
+        s"Wrong number of inputs, expected 2 but got ${inputType.fields.length}")
+
+    val field0 = inputType.fields(0)
+    val field1 = inputType.fields(1)
+
+    // Both arguments should be arrays of float
+    val isValidType0 = field0.dataType match {
+      case SparkArrayType(SparkFloatType, _) => true
+      case SparkArrayType(SparkDoubleType, _) => true
+      case _ => false
+    }
+    val isValidType1 = field1.dataType match {
+      case SparkArrayType(SparkFloatType, _) => true
+      case SparkArrayType(SparkDoubleType, _) => true
+      case _ => false
+    }
+
+    if (!isValidType0 || !isValidType1) {
+      throw new UnsupportedOperationException(
+        s"Both arguments must be ARRAY<FLOAT> or ARRAY<DOUBLE>, got ${field0.dataType} and ${field1.dataType}")
+    }
+
+    new ScalarFunction[java.lang.Double]() {
+      override def inputTypes: Array[DataType] = Array[DataType](field0.dataType, field1.dataType)
+
+      override def resultType: DataType = SparkDoubleType
+
+      override def produceResult(input: InternalRow): java.lang.Double = {
+        val arr0 = input.getArray(0)
+        val arr1 = input.getArray(1)
+
+        if (arr0 == null || arr1 == null) {
+          return null
+        }
+
+        val len0 = arr0.numElements()
+        val len1 = arr1.numElements()
+
+        if (len0 != len1) {
+          throw new IllegalArgumentException(
+            s"Vectors must have the same dimension, got $len0 and $len1")
+        }
+
+        if (len0 == 0) {
+          return 0.0
+        }
+
+        var dotProduct = 0.0
+        var norm0 = 0.0
+        var norm1 = 0.0
+
+        val isFloat0 = field0.dataType match {
+          case SparkArrayType(SparkFloatType, _) => true
+          case _ => false
+        }
+        val isFloat1 = field1.dataType match {
+          case SparkArrayType(SparkFloatType, _) => true
+          case _ => false
+        }
+
+        var i = 0
+        while (i < len0) {
+          val v0 = if (isFloat0) arr0.getFloat(i).toDouble else arr0.getDouble(i)
+          val v1 = if (isFloat1) arr1.getFloat(i).toDouble else arr1.getDouble(i)
+          dotProduct += v0 * v1
+          norm0 += v0 * v0
+          norm1 += v1 * v1
+          i += 1
+        }
+
+        val denominator = math.sqrt(norm0) * math.sqrt(norm1)
+        if (denominator == 0.0) {
+          0.0
+        } else {
+          dotProduct / denominator
+        }
+      }
+
+      override def name: String = COSINE_SIMILARITY
+
+      override def canonicalName: String =
+        s"paimon.$COSINE_SIMILARITY(${field0.dataType.catalogString}, ${field1.dataType.catalogString})"
+
+      override def isResultNullable: Boolean = true
+    }
+  }
+
+  override def description: String = name
+
+  override def name: String = COSINE_SIMILARITY
 }
