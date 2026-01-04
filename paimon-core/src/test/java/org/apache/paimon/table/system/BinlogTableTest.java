@@ -21,6 +21,7 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
@@ -45,36 +46,37 @@ import java.util.List;
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Unit tests for {@link AuditLogTable}. */
-public class AuditLogTableTest extends TableTestBase {
+/** Unit tests for {@link BinlogTable}. */
+public class BinlogTableTest extends TableTestBase {
 
     @Test
-    public void testReadAuditLogFromLatest() throws Exception {
-        AuditLogTable auditLogTable = createAuditLogTable("audit_table", false);
-        assertThat(auditLogTable.rowType().getFieldNames())
+    public void testReadBinlogFromLatest() throws Exception {
+        BinlogTable binlogTable = createBinlogTable("binlog_table", false);
+        assertThat(binlogTable.rowType().getFieldNames())
                 .containsExactly("rowkind", "pk", "pt", "col1");
+
+        List<InternalRow> result = read(binlogTable);
         List<InternalRow> expectRow = getExpectedResult();
-        List<InternalRow> result = read(auditLogTable);
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectRow);
     }
 
     @Test
     public void testReadSequenceNumberWithTableOption() throws Exception {
-        AuditLogTable auditLogTable = createAuditLogTable("audit_table_with_seq", true);
-        assertThat(auditLogTable.rowType().getFieldNames())
+        BinlogTable binlogTable = createBinlogTable("binlog_table_with_seq", true);
+        assertThat(binlogTable.rowType().getFieldNames())
                 .containsExactly("rowkind", "_SEQUENCE_NUMBER", "pk", "pt", "col1");
 
-        List<InternalRow> result = read(auditLogTable);
+        List<InternalRow> result = read(binlogTable);
         List<InternalRow> expectRow = getExpectedResultWithSequenceNumber();
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectRow);
     }
 
     @Test
     public void testReadSequenceNumberWithAlterTable() throws Exception {
-        String tableName = "audit_table_alter_seq";
+        String tableName = "binlog_table_alter_seq";
         // Create table without sequence-number option
-        AuditLogTable auditLogTable = createAuditLogTable(tableName, false);
-        assertThat(auditLogTable.rowType().getFieldNames())
+        BinlogTable binlogTable = createBinlogTable(tableName, false);
+        assertThat(binlogTable.rowType().getFieldNames())
                 .containsExactly("rowkind", "pk", "pt", "col1");
 
         // Add sequence-number option via alterTable
@@ -84,21 +86,21 @@ public class AuditLogTableTest extends TableTestBase {
                         CoreOptions.CHANGELOG_READ_SEQUENCE_NUMBER_ENABLED.key(), "true"),
                 false);
 
-        // Re-fetch the audit_log table to get updated schema
-        Identifier auditLogTableId =
-                identifier(tableName + SYSTEM_TABLE_SPLITTER + AuditLogTable.AUDIT_LOG);
-        AuditLogTable updatedAuditLogTable = (AuditLogTable) catalog.getTable(auditLogTableId);
+        // Re-fetch the binlog table to get updated schema
+        Identifier binlogTableId =
+                identifier(tableName + SYSTEM_TABLE_SPLITTER + BinlogTable.BINLOG);
+        BinlogTable updatedBinlogTable = (BinlogTable) catalog.getTable(binlogTableId);
 
         // Verify schema now includes _SEQUENCE_NUMBER
-        assertThat(updatedAuditLogTable.rowType().getFieldNames())
+        assertThat(updatedBinlogTable.rowType().getFieldNames())
                 .containsExactly("rowkind", "_SEQUENCE_NUMBER", "pk", "pt", "col1");
 
-        List<InternalRow> result = read(updatedAuditLogTable);
+        List<InternalRow> result = read(updatedBinlogTable);
         List<InternalRow> expectRow = getExpectedResultWithSequenceNumber();
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectRow);
     }
 
-    private AuditLogTable createAuditLogTable(String tableName, boolean enableSequenceNumber)
+    private BinlogTable createBinlogTable(String tableName, boolean enableSequenceNumber)
             throws Exception {
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, tableName));
         FileIO fileIO = LocalFileIO.create();
@@ -124,9 +126,9 @@ public class AuditLogTableTest extends TableTestBase {
 
         writeTestData(table);
 
-        Identifier auditLogTableId =
-                identifier(tableName + SYSTEM_TABLE_SPLITTER + AuditLogTable.AUDIT_LOG);
-        return (AuditLogTable) catalog.getTable(auditLogTableId);
+        Identifier binlogTableId =
+                identifier(tableName + SYSTEM_TABLE_SPLITTER + BinlogTable.BINLOG);
+        return (BinlogTable) catalog.getTable(binlogTableId);
     }
 
     private void writeTestData(FileStoreTable table) throws Exception {
@@ -141,24 +143,49 @@ public class AuditLogTableTest extends TableTestBase {
     private List<InternalRow> getExpectedResult() {
         List<InternalRow> expectedRow = new ArrayList<>();
         expectedRow.add(
-                GenericRow.of(BinaryString.fromString(RowKind.DELETE.shortString()), 1, 1, 1));
+                GenericRow.of(
+                        BinaryString.fromString(RowKind.DELETE.shortString()),
+                        new GenericArray(new Object[] {1}),
+                        new GenericArray(new Object[] {1}),
+                        new GenericArray(new Object[] {1})));
         expectedRow.add(
                 GenericRow.of(
-                        BinaryString.fromString(RowKind.UPDATE_AFTER.shortString()), 1, 2, 6));
+                        BinaryString.fromString(RowKind.UPDATE_AFTER.shortString()),
+                        new GenericArray(new Object[] {1}),
+                        new GenericArray(new Object[] {2}),
+                        new GenericArray(new Object[] {6})));
         expectedRow.add(
-                GenericRow.of(BinaryString.fromString(RowKind.INSERT.shortString()), 2, 3, 1));
+                GenericRow.of(
+                        BinaryString.fromString(RowKind.INSERT.shortString()),
+                        new GenericArray(new Object[] {2}),
+                        new GenericArray(new Object[] {3}),
+                        new GenericArray(new Object[] {1})));
         return expectedRow;
     }
 
     private List<InternalRow> getExpectedResultWithSequenceNumber() {
         List<InternalRow> expectedRow = new ArrayList<>();
         expectedRow.add(
-                GenericRow.of(BinaryString.fromString(RowKind.DELETE.shortString()), 1L, 1, 1, 1));
+                GenericRow.of(
+                        BinaryString.fromString(RowKind.DELETE.shortString()),
+                        1L,
+                        new GenericArray(new Object[] {1}),
+                        new GenericArray(new Object[] {1}),
+                        new GenericArray(new Object[] {1})));
         expectedRow.add(
                 GenericRow.of(
-                        BinaryString.fromString(RowKind.UPDATE_AFTER.shortString()), 2L, 1, 2, 6));
+                        BinaryString.fromString(RowKind.UPDATE_AFTER.shortString()),
+                        2L,
+                        new GenericArray(new Object[] {1}),
+                        new GenericArray(new Object[] {2}),
+                        new GenericArray(new Object[] {6})));
         expectedRow.add(
-                GenericRow.of(BinaryString.fromString(RowKind.INSERT.shortString()), 0L, 2, 3, 1));
+                GenericRow.of(
+                        BinaryString.fromString(RowKind.INSERT.shortString()),
+                        0L,
+                        new GenericArray(new Object[] {2}),
+                        new GenericArray(new Object[] {3}),
+                        new GenericArray(new Object[] {1})));
         return expectedRow;
     }
 }
