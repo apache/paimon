@@ -631,7 +631,7 @@ public interface Catalog extends AutoCloseable {
      *   <li>{@link #listBranches(Identifier)}.
      *   <li>{@link #getTag(Identifier, String)}.
      *   <li>{@link #createTag(Identifier, String, Long, String, boolean)}.
-     *   <li>{@link #listTagsPaged(Identifier, Integer, String)}.
+     *   <li>{@link #listTagsPaged(Identifier, Integer, String, String)}.
      *   <li>{@link #deleteTag(Identifier, String)}.
      * </ul>
      */
