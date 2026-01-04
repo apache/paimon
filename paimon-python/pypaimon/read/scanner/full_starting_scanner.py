@@ -580,7 +580,7 @@ class FullStartingScanner(StartingScanner):
             one_level = len(levels) == 1
 
             use_optimized_path = raw_convertible and (
-                    self.deletion_vectors_enabled or merge_engine_first_row or one_level)
+                self.deletion_vectors_enabled or merge_engine_first_row or one_level)
             if use_optimized_path:
                 packed_files: List[List[DataFileMeta]] = self._pack_for_ordered(
                     data_files, single_weight_func, self.target_split_size
