@@ -132,7 +132,6 @@ class TableRead:
         self,
         splits: List[Split],
         *,
-        auto_adjust_ray_block_size: bool = True,
         ray_remote_args: Optional[Dict[str, Any]] = None,
         concurrency: Optional[int] = None,
         override_num_blocks: Optional[int] = None,
@@ -141,9 +140,6 @@ class TableRead:
         """Convert Paimon table data to Ray Dataset.
         Args:
             splits: List of splits to read from the Paimon table.
-            auto_adjust_ray_block_size: If True (default), dynamically adjust
-                Ray's ``target_max_block_size`` based on split sizes to avoid unnecessary
-                splitBlock operations. If False, use the current DataContext setting.
             ray_remote_args: Optional kwargs passed to :func:`ray.remote` in read tasks.
                 For example, ``{"num_cpus": 2, "max_retries": 3}``.
             concurrency: Optional max number of Ray tasks to run concurrently.
@@ -157,9 +153,6 @@ class TableRead:
         for details.
         """
         import ray
-        import logging
-
-        logger = logging.getLogger(__name__)
 
         if not splits:
             schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
@@ -171,30 +164,6 @@ class TableRead:
 
         if override_num_blocks is not None and override_num_blocks < 1:
             raise ValueError(f"override_num_blocks must be at least 1, got {override_num_blocks}")
-
-        from ray.data import DataContext
-
-        ctx = DataContext.get_current()
-        current_size = ctx.target_max_block_size
-
-        if auto_adjust_ray_block_size:
-            max_split_size = max(
-                (split.file_size for split in splits
-                 if hasattr(split, 'file_size') and split.file_size > 0),
-                default=0
-            )
-
-            if max_split_size > current_size:
-                new_size = ((max_split_size + 1024 * 1024 - 1) // (1024 * 1024)) * 1024 * 1024
-                new_size = min(new_size, 512 * 1024 * 1024)
-
-                logger.info(
-                    f"Auto-adjusting target_max_block_size from "
-                    f"{current_size / (1024*1024):.1f}MB to {new_size / (1024*1024):.1f}MB "
-                    f"to accommodate split size {max_split_size / (1024*1024):.1f}MB"
-                )
-
-                ctx.target_max_block_size = new_size
 
         from pypaimon.read.ray_datasource import PaimonDatasource
         datasource = PaimonDatasource(self, splits)

@@ -429,7 +429,7 @@ print(ray_dataset.to_pandas())
 The `to_ray()` method supports Ray Data API parameters for distributed processing:
 
 ```python
-# Basic usage (auto-adjusts block size based on split sizes)
+# Basic usage
 ray_dataset = table_read.to_ray(splits)
 
 # Specify number of output blocks
@@ -442,9 +442,6 @@ ray_dataset = table_read.to_ray(
     ray_remote_args={"num_cpus": 2, "max_retries": 3}
 )
 
-# Disable automatic Ray block size adjustment
-ray_dataset = table_read.to_ray(splits, auto_adjust_ray_block_size=False)
-
 # Use Ray Data operations
 mapped_dataset = ray_dataset.map(lambda row: {'value': row['value'] * 2})
 filtered_dataset = ray_dataset.filter(lambda row: row['score'] > 80)
@@ -452,9 +449,6 @@ df = ray_dataset.to_pandas()
 ```
 
 **Parameters:**
-- `auto_adjust_ray_block_size`: If True (default), dynamically adjust Ray's ``target_max_block_size``
-  based on split sizes to avoid unnecessary splitBlock operations. If False, use the
-  current DataContext setting.
 - `override_num_blocks`: Optional override for the number of output blocks. By default,
   Ray automatically determines the optimal number.
 - `ray_remote_args`: Optional kwargs passed to `ray.remote()` in read tasks
@@ -466,17 +460,15 @@ df = ray_dataset.to_pandas()
 
 **Ray Block Size Configuration:**
 
-By default, `to_ray()` automatically adjusts ``target_max_block_size`` based on split sizes.
-For most use cases, you don't need to configure this manually.
-
-If you need to set a specific block size, configure it before calling `to_ray()`:
+If you need to configure Ray's block size (e.g., when Paimon splits exceed Ray's default
+128MB block size), set it before calling `to_ray()`:
 
 ```python
 from ray.data import DataContext
 
 ctx = DataContext.get_current()
-ctx.target_max_block_size = 256 * 1024 * 1024  # 256MB
-ray_dataset = table_read.to_ray(splits, auto_adjust_block_size=False)
+ctx.target_max_block_size = 256 * 1024 * 1024  # 256MB (default is 128MB)
+ray_dataset = table_read.to_ray(splits)
 ```
 
 See [Ray Data API Documentation](https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html) for more details.
