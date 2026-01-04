@@ -1,9 +1,9 @@
 ---
-title: "Flink CDC Paimon Pipeline Connector"
+title: "Flink CDC"
 weight: 10
 type: docs
 aliases:
-  - /cdc-ingestion/flink-cdc-paimon-pipeline-connector.html
+  - /cdc-ingestion/flink-cdc.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,7 +24,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Flink CDC Paimon Pipeline Connector
+# Flink CDC
 
 Flink CDC is a streaming data integration tool for the Flink engine. It allows users to describe their ETL pipeline 
 logic via YAML elegantly and help users automatically generating customized Flink operators and submitting job.

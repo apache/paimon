@@ -37,10 +37,7 @@ Download `CDC Bundled Jar` and put them under <FLINK_HOME>/lib/.
 | 3.5.0   | <li> <a href="https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-mysql-cdc/3.5.0/flink-sql-connector-mysql-cdc-3.5.0.jar">flink-sql-connector-mysql-cdc-3.5.0.jar</a> <li> <a href="https://repo1.maven.org/maven2/mysql/mysql-connector-java/8.0.27/mysql-connector-java-8.0.27.jar">mysql-connector-java-8.0.27.jar</a> |
 
 {{< hint danger >}}
-Currently, only CDC 3.5.0 or above is supported.
-
-You can download the `flink-sql-connector-mysql-cdc` jar package by clicking [here](https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-mysql-cdc/).
-
+Only CDC 3.5.0 or above is supported.
 {{< /hint >}}
 
 ## Synchronizing Tables
