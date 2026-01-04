@@ -138,6 +138,51 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
     }
 
+    @Override
+    public FileRecordReader<InternalRow> createReader(
+            FormatReaderFactory.Context context, long offset, long length) throws IOException {
+        // Use withRange to limit reading to the specified byte range
+        // This enables reading only specific row groups within the file
+        ParquetReadOptions.Builder builder =
+                ParquetReadOptions.builder(new PlainParquetConfiguration())
+                        .withRange(offset, offset + length);
+        setReadOptions(builder);
+
+        ParquetFileReader reader =
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(
+                                context.fileIO(), context.filePath(), context.fileSize()),
+                        builder.build(),
+                        context.selection());
+        MessageType fileSchema = reader.getFileMetaData().getSchema();
+        MessageType requestedSchema = clipParquetSchema(fileSchema);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Create reader of the parquet file {} with offset {} and length {}, "
+                            + "the fileSchema is {}, the requestedSchema is {}.",
+                    context.filePath(),
+                    offset,
+                    length,
+                    fileSchema,
+                    requestedSchema);
+        }
+
+        reader.setRequestedSchema(requestedSchema);
+        RowType[] shreddingSchemas =
+                VariantUtils.extractShreddingSchemasFromParquetSchema(readFields, fileSchema);
+        List<List<VariantAccessInfo.VariantField>> variantFields =
+                VariantUtils.buildVariantFields(readFields, variantAccess);
+        WritableColumnVector[] writableVectors = createWritableVectors(variantFields);
+
+        MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
+        List<ParquetField> fields =
+                buildFieldsList(readFields, columnIO, shreddingSchemas, variantFields);
+
+        return new VectorizedParquetRecordReader(
+                context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
+    }
+
     private void setReadOptions(ParquetReadOptions.Builder builder) {
         builder.useSignedStringMinMax(
                 conf.getBoolean("parquet.strings.signed-min-max.enabled", false));

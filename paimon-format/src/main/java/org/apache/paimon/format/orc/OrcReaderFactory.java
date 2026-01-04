@@ -97,6 +97,12 @@ public class OrcReaderFactory implements FormatReaderFactory {
     @Override
     public OrcVectorizedReader createReader(FormatReaderFactory.Context context)
             throws IOException {
+        return createReader(context, 0, context.fileSize());
+    }
+
+    @Override
+    public OrcVectorizedReader createReader(
+            FormatReaderFactory.Context context, long offset, long length) throws IOException {
         int poolSize =
                 context instanceof OrcFormatReaderContext
                         ? ((OrcFormatReaderContext) context).poolSize()
@@ -110,8 +116,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
                         conjunctPredicates,
                         context.fileIO(),
                         context.filePath(),
-                        0,
-                        context.fileSize(),
+                        offset,
+                        length,
                         context.selection(),
                         deletionVectorsEnabled);
         return new OrcVectorizedReader(orcReader, poolOfBatches);
