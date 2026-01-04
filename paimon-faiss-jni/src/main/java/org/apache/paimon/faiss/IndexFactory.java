@@ -21,36 +21,37 @@ package org.apache.paimon.faiss;
 /**
  * Factory for creating Faiss indexes.
  *
- * <p>This class provides static methods for creating various types of Faiss indexes
- * using Faiss's index factory syntax.
+ * <p>This class provides static methods for creating various types of Faiss indexes using Faiss's
+ * index factory syntax.
  *
- * <p><b>Index Description Syntax</b></p>
+ * <p><b>Index Description Syntax</b>
  *
  * <p>The index description string follows Faiss's index factory format:
  *
  * <ul>
- *   <li>{@code "Flat"} - Flat (brute-force) index, exact search</li>
- *   <li>{@code "IVF100,Flat"} - IVF index with 100 clusters and flat quantizer</li>
- *   <li>{@code "IVF100,PQ8"} - IVF index with PQ compression (8 bytes per vector)</li>
- *   <li>{@code "HNSW32"} - HNSW graph index with 32 neighbors per node</li>
- *   <li>{@code "HNSW32,Flat"} - HNSW with flat storage</li>
- *   <li>{@code "PQ16"} - Product quantization with 16 bytes per vector</li>
- *   <li>{@code "OPQ16,PQ16"} - Optimized PQ with rotation</li>
- *   <li>{@code "IVF100,PQ16x4"} - IVF with 4-bit PQ</li>
- *   <li>{@code "IDMap,Flat"} - Flat index with ID mapping support</li>
- *   <li>{@code "IDMap2,Flat"} - Flat index with ID mapping and removal support</li>
+ *   <li>{@code "Flat"} - Flat (brute-force) index, exact search
+ *   <li>{@code "IVF100,Flat"} - IVF index with 100 clusters and flat quantizer
+ *   <li>{@code "IVF100,PQ8"} - IVF index with PQ compression (8 bytes per vector)
+ *   <li>{@code "HNSW32"} - HNSW graph index with 32 neighbors per node
+ *   <li>{@code "HNSW32,Flat"} - HNSW with flat storage
+ *   <li>{@code "PQ16"} - Product quantization with 16 bytes per vector
+ *   <li>{@code "OPQ16,PQ16"} - Optimized PQ with rotation
+ *   <li>{@code "IVF100,PQ16x4"} - IVF with 4-bit PQ
+ *   <li>{@code "IDMap,Flat"} - Flat index with ID mapping support
+ *   <li>{@code "IDMap2,Flat"} - Flat index with ID mapping and removal support
  * </ul>
  *
- * <p><b>Preprocessing Options</b></p>
+ * <p><b>Preprocessing Options</b>
  *
  * <p>Preprocessing can be added before the main index:
+ *
  * <ul>
- *   <li>{@code "PCA64,Flat"} - PCA dimensionality reduction to 64 dims</li>
- *   <li>{@code "L2norm,Flat"} - L2 normalization before indexing</li>
- *   <li>{@code "ITQ64,Flat"} - ITQ rotation to 64 dims</li>
+ *   <li>{@code "PCA64,Flat"} - PCA dimensionality reduction to 64 dims
+ *   <li>{@code "L2norm,Flat"} - L2 normalization before indexing
+ *   <li>{@code "ITQ64,Flat"} - ITQ rotation to 64 dims
  * </ul>
  *
- * <p><b>Example Usage</b></p>
+ * <p><b>Example Usage</b>
  *
  * <pre>{@code
  * // Create a flat index for exact search
@@ -113,8 +114,8 @@ public final class IndexFactory {
     /**
      * Create a flat (brute-force) index.
      *
-     * <p>Flat indexes provide exact search results but have O(n) search complexity.
-     * Suitable for small datasets (up to ~100K vectors).
+     * <p>Flat indexes provide exact search results but have O(n) search complexity. Suitable for
+     * small datasets (up to ~100K vectors).
      *
      * @param dimension the dimension of the vectors
      * @param metricType the metric type
@@ -150,8 +151,8 @@ public final class IndexFactory {
     /**
      * Create an IVF (Inverted File) index.
      *
-     * <p>IVF indexes partition the vector space into clusters for faster search.
-     * They require training before use.
+     * <p>IVF indexes partition the vector space into clusters for faster search. They require
+     * training before use.
      *
      * @param dimension the dimension of the vectors
      * @param nlist the number of clusters (typically sqrt(n) to 4*sqrt(n))
@@ -184,8 +185,7 @@ public final class IndexFactory {
     /**
      * Create an HNSW (Hierarchical Navigable Small World) index.
      *
-     * <p>HNSW provides excellent search performance with good recall.
-     * It does not require training.
+     * <p>HNSW provides excellent search performance with good recall. It does not require training.
      *
      * @param dimension the dimension of the vectors
      * @param m the number of neighbors in the graph (typically 16-64)
@@ -211,8 +211,8 @@ public final class IndexFactory {
     /**
      * Create a product quantization index.
      *
-     * <p>PQ indexes provide significant memory savings at the cost of some accuracy.
-     * They require training.
+     * <p>PQ indexes provide significant memory savings at the cost of some accuracy. They require
+     * training.
      *
      * @param dimension the dimension of the vectors
      * @param m the number of sub-vectors (dimension must be divisible by m)
@@ -244,4 +244,3 @@ public final class IndexFactory {
         return create(dimension, "SQ" + bits, metricType);
     }
 }
-

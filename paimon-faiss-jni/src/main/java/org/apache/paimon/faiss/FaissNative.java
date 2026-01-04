@@ -21,11 +21,11 @@ package org.apache.paimon.faiss;
 /**
  * Native method declarations for Faiss JNI.
  *
- * <p>This class contains all the native method declarations that are implemented
- * in the JNI C++ layer. These methods directly map to Faiss C++ API calls.
+ * <p>This class contains all the native method declarations that are implemented in the JNI C++
+ * layer. These methods directly map to Faiss C++ API calls.
  *
- * <p>Users should not call these methods directly. Instead, use the high-level
- * Java API classes like {@link Index} and {@link IndexFactory}.
+ * <p>Users should not call these methods directly. Instead, use the high-level Java API classes
+ * like {@link Index} and {@link IndexFactory}.
  */
 final class FaissNative {
 
@@ -304,4 +304,3 @@ final class FaissNative {
      */
     static native int getNumThreads();
 }
-

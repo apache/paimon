@@ -21,10 +21,11 @@ package org.apache.paimon.faiss;
 /**
  * Global Faiss configuration and utilities.
  *
- * <p>This class provides methods for configuring Faiss globally, such as
- * setting the number of threads for parallel operations.
+ * <p>This class provides methods for configuring Faiss globally, such as setting the number of
+ * threads for parallel operations.
  *
  * <p>Example usage:
+ *
  * <pre>{@code
  * // Set the number of threads for Faiss operations
  * Faiss.setNumThreads(4);
@@ -59,8 +60,8 @@ public final class Faiss {
     /**
      * Set the number of threads for parallel operations.
      *
-     * <p>This affects operations like index training, adding vectors,
-     * and searching. Set to 1 to disable parallelism.
+     * <p>This affects operations like index training, adding vectors, and searching. Set to 1 to
+     * disable parallelism.
      *
      * @param numThreads the number of threads (must be positive)
      */
@@ -83,9 +84,8 @@ public final class Faiss {
     /**
      * Ensure the native library is loaded.
      *
-     * <p>This method is called automatically when any Faiss class is used.
-     * It can be called explicitly to load the library early and catch
-     * any loading errors.
+     * <p>This method is called automatically when any Faiss class is used. It can be called
+     * explicitly to load the library early and catch any loading errors.
      *
      * @throws FaissException if the native library cannot be loaded
      */
@@ -102,4 +102,3 @@ public final class Faiss {
         return NativeLibraryLoader.isLoaded();
     }
 }
-

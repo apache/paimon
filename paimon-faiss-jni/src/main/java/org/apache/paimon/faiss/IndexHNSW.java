@@ -21,19 +21,20 @@ package org.apache.paimon.faiss;
 /**
  * Utility class for HNSW (Hierarchical Navigable Small World) index operations.
  *
- * <p>HNSW indexes build a graph structure for fast approximate nearest neighbor search.
- * The key parameters are:
+ * <p>HNSW indexes build a graph structure for fast approximate nearest neighbor search. The key
+ * parameters are:
  *
  * <ul>
- *   <li>{@code M} - The number of neighbors in the graph. Higher values increase
- *       memory usage and build time but improve search accuracy.</li>
- *   <li>{@code efConstruction} - The size of the dynamic candidate list during construction.
- *       Higher values increase build time but can improve the graph quality.</li>
- *   <li>{@code efSearch} - The size of the dynamic candidate list during search.
- *       Higher values increase search accuracy at the cost of speed.</li>
+ *   <li>{@code M} - The number of neighbors in the graph. Higher values increase memory usage and
+ *       build time but improve search accuracy.
+ *   <li>{@code efConstruction} - The size of the dynamic candidate list during construction. Higher
+ *       values increase build time but can improve the graph quality.
+ *   <li>{@code efSearch} - The size of the dynamic candidate list during search. Higher values
+ *       increase search accuracy at the cost of speed.
  * </ul>
  *
  * <p>Example usage:
+ *
  * <pre>{@code
  * Index index = IndexFactory.createHNSW(128, 32, MetricType.L2);
  * index.add(vectors);
@@ -53,8 +54,8 @@ public final class IndexHNSW {
     /**
      * Get the efSearch parameter.
      *
-     * <p>This controls the size of the dynamic candidate list during search.
-     * Higher values give more accurate results but slower search.
+     * <p>This controls the size of the dynamic candidate list during search. Higher values give
+     * more accurate results but slower search.
      *
      * @param index the HNSW index
      * @return the current efSearch value
@@ -67,9 +68,8 @@ public final class IndexHNSW {
     /**
      * Set the efSearch parameter.
      *
-     * <p>This should be at least k (the number of neighbors requested in search).
-     * Typical values range from 16 to 256. Higher values give more accurate
-     * results but slower search.
+     * <p>This should be at least k (the number of neighbors requested in search). Typical values
+     * range from 16 to 256. Higher values give more accurate results but slower search.
      *
      * @param index the HNSW index
      * @param efSearch the efSearch value
@@ -85,8 +85,8 @@ public final class IndexHNSW {
     /**
      * Get the efConstruction parameter.
      *
-     * <p>This was the size of the dynamic candidate list during index construction.
-     * It cannot be changed after the index is built.
+     * <p>This was the size of the dynamic candidate list during index construction. It cannot be
+     * changed after the index is built.
      *
      * @param index the HNSW index
      * @return the efConstruction value
@@ -96,4 +96,3 @@ public final class IndexHNSW {
         return FaissNative.hnswGetEfConstruction(index.getNativeHandle());
     }
 }
-

@@ -25,13 +25,17 @@ import java.io.File;
 import java.nio.file.Path;
 import java.util.Random;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for the Faiss Index class.
  *
- * <p>Note: These tests require the native library to be built and available.
- * They will be skipped if the native library is not found.
+ * <p>Note: These tests require the native library to be built and available. They will be skipped
+ * if the native library is not found.
  */
 class IndexTest {
 
@@ -63,8 +67,7 @@ class IndexTest {
 
             // Verify labels are in valid range
             for (long label : result.getLabels()) {
-                assertTrue(label >= 0 && label < NUM_VECTORS,
-                        "Label " + label + " out of range");
+                assertTrue(label >= 0 && label < NUM_VECTORS, "Label " + label + " out of range");
             }
 
             // Verify distances are non-negative for L2
@@ -135,7 +138,8 @@ class IndexTest {
             // For inner product, higher is better, so first result should have highest score
             float[] distances = result.getDistancesForQuery(0);
             for (int i = 1; i < K; i++) {
-                assertTrue(distances[i - 1] >= distances[i],
+                assertTrue(
+                        distances[i - 1] >= distances[i],
                         "Distances should be sorted in descending order for inner product");
             }
         }
@@ -201,12 +205,7 @@ class IndexTest {
     @Test
     void testIndexFactoryDescriptions() {
         // Test various index factory strings
-        String[] descriptions = {
-                "Flat",
-                "IDMap,Flat",
-                "HNSW32",
-                "HNSW32,Flat"
-        };
+        String[] descriptions = {"Flat", "IDMap,Flat", "HNSW32", "HNSW32,Flat"};
 
         for (String desc : descriptions) {
             try (Index index = IndexFactory.create(DIMENSION, desc, MetricType.L2)) {
@@ -241,33 +240,43 @@ class IndexTest {
     @Test
     void testErrorHandling() {
         // Test invalid dimension
-        assertThrows(IllegalArgumentException.class, () -> {
-            IndexFactory.create(0, "Flat", MetricType.L2);
-        });
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> {
+                    IndexFactory.create(0, "Flat", MetricType.L2);
+                });
 
-        assertThrows(IllegalArgumentException.class, () -> {
-            IndexFactory.create(-1, "Flat", MetricType.L2);
-        });
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> {
+                    IndexFactory.create(-1, "Flat", MetricType.L2);
+                });
 
         // Test null description
-        assertThrows(IllegalArgumentException.class, () -> {
-            IndexFactory.create(DIMENSION, null, MetricType.L2);
-        });
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> {
+                    IndexFactory.create(DIMENSION, null, MetricType.L2);
+                });
 
         // Test vector dimension mismatch
         try (Index index = IndexFactory.createFlat(DIMENSION)) {
             float[] wrongDimVectors = new float[10]; // Wrong size
-            assertThrows(IllegalArgumentException.class, () -> {
-                index.addSingle(wrongDimVectors);
-            });
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> {
+                        index.addSingle(wrongDimVectors);
+                    });
         }
 
         // Test closed index
         Index closedIndex = IndexFactory.createFlat(DIMENSION);
         closedIndex.close();
-        assertThrows(IllegalStateException.class, () -> {
-            closedIndex.getCount();
-        });
+        assertThrows(
+                IllegalStateException.class,
+                () -> {
+                    closedIndex.getCount();
+                });
     }
 
     @Test
@@ -290,12 +299,16 @@ class IndexTest {
             }
 
             // Test out of bounds
-            assertThrows(IndexOutOfBoundsException.class, () -> {
-                result.getLabel(10, 0);
-            });
-            assertThrows(IndexOutOfBoundsException.class, () -> {
-                result.getLabel(0, 10);
-            });
+            assertThrows(
+                    IndexOutOfBoundsException.class,
+                    () -> {
+                        result.getLabel(10, 0);
+                    });
+            assertThrows(
+                    IndexOutOfBoundsException.class,
+                    () -> {
+                        result.getLabel(0, 10);
+                    });
         }
     }
 
@@ -308,4 +321,3 @@ class IndexTest {
         return vectors;
     }
 }
-

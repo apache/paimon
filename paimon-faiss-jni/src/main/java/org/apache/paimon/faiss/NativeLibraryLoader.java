@@ -36,10 +36,11 @@ import java.nio.file.Path;
  * path. It follows a similar pattern to RocksDB's native library loading mechanism.
  *
  * <p>The loader attempts to load the library in the following order:
+ *
  * <ol>
- *   <li>From the path specified by the {@code paimon.faiss.lib.path} system property</li>
- *   <li>From the system library path using {@code System.loadLibrary}</li>
- *   <li>From the JAR file bundled with the distribution</li>
+ *   <li>From the path specified by the {@code paimon.faiss.lib.path} system property
+ *   <li>From the system library path using {@code System.loadLibrary}
+ *   <li>From the JAR file bundled with the distribution
  * </ol>
  */
 public class NativeLibraryLoader {
@@ -142,7 +143,8 @@ public class NativeLibraryLoader {
             LOG.info("Loaded Faiss native library from system path");
             return;
         } catch (UnsatisfiedLinkError e) {
-            LOG.debug("Could not load from system path, trying bundled library: {}", e.getMessage());
+            LOG.debug(
+                    "Could not load from system path, trying bundled library: {}", e.getMessage());
         }
 
         // Third, try loading from JAR
@@ -270,7 +272,9 @@ public class NativeLibraryLoader {
             return "darwin";
         } else {
             throw new UnsupportedOperationException(
-                    "Unsupported operating system: " + osName + ". Only Linux and macOS are supported.");
+                    "Unsupported operating system: "
+                            + osName
+                            + ". Only Linux and macOS are supported.");
         }
     }
 
@@ -300,4 +304,3 @@ public class NativeLibraryLoader {
         return JNI_LIBRARY_NAME;
     }
 }
-

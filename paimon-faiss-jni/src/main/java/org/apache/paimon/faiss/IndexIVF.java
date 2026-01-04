@@ -21,11 +21,12 @@ package org.apache.paimon.faiss;
 /**
  * Utility class for IVF (Inverted File) index operations.
  *
- * <p>IVF indexes partition the vector space into clusters (cells) and only
- * search a subset of clusters during search. The {@code nprobe} parameter
- * controls how many clusters to search, trading off between speed and accuracy.
+ * <p>IVF indexes partition the vector space into clusters (cells) and only search a subset of
+ * clusters during search. The {@code nprobe} parameter controls how many clusters to search,
+ * trading off between speed and accuracy.
  *
  * <p>Example usage:
+ *
  * <pre>{@code
  * Index index = IndexFactory.createIVFFlat(128, 1000, MetricType.L2);
  * index.train(trainingVectors);
@@ -57,8 +58,8 @@ public final class IndexIVF {
     /**
      * Set the number of clusters to probe during search (nprobe).
      *
-     * <p>Higher values increase accuracy but decrease search speed.
-     * A good starting point is 1-10% of the total number of clusters.
+     * <p>Higher values increase accuracy but decrease search speed. A good starting point is 1-10%
+     * of the total number of clusters.
      *
      * @param index the IVF index
      * @param nprobe the number of clusters to probe
@@ -82,4 +83,3 @@ public final class IndexIVF {
         return FaissNative.ivfGetNlist(index.getNativeHandle());
     }
 }
-

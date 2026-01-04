@@ -25,8 +25,8 @@ import java.util.Properties;
 /**
  * Version information for Paimon Faiss.
  *
- * <p>This class provides version information for both the Java binding
- * and the underlying Faiss native library.
+ * <p>This class provides version information for both the Java binding and the underlying Faiss
+ * native library.
  */
 public final class FaissVersion {
 
@@ -38,7 +38,8 @@ public final class FaissVersion {
 
     static {
         Properties props = new Properties();
-        try (InputStream is = FaissVersion.class.getResourceAsStream("/paimon-faiss-version.properties")) {
+        try (InputStream is =
+                FaissVersion.class.getResourceAsStream("/paimon-faiss-version.properties")) {
             if (is != null) {
                 props.load(is);
             }
@@ -93,8 +94,8 @@ public final class FaissVersion {
         System.out.println("Native Faiss Version: " + getNativeVersion());
         System.out.println("Platform: " + getPlatform());
         System.out.println("Java Version: " + System.getProperty("java.version"));
-        System.out.println("OS: " + System.getProperty("os.name") + " " + System.getProperty("os.version"));
+        System.out.println(
+                "OS: " + System.getProperty("os.name") + " " + System.getProperty("os.version"));
         System.out.println("Architecture: " + System.getProperty("os.arch"));
     }
 }
-

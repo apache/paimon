@@ -23,11 +23,11 @@ import java.io.File;
 /**
  * A Faiss index for similarity search.
  *
- * <p>This class wraps a native Faiss index and provides methods for adding vectors,
- * searching for nearest neighbors, and managing the index.
+ * <p>This class wraps a native Faiss index and provides methods for adding vectors, searching for
+ * nearest neighbors, and managing the index.
  *
- * <p>Index instances must be closed when no longer needed to free native resources.
- * It is recommended to use try-with-resources:
+ * <p>Index instances must be closed when no longer needed to free native resources. It is
+ * recommended to use try-with-resources:
  *
  * <pre>{@code
  * try (Index index = IndexFactory.create(128, "Flat", MetricType.L2)) {
@@ -36,8 +36,8 @@ import java.io.File;
  * }
  * }</pre>
  *
- * <p>Thread Safety: Index instances are NOT thread-safe. External synchronization
- * is required if an index is accessed from multiple threads.
+ * <p>Thread Safety: Index instances are NOT thread-safe. External synchronization is required if an
+ * index is accessed from multiple threads.
  *
  * @see IndexFactory
  */
@@ -85,8 +85,8 @@ public class Index implements AutoCloseable {
     /**
      * Check if this index is trained.
      *
-     * <p>Some index types (like IVF) require training before vectors can be added.
-     * Flat indexes are always considered trained.
+     * <p>Some index types (like IVF) require training before vectors can be added. Flat indexes are
+     * always considered trained.
      *
      * @return true if the index is trained
      */
@@ -108,8 +108,8 @@ public class Index implements AutoCloseable {
     /**
      * Train the index on a set of training vectors.
      *
-     * <p>This is required for some index types (like IVF) before adding vectors.
-     * For flat indexes, this is a no-op.
+     * <p>This is required for some index types (like IVF) before adding vectors. For flat indexes,
+     * this is a no-op.
      *
      * @param vectors the training vectors (n * dimension floats)
      */
@@ -157,8 +157,8 @@ public class Index implements AutoCloseable {
     /**
      * Add vectors with explicit IDs to the index.
      *
-     * <p>Note: Not all index types support this operation. Flat indexes and
-     * IndexIDMap wrapped indexes support it.
+     * <p>Note: Not all index types support this operation. Flat indexes and IndexIDMap wrapped
+     * indexes support it.
      *
      * @param vectors the vectors to add (n * dimension floats)
      * @param ids the IDs for the vectors (n longs)
@@ -237,8 +237,8 @@ public class Index implements AutoCloseable {
     /**
      * Remove vectors by their IDs.
      *
-     * <p>Note: Not all index types support removal. Check Faiss documentation
-     * for details on which index types support this operation.
+     * <p>Note: Not all index types support removal. Check Faiss documentation for details on which
+     * index types support this operation.
      *
      * @param ids the IDs of vectors to remove
      * @return the number of vectors actually removed
@@ -248,9 +248,7 @@ public class Index implements AutoCloseable {
         return FaissNative.indexRemoveIds(nativeHandle, ids);
     }
 
-    /**
-     * Reset the index (remove all vectors).
-     */
+    /** Reset the index (remove all vectors). */
     public void reset() {
         checkNotClosed();
         FaissNative.indexReset(nativeHandle);
@@ -361,12 +359,15 @@ public class Index implements AutoCloseable {
         if (closed) {
             return "Index[closed]";
         }
-        return "Index{" +
-                "dimension=" + dimension +
-                ", count=" + getCount() +
-                ", trained=" + isTrained() +
-                ", metricType=" + getMetricType() +
-                '}';
+        return "Index{"
+                + "dimension="
+                + dimension
+                + ", count="
+                + getCount()
+                + ", trained="
+                + isTrained()
+                + ", metricType="
+                + getMetricType()
+                + '}';
     }
 }
-

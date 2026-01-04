@@ -23,8 +23,7 @@ import java.util.Arrays;
 /**
  * Result of a k-nearest neighbor search operation.
  *
- * <p>Contains the labels (IDs) and distances of the k nearest neighbors
- * for each query vector.
+ * <p>Contains the labels (IDs) and distances of the k nearest neighbors for each query vector.
  */
 public class SearchResult {
 
@@ -69,7 +68,8 @@ public class SearchResult {
     /**
      * Get all labels as a flat array.
      *
-     * <p>The array is organized as: [query0_neighbor0, query0_neighbor1, ..., query1_neighbor0, ...]
+     * <p>The array is organized as: [query0_neighbor0, query0_neighbor1, ..., query1_neighbor0,
+     * ...]
      *
      * @return the labels array
      */
@@ -152,12 +152,15 @@ public class SearchResult {
 
     @Override
     public String toString() {
-        return "SearchResult{" +
-                "numQueries=" + numQueries +
-                ", k=" + k +
-                ", labels=" + Arrays.toString(labels) +
-                ", distances=" + Arrays.toString(distances) +
-                '}';
+        return "SearchResult{"
+                + "numQueries="
+                + numQueries
+                + ", k="
+                + k
+                + ", labels="
+                + Arrays.toString(labels)
+                + ", distances="
+                + Arrays.toString(distances)
+                + '}';
     }
 }
-

@@ -23,9 +23,8 @@ import java.util.Arrays;
 /**
  * Result of a range search operation.
  *
- * <p>Unlike k-NN search which returns a fixed number of neighbors per query,
- * range search returns all neighbors within a given radius, which can vary
- * per query.
+ * <p>Unlike k-NN search which returns a fixed number of neighbors per query, range search returns
+ * all neighbors within a given radius, which can vary per query.
  */
 public class RangeSearchResult implements AutoCloseable {
 
@@ -162,4 +161,3 @@ public class RangeSearchResult implements AutoCloseable {
         }
     }
 }
-

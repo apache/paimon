@@ -21,8 +21,8 @@ package org.apache.paimon.faiss;
 /**
  * Exception thrown when a Faiss operation fails.
  *
- * <p>This exception wraps errors from the native Faiss library as well as
- * errors that occur during JNI operations.
+ * <p>This exception wraps errors from the native Faiss library as well as errors that occur during
+ * JNI operations.
  */
 public class FaissException extends Exception {
     private static final long serialVersionUID = 1L;
@@ -55,4 +55,3 @@ public class FaissException extends Exception {
         super(cause);
     }
 }
-

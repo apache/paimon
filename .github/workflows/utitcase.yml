@@ -53,7 +53,7 @@ jobs:
       - name: Build Others
         run: |
           echo "Start compiling modules"
-          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3
+          mvn -T 2C -B clean install -DskipTests -Ppaimon-faiss,flink1,spark3
 
       - name: Test Others
         timeout-minutes: 60

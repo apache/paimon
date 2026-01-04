@@ -22,17 +22,18 @@ package org.apache.paimon.faiss;
  * Metric type for similarity search.
  *
  * <p>Faiss supports two main metric types for measuring similarity between vectors:
+ *
  * <ul>
- *   <li>{@link #L2} - Euclidean distance (L2 norm). Smaller values indicate more similar vectors.</li>
- *   <li>{@link #INNER_PRODUCT} - Inner product (dot product). Larger values indicate more similar vectors.</li>
+ *   <li>{@link #L2} - Euclidean distance (L2 norm). Smaller values indicate more similar vectors.
+ *   <li>{@link #INNER_PRODUCT} - Inner product (dot product). Larger values indicate more similar
+ *       vectors.
  * </ul>
  */
 public enum MetricType {
     /**
      * Euclidean distance (L2 norm).
      *
-     * <p>The squared L2 distance between two vectors is computed as:
-     * {@code sum((a[i] - b[i])^2)}
+     * <p>The squared L2 distance between two vectors is computed as: {@code sum((a[i] - b[i])^2)}
      *
      * <p>Smaller distances indicate more similar vectors.
      */
@@ -41,11 +42,10 @@ public enum MetricType {
     /**
      * Inner product (dot product).
      *
-     * <p>The inner product between two vectors is computed as:
-     * {@code sum(a[i] * b[i])}
+     * <p>The inner product between two vectors is computed as: {@code sum(a[i] * b[i])}
      *
-     * <p>Larger values indicate more similar vectors. For normalized vectors,
-     * this is equivalent to cosine similarity.
+     * <p>Larger values indicate more similar vectors. For normalized vectors, this is equivalent to
+     * cosine similarity.
      */
     INNER_PRODUCT(1);
 
@@ -80,4 +80,3 @@ public enum MetricType {
         throw new IllegalArgumentException("Unknown metric type value: " + value);
     }
 }
-

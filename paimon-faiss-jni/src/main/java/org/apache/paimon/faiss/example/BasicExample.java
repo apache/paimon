@@ -31,11 +31,12 @@ import java.util.Random;
  * Basic example demonstrating the usage of Paimon Faiss.
  *
  * <p>This example shows how to:
+ *
  * <ul>
- *   <li>Create different types of indexes</li>
- *   <li>Add vectors to an index</li>
- *   <li>Search for nearest neighbors</li>
- *   <li>Serialize and deserialize indexes</li>
+ *   <li>Create different types of indexes
+ *   <li>Add vectors to an index
+ *   <li>Search for nearest neighbors
+ *   <li>Serialize and deserialize indexes
  * </ul>
  */
 public class BasicExample {
@@ -98,7 +99,8 @@ public class BasicExample {
             // Print results
             System.out.println("Top " + K + " results:");
             for (int i = 0; i < K; i++) {
-                System.out.printf("  %d: id=%d, distance=%.4f%n",
+                System.out.printf(
+                        "  %d: id=%d, distance=%.4f%n",
                         i + 1, result.getLabel(0, i), result.getDistance(0, i));
             }
         }
@@ -127,7 +129,8 @@ public class BasicExample {
             // Print results
             System.out.println("Top " + K + " results:");
             for (int i = 0; i < K; i++) {
-                System.out.printf("  %d: id=%d, distance=%.4f%n",
+                System.out.printf(
+                        "  %d: id=%d, distance=%.4f%n",
                         i + 1, result.getLabel(0, i), result.getDistance(0, i));
             }
         }
@@ -138,7 +141,7 @@ public class BasicExample {
             // Create custom IDs
             long[] ids = new long[NUM_VECTORS];
             for (int i = 0; i < NUM_VECTORS; i++) {
-                ids[i] = 1000000L + i;  // Start from 1,000,000
+                ids[i] = 1000000L + i; // Start from 1,000,000
             }
 
             // Add vectors with custom IDs
@@ -151,7 +154,8 @@ public class BasicExample {
             // Print results (should show custom IDs)
             System.out.println("Top " + K + " results (with custom IDs):");
             for (int i = 0; i < K; i++) {
-                System.out.printf("  %d: id=%d, distance=%.4f%n",
+                System.out.printf(
+                        "  %d: id=%d, distance=%.4f%n",
                         i + 1, result.getLabel(0, i), result.getDistance(0, i));
             }
         }
@@ -173,7 +177,8 @@ public class BasicExample {
 
             SearchResult result = index.searchSingle(query, K);
             System.out.println("Search on deserialized index:");
-            System.out.printf("  Top result: id=%d, distance=%.4f%n",
+            System.out.printf(
+                    "  Top result: id=%d, distance=%.4f%n",
                     result.getLabel(0, 0), result.getDistance(0, 0));
         }
     }
@@ -186,4 +191,3 @@ public class BasicExample {
         return vectors;
     }
 }
-
