@@ -63,8 +63,9 @@ public class MergeTreeCompactTask extends CompactTask {
             @Nullable CompactionMetrics.Reporter metricsReporter,
             Supplier<CompactDeletionFile> compactDfSupplier,
             @Nullable RecordLevelExpire recordLevelExpire,
-            boolean forceRewriteAllFiles) {
-        super(metricsReporter);
+            boolean forceRewriteAllFiles,
+            String type) {
+        super(metricsReporter, type);
         this.minFileSize = minFileSize;
         this.rewriter = rewriter;
         this.outputLevel = unit.outputLevel();

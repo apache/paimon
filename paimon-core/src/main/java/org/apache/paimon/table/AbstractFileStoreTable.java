@@ -491,14 +491,21 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
         if (!options.writeOnly()) {
             boolean changelogDecoupled = options.changelogLifecycleDecoupled();
+            boolean compactMetricsEnabled = options.compactMetricsEnabled();
             ExpireConfig expireConfig = options.expireConfig();
             ExpireSnapshots expireChangelog = newExpireChangelog().config(expireConfig);
             ExpireSnapshots expireSnapshots = newExpireSnapshots().config(expireConfig);
+            ExpireCompactMetrics expireCompactMetrics =
+                    new ExpireCompactMetricsImpl(
+                            store().compactMetricsManager(), options.compactMetricsRetainedNum());
             snapshotExpire =
                     () -> {
                         expireSnapshots.expire();
                         if (changelogDecoupled) {
                             expireChangelog.expire();
+                        }
+                        if (compactMetricsEnabled) {
+                            expireCompactMetrics.expire();
                         }
                     };
         }

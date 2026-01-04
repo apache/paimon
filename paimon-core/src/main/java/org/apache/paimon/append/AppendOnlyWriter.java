@@ -21,6 +21,7 @@ package org.apache.paimon.append;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
+import org.apache.paimon.compact.CompactMetricMeta;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -30,6 +31,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.CompactMetricIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
@@ -96,6 +98,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     @Nullable private CompactDeletionFile compactDeletionFile;
     private SinkWriter<InternalRow> sinkWriter;
     private MemorySegmentPool memorySegmentPool;
+    private CompactMetricMeta compactMetricMeta;
 
     public AppendOnlyWriter(
             FileIO fileIO,
@@ -338,6 +341,9 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                         result -> {
                             compactBefore.addAll(result.before());
                             compactAfter.addAll(result.after());
+                            compactMetricMeta =
+                                    new CompactMetricMeta(
+                                            result.compactionType(), result.compactionTimeMillis());
                             updateCompactDeletionFile(result.deletionFile());
                         });
     }
@@ -363,6 +369,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                         new ArrayList<>(compactAfter),
                         Collections.emptyList());
         CompactDeletionFile drainDeletionFile = compactDeletionFile;
+        CompactMetricIncrement compactMetricIncrement =
+                new CompactMetricIncrement(compactMetricMeta);
 
         newFiles.clear();
         deletedFiles.clear();
@@ -370,7 +378,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         compactAfter.clear();
         compactDeletionFile = null;
 
-        return new CommitIncrement(dataIncrement, compactIncrement, drainDeletionFile);
+        return new CommitIncrement(
+                dataIncrement, compactIncrement, compactMetricIncrement, drainDeletionFile);
     }
 
     @Override
