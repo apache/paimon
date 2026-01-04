@@ -67,8 +67,6 @@ jobs:
           
           # Exclude modules that have their own dedicated test workflows
           TEST_MODULES="!paimon-e2e-tests,"
-          TEST_MODULES+="!paimon-faiss-jni,"
-          TEST_MODULES+="!paimon-faiss,"
           for suffix in ut 3.5 3.4 3.3 3.2; do
             TEST_MODULES+="!org.apache.paimon:paimon-spark-${suffix}_2.12,"
           done
