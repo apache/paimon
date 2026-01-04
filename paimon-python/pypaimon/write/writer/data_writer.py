@@ -206,21 +206,16 @@ class DataWriter(ABC):
         if not all(count == 0 for count in key_stats.null_counts):
             raise RuntimeError("Primary key should not be null")
         
-        value_fields = stats_fields if value_stats_enabled else []
-        value_stats = (
-            self._collect_value_stats(data, value_fields, column_stats)
-            if value_stats_enabled
-            else SimpleStats.empty_stats()
-        )
+        value_stats = self._collect_value_stats(data, stats_fields, column_stats)
 
         min_seq = self.sequence_generator.start
         max_seq = self.sequence_generator.current
         self.sequence_generator.start = self.sequence_generator.current
         if value_stats_enabled:
-            if len(value_fields) == len(self.table.fields):
+            if len(stats_fields) == len(self.table.fields):
                 value_stats_cols = None
             else:
-                value_stats_cols = [field.name for field in value_fields]
+                value_stats_cols = [field.name for field in stats_fields]
         else:
             value_stats_cols = []
         self.committed_files.append(DataFileMeta.create(
