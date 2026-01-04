@@ -68,11 +68,11 @@ class AuditLogStreamingReadTest extends PaimonSparkTestBase {
             readStream.processAllAvailable()
             checkAnswer(
               currentResult(),
-              Row("+I", 1, "a", null) ::
-                Row("+I", 2, "b", null) ::
-                Row("-U", 1, "a", null) ::
-                Row("+U", 1, "a", 16) ::
-                Row("-D", 1, "a", 16) :: Nil
+              Row("+I", 0L, 1, "a", null) ::
+                Row("+I", 0L, 2, "b", null) ::
+                Row("-U", 0L, 1, "a", null) ::
+                Row("+U", 1L, 1, "a", 16) ::
+                Row("-D", 1L, 1, "a", 16) :: Nil
             )
           } finally {
             readStream.stop()

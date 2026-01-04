@@ -1008,7 +1008,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                 sql(
                         "SELECT * FROM `test_scan_mode$audit_log` "
                                 + "/*+ OPTIONS('incremental-between'='1,8','incremental-between-scan-mode'='diff') */");
-        assertThat(result).containsExactlyInAnyOrder(Row.of("+I", 3, "C"));
+        assertThat(result).containsExactlyInAnyOrder(Row.of("+I", 3L, 3, "C"));
 
         result =
                 sql(
@@ -1016,7 +1016,9 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                 + "/*+ OPTIONS('incremental-between'='1,8','incremental-between-scan-mode'='delta') */");
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        Row.of("+I", 2, "B"), Row.of("-D", 2, "B"), Row.of("+I", 3, "C"));
+                        Row.of("+I", 1L, 2, "B"),
+                        Row.of("-D", 2L, 2, "B"),
+                        Row.of("+I", 3L, 3, "C"));
     }
 
     @Test
@@ -1027,7 +1029,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO test_table VALUES (1, 1)");
         assertThat(sql("SELECT * FROM `test_table$audit_log`"))
-                .containsExactly(Row.of("+I", 1, 1, 2));
+                .containsExactly(Row.of("+I", null, 1, 1, 2));
     }
 
     @Test
@@ -1038,7 +1040,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO test_table VALUES (1, 1)");
         assertThat(sql("SELECT * FROM `test_table$binlog`"))
-                .containsExactly(Row.of("+I", new Integer[] {1}, new Integer[] {1}));
+                .containsExactly(Row.of("+I", null, new Integer[] {1}, new Integer[] {1}));
     }
 
     @Test
@@ -1046,7 +1048,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         sql("CREATE TABLE test_table (a int, b string);");
         sql("INSERT INTO test_table VALUES (1, 'A')");
         assertThat(sql("SELECT * FROM `test_table$binlog`"))
-                .containsExactly(Row.of("+I", new Integer[] {1}, new String[] {"A"}));
+                .containsExactly(Row.of("+I", null, new Integer[] {1}, new String[] {"A"}));
         assertThat(sql("SELECT b FROM `test_table$binlog`"))
                 .containsExactly(Row.of((Object) new String[] {"A"}));
         assertThat(sql("SELECT rowkind, b FROM `test_table$binlog`"))
