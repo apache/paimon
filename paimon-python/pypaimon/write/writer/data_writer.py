@@ -191,16 +191,20 @@ class DataWriter(ABC):
         max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
 
         # key stats & value stats
-        data_fields = self.table.fields if self.table.is_primary_key_table \
-            else PyarrowFieldParser.to_paimon_schema(data.schema)
+        value_stats_enabled = self.options.metadata_stats_enabled()
+        if value_stats_enabled:
+            stats_fields = self.table.fields if self.table.is_primary_key_table \
+                else PyarrowFieldParser.to_paimon_schema(data.schema)
+        else:
+            stats_fields = self.table.trimmed_primary_keys_fields
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
-            for field in data_fields
+            for field in stats_fields
         }
-        all_fields = data_fields
-        min_value_stats = [column_stats[field.name]['min_values'] for field in all_fields]
-        max_value_stats = [column_stats[field.name]['max_values'] for field in all_fields]
-        value_null_counts = [column_stats[field.name]['null_counts'] for field in all_fields]
+        data_fields = stats_fields if value_stats_enabled else []
+        min_value_stats = [column_stats[field.name]['min_values'] for field in data_fields]
+        max_value_stats = [column_stats[field.name]['max_values'] for field in data_fields]
+        value_null_counts = [column_stats[field.name]['null_counts'] for field in data_fields]
         key_fields = self.trimmed_primary_keys_fields
         min_key_stats = [column_stats[field.name]['min_values'] for field in key_fields]
         max_key_stats = [column_stats[field.name]['max_values'] for field in key_fields]
@@ -235,7 +239,7 @@ class DataWriter(ABC):
             creation_time=Timestamp.now(),
             delete_row_count=0,
             file_source=0,
-            value_stats_cols=None,  # None means all columns in the data have statistics
+            value_stats_cols=None if value_stats_enabled else [],
             external_path=external_path_str,  # Set external path if using external paths
             first_row_id=None,
             write_cols=self.write_cols,

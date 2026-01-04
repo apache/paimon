@@ -71,6 +71,10 @@ public class VariantAccessInfoUtils {
     /** Clip the variant schema to read with variant access fields. */
     public static RowType clipVariantSchema(
             RowType shreddingSchema, List<VariantAccessInfo.VariantField> variantFields) {
+        if (!shreddingSchema.containsField(TYPED_VALUE_FIELD_NAME)) {
+            return shreddingSchema;
+        }
+
         boolean canClip = true;
         Set<String> fieldsToRead = new HashSet<>();
         for (VariantAccessInfo.VariantField variantField : variantFields) {
