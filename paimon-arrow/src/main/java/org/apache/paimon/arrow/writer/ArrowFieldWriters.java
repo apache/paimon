@@ -454,7 +454,7 @@ public class ArrowFieldWriters {
                 if (columnVector.isNullAt(row)) {
                     timeMilliVector.setNull(i);
                 } else {
-                    int value = ((IntColumnVector) columnVector).getInt(i);
+                    int value = ((IntColumnVector) columnVector).getInt(row);
                     timeMilliVector.setSafe(i, value);
                 }
             }
