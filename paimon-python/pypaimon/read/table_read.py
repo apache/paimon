@@ -170,6 +170,8 @@ class TableRead:
                 DeprecationWarning,
                 stacklevel=2
             )
+            if parallelism < 1:
+                raise ValueError(f"parallelism must be at least 1 (or -1 for auto-detect), got {parallelism}")
             if override_num_blocks is None:
                 override_num_blocks = parallelism
             elif parallelism != override_num_blocks:
@@ -180,6 +182,9 @@ class TableRead:
                     UserWarning,
                     stacklevel=2
                 )
+        
+        if override_num_blocks is not None and override_num_blocks < 1:
+            raise ValueError(f"override_num_blocks must be at least 1, got {override_num_blocks}")
 
         from pypaimon.read.ray_datasource import PaimonDatasource
         datasource = PaimonDatasource(self, splits)
