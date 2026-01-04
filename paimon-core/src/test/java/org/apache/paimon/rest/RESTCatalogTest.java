@@ -108,6 +108,7 @@ import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.OBJECT_TABLE;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_FILE_IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
@@ -2692,6 +2693,67 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 assertThat(optionsJson).isNotEmpty();
             }
         }
+    }
+
+    @Test
+    void testEnableFileIOCache() throws Exception {
+        // Enable cache at client-side
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                DLF_FILE_IO_CACHE_ENABLED.key(),
+                "true"); // DLF_FILE_IO_CACHE_ENABLED MUST be configured to enable cache
+        this.catalog = newRestCatalogWithDataToken(options);
+        Identifier identifier =
+                Identifier.create("test_file_io_cache", "table_for_testing_file_io_cache");
+        String cachePolicy = "meta,read";
+        RESTToken token =
+                new RESTToken(
+                        ImmutableMap.of(
+                                "akId",
+                                "akId",
+                                "akSecret",
+                                UUID.randomUUID().toString(),
+                                "dlf.file-io.cache.policy",
+                                cachePolicy),
+                        System.currentTimeMillis() + 3600_000L);
+        setDataTokenToRestServerForMock(identifier, token);
+        createTable(
+                identifier,
+                ImmutableMap.of("dlf.file-io.cache.policy", cachePolicy),
+                Lists.newArrayList("col1"));
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+        RESTToken fileDataToken = fileIO.validToken();
+        assertEquals(cachePolicy, fileDataToken.token().get("dlf.file-io.cache.policy"));
+    }
+
+    @Test
+    void testDisableFileIOCache() throws Exception {
+        // Disable cache at client-side
+        Map<String, String> options = new HashMap<>();
+        this.catalog = newRestCatalogWithDataToken(options);
+        Identifier identifier =
+                Identifier.create("test_file_io_cache", "table_for_testing_file_io_cache");
+        String cachePolicy = "meta,read";
+        RESTToken token =
+                new RESTToken(
+                        ImmutableMap.of(
+                                "akId",
+                                "akId",
+                                "akSecret",
+                                UUID.randomUUID().toString(),
+                                "dlf.file-io.cache.policy",
+                                cachePolicy),
+                        System.currentTimeMillis() + 3600_000L);
+        setDataTokenToRestServerForMock(identifier, token);
+        createTable(
+                identifier,
+                ImmutableMap.of("dlf.file-io.cache.policy", cachePolicy),
+                Lists.newArrayList("col1"));
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+        RESTToken fileDataToken = fileIO.validToken();
+        assertNull(fileDataToken.token().get("dlf.file-io.cache.policy"));
     }
 
     private TestPagedResponse generateTestPagedResponse(
