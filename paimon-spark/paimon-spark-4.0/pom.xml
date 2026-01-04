@@ -45,6 +45,12 @@ under the License.
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-spark4-common_${scala.binary.version}</artifactId>
             <version>${project.version}</version>
+          <exclusions>
+            <exclusion>
+              <groupId>org.apache.spark</groupId>
+              <artifactId>spark-sql-api_2.13</artifactId>
+            </exclusion>
+          </exclusions>
         </dependency>
 
         <dependency>
