@@ -205,19 +205,13 @@ class DataWriter(ABC):
         key_stats = self._collect_value_stats(data, key_fields, column_stats)
         if not all(count == 0 for count in key_stats.null_counts):
             raise RuntimeError("Primary key should not be null")
-        
-        value_stats = self._collect_value_stats(data, stats_fields, column_stats)
+
+        value_fields = stats_fields if value_stats_enabled else []
+        value_stats = self._collect_value_stats(data, value_fields, column_stats)
 
         min_seq = self.sequence_generator.start
         max_seq = self.sequence_generator.current
         self.sequence_generator.start = self.sequence_generator.current
-        if value_stats_enabled:
-            if len(stats_fields) == len(self.table.fields):
-                value_stats_cols = None
-            else:
-                value_stats_cols = [field.name for field in stats_fields]
-        else:
-            value_stats_cols = []
         self.committed_files.append(DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
@@ -234,7 +228,7 @@ class DataWriter(ABC):
             creation_time=Timestamp.now(),
             delete_row_count=0,
             file_source=0,
-            value_stats_cols=value_stats_cols,
+            value_stats_cols=None if value_stats_enabled else [],
             external_path=external_path_str,  # Set external path if using external paths
             first_row_id=None,
             write_cols=self.write_cols,
@@ -278,7 +272,7 @@ class DataWriter(ABC):
         if not fields:
             return SimpleStats.empty_stats()
         
-        if column_stats is None:
+        if column_stats is None or not column_stats:
             column_stats = {
                 field.name: self._get_column_stats(data, field.name)
                 for field in fields

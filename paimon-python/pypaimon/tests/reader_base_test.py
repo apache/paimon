@@ -546,6 +546,84 @@ class ReaderBasicTest(unittest.TestCase):
                 self.assertFalse(is_system_field,
                                  f"value_stats_cols should not contain system field: {field_name}")
 
+    def test_value_stats_empty_when_stats_disabled(self):
+        catalog = CatalogFactory.create({
+            "warehouse": self.warehouse
+        })
+        catalog.create_database("test_db_stats_disabled", True)
+
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={'metadata.stats-mode': 'none', 'bucket': '2'}  # Stats disabled
+        )
+        catalog.create_table("test_db_stats_disabled.test_stats_disabled", schema, False)
+        table = catalog.get_table("test_db_stats_disabled.test_stats_disabled")
+
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'price': [10.5, 20.3, 30.7],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        latest_snapshot = SnapshotManager(table).get_latest_snapshot()
+        manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
+            manifest_files[0].file_name,
+            lambda row: table_scan.starting_scanner._filter_manifest_entry(row),
+            False
+        )
+
+        self.assertGreater(len(manifest_entries), 0, "Should have at least one manifest entry")
+        file_meta = manifest_entries[0].file
+
+        self.assertEqual(
+            file_meta.value_stats_cols, [],
+            "value_stats_cols should be empty list [] when stats are disabled"
+        )
+
+        self.assertEqual(
+            file_meta.value_stats.min_values.arity, 0,
+            "value_stats.min_values should be empty (arity=0) when stats are disabled"
+        )
+        self.assertEqual(
+            file_meta.value_stats.max_values.arity, 0,
+            "value_stats.max_values should be empty (arity=0) when stats are disabled"
+        )
+        self.assertEqual(
+            len(file_meta.value_stats.null_counts), 0,
+            "value_stats.null_counts should be empty when stats are disabled"
+        )
+
+        empty_stats = SimpleStats.empty_stats()
+        self.assertEqual(
+            file_meta.value_stats.min_values.arity, len(empty_stats.min_values),
+            "value_stats.min_values should be empty (same as SimpleStats.empty_stats()) when stats are disabled"
+        )
+        self.assertEqual(
+            file_meta.value_stats.max_values.arity, len(empty_stats.max_values),
+            "value_stats.max_values should be empty (same as SimpleStats.empty_stats()) when stats are disabled"
+        )
+        self.assertEqual(
+            len(file_meta.value_stats.null_counts), len(empty_stats.null_counts),
+            "value_stats.null_counts should be empty (same as SimpleStats.empty_stats()) when stats are disabled"
+        )
+
     def test_types(self):
         data_fields = [
             DataField(0, "f0", AtomicType('TINYINT'), 'desc'),
@@ -776,12 +854,8 @@ class ReaderBasicTest(unittest.TestCase):
         self.assertEqual(read_entry.file.value_stats.null_counts, null_counts)
 
     def _test_append_only_schema_match_case(self, table, pa_schema):
-        """Test that for append-only tables, data.schema matches table.fields.
+        from pypaimon.schema.data_types import PyarrowFieldParser
 
-        This verifies the assumption in data_writer.py that for append-only tables,
-        PyarrowFieldParser.to_paimon_schema(data.schema) should have the same fields
-        as self.table.fields (same count and same field names).
-        """
         self.assertFalse(table.is_primary_key_table,
                          "Table should be append-only (no primary keys)")
 
@@ -789,7 +863,26 @@ class ReaderBasicTest(unittest.TestCase):
             'id': [1, 2, 3],
             'name': ['Alice', 'Bob', 'Charlie'],
             'price': [10.5, 20.3, 30.7],
-            'category': ['A', 'B', 'C']})
+            'category': ['A', 'B', 'C']
+        }, schema=pa_schema)
+
+        data_fields_from_schema = PyarrowFieldParser.to_paimon_schema(test_data.schema)
+        table_fields = table.fields
+
+        self.assertEqual(
+            len(data_fields_from_schema), len(table_fields),
+            f"Field count mismatch: data.schema has {len(data_fields_from_schema)} fields, "
+            f"but table.fields has {len(table_fields)} fields"
+        )
+
+        data_field_names = {field.name for field in data_fields_from_schema}
+        table_field_names = {field.name for field in table_fields}
+        self.assertEqual(
+            data_field_names, table_field_names,
+            f"Field names mismatch: data.schema has {data_field_names}, "
+            f"but table.fields has {table_field_names}"
+        )
+
     def test_primary_key_value_stats(self):
         pa_schema = pa.schema([
             ('id', pa.int64()),
