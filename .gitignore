@@ -26,6 +26,9 @@ paimon-python/*.egg-info/
 paimon-python/dev/log
 paimon-lucene/.idea/
 
+### Native build artifacts ###
+paimon-faiss-jni/build/
+
 ### VS Code ###
 .vscode/
 

@@ -522,6 +522,13 @@ under the License.
                 <jdk>11</jdk>
             </activation>
         </profile>
+        <profile>
+            <id>paimon-faiss-vector</id>
+            <modules>
+                <module>paimon-faiss</module>
+                <module>paimon-faiss-jni</module>
+            </modules>
+        </profile>
     </profiles>
 
     <build>
@@ -626,6 +633,8 @@ under the License.
                         <!-- antlr grammar files -->
                         <exclude>paimon-common/src/main/antlr4/**</exclude>
                         <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
+                        <!-- CMake build artifacts for native libraries -->
+                        <exclude>paimon-faiss-jni/build/**</exclude>
                     </excludes>
                 </configuration>
             </plugin>
