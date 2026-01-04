@@ -30,6 +30,7 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -577,7 +578,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public List<String> authTableQuery(Identifier identifier, List<String> select) {
+    public Predicate authTableQuery(Identifier identifier, @Nullable List<String> select) {
         throw new UnsupportedOperationException();
     }
 
