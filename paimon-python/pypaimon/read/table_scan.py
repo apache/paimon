@@ -18,7 +18,7 @@
 
 from typing import Optional
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 
 from pypaimon.read.plan import Plan
@@ -45,13 +45,13 @@ class TableScan:
         return self.starting_scanner.scan()
 
     def _create_starting_scanner(self) -> Optional[StartingScanner]:
-        options = self.table.options
-        if CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP in options:
-            ts = options[CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP].split(",")
+        options = self.table.options.options
+        if options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
+            ts = options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP).split(",")
             if len(ts) != 2:
                 raise ValueError(
                     "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: " +
-                    options[CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP])
+                    options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP))
             earliest_snapshot = SnapshotManager(self.table).try_get_earliest_snapshot()
             latest_snapshot = SnapshotManager(self.table).get_latest_snapshot()
             if earliest_snapshot is None or latest_snapshot is None:
@@ -70,4 +70,12 @@ class TableScan:
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
         self.starting_scanner.with_shard(idx_of_this_subtask, number_of_para_subtasks)
+        return self
+
+    def with_row_range(self, start_row, end_row) -> 'TableScan':
+        """
+        Filter file entries by row range. The row_id corresponds to the row position of the
+        file in all file entries in table scan's partitioned_files.
+        """
+        self.starting_scanner.with_row_range(start_row, end_row)
         return self

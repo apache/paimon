@@ -23,6 +23,7 @@ from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read.table_read import TableRead
 from pypaimon.read.table_scan import TableScan
 from pypaimon.schema.data_types import DataField
+from pypaimon.table.special_fields import SpecialFields
 
 
 class ReadBuilder:
@@ -71,5 +72,7 @@ class ReadBuilder:
         if not self._projection:
             return table_fields
         else:
-            field_map = {field.name: field for field in self.table.fields}
+            if self.table.options.row_tracking_enabled():
+                table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
+            field_map = {field.name: field for field in table_fields}
             return [field_map[name] for name in self._projection if name in field_map]

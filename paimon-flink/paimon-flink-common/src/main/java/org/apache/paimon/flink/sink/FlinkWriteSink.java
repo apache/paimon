@@ -72,16 +72,14 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
     protected static OneInputStreamOperatorFactory<InternalRow, Committable>
             createNoStateRowWriteOperatorFactory(
                     FileStoreTable table,
-                    LogSinkFunction logSinkFunction,
                     StoreSinkWrite.Provider writeProvider,
                     String commitUser) {
-        return new RowDataStoreWriteOperator.Factory(
-                table, logSinkFunction, writeProvider, commitUser) {
+        return new RowDataStoreWriteOperator.Factory(table, writeProvider, commitUser) {
             @Override
             @SuppressWarnings("unchecked, rawtypes")
             public StreamOperator createStreamOperator(StreamOperatorParameters parameters) {
                 return new StatelessRowDataStoreWriteOperator(
-                        parameters, table, logSinkFunction, writeProvider, commitUser);
+                        parameters, table, writeProvider, commitUser);
             }
         };
     }

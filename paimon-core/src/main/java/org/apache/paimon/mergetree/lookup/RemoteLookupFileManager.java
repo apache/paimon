@@ -75,7 +75,7 @@ public class RemoteLookupFileManager<T> implements RemoteFileDownloader {
         String remoteSstName = lookupLevels.newRemoteSst(file, length);
         Path sstFile = remoteSstPath(file, remoteSstName);
         try (FileInputStream is = new FileInputStream(lookupFile.localFile());
-                PositionOutputStream os = fileIO.newOutputStream(sstFile, false)) {
+                PositionOutputStream os = fileIO.newOutputStream(sstFile, true)) {
             IOUtils.copy(is, os);
         } catch (IOException e) {
             throw new RuntimeException(e);

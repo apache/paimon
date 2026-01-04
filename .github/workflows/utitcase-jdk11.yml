@@ -44,7 +44,7 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
       - name: Build
-        run:  mvn -T 1C -B clean install -DskipTests -Pflink1,spark3
+        run:  mvn -T 1C -B clean install -DskipTests -Pflink1,spark3,paimon-lucene
       - name: Test
         run: |
           # run tests with random timezone to find out timezone related bugs
@@ -56,6 +56,6 @@ jobs:
           test_modules+="!org.apache.paimon:paimon-spark-${suffix}_2.12,"
           done
           test_modules="${test_modules%,}"
-          mvn -T 1C -B clean install -pl "${test_modules}" -Pflink1,spark3 -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
+          mvn -T 1C -B clean install -pl "${test_modules}" -Pflink1,spark3,paimon-lucene -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m

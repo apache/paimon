@@ -18,32 +18,26 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggregation
+import org.apache.paimon.spark.scan.PaimonLocalScan
 import org.apache.paimon.table.{FileStoreTable, InnerTable}
-import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.connector.expressions
 import org.apache.spark.sql.connector.expressions.{NamedReference, SortOrder}
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
-import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
 import org.apache.spark.sql.connector.read._
-
-import java.util.{List => JList}
 
 import scala.collection.JavaConverters._
 
-class PaimonScanBuilder(table: InnerTable)
-  extends PaimonBaseScanBuilder(table)
-  with PaimonBasePushDown
+class PaimonScanBuilder(val table: InnerTable)
+  extends PaimonBaseScanBuilder
   with SupportsPushDownAggregates
   with SupportsPushDownTopN {
 
   private var localScan: Option[Scan] = None
-
-  override protected var partitionKeys: JList[String] = table.partitionKeys()
-  override protected var rowType: RowType = table.rowType()
 
   override def pushTopN(orders: Array[SortOrder], limit: Int): Boolean = {
     if (hasPostScanPredicates) {
@@ -86,7 +80,7 @@ class PaimonScanBuilder(table: InnerTable)
         })
       .toList
 
-    pushDownTopN = Some(new TopN(sorts.asJava, limit))
+    pushedTopN = Some(new TopN(sorts.asJava, limit))
 
     // just make the best effort to push down TopN
     false
@@ -115,15 +109,15 @@ class PaimonScanBuilder(table: InnerTable)
     }
 
     val readBuilder = table.newReadBuilder
-    if (pushedPaimonPredicates.nonEmpty) {
-      val pushedPartitionPredicate = PredicateBuilder.and(pushedPaimonPredicates.toList.asJava)
-      readBuilder.withFilter(pushedPartitionPredicate)
+    if (pushedPartitionFilters.nonEmpty) {
+      readBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.toList.asJava))
     }
+    assert(pushedDataFilters.isEmpty)
 
     tryPushdownAggregation(table.asInstanceOf[FileStoreTable], aggregation, readBuilder) match {
       case Some(agg) =>
         localScan = Some(
-          PaimonLocalScan(agg.result(), agg.resultSchema(), table, pushedPaimonPredicates)
+          PaimonLocalScan(agg.result(), agg.resultSchema(), table, pushedPartitionFilters)
         )
         true
       case None => false
@@ -131,16 +125,16 @@ class PaimonScanBuilder(table: InnerTable)
   }
 
   override def build(): Scan = {
-    if (localScan.isDefined) {
-      localScan.get
-    } else {
-      PaimonScan(
-        table,
-        requiredSchema,
-        pushedPaimonPredicates,
-        reservedFilters,
-        pushDownLimit,
-        pushDownTopN)
+    localScan match {
+      case Some(scan) => scan
+      case None =>
+        PaimonScan(
+          table,
+          requiredSchema,
+          pushedPartitionFilters,
+          pushedDataFilters,
+          pushedLimit,
+          pushedTopN)
     }
   }
 }

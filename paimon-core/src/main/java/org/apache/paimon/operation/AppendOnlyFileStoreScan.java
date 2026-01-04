@@ -33,8 +33,11 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
@@ -43,6 +46,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     private final SimpleStatsEvolutions simpleStatsEvolutions;
 
     private final boolean fileIndexReadEnabled;
+    private final boolean deletionVectorsEnabled;
 
     protected Predicate inputFilter;
 
@@ -60,7 +64,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
             Integer scanManifestParallelism,
-            boolean fileIndexReadEnabled) {
+            boolean fileIndexReadEnabled,
+            boolean deletionVectorsEnabled) {
         super(
                 manifestsReader,
                 snapshotManager,
@@ -72,12 +77,24 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         this.simpleStatsEvolutions =
                 new SimpleStatsEvolutions(sid -> scanTableSchema(sid).fields(), schema.id());
         this.fileIndexReadEnabled = fileIndexReadEnabled;
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
         this.inputFilter = predicate;
         this.bucketSelectConverter.convert(predicate).ifPresent(this::withTotalAwareBucketFilter);
         return this;
+    }
+
+    @Override
+    public boolean supportsLimitPushManifestEntries() {
+        return limit != null && limit > 0 && !deletionVectorsEnabled;
+    }
+
+    @Override
+    protected Iterator<ManifestEntry> limitPushManifestEntries(Iterator<ManifestEntry> entries) {
+        checkArgument(limit != null && limit > 0 && !deletionVectorsEnabled);
+        return new LimitAwareManifestEntryIterator(entries, limit);
     }
 
     /** Note: Keep this thread-safe. */
@@ -140,6 +157,66 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             return predicate.evaluate(dataPredicate).remain();
         } catch (IOException e) {
             throw new RuntimeException("Exception happens while checking predicate.", e);
+        }
+    }
+
+    /**
+     * Iterator that applies limit pushdown by stopping early when enough rows have been
+     * accumulated.
+     */
+    private static class LimitAwareManifestEntryIterator implements Iterator<ManifestEntry> {
+        private final Iterator<ManifestEntry> baseIterator;
+        private final long limit;
+
+        private long accumulatedRowCount = 0;
+        private ManifestEntry nextEntry = null;
+        private boolean hasNext = false;
+
+        LimitAwareManifestEntryIterator(Iterator<ManifestEntry> baseIterator, long limit) {
+            this.baseIterator = baseIterator;
+            this.limit = limit;
+            advance();
+        }
+
+        private void advance() {
+            // If we've already accumulated enough rows, stop reading more entries
+            if (accumulatedRowCount >= limit) {
+                hasNext = false;
+                nextEntry = null;
+                return;
+            }
+
+            if (baseIterator.hasNext()) {
+                nextEntry = baseIterator.next();
+                hasNext = true;
+
+                long fileRowCount = nextEntry.file().rowCount();
+                if (fileRowCount > 0) {
+                    accumulatedRowCount += fileRowCount;
+                }
+
+                return;
+            }
+
+            // No more base entries
+            hasNext = false;
+            nextEntry = null;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return hasNext;
+        }
+
+        @Override
+        public ManifestEntry next() {
+            // This exception is only thrown if next() is called when hasNext() returns false.
+            if (!hasNext) {
+                throw new java.util.NoSuchElementException();
+            }
+            ManifestEntry current = nextEntry;
+            advance();
+            return current;
         }
     }
 }

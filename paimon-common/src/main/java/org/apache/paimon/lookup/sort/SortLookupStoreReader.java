@@ -18,159 +18,61 @@
 
 package org.apache.paimon.lookup.sort;
 
-import org.apache.paimon.compression.BlockCompressionFactory;
-import org.apache.paimon.compression.BlockDecompressor;
-import org.apache.paimon.io.PageFileInput;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
-import org.apache.paimon.memory.MemorySliceInput;
+import org.apache.paimon.sst.BlockCache;
+import org.apache.paimon.sst.SstFileReader;
 import org.apache.paimon.utils.FileBasedBloomFilter;
-import org.apache.paimon.utils.MurmurHashUtils;
 
 import javax.annotation.Nullable;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.Comparator;
 
-import static org.apache.paimon.lookup.sort.SortLookupStoreUtils.crc32c;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
-/** A {@link LookupStoreReader} for sort store. */
+/** A {@link LookupStoreReader} backed by an {@link SstFileReader}. */
 public class SortLookupStoreReader implements LookupStoreReader {
 
-    private final Comparator<MemorySlice> comparator;
-    private final String filePath;
-    private final long fileSize;
-
-    private final BlockIterator indexBlockIterator;
-    @Nullable private FileBasedBloomFilter bloomFilter;
-    private final BlockCache blockCache;
-    private final PageFileInput fileInput;
+    private final SeekableInputStream input;
+    private final SstFileReader reader;
 
     public SortLookupStoreReader(
-            Comparator<MemorySlice> comparator, File file, int blockSize, CacheManager cacheManager)
-            throws IOException {
-        this.comparator = comparator;
-        this.filePath = file.getAbsolutePath();
-        this.fileSize = file.length();
-
-        this.fileInput = PageFileInput.create(file, blockSize, null, fileSize, null);
-        this.blockCache = new BlockCache(fileInput.file(), cacheManager);
-        Footer footer = readFooter();
-        this.indexBlockIterator = readBlock(footer.getIndexBlockHandle(), true).iterator();
-        BloomFilterHandle handle = footer.getBloomFilterHandle();
-        if (handle != null) {
-            this.bloomFilter =
-                    new FileBasedBloomFilter(
-                            fileInput,
-                            cacheManager,
-                            handle.expectedEntries(),
-                            handle.offset(),
-                            handle.size());
-        }
-    }
-
-    private Footer readFooter() throws IOException {
+            Comparator<MemorySlice> comparator,
+            Path filePath,
+            long fileLen,
+            SeekableInputStream input,
+            CacheManager cacheManager) {
+        this.input = input;
+        BlockCache blockCache = new BlockCache(filePath, input, cacheManager);
+        int footerLen = SortLookupStoreFooter.ENCODED_LENGTH;
         MemorySegment footerData =
-                blockCache.getBlock(
-                        fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH, b -> b, true);
-        return Footer.readFooter(MemorySlice.wrap(footerData).toInput());
+                blockCache.getBlock(fileLen - footerLen, footerLen, b -> b, true);
+        SortLookupStoreFooter footer =
+                SortLookupStoreFooter.readFooter(MemorySlice.wrap(footerData).toInput());
+        FileBasedBloomFilter bloomFilter =
+                FileBasedBloomFilter.create(
+                        input, filePath, cacheManager, footer.getBloomFilterHandle());
+        this.reader =
+                new SstFileReader(
+                        comparator, blockCache, footer.getIndexBlockHandle(), bloomFilter);
     }
 
     @Nullable
     @Override
     public byte[] lookup(byte[] key) throws IOException {
-        if (bloomFilter != null && !bloomFilter.testHash(MurmurHashUtils.hashBytes(key))) {
-            return null;
-        }
-
-        MemorySlice keySlice = MemorySlice.wrap(key);
-        // seek the index to the block containing the key
-        indexBlockIterator.seekTo(keySlice);
-
-        // if indexIterator does not have a next, it means the key does not exist in this iterator
-        if (indexBlockIterator.hasNext()) {
-            // seek the current iterator to the key
-            BlockIterator current = getNextBlock();
-            if (current.seekTo(keySlice)) {
-                return current.next().getValue().copyBytes();
-            }
-        }
-        return null;
+        return reader.lookup(key);
     }
 
-    private BlockIterator getNextBlock() {
-        // index block handle, point to the key, value position.
-        MemorySlice blockHandle = indexBlockIterator.next().getValue();
-        BlockReader dataBlock =
-                readBlock(BlockHandle.readBlockHandle(blockHandle.toInput()), false);
-        return dataBlock.iterator();
-    }
-
-    /**
-     * @param blockHandle The block handle.
-     * @param index Whether read the block as an index.
-     * @return The reader of the target block.
-     */
-    private BlockReader readBlock(BlockHandle blockHandle, boolean index) {
-        // read block trailer
-        MemorySegment trailerData =
-                blockCache.getBlock(
-                        blockHandle.offset() + blockHandle.size(),
-                        BlockTrailer.ENCODED_LENGTH,
-                        b -> b,
-                        true);
-        BlockTrailer blockTrailer =
-                BlockTrailer.readBlockTrailer(MemorySlice.wrap(trailerData).toInput());
-
-        MemorySegment unCompressedBlock =
-                blockCache.getBlock(
-                        blockHandle.offset(),
-                        blockHandle.size(),
-                        bytes -> decompressBlock(bytes, blockTrailer),
-                        index);
-        return new BlockReader(MemorySlice.wrap(unCompressedBlock), comparator);
-    }
-
-    private byte[] decompressBlock(byte[] compressedBytes, BlockTrailer blockTrailer) {
-        MemorySegment compressed = MemorySegment.wrap(compressedBytes);
-        int crc32cCode = crc32c(compressed, blockTrailer.getCompressionType());
-        checkArgument(
-                blockTrailer.getCrc32c() == crc32cCode,
-                String.format(
-                        "Expected CRC32C(%d) but found CRC32C(%d) for file(%s)",
-                        blockTrailer.getCrc32c(), crc32cCode, filePath));
-
-        // decompress data
-        BlockCompressionFactory compressionFactory =
-                BlockCompressionFactory.create(blockTrailer.getCompressionType());
-        if (compressionFactory == null) {
-            return compressedBytes;
-        } else {
-            MemorySliceInput compressedInput = MemorySlice.wrap(compressed).toInput();
-            byte[] uncompressed = new byte[compressedInput.readVarLenInt()];
-            BlockDecompressor decompressor = compressionFactory.getDecompressor();
-            int uncompressedLength =
-                    decompressor.decompress(
-                            compressed.getHeapMemory(),
-                            compressedInput.position(),
-                            compressedInput.available(),
-                            uncompressed,
-                            0);
-            checkArgument(uncompressedLength == uncompressed.length);
-            return uncompressed;
-        }
+    public SstFileReader.SstFileIterator createIterator() {
+        return reader.createIterator();
     }
 
     @Override
     public void close() throws IOException {
-        if (bloomFilter != null) {
-            bloomFilter.close();
-        }
-        blockCache.close();
-        fileInput.close();
+        reader.close();
+        input.close();
     }
 }

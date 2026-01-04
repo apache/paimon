@@ -82,7 +82,13 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
             if ("{}".equals(str) || "MAP()".equalsIgnoreCase(str)) {
                 return new GenericMap(new HashMap<>());
             }
-            return new GenericMap(parseDefaultMap(str, keyCastExecutor, valueCastExecutor));
+            Map<Object, Object> defaultMapValue =
+                    parseDefaultMap(str, keyCastExecutor, valueCastExecutor);
+            if (defaultMapValue == null) {
+                return null;
+            } else {
+                return new GenericMap(defaultMapValue);
+            }
         } catch (Exception e) {
             throw new RuntimeException("Cannot parse '" + value + "' as MAP: " + e.getMessage(), e);
         }
@@ -104,7 +110,10 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
             CastExecutor<BinaryString, Object> keyCastExecutor,
             CastExecutor<BinaryString, Object> valueCastExecutor) {
 
-        Map<Object, Object> mapContent = Maps.newHashMap();
+        if (str.equalsIgnoreCase("NULL")) {
+            return null;
+        }
+
         Matcher bracketMatcher = BRACKET_MAP_PATTERN.matcher(str);
         if (bracketMatcher.matches()) {
             // Parse bracket format (arrow-separated entries)
@@ -167,7 +176,7 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
                 : castExecutor.cast(BinaryString.fromString(valueStr));
     }
 
-    private List<String> splitMapEntries(String content) {
+    public List<String> splitMapEntries(String content) {
         List<String> entries = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         Stack<Character> bracketStack = new Stack<>();
@@ -177,10 +186,13 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
         for (char c : content.toCharArray()) {
             if (escaped) {
                 escaped = false;
+                continue;
             } else if (c == '\\') {
                 escaped = true;
+                continue;
             } else if (c == '"') {
                 inQuotes = !inQuotes;
+                continue;
             } else if (!inQuotes) {
                 if (StringUtils.isOpenBracket(c)) {
                     bracketStack.push(c);
@@ -200,7 +212,7 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
 
     private void addCurrentEntry(List<String> entries, StringBuilder current) {
         if (current.length() > 0) {
-            entries.add(current.toString());
+            entries.add(current.toString().trim());
             current.setLength(0);
         }
     }

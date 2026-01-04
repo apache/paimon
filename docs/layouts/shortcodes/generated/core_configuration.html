@@ -99,6 +99,12 @@ under the License.
             <td>Memory page size for caching.</td>
         </tr>
         <tr>
+            <td><h5>chain-table.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether enabled chain table.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-file.compression</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -126,7 +132,7 @@ under the License.
             <td><h5>changelog-producer</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
-            <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads. This can be applied to tables with primary keys. <br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li><li>"lookup": Generate changelog files through 'lookup' before committing the data writing.</li></ul></td>
+            <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads. This can be applied to tables with primary keys. <br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li><li>"lookup": Generate changelog files through 'lookup' compaction.</li></ul></td>
         </tr>
         <tr>
             <td><h5>changelog-producer.row-deduplicate</h5></td>
@@ -273,6 +279,12 @@ under the License.
             <td>If set to true, compaction strategy will always include all level 0 files in candidates.</td>
         </tr>
         <tr>
+            <td><h5>compaction.incremental-size-threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>When incremental size is bigger than this threshold, force a full compaction.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
             <td style="word-wrap: break-word;">200</td>
             <td>Integer</td>
@@ -384,7 +396,7 @@ under the License.
             <td><h5>data-file.external-paths.strategy</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
-            <td>The strategy of selecting an external path when writing data.<br /><br />Possible values:<ul><li>"none": Do not choose any external storage, data will still be written to the default warehouse path.</li><li>"specific-fs": Select a specific file system as the external path. Currently supported are S3 and OSS.</li><li>"round-robin": When writing a new file, a path is chosen from data-file.external-paths in turn.</li></ul></td>
+            <td>The strategy of selecting an external path when writing data.<br /><br />Possible values:<ul><li>"none": Do not choose any external storage, data will still be written to the default warehouse path.</li><li>"specific-fs": Select a specific file system as the external path. Currently supported are S3 and OSS.</li><li>"round-robin": When writing a new file, a path is chosen from data-file.external-paths in turn.</li><li>"entropy-inject": When writing a new file, a path is chosen based on the hash value of the file's content.</li></ul></td>
         </tr>
         <tr>
             <td><h5>data-file.path-directory</h5></td>
@@ -585,10 +597,22 @@ under the License.
             <td>For streaming write, full compaction will be constantly triggered after delta commits. For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.</td>
         </tr>
         <tr>
+            <td><h5>global-index.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable global index for scan.</td>
+        </tr>
+        <tr>
             <td><h5>global-index.row-count-per-shard</h5></td>
             <td style="word-wrap: break-word;">100000</td>
             <td>Long</td>
             <td>Row count per shard for global index.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.thread-num</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent scanner for global index.By default is the number of processors available to the Java virtual machine.</td>
         </tr>
         <tr>
             <td><h5>ignore-delete</h5></td>
@@ -846,6 +870,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 3.</td>
         </tr>
         <tr>
+            <td><h5>overwrite-upgrade</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to try upgrading the data files after overwriting a primary key table.</td>
+        </tr>
+        <tr>
             <td><h5>page-size</h5></td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
@@ -1038,6 +1068,18 @@ This config option does not affect the default filesystem metastore.</td>
             <td>When a batch job queries from a table, if a partition does not exist in the current branch, the reader will try to get this partition from this fallback branch.</td>
         </tr>
         <tr>
+            <td><h5>scan.fallback-delta-branch</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When a batch job queries from a chain table, if a partition does not exist in either main or snapshot branch, the reader will try to get this partition from chain snapshot and delta branch together.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.fallback-snapshot-branch</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When a batch job queries from a chain table, if a partition does not exist in the main branch, the reader will try to get this partition from chain snapshot branch.</td>
+        </tr>
+        <tr>
             <td><h5>scan.file-creation-time-millis</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
@@ -1177,7 +1219,7 @@ This config option does not affect the default filesystem metastore.</td>
         </tr>
         <tr>
             <td><h5>sort-compaction.range-strategy</h5></td>
-            <td style="word-wrap: break-word;">QUANTITY</td>
+            <td style="word-wrap: break-word;">SIZE</td>
             <td><p>Enum</p></td>
             <td>The range strategy of sort compaction, the default value is quantity.
 If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, the config can be set to size.<br /><br />Possible values:<ul><li>"SIZE"</li><li>"QUANTITY"</li></ul></td>
@@ -1229,12 +1271,6 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to read the delta from append table's overwrite commit in streaming mode.</td>
-        </tr>
-        <tr>
-            <td><h5>streaming-read-mode</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td><p>Enum</p></td>
-            <td>The mode of streaming read that specifies to read the data of table file or log.<br /><br />Possible values:<ul><li>"log": Read from the data of table log store.</li><li>"file": Read from the data of table file store.</li></ul></td>
         </tr>
         <tr>
             <td><h5>streaming-read-overwrite</h5></td>
@@ -1319,6 +1355,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">with_dashes</td>
             <td><p>Enum</p></td>
             <td>The date format for tag periods.<br /><br />Possible values:<ul><li>"with_dashes": Dates and hours with dashes, e.g., 'yyyy-MM-dd HH'</li><li>"without_dashes": Dates and hours without dashes, e.g., 'yyyyMMdd HH'</li><li>"without_dashes_and_spaces": Dates and hours without dashes and spaces, e.g., 'yyyyMMddHH'</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>tag.time-expire-enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable tag expiration by retained time.</td>
         </tr>
         <tr>
             <td><h5>target-file-size</h5></td>

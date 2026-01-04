@@ -18,10 +18,29 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.table.Table
+import org.apache.paimon.spark.rowops.PaimonSparkCopyOnWriteOperation
+import org.apache.paimon.table.{FileStoreTable, Table}
+
+import org.apache.spark.sql.connector.catalog.SupportsRowLevelOperations
+import org.apache.spark.sql.connector.write.{RowLevelOperationBuilder, RowLevelOperationInfo}
 
 /** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
-case class SparkTable(override val table: Table) extends PaimonSparkTableBase(table) {}
+case class SparkTable(override val table: Table)
+  extends PaimonSparkTableBase(table)
+  with SupportsRowLevelOperations {
+
+  override def newRowLevelOperationBuilder(
+      info: RowLevelOperationInfo): RowLevelOperationBuilder = {
+    table match {
+      case t: FileStoreTable if useV2Write =>
+        () => new PaimonSparkCopyOnWriteOperation(t, info)
+      case _ =>
+        throw new UnsupportedOperationException(
+          s"Write operation is only supported for FileStoreTable with V2 write enabled. " +
+            s"Actual table type: ${table.getClass.getSimpleName}, useV2Write: $useV2Write")
+    }
+  }
+}
 
 case class SparkIcebergTable(table: Table) extends BaseTable
 

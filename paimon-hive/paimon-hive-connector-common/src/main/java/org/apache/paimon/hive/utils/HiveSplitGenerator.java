@@ -172,7 +172,7 @@ public class HiveSplitGenerator {
         List<DataSplit> toPack = new ArrayList<>();
         int numFiles = 0;
         for (DataSplit split : splits) {
-            if (split instanceof FallbackReadFileStoreTable.FallbackDataSplit) {
+            if (split instanceof FallbackReadFileStoreTable.FallbackSplit) {
                 dataSplits.add(split);
             } else if (split.beforeFiles().isEmpty() && split.rawConvertible()) {
                 numFiles += split.dataFiles().size();

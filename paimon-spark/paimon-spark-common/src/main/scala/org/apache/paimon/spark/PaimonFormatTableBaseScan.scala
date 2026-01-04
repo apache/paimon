@@ -18,79 +18,34 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
-import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.spark.scan.BaseScan
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.source.Split
-
-import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
-import org.apache.spark.sql.connector.read.{Batch, Statistics, SupportsReportStatistics}
-import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
 /** Base Scan implementation for [[FormatTable]]. */
-abstract class PaimonFormatTableBaseScan(
-    table: FormatTable,
-    requiredSchema: StructType,
-    filters: Seq[Predicate],
-    pushDownLimit: Option[Int])
-  extends ColumnPruningAndPushDown
-  with SupportsReportStatistics
-  with ScanHelper {
+abstract class PaimonFormatTableBaseScan extends BaseScan {
 
-  override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
-  protected var inputSplits: Array[Split] = _
-  protected var inputPartitions: Seq[PaimonInputPartition] = _
+  protected var _inputSplits: Array[Split] = _
+  protected var _inputPartitions: Seq[PaimonInputPartition] = _
 
-  def getOriginSplits: Array[Split] = {
-    if (inputSplits == null) {
-      inputSplits = readBuilder
+  def inputSplits: Array[Split] = {
+    if (_inputSplits == null) {
+      _inputSplits = readBuilder
         .newScan()
         .plan()
         .splits()
         .asScala
         .toArray
     }
-    inputSplits
+    _inputSplits
   }
 
-  final def lazyInputPartitions: Seq[PaimonInputPartition] = {
-    if (inputPartitions == null) {
-      inputPartitions = getInputPartitions(getOriginSplits)
+  final override def inputPartitions: Seq[PaimonInputPartition] = {
+    if (_inputPartitions == null) {
+      _inputPartitions = getInputPartitions(inputSplits)
     }
-    inputPartitions
-  }
-
-  override def toBatch: Batch = {
-    PaimonBatch(lazyInputPartitions, readBuilder, coreOptions.blobAsDescriptor(), metadataColumns)
-  }
-
-  override def estimateStatistics(): Statistics = {
-    FormatTableStatistics(this)
-  }
-
-  override def supportedCustomMetrics: Array[CustomMetric] = {
-    Array(
-      PaimonNumSplitMetric(),
-      PaimonPartitionSizeMetric(),
-      PaimonResultedTableFilesMetric()
-    )
-  }
-
-  override def reportDriverMetrics(): Array[CustomTaskMetric] = {
-    val filesCount = getOriginSplits.length
-    Array(
-      PaimonResultedTableFilesTaskMetric(filesCount)
-    )
-  }
-
-  override def description(): String = {
-    val pushedFiltersStr = if (filters.nonEmpty) {
-      ", PushedFilters: [" + filters.mkString(",") + "]"
-    } else {
-      ""
-    }
-    s"PaimonFormatTableScan: [${table.name}]" + pushedFiltersStr
+    _inputPartitions
   }
 }

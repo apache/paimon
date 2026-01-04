@@ -24,7 +24,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Range;
 
 import java.util.List;
 
@@ -76,10 +75,6 @@ public interface InnerTableRead extends TableRead {
 
     @Override
     default InnerTableRead withMetricRegistry(MetricRegistry registry) {
-        return this;
-    }
-
-    default InnerTableRead withRowRanges(List<Range> rowRanges) {
         return this;
     }
 }

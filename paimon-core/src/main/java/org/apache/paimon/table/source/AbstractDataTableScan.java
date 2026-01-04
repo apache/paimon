@@ -149,6 +149,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
+    public InnerTableScan withPartitionFilter(Predicate predicate) {
+        snapshotReader.withPartitionFilter(predicate);
+        return this;
+    }
+
+    @Override
     public AbstractDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
         snapshotReader.withLevelFilter(levelFilter);
         return this;
@@ -177,6 +183,10 @@ abstract class AbstractDataTableScan implements DataTableScan {
     public InnerTableScan withRowRanges(List<Range> rowRanges) {
         snapshotReader.withRowRanges(rowRanges);
         return this;
+    }
+
+    public SnapshotReader snapshotReader() {
+        return snapshotReader;
     }
 
     public CoreOptions options() {

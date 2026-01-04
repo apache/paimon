@@ -20,6 +20,8 @@ import unittest
 
 from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
@@ -35,7 +37,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tempdir = tempfile.mkdtemp()
-        cls.catalog = FileSystemCatalog({'warehouse': cls.tempdir})
+        cls.catalog = FileSystemCatalog(Options({CatalogOptions.WAREHOUSE.key(): cls.tempdir}))
         cls.catalog.create_database('default', False)
 
     def setUp(self):
@@ -55,6 +57,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
 
     def _create_file_meta(self, file_name, level=0, extra_files=None, external_path=None):
         """Helper to create DataFileMeta with common defaults."""
+        from pypaimon.data.timestamp import Timestamp
         return DataFileMeta(
             file_name=file_name,
             file_size=1024,
@@ -76,7 +79,7 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
             schema_id=0,
             level=level,
             extra_files=extra_files or [],
-            creation_time=1234567890,
+            creation_time=Timestamp.from_epoch_millis(1234567890),
             delete_row_count=0,
             embedded_index=None,
             file_source=None,

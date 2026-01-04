@@ -26,7 +26,7 @@ import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowKind
 
-import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.{Column, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
@@ -127,32 +127,26 @@ case class UpdatePaimonTableCommand(
   private def writeOnlyUpdatedData(
       sparkSession: SparkSession,
       touchedDataSplits: Array[DataSplit]): Seq[CommitMessage] = {
-    val updateColumns = updateExpressions.zip(relation.output).map {
-      case (update, origin) =>
-        toColumn(update).as(origin.name, origin.metadata)
-    }
+    val updateColumns = getUpdateColumns(sparkSession)
 
     val toUpdateScanRelation = createNewScanPlan(touchedDataSplits, relation, Some(condition))
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
-    writer.write(data)
+    writer.withRowTracking().write(data)
   }
 
   private def writeUpdatedAndUnchangedData(
       sparkSession: SparkSession,
       toUpdateScanRelation: LogicalPlan): Seq[CommitMessage] = {
+    val updateColumns = getUpdateColumns(sparkSession)
 
-    def rowIdCol = col(ROW_ID_COLUMN)
+    val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
+    writer.withRowTracking().write(data)
+  }
 
-    def sequenceNumberCol = toColumn(
-      optimizedIf(
-        condition,
-        Literal(null),
-        toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
-      .as(SEQUENCE_NUMBER_COLUMN)
-
+  private def getUpdateColumns(sparkSession: SparkSession): Seq[Column] = {
     var updateColumns = updateExpressions.zip(relation.output).map {
       case (_, origin) if origin.name == ROW_ID_COLUMN => rowIdCol
-      case (_, origin) if origin.name == SEQUENCE_NUMBER_COLUMN => sequenceNumberCol
+      case (_, origin) if origin.name == SEQUENCE_NUMBER_COLUMN => sequenceNumberCol(sparkSession)
       case (update, origin) =>
         val updated = optimizedIf(condition, update, origin)
         toColumn(updated).as(origin.name, origin.metadata)
@@ -164,13 +158,18 @@ case class UpdatePaimonTableCommand(
         updateColumns ++= Seq(rowIdCol)
       }
       if (!outputSet.exists(_.name == SEQUENCE_NUMBER_COLUMN)) {
-        updateColumns ++= Seq(sequenceNumberCol)
+        updateColumns ++= Seq(sequenceNumberCol(sparkSession))
       }
     }
 
-    val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
-    writer.withRowTracking().write(data)
+    updateColumns
   }
+
+  private def rowIdCol = col(ROW_ID_COLUMN)
+
+  private def sequenceNumberCol(sparkSession: SparkSession) = toColumn(
+    optimizedIf(condition, Literal(null), toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
+    .as(SEQUENCE_NUMBER_COLUMN)
 
   private def optimizedIf(
       predicate: Expression,

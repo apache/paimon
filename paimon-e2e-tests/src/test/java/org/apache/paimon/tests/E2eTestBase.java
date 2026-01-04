@@ -80,10 +80,13 @@ public abstract class E2eTestBase {
     private static final int CHECK_RESULT_INTERVAL_MS = 1000;
     private static final int CHECK_RESULT_RETRIES = 60;
     private final List<String> currentResults = new ArrayList<>();
+    private static final Pattern FLINK_VERSION_PATTERN =
+            Pattern.compile("Version:\\s*([0-9]+(?:\\.[0-9]+){1,2})");
 
     protected Network network;
     protected ComposeContainer environment;
     protected ContainerState jobManager;
+    protected String flinkVersion;
 
     @BeforeEach
     public void before() throws Exception {
@@ -146,6 +149,11 @@ public abstract class E2eTestBase {
 
         jobManager = environment.getContainerByServiceName("jobmanager-1").get();
         jobManager.execInContainer("chown", "-R", "flink:flink", TEST_DATA_DIR);
+
+        String flinkVersionCliOut =
+                jobManager.execInContainer("bash", "-c", "flink --version").getStdout();
+        Matcher flinkVersionMatcher = FLINK_VERSION_PATTERN.matcher(flinkVersionCliOut);
+        flinkVersion = flinkVersionMatcher.find() ? flinkVersionMatcher.group(1) : null;
     }
 
     private WaitStrategy buildWaitStrategy(String regex, int times) {
@@ -368,6 +376,49 @@ public abstract class E2eTestBase {
                         + expectedMap
                         + "\nActual: "
                         + actual);
+    }
+
+    protected boolean isFlinkVersionAtLeast(String compareToVersion) {
+        if (flinkVersion == null || compareToVersion == null) {
+            return false;
+        }
+
+        int[] current = safelyParseVersion(flinkVersion);
+        int[] target = safelyParseVersion(compareToVersion);
+
+        for (int i = 0; i < 3; i++) {
+            if (current[i] < target[i]) {
+                return false;
+            }
+            if (current[i] > target[i]) {
+                return true;
+            }
+        }
+        return true; // equal
+    }
+
+    private int[] safelyParseVersion(String v) {
+        // default: [0, 0, 0]
+        int[] nums = new int[] {0, 0, 0};
+
+        if (v == null || v.isEmpty()) {
+            return nums;
+        }
+
+        // keep only "number" parts before possible suffix (e.g., rc1 / SNAPSHOT)
+        String[] parts = v.split("\\.");
+
+        for (int i = 0; i < Math.min(parts.length, 3); i++) {
+            String numeric = parts[i].replaceAll("[^0-9]", ""); // strip non-digit
+            if (!numeric.isEmpty()) {
+                try {
+                    nums[i] = Integer.parseInt(numeric);
+                } catch (NumberFormatException ignored) {
+                    nums[i] = 0;
+                }
+            }
+        }
+        return nums;
     }
 
     private class LogConsumer extends Slf4jLogConsumer {

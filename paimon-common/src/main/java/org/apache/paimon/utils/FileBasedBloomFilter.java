@@ -19,11 +19,16 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.io.PageFileInput;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.io.cache.CacheCallback;
 import org.apache.paimon.io.cache.CacheKey;
+import org.apache.paimon.io.cache.CacheKey.PositionCacheKey;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.sst.BloomFilterHandle;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -34,16 +39,16 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Util to apply a built bloom filter . */
 public class FileBasedBloomFilter implements Closeable {
 
-    private final PageFileInput input;
+    private final SeekableInputStream input;
     private final CacheManager cacheManager;
     private final BloomFilter filter;
-    private final long readOffset;
-    private final int readLength;
-    private final CacheKey cacheKey;
+    private final PositionCacheKey cacheKey;
+
     private int accessCount;
 
     public FileBasedBloomFilter(
-            PageFileInput input,
+            SeekableInputStream input,
+            Path filePath,
             CacheManager cacheManager,
             long expectedEntries,
             long readOffset,
@@ -52,10 +57,26 @@ public class FileBasedBloomFilter implements Closeable {
         this.cacheManager = cacheManager;
         checkArgument(expectedEntries >= 0);
         this.filter = new BloomFilter(expectedEntries, readLength);
-        this.readOffset = readOffset;
-        this.readLength = readLength;
         this.accessCount = 0;
-        this.cacheKey = CacheKey.forPosition(input.file(), readOffset, readLength, true);
+        this.cacheKey = CacheKey.forPosition(filePath, readOffset, readLength, true);
+    }
+
+    @Nullable
+    public static FileBasedBloomFilter create(
+            SeekableInputStream input,
+            Path filePath,
+            CacheManager cacheManager,
+            @Nullable BloomFilterHandle bloomFilterHandle) {
+        if (bloomFilterHandle == null) {
+            return null;
+        }
+        return new FileBasedBloomFilter(
+                input,
+                filePath,
+                cacheManager,
+                bloomFilterHandle.expectedEntries(),
+                bloomFilterHandle.offset(),
+                bloomFilterHandle.size());
     }
 
     public boolean testHash(int hash) {
@@ -65,13 +86,19 @@ public class FileBasedBloomFilter implements Closeable {
         if (accessCount == REFRESH_COUNT || filter.getMemorySegment() == null) {
             MemorySegment segment =
                     cacheManager.getPage(
-                            cacheKey,
-                            key -> input.readPosition(readOffset, readLength),
-                            new BloomFilterCallBack(filter));
+                            cacheKey, this::readBytes, new BloomFilterCallBack(filter));
             filter.setMemorySegment(segment, 0);
             accessCount = 0;
         }
         return filter.testHash(hash);
+    }
+
+    private byte[] readBytes(CacheKey k) throws IOException {
+        PositionCacheKey key = (PositionCacheKey) k;
+        input.seek(key.position());
+        byte[] bytes = new byte[key.length()];
+        IOUtils.readFully(input, bytes);
+        return bytes;
     }
 
     @VisibleForTesting

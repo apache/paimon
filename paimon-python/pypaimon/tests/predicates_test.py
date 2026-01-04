@@ -52,7 +52,7 @@ class PredicateTest(unittest.TestCase):
             ('f1', pa.string()),
         ])
         cls.catalog.create_table('default.test_append', Schema.from_pyarrow_schema(
-            pa_schema, options={'file.format': _random_format()}), False)
+            pa_schema, options={'file.format': _random_format(), 'metadata.stats-mode': 'full'}), False)
         cls.catalog.create_table('default.test_pk', Schema.from_pyarrow_schema(
             pa_schema, primary_keys=['f0'], options={'bucket': '1', 'file.format': _random_format()}), False)
 

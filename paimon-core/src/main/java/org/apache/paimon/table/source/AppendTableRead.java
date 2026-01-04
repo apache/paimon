@@ -29,7 +29,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.SplitReadConfig;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -50,7 +49,6 @@ public final class AppendTableRead extends AbstractDataTableRead {
     private Predicate predicate = null;
     private TopN topN = null;
     private Integer limit = null;
-    @Nullable private List<Range> rowRanges;
     @Nullable private VariantAccessInfo[] variantAccess;
 
     public AppendTableRead(
@@ -80,7 +78,6 @@ public final class AppendTableRead extends AbstractDataTableRead {
         read.withFilter(predicate);
         read.withTopN(topN);
         read.withLimit(limit);
-        read.withRowRanges(rowRanges);
         read.withVariantAccess(variantAccess);
     }
 
@@ -94,12 +91,6 @@ public final class AppendTableRead extends AbstractDataTableRead {
     public void applyVariantAccess(VariantAccessInfo[] variantAccess) {
         initialized().forEach(r -> r.withVariantAccess(variantAccess));
         this.variantAccess = variantAccess;
-    }
-
-    @Override
-    public void applyRowRanges(List<Range> rowRanges) {
-        initialized().forEach(r -> r.withRowRanges(rowRanges));
-        this.rowRanges = rowRanges;
     }
 
     @Override
@@ -125,10 +116,9 @@ public final class AppendTableRead extends AbstractDataTableRead {
 
     @Override
     public RecordReader<InternalRow> reader(Split split) throws IOException {
-        DataSplit dataSplit = (DataSplit) split;
         for (SplitReadProvider readProvider : readProviders) {
-            if (readProvider.match(dataSplit, new SplitReadProvider.Context(false))) {
-                return readProvider.get().get().createReader(dataSplit);
+            if (readProvider.match(split, new SplitReadProvider.Context(false))) {
+                return readProvider.get().get().createReader(split);
             }
         }
 

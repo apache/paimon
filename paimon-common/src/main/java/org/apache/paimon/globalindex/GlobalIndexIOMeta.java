@@ -18,20 +18,19 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.utils.Range;
+import java.util.Arrays;
+import java.util.Objects;
 
 /** Index meta for global index. */
 public class GlobalIndexIOMeta {
 
     private final String fileName;
     private final long fileSize;
-    private final Range rowIdRange;
     private final byte[] metadata;
 
-    public GlobalIndexIOMeta(String fileName, long fileSize, Range rowIdRange, byte[] metadata) {
+    public GlobalIndexIOMeta(String fileName, long fileSize, byte[] metadata) {
         this.fileName = fileName;
         this.fileSize = fileSize;
-        this.rowIdRange = rowIdRange;
         this.metadata = metadata;
     }
 
@@ -43,11 +42,28 @@ public class GlobalIndexIOMeta {
         return fileSize;
     }
 
-    public Range rowIdRange() {
-        return rowIdRange;
-    }
-
     public byte[] metadata() {
         return metadata;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        GlobalIndexIOMeta that = (GlobalIndexIOMeta) o;
+        return Objects.equals(fileName, that.fileName)
+                && fileSize == that.fileSize
+                && Arrays.equals(metadata, that.metadata);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = Objects.hash(fileName, fileSize);
+        result = 31 * result + Arrays.hashCode(metadata);
+        return result;
     }
 }

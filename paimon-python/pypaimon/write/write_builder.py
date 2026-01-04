@@ -20,9 +20,11 @@ import uuid
 from abc import ABC
 from typing import Optional
 
-from pypaimon.common.core_options import CoreOptions
-from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit, TableCommit
-from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite, TableWrite
+from pypaimon.write.table_commit import (BatchTableCommit, StreamTableCommit,
+                                         TableCommit)
+from pypaimon.write.table_update import TableUpdate
+from pypaimon.write.table_write import (BatchTableWrite, StreamTableWrite,
+                                        TableWrite)
 
 
 class WriteBuilder(ABC):
@@ -40,12 +42,16 @@ class WriteBuilder(ABC):
     def new_write(self) -> TableWrite:
         """Returns a table write."""
 
+    def new_update(self) -> TableUpdate:
+        """Returns a table update."""
+
     def new_commit(self) -> TableCommit:
         """Returns a table commit."""
 
     def _create_commit_user(self):
-        if CoreOptions.COMMIT_USER_PREFIX in self.table.options:
-            return f"{self.table.options.get(CoreOptions.COMMIT_USER_PREFIX)}_{uuid.uuid4()}"
+        commit_user_prefix = self.table.options.commit_user_prefix()
+        if commit_user_prefix is not None:
+            return f"{commit_user_prefix}_{uuid.uuid4()}"
         else:
             return str(uuid.uuid4())
 
@@ -55,14 +61,21 @@ class BatchWriteBuilder(WriteBuilder):
     def new_write(self) -> BatchTableWrite:
         return BatchTableWrite(self.table, self.commit_user)
 
+    def new_update(self) -> TableUpdate:
+        return TableUpdate(self.table, self.commit_user)
+
     def new_commit(self) -> BatchTableCommit:
         commit = BatchTableCommit(self.table, self.commit_user, self.static_partition)
         return commit
 
 
 class StreamWriteBuilder(WriteBuilder):
+
     def new_write(self) -> StreamTableWrite:
         return StreamTableWrite(self.table, self.commit_user)
+
+    def new_update(self) -> TableUpdate:
+        raise ValueError("StreamWriteBuilder.new_update() not supported.")
 
     def new_commit(self) -> StreamTableCommit:
         commit = StreamTableCommit(self.table, self.commit_user, self.static_partition)

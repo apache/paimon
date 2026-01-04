@@ -506,6 +506,33 @@ The following table lists the type mapping from Paimon type to CSV type.
     </tbody>
 </table>
 
+## TEXT
+
+Experimental feature, not recommended for production.
+
+Format Options:
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left" style="width: 25%">Option</th>
+        <th class="text-center" style="width: 7%">Default</th>
+        <th class="text-center" style="width: 10%">Type</th>
+        <th class="text-center" style="width: 42%">Description</th>
+      </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>text.line-delimiter</h5></td>
+      <td style="word-wrap: break-word;"><code>\n</code></td>
+      <td>String</td>
+      <td>The line delimiter for TEXT format</td>
+    </tr>
+    </tbody>
+</table>
+
+The Paimon text table contains only one field, and it is of string type.
+
 ## JSON
 
 Experimental feature, not recommended for production.
@@ -726,3 +753,39 @@ The following table lists the type mapping from Paimon type to Lance (Arrow) typ
 Limitations:
 1. Lance file format does not support `MAP` type.
 2. Lance file format does not support `TIMESTAMP_LOCAL_ZONE` type.
+
+## BLOB
+
+The BLOB format is a specialized format for storing large binary objects such as images, videos, and other multimodal data. Unlike other formats that store data inline, BLOB format stores large binary data in separate files with an optimized layout for random access.
+
+BLOB files use the `.blob` extension and have the following structure:
+
+```
++------------------+
+| Blob Entry 1     |
+|   Magic Number   |  4 bytes (1481511375, Little Endian)
+|   Blob Data      |  Variable length
+|   Length         |  8 bytes (Little Endian)
+|   CRC32          |  4 bytes (Little Endian)
++------------------+
+| Blob Entry 2     |
+|   ...            |
++------------------+
+| Index            |  Variable (Delta-Varint compressed)
++------------------+
+| Index Length     |  4 bytes (Little Endian)
+| Version          |  1 byte
++------------------+
+```
+
+Key features:
+- **CRC32 Checksums**: Each blob entry has a CRC32 checksum for data integrity verification
+- **Indexed Access**: The index at the end enables efficient random access to any blob in the file
+- **Delta-Varint Compression**: The index uses delta-varint compression for space efficiency
+
+Limitations:
+1. BLOB format only supports a single BLOB type column per file.
+2. BLOB format does not support predicate pushdown.
+3. Statistics collection is not supported for BLOB columns.
+
+For usage details, configuration options, and examples, see [Blob Type]({{< ref "concepts/spec/blob" >}}).

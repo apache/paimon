@@ -31,6 +31,7 @@ import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
@@ -51,13 +52,13 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
+import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
-import static org.apache.paimon.predicate.PredicateBuilder.fieldIdxToPartitionIdx;
-import static org.apache.paimon.predicate.PredicateBuilder.splitAndByPartition;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link ReadBuilder} for {@link FormatTable}. */
@@ -147,13 +148,12 @@ public class FormatReadBuilder implements ReadBuilder {
     public TableScan newScan() {
         PartitionPredicate partitionFilter = this.partitionFilter;
         if (partitionFilter == null && this.filter != null && !table.partitionKeys().isEmpty()) {
-            int[] partitionIdx = fieldIdxToPartitionIdx(table.rowType(), table.partitionKeys());
-            List<Predicate> partitionFilters = splitAndByPartition(filter, partitionIdx).getLeft();
-            if (!partitionFilters.isEmpty()) {
-                RowType partitionType = table.rowType().project(table.partitionKeys());
-                partitionFilter =
-                        PartitionPredicate.fromPredicate(
-                                partitionType, PredicateBuilder.and(partitionFilters));
+            Optional<PartitionPredicate> partitionPredicateOpt =
+                    splitPartitionPredicatesAndDataPredicates(
+                                    filter, table.rowType(), table.partitionKeys())
+                            .getLeft();
+            if (partitionPredicateOpt.isPresent()) {
+                partitionFilter = partitionPredicateOpt.get();
             }
         }
         return new FormatTableScan(table, partitionFilter, limit);
@@ -245,6 +245,11 @@ public class FormatReadBuilder implements ReadBuilder {
 
     @Override
     public ReadBuilder withRowRanges(List<Range> rowRanges) {
+        throw new UnsupportedOperationException("Format Table does not support withRowRanges.");
+    }
+
+    @Override
+    public ReadBuilder withVectorSearch(VectorSearch vectorSearch) {
         throw new UnsupportedOperationException("Format Table does not support withRowRanges.");
     }
 

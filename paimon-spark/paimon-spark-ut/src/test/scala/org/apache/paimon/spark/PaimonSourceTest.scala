@@ -30,6 +30,24 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
 
   import testImplicits._
 
+  test("Paimon Source: EQUAL_NULL_SAFE") {
+    withTempDir {
+      _ =>
+        {
+          val TableSnapshotState(_, _, _, _, _) = prepareTableAndGetLocation(0, hasPk = true)
+          spark.sql("INSERT INTO T VALUES (1, CAST(null as string)), (2, CAST(null as string))")
+          val currentResult = () => spark.sql("SELECT * FROM T WHERE !(b <=> 'v_1')")
+          checkAnswer(currentResult(), Seq(Row(1, null), Row(2, null)))
+          spark.sql("INSERT INTO T VALUES (3, 'v_1'), (4, CAST(null as string))")
+          checkAnswer(currentResult(), Seq(Row(1, null), Row(2, null), Row(4, null)))
+          val valueDF = spark.sql("SELECT * FROM T WHERE b <=> 'v_1'")
+          checkAnswer(valueDF, Seq(Row(3, "v_1")))
+          val nullDF = spark.sql("SELECT * FROM T WHERE b <=> null")
+          checkAnswer(nullDF, Seq(Row(1, null), Row(2, null), Row(4, null)))
+        }
+    }
+  }
+
   test("Paimon Source: default scan mode") {
     withTempDir {
       checkpointDir =>

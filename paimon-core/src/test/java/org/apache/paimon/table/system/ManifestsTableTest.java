@@ -28,10 +28,13 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
@@ -161,6 +164,49 @@ public class ManifestsTableTest extends TableTestBase {
                 "Specified parameter scan.snapshot-id = 3 is not exist, you can set it in range from 1 to 2");
     }
 
+    @Test
+    void testManifestCreationTimeTimestamp() throws Exception {
+        Identifier identifier = identifier("T_CreationTime");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("pt", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .option("bucket", "1")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        Table testTable = catalog.getTable(identifier);
+
+        write(testTable, GenericRow.of(1, 1, 1), GenericRow.of(2, 2, 2));
+
+        FileStoreScan scan = ((FileStoreTable) testTable).store().newScan();
+        FileStoreScan.Plan plan = scan.plan();
+        List<ManifestEntry> entries = plan.files();
+
+        int creationTimesFound = 0;
+        for (org.apache.paimon.manifest.ManifestEntry entry : entries) {
+            if (entry.file().creationTime() != null) {
+                creationTimesFound++;
+                org.apache.paimon.data.Timestamp creationTime = entry.file().creationTime();
+                assertThat(creationTime).isNotNull();
+                long epochMillis = entry.file().creationTimeEpochMillis();
+                assertThat(epochMillis).isPositive();
+                long expectedEpochMillis = creationTime.getMillisecond();
+                java.time.ZoneId systemZone = java.time.ZoneId.systemDefault();
+                java.time.ZoneOffset offset =
+                        systemZone
+                                .getRules()
+                                .getOffset(java.time.Instant.ofEpochMilli(expectedEpochMillis));
+                expectedEpochMillis = expectedEpochMillis - (offset.getTotalSeconds() * 1000L);
+                assertThat(epochMillis).isEqualTo(expectedEpochMillis);
+            }
+        }
+
+        assertThat(creationTimesFound).isPositive();
+    }
+
     private List<InternalRow> getExpectedResult(long snapshotId) {
         if (!snapshotManager.snapshotExists(snapshotId)) {
             return Collections.emptyList();
@@ -191,7 +237,9 @@ public class ManifestsTableTest extends TableTestBase {
                                             manifestFileMeta
                                                     .partitionStats()
                                                     .maxValues()
-                                                    .getInt(0)))));
+                                                    .getInt(0))),
+                            manifestFileMeta.minRowId(),
+                            manifestFileMeta.maxRowId()));
         }
         return expectedRow;
     }

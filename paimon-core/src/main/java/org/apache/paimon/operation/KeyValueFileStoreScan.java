@@ -34,16 +34,20 @@ import org.apache.paimon.stats.SimpleStatsEvolution;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
@@ -155,7 +159,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     @Override
     protected ManifestEntry dropStats(ManifestEntry entry) {
-        if (!isValueFilterEnabled() && wholeBucketFilterEnabled()) {
+        if (!isValueFilterEnabled() && postFilterManifestEntriesEnabled()) {
             return new FilteredManifestEntry(entry.copyWithoutStats(), filterByValueFilter(entry));
         }
         return entry.copyWithoutStats();
@@ -200,12 +204,31 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     }
 
     @Override
-    protected boolean wholeBucketFilterEnabled() {
+    protected boolean postFilterManifestEntriesEnabled() {
         return valueFilter != null && scanMode == ScanMode.ALL;
     }
 
     @Override
-    protected List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries) {
+    protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> files) {
+        // We group files by bucket here, and filter them by the whole bucket filter.
+        // Why do this: because in primary key table, we can't just filter the value
+        // by the stat in files (see `PrimaryKeyFileStoreTable.nonPartitionFilterConsumer`),
+        // but we can do this by filter the whole bucket files
+        return files.stream()
+                .collect(
+                        Collectors.groupingBy(
+                                // we use LinkedHashMap to avoid disorder
+                                file -> Pair.of(file.partition(), file.bucket()),
+                                LinkedHashMap::new,
+                                Collectors.toList()))
+                .values()
+                .stream()
+                .map(this::doFilterWholeBucketByStats)
+                .flatMap(Collection::stream)
+                .collect(Collectors.toList());
+    }
+
+    private List<ManifestEntry> doFilterWholeBucketByStats(List<ManifestEntry> entries) {
         return noOverlapping(entries)
                 ? filterWholeBucketPerFile(entries)
                 : filterWholeBucketAllFiles(entries);

@@ -25,7 +25,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.Committable;
-import org.apache.paimon.flink.sink.WriterRefresher;
+import org.apache.paimon.flink.sink.CompactRefresher;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
@@ -65,7 +66,7 @@ public class AppendTableCompactor {
     @Nullable private final CompactionMetrics compactionMetrics;
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
-    @Nullable protected final WriterRefresher writeRefresher;
+    @Nullable protected final CompactRefresher compactRefresher;
 
     public AppendTableCompactor(
             FileStoreTable table,
@@ -91,7 +92,7 @@ public class AppendTableCompactor {
                         ? null
                         // partition and bucket fields are no use.
                         : this.compactionMetrics.createReporter(BinaryRow.EMPTY_ROW, 0);
-        this.writeRefresher = WriterRefresher.create(isStreaming, table, this::replace);
+        this.compactRefresher = CompactRefresher.create(isStreaming, table, this::replace);
     }
 
     public void processElement(AppendCompactTask task) throws Exception {
@@ -198,7 +199,7 @@ public class AppendTableCompactor {
                 tempList.add(future.get());
             }
             return tempList.stream()
-                    .map(s -> new Committable(checkpointId, Committable.Kind.FILE, s))
+                    .map(s -> new Committable(checkpointId, s))
                     .collect(Collectors.toList());
         } catch (InterruptedException e) {
             throw new RuntimeException("Interrupted while waiting tasks done.", e);
@@ -219,12 +220,12 @@ public class AppendTableCompactor {
         this.write.restore(states);
     }
 
-    public void tryRefreshWrite() {
+    public void tryRefreshWrite(List<DataFileMeta> files) {
         if (commitUser == null) {
             return;
         }
-        if (writeRefresher != null) {
-            writeRefresher.tryRefresh();
+        if (compactRefresher != null && (!files.isEmpty())) {
+            compactRefresher.tryRefresh(files);
         }
     }
 }

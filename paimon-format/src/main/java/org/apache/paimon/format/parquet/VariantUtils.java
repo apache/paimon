@@ -22,6 +22,7 @@ import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -35,6 +36,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
+import static org.apache.paimon.data.variant.Variant.METADATA;
+import static org.apache.paimon.data.variant.Variant.VALUE;
+
 /** Utils for variant. */
 public class VariantUtils {
 
@@ -44,17 +48,24 @@ public class VariantUtils {
         RowType[] shreddingSchemas = new RowType[readFields.length];
         for (int i = 0; i < readFields.length; i++) {
             DataField field = readFields[i];
-            if (field.type() instanceof VariantType
-                    && fileSchema
-                            .getType(field.name())
-                            .asGroupType()
-                            .containsField(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME)) {
-                RowType shreddingSchema =
-                        (RowType)
-                                ParquetSchemaConverter.convertToPaimonField(
-                                                fileSchema.getType(field.name()))
-                                        .type();
-                shreddingSchemas[i] = shreddingSchema;
+            if (field.type() instanceof VariantType) {
+                boolean isShredded =
+                        fileSchema
+                                .getType(field.name())
+                                .asGroupType()
+                                .containsField(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME);
+                if (isShredded) {
+                    shreddingSchemas[i] =
+                            (RowType)
+                                    ParquetSchemaConverter.convertToPaimonField(
+                                                    fileSchema.getType(field.name()))
+                                            .type();
+                } else {
+                    List<DataField> dataFields = new ArrayList<>();
+                    dataFields.add(new DataField(0, VALUE, DataTypes.BYTES()));
+                    dataFields.add(new DataField(1, METADATA, DataTypes.BYTES()));
+                    shreddingSchemas[i] = new RowType(dataFields);
+                }
             }
         }
         return shreddingSchemas;

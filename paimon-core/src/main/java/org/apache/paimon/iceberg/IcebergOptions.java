@@ -26,7 +26,10 @@ import org.apache.paimon.options.description.InlineElement;
 import org.apache.paimon.options.description.TextElement;
 import org.apache.paimon.utils.Preconditions;
 
+import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.options.ConfigOptions.key;
@@ -254,5 +257,25 @@ public class IcebergOptions {
         public InlineElement getDescription() {
             return TextElement.text(description);
         }
+    }
+
+    /**
+     * Returns all ConfigOption fields defined in this class. This method uses reflection to
+     * dynamically discover all ConfigOption fields, ensuring that new options are automatically
+     * included without code changes.
+     */
+    public static List<ConfigOption<?>> getOptions() {
+        final Field[] fields = IcebergOptions.class.getFields();
+        final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
+        for (Field field : fields) {
+            if (ConfigOption.class.isAssignableFrom(field.getType())) {
+                try {
+                    list.add((ConfigOption<?>) field.get(IcebergOptions.class));
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+        return list;
     }
 }

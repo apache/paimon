@@ -27,6 +27,8 @@ import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.io.ChainKeyValueFileReaderFactory;
+import org.apache.paimon.io.ChainReadContext;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.mergetree.DropDeleteReader;
@@ -45,6 +47,7 @@ import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.Split;
@@ -254,8 +257,18 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     @Override
-    public RecordReader<KeyValue> createReader(Split s) throws IOException {
-        DataSplit split = (DataSplit) s;
+    public RecordReader<KeyValue> createReader(Split split) throws IOException {
+        if (split instanceof DataSplit) {
+            return createReader((DataSplit) split);
+        } else if (split instanceof ChainSplit) {
+            return createChainReader((ChainSplit) split);
+        } else {
+            throw new IllegalArgumentException(
+                    "Un-supported split type: " + split.getClass().getName());
+        }
+    }
+
+    public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
         if (!split.beforeFiles().isEmpty()) {
             throw new IllegalArgumentException("This read cannot accept split with before files.");
         }
@@ -277,6 +290,28 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         }
     }
 
+    public RecordReader<KeyValue> createChainReader(ChainSplit chainSplit) throws IOException {
+        List<DataFileMeta> files = chainSplit.dataFiles();
+        ChainReadContext chainReadContext =
+                new ChainReadContext.Builder()
+                        .withLogicalPartition(chainSplit.logicalPartition())
+                        .withFileBranchPathMapping(chainSplit.fileBranchMapping())
+                        .withFileBucketPathMapping(chainSplit.fileBucketPathMapping())
+                        .build();
+        DeletionVector.Factory dvFactory =
+                DeletionVector.factory(fileIO, files, chainSplit.deletionFiles().orElse(null));
+        ChainKeyValueFileReaderFactory.Builder builder =
+                ChainKeyValueFileReaderFactory.newBuilder(readerFactoryBuilder);
+        ChainKeyValueFileReaderFactory overlappedSectionFactory =
+                builder.build(
+                        null, dvFactory, false, filtersForKeys, variantAccess, chainReadContext);
+        ChainKeyValueFileReaderFactory nonOverlappedSectionFactory =
+                builder.build(
+                        null, dvFactory, false, filtersForAll, variantAccess, chainReadContext);
+        return createMergeReader(
+                files, overlappedSectionFactory, nonOverlappedSectionFactory, forceKeepDelete);
+    }
+
     public RecordReader<KeyValue> createMergeReader(
             BinaryRow partition,
             int bucket,
@@ -293,7 +328,16 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         KeyValueFileReaderFactory nonOverlappedSectionFactory =
                 readerFactoryBuilder.build(
                         partition, bucket, dvFactory, false, filtersForAll, variantAccess);
+        return createMergeReader(
+                files, overlappedSectionFactory, nonOverlappedSectionFactory, keepDelete);
+    }
 
+    public RecordReader<KeyValue> createMergeReader(
+            List<DataFileMeta> files,
+            KeyValueFileReaderFactory overlappedSectionFactory,
+            KeyValueFileReaderFactory nonOverlappedSectionFactory,
+            boolean keepDelete)
+            throws IOException {
         List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
         MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
                 new ReducerMergeFunctionWrapper(mfFactory.create(pushdownProjection));

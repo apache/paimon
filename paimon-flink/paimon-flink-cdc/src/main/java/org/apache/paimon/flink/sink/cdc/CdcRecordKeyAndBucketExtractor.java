@@ -114,9 +114,4 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
         }
         return trimmedPK;
     }
-
-    @Override
-    public BinaryRow logPrimaryKey() {
-        throw new UnsupportedOperationException();
-    }
 }

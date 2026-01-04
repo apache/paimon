@@ -54,7 +54,7 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
             } else {
                 throw new IllegalArgumentException(
                         "By default, First row merge engine can not accept DELETE/UPDATE_BEFORE records.\n"
-                                + "You can config 'first-row.ignore-delete' to ignore the DELETE/UPDATE_BEFORE records.");
+                                + "You can config 'ignore-delete' to ignore the DELETE/UPDATE_BEFORE records.");
             }
         }
 

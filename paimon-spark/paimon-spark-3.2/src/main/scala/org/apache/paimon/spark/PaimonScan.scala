@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{Predicate, TopN}
 import org.apache.paimon.table.InnerTable
 
@@ -32,13 +33,12 @@ import scala.collection.JavaConverters._
 case class PaimonScan(
     table: InnerTable,
     requiredSchema: StructType,
-    filters: Seq[Predicate],
-    reservedFilters: Seq[Filter],
-    override val pushDownLimit: Option[Int],
-    // no usage, just for compile compatibility
-    override val pushDownTopN: Option[TopN],
+    pushedPartitionFilters: Seq[PartitionPredicate],
+    pushedDataFilters: Seq[Predicate],
+    override val pushedLimit: Option[Int] = None,
+    override val pushedTopN: Option[TopN] = None,
     bucketedScanDisabled: Boolean = true)
-  extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)
+  extends PaimonBaseScan(table)
   with SupportsRuntimeFiltering {
 
   override def filterAttributes(): Array[NamedReference] = {
@@ -61,7 +61,8 @@ case class PaimonScan(
     if (partitionFilter.nonEmpty) {
       readBuilder.withFilter(partitionFilter.head)
       // set inputPartitions null to trigger to get the new splits.
-      inputPartitions = null
+      _inputSplits = null
+      _inputPartitions = null
     }
   }
 }

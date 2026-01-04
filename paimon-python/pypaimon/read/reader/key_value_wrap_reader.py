@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Union
 
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
@@ -53,7 +53,7 @@ class KeyValueWrapIterator(RecordIterator[KeyValue]):
 
     def __init__(
             self,
-            iterator: Iterator,
+            iterator: Union[Iterator, RecordIterator],
             reused_kv: KeyValue
     ):
         self.iterator = iterator
@@ -65,3 +65,6 @@ class KeyValueWrapIterator(RecordIterator[KeyValue]):
             return None
         self.reused_kv.replace(row_tuple)
         return self.reused_kv
+
+    def return_pos(self) -> int:
+        return self.iterator.return_pos()

@@ -22,7 +22,7 @@ import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 
 /** Factory for creating bitmap global indexers. */
 public class BitmapGlobalIndexerFactory implements GlobalIndexerFactory {
@@ -35,8 +35,8 @@ public class BitmapGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
-    public GlobalIndexer create(DataType type, Options options) {
-        BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(type, options);
+    public GlobalIndexer create(DataField dataField, Options options) {
+        BitmapFileIndex bitmapFileIndex = new BitmapFileIndex(dataField.type(), options);
         return new BitmapGlobalIndex(bitmapFileIndex);
     }
 }

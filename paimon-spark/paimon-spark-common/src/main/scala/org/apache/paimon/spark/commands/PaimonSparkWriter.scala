@@ -30,13 +30,13 @@ import org.apache.paimon.fs.Path
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.FileKind
-import org.apache.paimon.spark.{SparkRow, SparkTableWrite, SparkTypeUtils}
+import org.apache.paimon.spark.{SparkRow, SparkTypeUtils}
 import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.sort.TableSorter
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
-import org.apache.paimon.spark.write.WriteHelper
+import org.apache.paimon.spark.write.{PaimonDataWrite, WriteHelper, WriteTaskResult}
 import org.apache.paimon.table.{FileStoreTable, PostponeUtils, SpecialFields}
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.sink._
@@ -56,7 +56,7 @@ import scala.collection.JavaConverters._
 case class PaimonSparkWriter(
     table: FileStoreTable,
     writeRowTracking: Boolean = false,
-    batchId: Long = -1)
+    batchId: Option[Long] = None)
   extends WriteHelper {
 
   private lazy val tableSchema = table.schema
@@ -70,7 +70,12 @@ case class PaimonSparkWriter(
 
   private val writeType = {
     if (writeRowTracking) {
-      SpecialFields.rowTypeWithRowTracking(table.rowType(), true)
+      // The historical data and new data are processed separately.
+      // 1. The historical data contains the non-null RowId, but its sequenceNumber may not have been generated yet,
+      //    will be generated according to the Snapshot id when committing. (But the previously updated data included
+      //    the sequenceNumber value).
+      // 2. The new data will be written to the branch without writeRowTracking.
+      SpecialFields.rowTypeWithRowTracking(table.rowType(), false, true)
     } else {
       table.rowType()
     }
@@ -124,7 +129,7 @@ case class PaimonSparkWriter(
         None
       }
 
-    def newWrite() = SparkTableWrite(
+    def newWrite() = PaimonDataWrite(
       writeBuilder,
       writeType,
       rowKindColIdx,
@@ -142,14 +147,14 @@ case class PaimonSparkWriter(
       Math.max(defaultParallelism, numShufflePartitions)
     }
 
-    def writeWithoutBucket(dataFrame: DataFrame): Dataset[Array[Byte]] = {
+    def writeWithoutBucket(dataFrame: DataFrame) = {
       dataFrame.mapPartitions {
         iter =>
           {
             val write = newWrite()
             try {
               iter.foreach(row => write.write(row))
-              write.finish()
+              Iterator.apply(write.commit)
             } finally {
               write.close()
             }
@@ -157,14 +162,14 @@ case class PaimonSparkWriter(
       }
     }
 
-    def writeWithBucket(dataFrame: DataFrame): Dataset[Array[Byte]] = {
+    def writeWithBucket(dataFrame: DataFrame) = {
       dataFrame.mapPartitions {
         iter =>
           {
             val write = newWrite()
             try {
               iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
-              write.finish()
+              Iterator.apply(write.commit)
             } finally {
               write.close()
             }
@@ -172,9 +177,7 @@ case class PaimonSparkWriter(
       }
     }
 
-    def writeWithBucketProcessor(
-        dataFrame: DataFrame,
-        processor: BucketProcessor[Row]): Dataset[Array[Byte]] = {
+    def writeWithBucketProcessor(dataFrame: DataFrame, processor: BucketProcessor[Row]) = {
       val repartitioned = repartitionByPartitionsAndBucket(
         dataFrame
           .mapPartitions(processor.processPartition)(encoderGroupWithBucketCol.encoder)
@@ -182,9 +185,7 @@ case class PaimonSparkWriter(
       writeWithBucket(repartitioned)
     }
 
-    def writeWithBucketAssigner(
-        dataFrame: DataFrame,
-        funcFactory: () => Row => Int): Dataset[Array[Byte]] = {
+    def writeWithBucketAssigner(dataFrame: DataFrame, funcFactory: () => Row => Int) = {
       dataFrame.mapPartitions {
         iter =>
           {
@@ -192,7 +193,7 @@ case class PaimonSparkWriter(
             val write = newWrite()
             try {
               iter.foreach(row => write.write(row, assigner.apply(row)))
-              write.finish()
+              Iterator.apply(write.commit)
             } finally {
               write.close()
             }
@@ -200,7 +201,7 @@ case class PaimonSparkWriter(
       }
     }
 
-    val written: Dataset[Array[Byte]] = bucketMode match {
+    val written = bucketMode match {
       case KEY_DYNAMIC =>
         // Topology: input -> bootstrap -> shuffle by key hash -> bucket-assigner -> shuffle by partition & bucket
         val rowType = SparkTypeUtils.toPaimonType(withInitBucketCol.schema).asInstanceOf[RowType]
@@ -336,10 +337,7 @@ case class PaimonSparkWriter(
         throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")
     }
 
-    written
-      .collect()
-      .map(deserializeCommitMessage(serializer, _))
-      .toSeq
+    WriteTaskResult.merge(written.collect())
   }
 
   /**

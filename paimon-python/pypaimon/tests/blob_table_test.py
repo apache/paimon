@@ -17,12 +17,13 @@ limitations under the License.
 """
 import os
 import shutil
+import struct
 import tempfile
 import unittest
 
 import pyarrow as pa
 
-from pypaimon import CatalogFactory
+from pypaimon import CatalogFactory, Schema
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.write.commit_message import CommitMessage
 
@@ -975,7 +976,7 @@ class DataBlobWriterTest(unittest.TestCase):
         from pypaimon import Schema
         from pypaimon.table.row.blob import BlobDescriptor, Blob
         from pypaimon.common.uri_reader import UriReaderFactory
-        from pypaimon.common.config import CatalogOptions
+        from pypaimon.common.options.config import CatalogOptions
 
         # Create schema with blob column
         pa_schema = pa.schema([
@@ -1054,7 +1055,7 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(new_blob_descriptor.length, len(blob_data), "Length should match")
 
         # Create URI reader factory and read the blob data
-        catalog_options = {CatalogOptions.WAREHOUSE: self.warehouse}
+        catalog_options = {CatalogOptions.WAREHOUSE.key(): self.warehouse}
         uri_reader_factory = UriReaderFactory(catalog_options)
         uri_reader = uri_reader_factory.create(new_blob_descriptor.uri)
         blob = Blob.from_descriptor(uri_reader, new_blob_descriptor)
@@ -2134,12 +2135,22 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(result.column('id').to_pylist(), list(range(1, num_blobs + 1)))
 
     def test_blob_write_read_large_data_with_rolling_with_shard(self):
-        from pypaimon import Schema
+        """
+        Test writing and reading large blob data with file rolling and sharding.
+
+        Test workflow:
+        - Creates a table with blob column and 10MB target file size
+        - Writes 4 batches of 40 records each (160 total records)
+        - Each record contains a 3MB blob
+        - Reads data using 3-way sharding (shard 0 - 3)
+        - Verifies blob data integrity and size
+        - Compares concatenated sharded results with full table scan
+        """
 
         # Create schema with blob column
         pa_schema = pa.schema([
             ('id', pa.int32()),
-            ('batch_id', pa.int32()),
+            ('record_id_of_batch', pa.int32()),
             ('metadata', pa.string()),
             ('large_blob', pa.large_binary()),
         ])
@@ -2156,7 +2167,7 @@ class DataBlobWriterTest(unittest.TestCase):
         table = self.catalog.get_table('test_db.blob_rolling_with_shard')
 
         # Create large blob data
-        large_blob_size = 3 * 1024 * 1024  #
+        large_blob_size = 3 * 1024 * 1024
         blob_pattern = b'LARGE_BLOB_PATTERN_' + b'X' * 1024  # ~1KB pattern
         pattern_size = len(blob_pattern)
         repetitions = large_blob_size // pattern_size
@@ -2164,16 +2175,16 @@ class DataBlobWriterTest(unittest.TestCase):
 
         actual_size = len(large_blob_data)
         print(f"Created blob data: {actual_size:,} bytes ({actual_size / (1024 * 1024):.2f} MB)")
+        # Write 4 batches of 40 records
         for i in range(4):
-            # Write 40 batches of data
             write_builder = table.new_batch_write_builder()
             writer = write_builder.new_write()
-            # Write all 40 batches first
-            for batch_id in range(40):
+            # Write 40 records
+            for record_id in range(40):
                 test_data = pa.Table.from_pydict({
-                    'id': [i * 40 + batch_id + 1],  # Unique ID for each row
-                    'batch_id': [batch_id],
-                    'metadata': [f'Large blob batch {batch_id + 1}'],
+                    'id': [i * 40 + record_id + 1],  # Unique ID for each row
+                    'record_id_of_batch': [record_id],
+                    'metadata': [f'Large blob batch {record_id + 1}'],
                     'large_blob': [large_blob_data]
                 }, schema=pa_schema)
                 writer.write_arrow(test_data)
@@ -2190,12 +2201,12 @@ class DataBlobWriterTest(unittest.TestCase):
         result = table_read.to_arrow(table_scan.plan().splits())
 
         # Verify the data
-        self.assertEqual(result.num_rows, 54, "Should have 94 rows")
+        self.assertEqual(result.num_rows, 54, "Should have 54 rows")
         self.assertEqual(result.num_columns, 4, "Should have 4 columns")
 
         # Verify blob data integrity
         blob_data = result.column('large_blob').to_pylist()
-        self.assertEqual(len(blob_data), 54, "Should have 94 blob records")
+        self.assertEqual(len(blob_data), 54, "Should have 54 blob records")
         # Verify each blob
         for i, blob in enumerate(blob_data):
             self.assertEqual(len(blob), len(large_blob_data), f"Blob {i + 1} should be {large_blob_size:,} bytes")
@@ -2211,13 +2222,93 @@ class DataBlobWriterTest(unittest.TestCase):
         actual = pa.concat_tables([actual1, actual2, actual3]).sort_by('id')
 
         # Verify the data
-        self.assertEqual(actual.num_rows, 160, "Should have 280 rows")
+        self.assertEqual(actual.num_rows, 160, "Should have 160 rows")
         self.assertEqual(actual.num_columns, 4, "Should have 4 columns")
         self.assertEqual(actual.column('id').to_pylist(), list(range(1, 161)), "ID column should match")
         self.assertEqual(actual, expected)
 
+    def test_blob_rolling_with_shard(self):
+        """
+        - Writes 30 records
+        - Each record contains a 3MB blob
+        """
+
+        # Create schema with blob column
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('metadata', pa.string()),
+            ('large_blob', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob.target-file-size': '10MB'
+            }
+        )
+        self.catalog.create_table('test_db.blob_rolling_with_shard1', schema, False)
+        table = self.catalog.get_table('test_db.blob_rolling_with_shard1')
+
+        # Create large blob data
+        large_blob_size = 3 * 1024 * 1024  #
+        blob_pattern = b'LARGE_BLOB_PATTERN_' + b'X' * 1024  # ~1KB pattern
+        pattern_size = len(blob_pattern)
+        repetitions = large_blob_size // pattern_size
+        large_blob_data = blob_pattern * repetitions
+
+        actual_size = len(large_blob_data)
+        print(f"Created blob data: {actual_size:,} bytes ({actual_size / (1024 * 1024):.2f} MB)")
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        # Write 30 records
+        for record_id in range(30):
+            test_data = pa.Table.from_pydict({
+                'id': [record_id],  # Unique ID for each row
+                'metadata': [f'Large blob batch {record_id + 1}'],
+                'large_blob': [struct.pack('<I', record_id) + large_blob_data]
+            }, schema=pa_schema)
+            writer.write_arrow(test_data)
+
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        # Read data back
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan().with_shard(1, 3)
+        table_read = read_builder.new_read()
+        result = table_read.to_arrow(table_scan.plan().splits())
+
+        # Verify the data
+        self.assertEqual(result.num_rows, 10, "Should have 10 rows")
+        self.assertEqual(result.num_columns, 3, "Should have 3 columns")
+
+        # Verify blob data integrity
+        blob_data = result.column('large_blob').to_pylist()
+        self.assertEqual(len(blob_data), 10, "Should have 94 blob records")
+        # Verify each blob
+        for i, blob in enumerate(blob_data):
+            self.assertEqual(len(blob), len(large_blob_data) + 4, f"Blob {i + 1} should be {large_blob_size:,} bytes")
+        splits = read_builder.new_scan().plan().splits()
+        expected = table_read.to_arrow(splits)
+        splits1 = read_builder.new_scan().with_shard(0, 3).plan().splits()
+        actual1 = table_read.to_arrow(splits1)
+        splits2 = read_builder.new_scan().with_shard(1, 3).plan().splits()
+        actual2 = table_read.to_arrow(splits2)
+        splits3 = read_builder.new_scan().with_shard(2, 3).plan().splits()
+        actual3 = table_read.to_arrow(splits3)
+        actual = pa.concat_tables([actual1, actual2, actual3]).sort_by('id')
+
+        # Verify the data
+        self.assertEqual(actual.num_rows, 30, "Should have 30 rows")
+        self.assertEqual(actual.num_columns, 3, "Should have 3 columns")
+        self.assertEqual(actual, expected)
+
     def test_blob_large_data_volume_with_shard(self):
-        from pypaimon import Schema
 
         # Create schema with blob column
         pa_schema = pa.schema([
@@ -2282,9 +2373,70 @@ class DataBlobWriterTest(unittest.TestCase):
         actual = pa.concat_tables([actual1, actual2, actual3]).sort_by('id')
         self.assertEqual(actual, expected)
 
+    def test_data_blob_writer_with_row_range(self):
+        """Test DataBlobWriter with mixed data types in blob column."""
+
+        # Create schema with blob column
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('type', pa.string()),
+            ('data', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table('test_db.with_row_range_test', schema, False)
+        table = self.catalog.get_table('test_db.with_row_range_test')
+
+        # Use proper table API to create writer
+        write_builder = table.new_batch_write_builder()
+        blob_writer = write_builder.new_write()
+
+        # Test data with different types of blob content
+        test_data = pa.Table.from_pydict({
+            'id': [0, 1, 2, 3, 4],
+            'type': ['text', 'json', 'binary', 'image', 'pdf'],
+            'data': [
+                b'This is text content',
+                b'{"key": "value", "number": 42}',
+                b'\x00\x01\x02\x03\xff\xfe\xfd',
+                b'PNG_IMAGE_DATA_PLACEHOLDER',
+                b'%PDF-1.4\nPDF_CONTENT_PLACEHOLDER'
+            ]
+        }, schema=pa_schema)
+
+        # Write mixed data
+        total_rows = 0
+        for batch in test_data.to_batches():
+            blob_writer.write_arrow_batch(batch)
+            total_rows += batch.num_rows
+
+        # Test prepare commit
+        commit_messages = blob_writer.prepare_commit()
+        # Create commit and commit the data
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        blob_writer.close()
+
+        # Read data back using table API
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan().with_row_range(2, 4)
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        result = table_read.to_arrow(splits)
+
+        # Verify the data was read back correctly
+        self.assertEqual(result.num_rows, 2, "Should have 2 rows")
+        self.assertEqual(result.num_columns, 3, "Should have 3 columns")
+        self.assertEqual(result["id"].unique().to_pylist(), [2, 3], "Get incorrect column ID")
+
     def test_data_blob_writer_with_shard(self):
         """Test DataBlobWriter with mixed data types in blob column."""
-        from pypaimon import Schema
 
         # Create schema with blob column
         pa_schema = pa.schema([
@@ -2345,8 +2497,12 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(result.num_columns, 3, "Should have 3 columns")
 
     def test_blob_write_read_large_data_volume_rolling_with_shard(self):
-        from pypaimon import Schema
-
+        """
+        - Writes 10000 records
+        - Each record contains a 5KB blob
+        - 'blob.target-file-size': '10MB'
+        - each blob file contains 2000 records
+        """
         # Create schema with blob column
         pa_schema = pa.schema([
             ('id', pa.int32()),
@@ -2375,7 +2531,7 @@ class DataBlobWriterTest(unittest.TestCase):
 
         actual_size = len(large_blob_data)
         print(f"Created blob data: {actual_size:,} bytes ({actual_size / (1024 * 1024):.2f} MB)")
-        # Write 40 batches of data
+        # Write 10000 records of data
         num_row = 10000
         expected = pa.Table.from_pydict({
             'id': [1] * num_row,

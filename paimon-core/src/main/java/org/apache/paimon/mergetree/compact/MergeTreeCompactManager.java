@@ -41,6 +41,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -114,7 +115,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
     @Override
     public void addNewFile(DataFileMeta file) {
-        levels.addLevel0File(file);
+        // if overwrite an empty partition, the snapshot will be changed to APPEND, then its files
+        // might be upgraded to high level, thus we should use #update
+        levels.update(Collections.emptyList(), Collections.singletonList(file));
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
 

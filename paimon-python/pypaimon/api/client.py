@@ -158,7 +158,7 @@ class ExponentialRetry:
         retry_kwargs = {
             'total': max_retries,
             'read': max_retries,
-            'connect': max_retries,
+            'connect': 0,
             'backoff_factor': 1,
             'status_forcelist': [429, 502, 503, 504],
             'raise_on_status': False,

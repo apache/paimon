@@ -94,6 +94,33 @@ public class DefaultValueRowTest {
 
         InternalMap propertiesValue = wrappedRow.getMap(1);
         assertThat(propertiesValue).isNotNull();
+        assertThat(propertiesValue.size()).isEqualTo(2);
+    }
+
+    @Test
+    public void testDefaultValueRowWithNullMapType() {
+        // Test with Map default value
+        RowType rowType =
+                RowType.of(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "properties",
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()),
+                                "Default properties",
+                                "null"));
+
+        DefaultValueRow defaultValueRow = DefaultValueRow.create(rowType);
+
+        GenericRow originalRow = new GenericRow(2);
+        originalRow.setField(0, 200);
+        originalRow.setField(1, null); // Use default properties
+
+        DefaultValueRow wrappedRow = defaultValueRow.replaceRow(originalRow);
+        InternalMap propertiesValue = wrappedRow.getMap(1);
+
+        assertThat(wrappedRow.getInt(0)).isEqualTo(200);
+        assertThat(propertiesValue).isNull();
     }
 
     @Test

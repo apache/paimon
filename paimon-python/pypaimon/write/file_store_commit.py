@@ -20,7 +20,6 @@ import time
 import uuid
 from typing import List
 
-from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -134,7 +133,7 @@ class FileStoreCommit:
         new_snapshot_id = self._generate_snapshot_id()
 
         # Check if row tracking is enabled
-        row_tracking_enabled = self.table.options.get(CoreOptions.ROW_TRACKING_ENABLED, 'false').lower() == 'true'
+        row_tracking_enabled = self.table.options.row_tracking_enabled()
 
         # Apply row tracking logic if enabled
         next_row_id = None
@@ -200,7 +199,7 @@ class FileStoreCommit:
         new_snapshot_id = self._generate_snapshot_id()
         total_record_count += delta_record_count
         snapshot_data = Snapshot(
-            version=1,
+            version=3,
             id=new_snapshot_id,
             schema_id=self.table.table_schema.id,
             base_manifest_list=base_manifest_list,
@@ -308,9 +307,9 @@ class FileStoreCommit:
             file_size_in_bytes = file_meta.file_size if entry.kind == 0 else file_meta.file_size * -1
             file_count = 1 if entry.kind == 0 else -1
 
-            # Convert creation_time to milliseconds (Java uses epoch millis)
+            # Use epoch millis
             if file_meta.creation_time:
-                file_creation_time = int(file_meta.creation_time.timestamp() * 1000)
+                file_creation_time = file_meta.creation_time_epoch_millis()
             else:
                 file_creation_time = int(time.time() * 1000)
 

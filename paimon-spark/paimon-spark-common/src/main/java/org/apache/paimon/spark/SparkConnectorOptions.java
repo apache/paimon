@@ -51,7 +51,7 @@ public class SparkConnectorOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE and TableCapability.ACCEPT_ANY_SCHEMA.");
+                            "If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE.");
 
     public static final ConfigOption<Integer> MAX_FILES_PER_TRIGGER =
             key("read.stream.maxFilesPerTrigger")
@@ -91,4 +91,19 @@ public class SparkConnectorOptions {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to read row in the form of changelog (add rowkind column in row to represent its change type).");
+
+    public static final ConfigOption<Boolean> READ_ALLOW_FULL_SCAN =
+            key("read.allow.fullScan")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to allow full scan when reading a partitioned table.");
+
+    public static final ConfigOption<Boolean> SOURCE_SPLIT_TARGET_SIZE_WITH_COLUMN_PRUNING =
+            key("source.split.target-size-with-column-pruning")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to adjust the target split size based on pruned (projected) columns. "
+                                    + "If enabled, split size estimation uses only the columns actually being read.");
 }

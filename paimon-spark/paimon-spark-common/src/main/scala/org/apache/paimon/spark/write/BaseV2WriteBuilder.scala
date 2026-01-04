@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.write
 
+import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.connector.write.{SupportsDynamicOverwrite, SupportsOverwrite, WriteBuilder}
@@ -29,39 +30,35 @@ abstract class BaseV2WriteBuilder(table: Table)
   with SupportsOverwrite
   with SupportsDynamicOverwrite {
 
-  protected var overwriteDynamic = false
+  protected var overwriteDynamic: Option[Boolean] = None
   protected var overwritePartitions: Option[Map[String, String]] = None
+  protected var copyOnWriteScan: Option[PaimonCopyOnWriteScan] = None
+
+  def overwriteFiles(copyOnWriteScan: PaimonCopyOnWriteScan): WriteBuilder = {
+    assert(overwriteDynamic.isEmpty && overwritePartitions.isEmpty)
+    this.copyOnWriteScan = Some(copyOnWriteScan)
+    this
+  }
 
   override def overwrite(filters: Array[Filter]): WriteBuilder = {
-    if (overwriteDynamic) {
-      throw new IllegalArgumentException("Cannot overwrite dynamically and by filter both")
-    }
-
+    assert(overwriteDynamic.isEmpty && copyOnWriteScan.isEmpty)
     failIfCanNotOverwrite(filters)
 
-    val conjunctiveFilters = if (filters.nonEmpty) {
-      Some(filters.reduce((l, r) => And(l, r)))
+    overwriteDynamic = Some(false)
+    val conjunctiveFilters = filters.reduce((l, r) => And(l, r))
+    if (isTruncate(conjunctiveFilters)) {
+      overwritePartitions = Some(Map.empty[String, String])
     } else {
-      None
+      overwritePartitions = Some(
+        convertPartitionFilterToMap(conjunctiveFilters, partitionRowType()))
     }
-
-    if (isTruncate(conjunctiveFilters.get)) {
-      overwritePartitions = Option.apply(Map.empty[String, String])
-    } else {
-      overwritePartitions =
-        Option.apply(convertPartitionFilterToMap(conjunctiveFilters.get, partitionRowType()))
-    }
-
     this
   }
 
   override def overwriteDynamicPartitions(): WriteBuilder = {
-    if (overwritePartitions.exists(_.nonEmpty)) {
-      throw new IllegalArgumentException("Cannot overwrite dynamically and by filter both")
-    }
-
-    overwriteDynamic = true
-    overwritePartitions = Option.apply(Map.empty[String, String])
+    assert(overwritePartitions.isEmpty && copyOnWriteScan.isEmpty)
+    overwriteDynamic = Some(true)
+    overwritePartitions = Some(Map.empty[String, String])
     this
   }
 }

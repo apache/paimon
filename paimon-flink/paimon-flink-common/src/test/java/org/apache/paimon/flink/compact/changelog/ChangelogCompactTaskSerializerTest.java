@@ -73,7 +73,7 @@ public class ChangelogCompactTaskSerializerTest {
                                 put(1, newFiles(10));
                             }
                         });
-        serializeTask = serializer.deserialize(2, serializer.serialize(task));
+        serializeTask = serializer.deserialize(serializer.getVersion(), serializer.serialize(task));
         assertThat(task).isEqualTo(serializeTask);
     }
 

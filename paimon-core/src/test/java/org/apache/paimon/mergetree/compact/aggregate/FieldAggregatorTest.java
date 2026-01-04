@@ -40,6 +40,7 @@ import org.apache.paimon.mergetree.compact.aggregate.factory.FieldListaggAggFact
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMaxAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMinAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedPartialUpdateAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedUpdateAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldProductAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldRoaringBitmap32AggFactory;
@@ -626,7 +627,7 @@ public class FieldAggregatorTest {
         return new GenericArray(new InternalRow[] {row});
     }
 
-    private InternalRow row(int k0, int k1, String v) {
+    private InternalRow row(Integer k0, Integer k1, String v) {
         return GenericRow.of(k0, k1, BinaryString.fromString(v));
     }
 
@@ -1152,6 +1153,48 @@ public class FieldAggregatorTest {
 
         Object agg = fieldAggregator.agg("test", "test");
         assertThat(agg).isEqualTo("test");
+    }
+
+    @Test
+    public void testFieldNestedPartialUpdateAgg() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k", DataTypes.INT()),
+                        DataTypes.FIELD(1, "v1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v2", DataTypes.STRING()));
+        FieldNestedPartialUpdateAgg agg =
+                new FieldNestedPartialUpdateAgg(
+                        FieldNestedPartialUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "k", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "v1", DataTypes.INT()),
+                                        DataTypes.FIELD(2, "v2", DataTypes.STRING()))),
+                        Collections.singletonList("k"));
+
+        InternalArray accumulator;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalRow current = row(0, 0, null);
+        accumulator = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        current = row(0, null, "A");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 0, "A")));
+
+        current = row(0, 1, "B");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 1, "B")));
+
+        current = row(1, 2, "C");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(1, 2, "C")));
     }
 
     private Map<Object, Object> toMap(Object... kvs) {

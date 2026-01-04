@@ -26,6 +26,7 @@ on:
       - '**/*.md'
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
+      - 'paimon-lucene/**'
 
 env:
   JDK_VERSION: 17
@@ -50,7 +51,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Build Spark
-        run:  mvn -T 2C -B clean install -DskipTests -Pspark4,flink1
+        run:  mvn -T 2C -B clean install -DskipTests -Pspark4,flink1,paimon-lucene
 
       - name: Test Spark
         timeout-minutes: 60
@@ -64,6 +65,6 @@ jobs:
           test_modules+="org.apache.paimon:paimon-spark-${suffix}_2.13,"
           done
           test_modules="${test_modules%,}"
-          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Pspark4,flink1
+          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Pspark4,flink1,paimon-lucene
         env:
           MAVEN_OPTS: -Xmx4096m

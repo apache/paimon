@@ -136,6 +136,11 @@ public class PojoManifestEntry implements ManifestEntry {
     }
 
     @Override
+    public ManifestEntry upgrade(int newLevel) {
+        return new PojoManifestEntry(kind, partition, bucket, totalBuckets, file.upgrade(newLevel));
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (!(o instanceof ManifestEntry)) {
             return false;

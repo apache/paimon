@@ -53,6 +53,7 @@ import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -67,6 +68,7 @@ import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
@@ -79,6 +81,7 @@ import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListTagsResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
@@ -97,6 +100,8 @@ import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
+import org.apache.paimon.utils.TimeUtils;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
@@ -113,8 +118,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
+import javax.annotation.Nullable;
+
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -143,6 +153,7 @@ import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTApi.PARTITION_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.TABLE_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.TABLE_TYPE;
+import static org.apache.paimon.rest.RESTApi.TAG_NAME_PREFIX;
 import static org.apache.paimon.rest.RESTApi.VIEW_NAME_PATTERN;
 import static org.apache.paimon.rest.ResourcePaths.FUNCTIONS;
 import static org.apache.paimon.rest.ResourcePaths.FUNCTION_DETAILS;
@@ -389,6 +400,14 @@ public class RESTCatalogServer {
                                 resources.length >= 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && "branches".equals(resources[3]);
+                        boolean isTags =
+                                resources.length >= 4
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && resources[3].startsWith(ResourcePaths.TAGS);
+                        boolean isTag =
+                                resources.length >= 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.TAGS.equals(resources[3]);
                         Identifier identifier =
                                 resources.length >= 3
                                                 && !"rename".equals(resources[2])
@@ -430,6 +449,13 @@ public class RESTCatalogServer {
                                     restAuthParameter.method(),
                                     restAuthParameter.data(),
                                     identifier);
+                        } else if (isTags || isTag) {
+                            return tagApiHandle(
+                                    resources,
+                                    restAuthParameter.method(),
+                                    restAuthParameter.data(),
+                                    parameters,
+                                    identifier);
                         } else if (isTableToken) {
                             return getDataTokenHandle(identifier);
                         } else if (isTableSnapshot) {
@@ -455,7 +481,8 @@ public class RESTCatalogServer {
                                 long snapshotId =
                                         ((Instant.SnapshotInstant) requestBody.getInstant())
                                                 .getSnapshotId();
-                                return rollbackTableByIdHandle(identifier, snapshotId);
+                                return rollbackTableByIdHandle(
+                                        identifier, snapshotId, requestBody.getFromSnapshot());
                             } else if (requestBody.getInstant() instanceof Instant.TagInstant) {
                                 String tagName =
                                         ((Instant.TagInstant) requestBody.getInstant())
@@ -821,26 +848,35 @@ public class RESTCatalogServer {
                 requestBody.getStatistics());
     }
 
-    private MockResponse rollbackTableByIdHandle(Identifier identifier, long snapshotId)
-            throws Exception {
+    private MockResponse rollbackTableByIdHandle(
+            Identifier identifier, long snapshotId, @Nullable Long fromSnapshot) throws Exception {
         FileStoreTable table = getFileTable(identifier);
         String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshotId);
-        if (tableWithSnapshotId2SnapshotStore.containsKey(identifierWithSnapshotId)) {
-            table =
-                    table.copy(
-                            Collections.singletonMap(
-                                    SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"));
-            long latestSnapshotId = table.snapshotManager().latestSnapshotId();
-            table.rollbackTo(snapshotId);
-            cleanSnapshot(identifier, snapshotId, latestSnapshotId);
-            tableLatestSnapshotStore.put(
-                    identifier.getFullName(),
-                    tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
-            return new MockResponse().setResponseCode(200);
+        TableSnapshot toSnapshot = tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId);
+        if (toSnapshot == null) {
+            return mockResponse(
+                    new ErrorResponse(
+                            ErrorResponse.RESOURCE_TYPE_SNAPSHOT, "" + snapshotId, "", 404),
+                    404);
         }
-        return mockResponse(
-                new ErrorResponse(ErrorResponse.RESOURCE_TYPE_SNAPSHOT, "" + snapshotId, "", 404),
-                404);
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        if (fromSnapshot != null && fromSnapshot != latestSnapshotId) {
+            return mockResponse(
+                    new ErrorResponse(
+                            null,
+                            null,
+                            String.format(
+                                    "Latest snapshot %s is not %s", latestSnapshotId, fromSnapshot),
+                            500),
+                    500);
+        }
+        table =
+                table.copy(
+                        Collections.singletonMap(SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"));
+        table.rollbackTo(snapshotId);
+        cleanSnapshot(identifier, snapshotId, latestSnapshotId);
+        tableLatestSnapshotStore.put(identifier.getFullName(), toSnapshot);
+        return new MockResponse().setResponseCode(200);
     }
 
     private MockResponse rollbackTableByTagNameHandle(Identifier identifier, String tagName)
@@ -1683,6 +1719,178 @@ public class RESTCatalogServer {
         return new MockResponse().setResponseCode(404);
     }
 
+    private MockResponse tagApiHandle(
+            String[] resources,
+            String method,
+            String data,
+            Map<String, String> parameters,
+            Identifier identifier)
+            throws Exception {
+        RESTResponse response;
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        TagManager tagManager = table.tagManager();
+        String tagName = "";
+        try {
+            switch (method) {
+                case "GET":
+                    if (resources.length == 4) {
+                        // GET /v1/{prefix}/databases/{database}/tables/{table}/tags
+                        // Page list tags
+                        List<String> tags = new ArrayList<>(tagManager.allTagNames());
+
+                        // Filter by tagNamePrefix if provided
+                        String tagNamePrefix = parameters.get(TAG_NAME_PREFIX);
+                        if (StringUtils.isNotEmpty(tagNamePrefix)) {
+                            tags =
+                                    tags.stream()
+                                            .filter(tag -> matchNamePattern(tag, tagNamePrefix))
+                                            .collect(Collectors.toList());
+                        }
+
+                        if (tags.isEmpty()) {
+                            response = new ListTagsResponse(Collections.emptyList(), null);
+                            return mockResponse(response, 200);
+                        }
+                        int maxResults;
+                        try {
+                            maxResults = getMaxResults(parameters);
+                        } catch (NumberFormatException e) {
+                            return handleInvalidMaxResults(parameters);
+                        }
+                        String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
+                        PagedList<String> pagedTags =
+                                buildPagedEntities(tags, maxResults, pageToken);
+                        response =
+                                new ListTagsResponse(
+                                        pagedTags.getElements(), pagedTags.getNextPageToken());
+                        return mockResponse(response, 200);
+                    } else {
+                        // GET /v1/{prefix}/databases/{database}/tables/{table}/tags/{tag}
+                        tagName = RESTUtil.decodeString(resources[4]);
+                        Optional<Tag> tag = tagManager.get(tagName);
+                        if (!tag.isPresent()) {
+                            response =
+                                    new ErrorResponse(
+                                            ErrorResponse.RESOURCE_TYPE_TAG,
+                                            tagName,
+                                            String.format(
+                                                    "Tag %s in table %s doesn't exist.",
+                                                    tagName, identifier.getFullName()),
+                                            404);
+                            return mockResponse(response, 404);
+                        }
+                        Tag tagObj = tag.get();
+                        Long tagCreateTimeMillis =
+                                tagObj.getTagCreateTime() != null
+                                        ? tagObj.getTagCreateTime()
+                                                .atZone(ZoneId.systemDefault())
+                                                .toInstant()
+                                                .toEpochMilli()
+                                        : null;
+                        String timeRetainedStr =
+                                tagObj.getTagTimeRetained() != null
+                                        ? tagObj.getTagTimeRetained().toString()
+                                        : null;
+                        response =
+                                new GetTagResponse(
+                                        tagName,
+                                        tagObj.trimToSnapshot(),
+                                        tagCreateTimeMillis,
+                                        timeRetainedStr);
+                        return mockResponse(response, 200);
+                    }
+                case "DELETE":
+                    // DELETE /v1/{prefix}/databases/{database}/tables/{table}/tags/{tag}
+                    tagName = RESTUtil.decodeString(resources[4]);
+                    Optional<Tag> tagToDelete = tagManager.get(tagName);
+                    if (!tagToDelete.isPresent()) {
+                        response =
+                                new ErrorResponse(
+                                        ErrorResponse.RESOURCE_TYPE_TAG,
+                                        tagName,
+                                        String.format(
+                                                "Tag %s in table %s doesn't exist.",
+                                                tagName, identifier.getFullName()),
+                                        404);
+                        return mockResponse(response, 404);
+                    }
+                    table.deleteTag(tagName);
+                    return new MockResponse().setResponseCode(200);
+                case "POST":
+                    // POST /v1/{prefix}/databases/{database}/tables/{table}/tags
+                    CreateTagRequest requestBody = RESTApi.fromJson(data, CreateTagRequest.class);
+                    tagName = requestBody.tagName();
+
+                    Snapshot snapshot;
+                    SnapshotManager snapshotManager = table.snapshotManager();
+                    if (requestBody.snapshotId() != null) {
+                        try {
+                            snapshot = snapshotManager.tryGetSnapshot(requestBody.snapshotId());
+                        } catch (FileNotFoundException e) {
+                            snapshot = null;
+                        }
+                    } else {
+                        // Use latest snapshot
+                        snapshot = snapshotManager.latestSnapshot();
+                    }
+                    if (snapshot == null) {
+                        response =
+                                new ErrorResponse(
+                                        ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
+                                        String.valueOf(requestBody.snapshotId()),
+                                        String.format(
+                                                "Snapshot %s in table %s doesn't exist.",
+                                                requestBody.snapshotId(), identifier.getFullName()),
+                                        404);
+                        return mockResponse(response, 404);
+                    }
+
+                    // Parse timeRetained
+                    Duration timeRetained = null;
+                    if (requestBody.timeRetained() != null) {
+                        try {
+                            timeRetained = TimeUtils.parseDuration(requestBody.timeRetained());
+                        } catch (Exception e) {
+                            response =
+                                    new ErrorResponse(
+                                            null,
+                                            null,
+                                            "Invalid timeRetained format: "
+                                                    + requestBody.timeRetained(),
+                                            400);
+                            return mockResponse(response, 400);
+                        }
+                    }
+
+                    // Create tag
+                    table.createTag(tagName, snapshot.id(), timeRetained);
+                    return new MockResponse().setResponseCode(200);
+                default:
+                    return new MockResponse().setResponseCode(404);
+            }
+        } catch (Exception e) {
+            if (e.getMessage().contains("Tag") && e.getMessage().contains("already exists")) {
+                response =
+                        new ErrorResponse(
+                                ErrorResponse.RESOURCE_TYPE_TAG, tagName, e.getMessage(), 409);
+                return mockResponse(response, 409);
+            }
+            if (e.getMessage().contains("Tag") && e.getMessage().contains("doesn't exist")) {
+                response =
+                        new ErrorResponse(
+                                ErrorResponse.RESOURCE_TYPE_TAG, tagName, e.getMessage(), 404);
+                return mockResponse(response, 404);
+            }
+            if (e.getMessage().contains("Snapshot") && e.getMessage().contains("doesn't exist")) {
+                response =
+                        new ErrorResponse(
+                                ErrorResponse.RESOURCE_TYPE_SNAPSHOT, tagName, e.getMessage(), 404);
+                return mockResponse(response, 404);
+            }
+            throw e;
+        }
+    }
+
     private MockResponse generateFinalListPartitionsResponse(
             Map<String, String> parameters, List<Partition> partitions) {
         RESTResponse response;
@@ -2157,17 +2365,7 @@ public class RESTCatalogServer {
             if (!tablePartitionsStore.containsKey(identifier.getFullName())) {
                 if (statistics != null) {
                     List<Partition> newPartitions =
-                            statistics.stream()
-                                    .map(
-                                            stats ->
-                                                    new Partition(
-                                                            stats.spec(),
-                                                            stats.recordCount(),
-                                                            stats.fileSizeInBytes(),
-                                                            stats.fileCount(),
-                                                            stats.lastFileCreationTime(),
-                                                            false))
-                                    .collect(Collectors.toList());
+                            statistics.stream().map(this::toPartition).collect(Collectors.toList());
                     tablePartitionsStore.put(identifier.getFullName(), newPartitions);
                 }
             } else {
@@ -2192,7 +2390,7 @@ public class RESTCatalogServer {
                                                                 partitionStatisticsMap.get(
                                                                         oldPartition.spec());
                                                         if (stats == null) {
-                                                            return oldPartition; // 如果没有新的统计信息，保持原样
+                                                            return oldPartition;
                                                         }
                                                         return new Partition(
                                                                 oldPartition.spec(),
@@ -2207,9 +2405,24 @@ public class RESTCatalogServer {
                                                                                 .lastFileCreationTime(),
                                                                         stats
                                                                                 .lastFileCreationTime()),
-                                                                oldPartition.done());
+                                                                oldPartition.done(),
+                                                                oldPartition.createdAt(),
+                                                                oldPartition.createdBy(),
+                                                                oldPartition.updatedAt(),
+                                                                oldPartition.updatedBy(),
+                                                                oldPartition.options());
                                                     })
                                             .collect(Collectors.toList());
+                            Set<Map<String, String>> existingSpecs =
+                                    oldPartitions.stream()
+                                            .map(Partition::spec)
+                                            .collect(Collectors.toSet());
+                            List<Partition> newPartitions =
+                                    statistics.stream()
+                                            .filter(stats -> !existingSpecs.contains(stats.spec()))
+                                            .map(this::toPartition)
+                                            .collect(Collectors.toList());
+                            updatedPartitions.addAll(newPartitions);
                             return updatedPartitions;
                         });
             }
@@ -2408,6 +2621,21 @@ public class RESTCatalogServer {
                                 "Invalid input for queryParameter maxResults: %s", maxResults),
                         400),
                 400);
+    }
+
+    private Partition toPartition(PartitionStatistics stats) {
+        return new Partition(
+                stats.spec(),
+                stats.recordCount(),
+                stats.fileSizeInBytes(),
+                stats.fileCount(),
+                stats.lastFileCreationTime(),
+                false,
+                System.currentTimeMillis(),
+                "created",
+                System.currentTimeMillis(),
+                "updated",
+                new HashMap<>());
     }
 
     public List<Map<String, String>> getReceivedHeaders() {

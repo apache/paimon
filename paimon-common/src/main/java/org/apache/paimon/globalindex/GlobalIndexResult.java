@@ -22,6 +22,7 @@ import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import java.util.List;
 import java.util.function.Supplier;
 
 /** Global index result represents row ids as a compressed bitmap. */
@@ -29,6 +30,19 @@ public interface GlobalIndexResult {
 
     /** Returns the bitmap representing row ids. */
     RoaringNavigableMap64 results();
+
+    default GlobalIndexResult offset(long startOffset) {
+        if (startOffset == 0) {
+            return this;
+        }
+        RoaringNavigableMap64 roaringNavigableMap64 = results();
+        final RoaringNavigableMap64 roaringNavigableMap64Offset = new RoaringNavigableMap64();
+
+        for (long rowId : roaringNavigableMap64) {
+            roaringNavigableMap64Offset.add(rowId + startOffset);
+        }
+        return create(() -> roaringNavigableMap64Offset);
+    }
 
     /**
      * Returns the intersection of this result and the other result.
@@ -65,6 +79,17 @@ public interface GlobalIndexResult {
                 () -> {
                     RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
                     result64.addRange(range);
+                    return result64;
+                });
+    }
+
+    static GlobalIndexResult fromRanges(List<Range> ranges) {
+        return create(
+                () -> {
+                    RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
+                    for (Range range : ranges) {
+                        result64.addRange(range);
+                    }
                     return result64;
                 });
     }

@@ -439,6 +439,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withLimit(int limit) {
+            wrapped.withLimit(limit);
+            return this;
+        }
+
+        @Override
         public Plan read() {
             return wrapped.read();
         }

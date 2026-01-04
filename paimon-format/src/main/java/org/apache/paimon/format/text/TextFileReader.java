@@ -18,156 +18,42 @@
 
 package org.apache.paimon.format.text;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.reader.FileRecordIterator;
-import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.io.InputStream;
 
-import static org.apache.paimon.format.text.HadoopCompressionUtils.createDecompressedInputStream;
+/** TEXT format reader implementation. */
+public class TextFileReader extends AbstractTextFileReader {
 
-/** Base class for text-based file readers that provides common functionality. */
-public abstract class TextFileReader implements FileRecordReader<InternalRow> {
+    private static final GenericRow emptyRow = new GenericRow(0);
 
-    private final Path filePath;
-    private final TextRecordIterator reader;
+    private final boolean isEmptyRow;
 
-    protected final RowType rowType;
-    protected final long offset;
-    protected final TextLineReader lineReader;
-
-    protected boolean readerClosed = false;
-
-    protected TextFileReader(
+    public TextFileReader(
             FileIO fileIO,
             Path filePath,
-            RowType rowType,
-            String delimiter,
+            RowType projectedRowType,
+            TextOptions options,
             long offset,
             @Nullable Long length)
             throws IOException {
-        this.filePath = filePath;
-        this.rowType = rowType;
-        this.offset = offset;
-        InputStream decompressedStream =
-                createDecompressedInputStream(fileIO.newInputStream(filePath), filePath);
-        this.lineReader = TextLineReader.create(decompressedStream, delimiter, offset, length);
-        this.reader = new TextRecordIterator();
-    }
-
-    /**
-     * Parses a single line of text into an InternalRow. Subclasses must implement this method to
-     * handle their specific format.
-     */
-    @Nullable
-    protected abstract InternalRow parseLine(String line) throws IOException;
-
-    /**
-     * Performs any additional setup before reading records. Subclasses can override this method if
-     * they need to perform setup operations like skipping headers.
-     */
-    protected void setupReading() throws IOException {
-        // Default implementation does nothing
+        super(fileIO, filePath, projectedRowType, options.lineDelimiter(), offset, length);
+        this.isEmptyRow = projectedRowType.getFieldCount() == 0;
     }
 
     @Override
-    @Nullable
-    public FileRecordIterator<InternalRow> readBatch() throws IOException {
-        if (readerClosed) {
-            return null;
+    protected @Nullable InternalRow parseLine(String line) {
+        if (isEmptyRow) {
+            return emptyRow;
         }
 
-        // Perform any setup needed before reading
-        setupReading();
-
-        if (reader.end) {
-            return null;
-        }
-        return reader;
-    }
-
-    @Override
-    public void close() throws IOException {
-        if (!readerClosed) {
-            if (lineReader != null) {
-                lineReader.close();
-            }
-            readerClosed = true;
-        }
-    }
-
-    /** Record iterator for text-based file readers. */
-    private class TextRecordIterator implements FileRecordIterator<InternalRow> {
-
-        protected long currentPosition = 0;
-        protected boolean end = false;
-
-        @Override
-        public InternalRow next() throws IOException {
-            while (true) {
-                if (readerClosed) {
-                    return null;
-                }
-                String nextLine = readLine();
-                if (nextLine == null) {
-                    end = true;
-                    return null;
-                }
-
-                currentPosition++;
-                InternalRow row = parseLine(nextLine);
-                if (row != null) {
-                    return row;
-                }
-            }
-        }
-
-        @Override
-        public void releaseBatch() {
-            // Default implementation does nothing
-        }
-
-        @Override
-        public Path filePath() {
-            return filePath;
-        }
-
-        @Override
-        public long returnedPosition() {
-            if (offset > 0) {
-                throw new UnsupportedOperationException(
-                        "Cannot return position with reading offset.");
-            }
-            return Math.max(0, currentPosition - 1);
-        }
-    }
-
-    /**
-     * Reads a single line from the input stream, using either the default line delimiter or a
-     * custom delimiter.
-     *
-     * <p>This method supports multi-character custom delimiters by using a simple pattern matching
-     * algorithm. For standard delimiters (null or empty), it delegates to BufferedReader's
-     * readLine() for optimal performance.
-     *
-     * <p>The algorithm maintains a partial match index and accumulates bytes until:
-     *
-     * <ul>
-     *   <li>A complete delimiter is found (returns line without delimiter)
-     *   <li>End of stream is reached (returns accumulated data or null if empty)
-     *   <li>Maximum line length is exceeded (throws IOException)
-     * </ul>
-     *
-     * @return the next line as a string (without delimiter), or null if end of stream
-     * @throws IOException if an I/O error occurs or line exceeds maximum length
-     */
-    protected String readLine() throws IOException {
-        return lineReader.readLine();
+        return GenericRow.of(BinaryString.fromString(line));
     }
 }

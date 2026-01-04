@@ -21,6 +21,7 @@ package org.apache.paimon.schema;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
@@ -39,6 +40,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import java.util.ArrayList;
@@ -78,7 +80,6 @@ import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQ
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
-import static org.apache.paimon.types.DataTypeRoot.BLOB;
 import static org.apache.paimon.types.DataTypeRoot.MAP;
 import static org.apache.paimon.types.DataTypeRoot.MULTISET;
 import static org.apache.paimon.types.DataTypeRoot.ROW;
@@ -242,6 +243,8 @@ public class SchemaValidation {
         validateRowTracking(schema, options);
 
         validateIncrementalClustering(schema, options);
+
+        validateChainTable(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -651,16 +654,21 @@ public class SchemaValidation {
                     "Data evolution config must disabled with deletion-vectors.enabled");
         }
 
-        if (schema.fields().stream().map(DataField::type).anyMatch(t -> t.is(BLOB))) {
+        List<String> blobNames =
+                BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldNames();
+        if (!blobNames.isEmpty()) {
             checkArgument(
                     options.dataEvolutionEnabled(),
                     "Data evolution config must enabled for table with BLOB type column.");
             checkArgument(
-                    BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldCount() == 1,
+                    blobNames.size() == 1,
                     "Table with BLOB type column only support one BLOB column.");
             checkArgument(
                     schema.fields().size() > 1,
                     "Table with BLOB type column must have other normal columns.");
+            checkArgument(
+                    !schema.partitionKeys().contains(blobNames.get(0)),
+                    "The BLOB type column can not be part of partition keys.");
         }
     }
 
@@ -674,6 +682,36 @@ public class SchemaValidation {
                     schema.primaryKeys().isEmpty(),
                     "Cannot define %s for incremental clustering table.",
                     PRIMARY_KEY.key());
+        }
+    }
+
+    public static void validateChainTable(TableSchema schema, CoreOptions options) {
+        if (options.isChainTable()) {
+            boolean isPrimaryTbl = schema.primaryKeys() != null && !schema.primaryKeys().isEmpty();
+            boolean isPartitionTbl =
+                    schema.partitionKeys() != null && !schema.partitionKeys().isEmpty();
+            ChangelogProducer changelogProducer = options.changelogProducer();
+            Preconditions.checkArgument(
+                    options.type() == TableType.TABLE, "Chain table must be table type.");
+            Preconditions.checkArgument(isPrimaryTbl, "Primary key is required for chain table.");
+            Preconditions.checkArgument(isPartitionTbl, "Chain table must be partition table.");
+            Preconditions.checkArgument(
+                    options.bucket() > 0, "Bucket number must be greater than 0 for chain table.");
+            Preconditions.checkArgument(
+                    options.sequenceField() != null, "Sequence field is required for chain table.");
+            Preconditions.checkArgument(
+                    options.mergeEngine() == MergeEngine.DEDUPLICATE,
+                    "Merge engine must be deduplicate for chain table.");
+            Preconditions.checkArgument(
+                    changelogProducer == ChangelogProducer.NONE
+                            || changelogProducer == ChangelogProducer.INPUT,
+                    "Changelog producer must be none or input for chain table.");
+            Preconditions.checkArgument(
+                    options.partitionTimestampPattern() != null,
+                    "Partition timestamp pattern is required for chain table.");
+            Preconditions.checkArgument(
+                    options.partitionTimestampFormatter() != null,
+                    "Partition timestamp formatter is required for chain table.");
         }
     }
 }

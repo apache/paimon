@@ -26,8 +26,10 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.runtime.operators.coordination.OperatorEventGateway;
 import org.apache.flink.streaming.api.operators.SourceOperator;
+import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
+import org.apache.flink.streaming.util.MockStreamingRuntimeContext;
 import org.apache.flink.util.function.FunctionWithException;
 
 import java.util.HashMap;
@@ -35,6 +37,9 @@ import java.util.HashMap;
 /** Helper class to resolve the compatibility of {@link SourceOperator}'s constructor. */
 public abstract class AbstractTestingSourceOperator<T, S extends SourceSplit>
         extends SourceOperator<T, S> {
+
+    private final int subtaskIndex;
+    private final int parallelism;
 
     public AbstractTestingSourceOperator(
             FunctionWithException<SourceReaderContext, SourceReader<T, S>, Exception> readerFactory,
@@ -44,9 +49,10 @@ public abstract class AbstractTestingSourceOperator<T, S extends SourceSplit>
             ProcessingTimeService timeService,
             Configuration configuration,
             String localHostname,
+            int subtaskIndex,
+            int parallelism,
             boolean emitProgressiveWatermarks,
             StreamTask.CanEmitBatchOfRecordsChecker canEmitBatchOfRecords) {
-
         super(
                 null,
                 readerFactory,
@@ -58,6 +64,14 @@ public abstract class AbstractTestingSourceOperator<T, S extends SourceSplit>
                 localHostname,
                 emitProgressiveWatermarks,
                 canEmitBatchOfRecords,
-                new HashMap<>());
+                new HashMap<>(),
+                false);
+        this.subtaskIndex = subtaskIndex;
+        this.parallelism = parallelism;
+    }
+
+    @Override
+    public StreamingRuntimeContext getRuntimeContext() {
+        return new MockStreamingRuntimeContext(parallelism, subtaskIndex);
     }
 }

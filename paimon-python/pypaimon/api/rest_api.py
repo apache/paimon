@@ -16,7 +16,7 @@
 #  under the License.
 
 import logging
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Union
 
 from pypaimon.api.api_request import (AlterDatabaseRequest, CommitTableRequest,
                                       CreateDatabaseRequest,
@@ -32,7 +32,8 @@ from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.api.typedef import T
-from pypaimon.common.config import CatalogOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
 from pypaimon.snapshot.snapshot import Snapshot
@@ -47,18 +48,29 @@ class RESTApi:
     TABLE_NAME_PATTERN = "tableNamePattern"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
 
-    def __init__(self, options: Dict[str, str], config_required: bool = True):
+    def __init__(self, options: Union[Options, Dict[str, str]], config_required: bool = True):
+        if isinstance(options, dict):
+            options = Options(options)
+        if not options:
+            raise ValueError("Options cannot be None or empty")
+
+        uri = options.get(CatalogOptions.URI)
+        if not uri or not uri.strip():
+            raise ValueError("URI cannot be empty")
+
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.client = HttpClient(options.get(CatalogOptions.URI))
+        self.client = HttpClient(uri)
         auth_provider = AuthProviderFactory.create_auth_provider(options)
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
 
         if config_required:
             warehouse = options.get(CatalogOptions.WAREHOUSE)
-            query_params = {}
-            if warehouse:
-                query_params[CatalogOptions.WAREHOUSE] = RESTUtil.encode_string(
-                    warehouse)
+            if not warehouse or not warehouse.strip():
+                raise ValueError("Warehouse name cannot be empty")
+
+            query_params = {
+                CatalogOptions.WAREHOUSE.key(): RESTUtil.encode_string(warehouse)
+            }
 
             config_response = self.client.get_with_params(
                 ResourcePaths.config(),
@@ -118,7 +130,7 @@ class RESTApi:
 
         return results
 
-    def get_options(self) -> Dict[str, str]:
+    def get_options(self) -> Options:
         return self.options
 
     def list_databases(self) -> List[str]:
@@ -152,13 +164,19 @@ class RESTApi:
         databases = response.data() or []
         return PagedList(databases, response.get_next_page_token())
 
-    def create_database(self, name: str, options: Dict[str, str]) -> None:
-        request = CreateDatabaseRequest(name, options)
+    def create_database(self, name: str, properties: Dict[str, str]) -> None:
+        if not name or not name.strip():
+            raise ValueError("Database name cannot be empty")
+
+        request = CreateDatabaseRequest(name, properties)
         self.client.post(
             self.resource_paths.databases(), request, self.rest_auth_function
         )
 
     def get_database(self, name: str) -> GetDatabaseResponse:
+        if not name or not name.strip():
+            raise ValueError("Database name cannot be empty")
+
         return self.client.get(
             self.resource_paths.database(name),
             GetDatabaseResponse,
@@ -166,6 +184,9 @@ class RESTApi:
         )
 
     def drop_database(self, name: str) -> None:
+        if not name or not name.strip():
+            raise ValueError("Database name cannot be empty")
+
         self.client.delete(
             self.resource_paths.database(name),
             self.rest_auth_function)
@@ -188,6 +209,9 @@ class RESTApi:
             self.rest_auth_function)
 
     def list_tables(self, database_name: str) -> List[str]:
+        if not database_name or not database_name.strip():
+            raise ValueError("Database name cannot be empty")
+
         return self.__list_data_from_page_api(
             lambda query_params: self.client.get_with_params(
                 self.resource_paths.tables(database_name),
@@ -204,6 +228,9 @@ class RESTApi:
             page_token: Optional[str] = None,
             table_name_pattern: Optional[str] = None,
     ) -> PagedList[str]:
+        if not database_name or not database_name.strip():
+            raise ValueError("Database name cannot be empty")
+
         response = self.client.get_with_params(
             self.resource_paths.tables(database_name),
             self.__build_paged_query_params(
@@ -217,30 +244,45 @@ class RESTApi:
         return PagedList(tables, response.get_next_page_token())
 
     def create_table(self, identifier: Identifier, schema: Schema) -> None:
+        database_name, _ = self.__validate_identifier(identifier)
+        if not schema:
+            raise ValueError("Schema cannot be None")
+
         request = CreateTableRequest(identifier, schema)
         return self.client.post(
-            self.resource_paths.tables(identifier.get_database_name()),
+            self.resource_paths.tables(database_name),
             request,
             self.rest_auth_function)
 
     def get_table(self, identifier: Identifier) -> GetTableResponse:
+        database_name, table_name = self.__validate_identifier(identifier)
+
         return self.client.get(
             self.resource_paths.table(
-                identifier.get_database_name(),
-                identifier.get_object_name()),
+                database_name,
+                table_name),
             GetTableResponse,
             self.rest_auth_function,
         )
 
     def drop_table(self, identifier: Identifier) -> GetTableResponse:
+        database_name, table_name = self.__validate_identifier(identifier)
+
         return self.client.delete(
             self.resource_paths.table(
-                identifier.get_database_name(),
-                identifier.get_object_name()),
+                database_name,
+                table_name),
             self.rest_auth_function,
         )
 
     def rename_table(self, source_identifier: Identifier, target_identifier: Identifier) -> None:
+        if not source_identifier:
+            raise ValueError("Source identifier cannot be None")
+        if not target_identifier:
+            raise ValueError("Target identifier cannot be None")
+        self.__validate_identifier(source_identifier)
+        self.__validate_identifier(target_identifier)
+
         request = RenameTableRequest(source_identifier, target_identifier)
         return self.client.post(
             self.resource_paths.rename_table(),
@@ -248,10 +290,12 @@ class RESTApi:
             self.rest_auth_function)
 
     def load_table_token(self, identifier: Identifier) -> GetTableTokenResponse:
+        database_name, table_name = self.__validate_identifier(identifier)
+
         return self.client.get(
             self.resource_paths.table_token(
-                identifier.get_database_name(),
-                identifier.get_object_name()),
+                database_name,
+                table_name),
             GetTableTokenResponse,
             self.rest_auth_function,
         )
@@ -279,12 +323,33 @@ class RESTApi:
             NoSuchResourceException: Exception thrown on HTTP 404 means the table not exists
             ForbiddenException: Exception thrown on HTTP 403 means don't have the permission for this table
         """
+        database_name, table_name = self.__validate_identifier(identifier)
+        if not snapshot:
+            raise ValueError("Snapshot cannot be None")
+        if statistics is None:
+            raise ValueError("Statistics cannot be None")
+
         request = CommitTableRequest(table_uuid, snapshot, statistics)
         response = self.client.post_with_response_type(
             self.resource_paths.commit_table(
-                identifier.get_database_name(), identifier.get_object_name()),
+                database_name, table_name),
             request,
             CommitTableResponse,
             self.rest_auth_function
         )
         return response.is_success()
+
+    @staticmethod
+    def __validate_identifier(identifier: Identifier):
+        if not identifier:
+            raise ValueError("Identifier cannot be None")
+
+        database_name = identifier.get_database_name()
+        if not database_name or not database_name.strip():
+            raise ValueError("Database name cannot be empty")
+
+        table_name = identifier.get_object_name()
+        if not table_name or not table_name.strip():
+            raise ValueError("Table name cannot be None")
+
+        return database_name.strip(), table_name.strip()

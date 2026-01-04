@@ -20,14 +20,15 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactoryUtils;
+import org.apache.paimon.spark.globalindex.GlobalIndexTopoBuilder;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -59,7 +60,9 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -123,10 +126,6 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
 
         String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : null;
 
-        // Early validation: check if the index type is supported
-        GlobalIndexBuilderFactory globalIndexBuilderFactory =
-                GlobalIndexBuilderFactoryUtils.load(indexType);
-
         LOG.info("Starting to build index for table " + tableIdent + " WHERE: " + finalWhere);
 
         return modifyPaimonTable(
@@ -174,18 +173,33 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
 
                         // Step 1: generate splits for each partition&&shard
-                        Map<BinaryRow, Map<Range, DataSplit>> splits =
+                        Map<BinaryRow, List<IndexedSplit>> splits =
                                 split(table, partitionPredicate, rowsPerShard);
 
+                        List<CommitMessage> indexResults;
                         // Step 2: build index by certain index system
-                        List<CommitMessage> indexResults =
-                                buildIndex(
-                                        table,
-                                        splits,
-                                        indexType,
-                                        readRowType,
-                                        indexField,
-                                        userOptions);
+                        GlobalIndexTopoBuilder topoBuildr =
+                                GlobalIndexBuilderFactoryUtils.createTopoBuilder(indexType);
+                        if (topoBuildr != null) {
+                            indexResults =
+                                    topoBuildr.buildIndex(
+                                            new JavaSparkContext(spark().sparkContext()),
+                                            table,
+                                            splits,
+                                            indexType,
+                                            readRowType,
+                                            indexField,
+                                            userOptions);
+                        } else {
+                            indexResults =
+                                    buildIndex(
+                                            table,
+                                            splits,
+                                            indexType,
+                                            readRowType,
+                                            indexField,
+                                            userOptions);
+                        }
 
                         // Step 3: commit index meta to a new snapshot
                         commit(table, indexResults);
@@ -203,7 +217,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
 
     private List<CommitMessage> buildIndex(
             FileStoreTable table,
-            Map<BinaryRow, Map<Range, DataSplit>> preparedDS,
+            Map<BinaryRow, List<IndexedSplit>> preparedDS,
             String indexType,
             RowType readType,
             DataField indexField,
@@ -211,13 +225,14 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             throws IOException {
         JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
         List<Pair<GlobalIndexBuilderContext, byte[]>> taskList = new ArrayList<>();
-        for (Map.Entry<BinaryRow, Map<Range, DataSplit>> entry : preparedDS.entrySet()) {
+        for (Map.Entry<BinaryRow, List<IndexedSplit>> entry : preparedDS.entrySet()) {
             BinaryRow partition = entry.getKey();
-            Map<Range, DataSplit> partitions = entry.getValue();
+            List<IndexedSplit> partitions = entry.getValue();
 
-            for (Map.Entry<Range, DataSplit> partitionEntry : partitions.entrySet()) {
-                Range startOffset = partitionEntry.getKey();
-                DataSplit partitionDS = partitionEntry.getValue();
+            for (IndexedSplit indexedSplit : partitions) {
+                checkArgument(
+                        indexedSplit.rowRanges().size() == 1,
+                        "Each IndexedSplit should contain exactly one row range.");
                 GlobalIndexBuilderContext builderContext =
                         new GlobalIndexBuilderContext(
                                 table,
@@ -225,10 +240,10 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 readType,
                                 indexField,
                                 indexType,
-                                startOffset,
+                                indexedSplit.rowRanges().get(0).from,
                                 options);
 
-                byte[] dsBytes = InstantiationUtil.serializeObject(partitionDS);
+                byte[] dsBytes = InstantiationUtil.serializeObject(indexedSplit);
                 taskList.add(Pair.of(builderContext, dsBytes));
             }
         }
@@ -242,15 +257,13 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                             new CommitMessageSerializer();
                                     GlobalIndexBuilderContext builderContext = pair.getLeft();
                                     byte[] dataSplitBytes = pair.getRight();
-                                    DataSplit split =
+                                    IndexedSplit split =
                                             InstantiationUtil.deserializeObject(
                                                     dataSplitBytes,
                                                     GlobalIndexBuilder.class.getClassLoader());
-                                    GlobalIndexBuilderFactory globalIndexBuilderFactory =
-                                            GlobalIndexBuilderFactoryUtils.load(
-                                                    builderContext.indexType());
                                     GlobalIndexBuilder globalIndexBuilder =
-                                            globalIndexBuilderFactory.create(builderContext);
+                                            GlobalIndexBuilderFactoryUtils.createIndexBuilder(
+                                                    builderContext);
                                     return commitMessageSerializer.serialize(
                                             globalIndexBuilder.build(split));
                                 })
@@ -271,7 +284,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
         }
     }
 
-    protected Map<BinaryRow, Map<Range, DataSplit>> split(
+    protected Map<BinaryRow, List<IndexedSplit>> split(
             FileStoreTable table, PartitionPredicate partitions, long rowsPerShard) {
         FileStorePathFactory pathFactory = table.store().pathFactory();
         // Get all manifest entries from the table scan
@@ -295,11 +308,11 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
      * @param pathFactory path factory for creating bucket paths
      * @return map of partition to shard splits
      */
-    public static Map<BinaryRow, Map<Range, DataSplit>> groupFilesIntoShardsByPartition(
+    public static Map<BinaryRow, List<IndexedSplit>> groupFilesIntoShardsByPartition(
             Map<BinaryRow, List<ManifestEntry>> entriesByPartition,
             long rowsPerShard,
             BiFunction<BinaryRow, Integer, Path> pathFactory) {
-        Map<BinaryRow, Map<Range, DataSplit>> result = new HashMap<>();
+        Map<BinaryRow, List<IndexedSplit>> result = new HashMap<>();
 
         for (Map.Entry<BinaryRow, List<ManifestEntry>> partitionEntry :
                 entriesByPartition.entrySet()) {
@@ -307,7 +320,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             List<ManifestEntry> partitionEntries = partitionEntry.getValue();
 
             // Group files into shards - a file may belong to multiple shards
-            Map<Long, List<DataFileMeta>> filesByShard = new HashMap<>();
+            Map<Long, List<DataFileMeta>> filesByShard = new LinkedHashMap<>();
 
             for (ManifestEntry entry : partitionEntries) {
                 DataFileMeta file = entry.file();
@@ -332,31 +345,60 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             }
 
             // Create DataSplit for each shard with exact ranges
-            Map<Range, DataSplit> shardSplits = new HashMap<>();
+            List<IndexedSplit> shardSplits = new ArrayList<>();
             for (Map.Entry<Long, List<DataFileMeta>> shardEntry : filesByShard.entrySet()) {
-                long startRowId = shardEntry.getKey();
+                long shardStart = shardEntry.getKey();
+                long shardEnd = shardStart + rowsPerShard - 1;
                 List<DataFileMeta> shardFiles = shardEntry.getValue();
 
                 if (shardFiles.isEmpty()) {
                     continue;
                 }
 
-                // Use exact shard boundaries: [n*rowsPerShard, (n+1)*rowsPerShard - 1]
-                long minRowId = startRowId;
-                long maxRowId = startRowId + rowsPerShard - 1;
-                Range range = new Range(minRowId, maxRowId);
+                // Sort files by firstRowId to ensure sequential order
+                shardFiles.sort(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId));
 
-                // Create DataSplit for this shard
-                DataSplit dataSplit =
-                        DataSplit.builder()
-                                .withPartition(partition)
-                                .withBucket(0)
-                                .withDataFiles(shardFiles)
-                                .withBucketPath(pathFactory.apply(partition, 0).toString())
-                                .rawConvertible(false)
-                                .build();
+                // Group contiguous files and create separate DataSplits for each group
+                List<DataFileMeta> currentGroup = new ArrayList<>();
+                long currentGroupEnd = -1;
 
-                shardSplits.put(range, dataSplit);
+                for (DataFileMeta file : shardFiles) {
+                    long fileStart = file.nonNullFirstRowId();
+                    long fileEnd = fileStart + file.rowCount() - 1;
+
+                    if (currentGroup.isEmpty()) {
+                        // Start a new group
+                        currentGroup.add(file);
+                        currentGroupEnd = fileEnd;
+                    } else if (fileStart <= currentGroupEnd + 1) {
+                        // File is contiguous with current group (adjacent or overlapping)
+                        currentGroup.add(file);
+                        currentGroupEnd = Math.max(currentGroupEnd, fileEnd);
+                    } else {
+                        // Gap detected, finalize current group and start a new one
+                        createDataSplitForGroup(
+                                currentGroup,
+                                shardStart,
+                                shardEnd,
+                                partition,
+                                pathFactory,
+                                shardSplits);
+                        currentGroup = new ArrayList<>();
+                        currentGroup.add(file);
+                        currentGroupEnd = fileEnd;
+                    }
+                }
+
+                // Don't forget to process the last group
+                if (!currentGroup.isEmpty()) {
+                    createDataSplitForGroup(
+                            currentGroup,
+                            shardStart,
+                            shardEnd,
+                            partition,
+                            pathFactory,
+                            shardSplits);
+                }
             }
 
             if (!shardSplits.isEmpty()) {
@@ -365,6 +407,40 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
         }
 
         return result;
+    }
+
+    private static void createDataSplitForGroup(
+            List<DataFileMeta> files,
+            long shardStart,
+            long shardEnd,
+            BinaryRow partition,
+            BiFunction<BinaryRow, Integer, Path> pathFactory,
+            List<IndexedSplit> shardSplits) {
+        // Calculate the actual row range covered by the files
+        long groupMinRowId = files.get(0).nonNullFirstRowId();
+        long groupMaxRowId =
+                files.stream()
+                        .mapToLong(f -> f.nonNullFirstRowId() + f.rowCount() - 1)
+                        .max()
+                        .getAsLong();
+
+        // Clamp to shard boundaries
+        // Range.from >= shardStart, Range.to <= shardEnd
+        long rangeFrom = Math.max(groupMinRowId, shardStart);
+        long rangeTo = Math.min(groupMaxRowId, shardEnd);
+
+        Range range = new Range(rangeFrom, rangeTo);
+
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withPartition(partition)
+                        .withBucket(0)
+                        .withDataFiles(files)
+                        .withBucketPath(pathFactory.apply(partition, 0).toString())
+                        .rawConvertible(false)
+                        .build();
+
+        shardSplits.add(new IndexedSplit(dataSplit, Collections.singletonList(range), null));
     }
 
     public static ProcedureBuilder builder() {

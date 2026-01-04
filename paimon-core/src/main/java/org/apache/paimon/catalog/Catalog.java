@@ -26,11 +26,13 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 
@@ -627,6 +629,10 @@ public interface Catalog extends AutoCloseable {
      *   <li>{@link #createBranch(Identifier, String, String)}.
      *   <li>{@link #dropBranch(Identifier, String)}.
      *   <li>{@link #listBranches(Identifier)}.
+     *   <li>{@link #getTag(Identifier, String)}.
+     *   <li>{@link #createTag(Identifier, String, Long, String, boolean)}.
+     *   <li>{@link #listTagsPaged(Identifier, Integer, String, String)}.
+     *   <li>{@link #deleteTag(Identifier, String)}.
      * </ul>
      */
     boolean supportsVersionManagement();
@@ -711,7 +717,24 @@ public interface Catalog extends AutoCloseable {
      * @throws UnsupportedOperationException if the catalog does not {@link
      *     #supportsVersionManagement()}
      */
-    void rollbackTo(Identifier identifier, Instant instant) throws Catalog.TableNotExistException;
+    default void rollbackTo(Identifier identifier, Instant instant)
+            throws Catalog.TableNotExistException {
+        rollbackTo(identifier, instant, null);
+    }
+
+    /**
+     * rollback table by the given {@link Identifier} and instant.
+     *
+     * @param identifier path of the table
+     * @param instant like snapshotId or tagName
+     * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
+     *     snapshot.
+     * @throws Catalog.TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
+            throws Catalog.TableNotExistException;
 
     /**
      * Create a new branch for this table. By default, an empty branch will be created using the
@@ -761,6 +784,79 @@ public interface Catalog extends AutoCloseable {
      *     #supportsVersionManagement()}
      */
     List<String> listBranches(Identifier identifier) throws TableNotExistException;
+
+    /**
+     * Get tag for table.
+     *
+     * @param identifier path of the table, cannot be system name.
+     * @param tagName tag name
+     * @return {@link GetTagResponse} containing tag information
+     * @throws TableNotExistException if the table does not exist
+     * @throws TagNotExistException if the tag does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    GetTagResponse getTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException;
+
+    /**
+     * Create tag for table.
+     *
+     * @param identifier path of the table, cannot be system name.
+     * @param tagName tag name
+     * @param snapshotId optional snapshot id, if not provided uses latest snapshot
+     * @param timeRetained optional time retained as string (e.g., "1d", "12h", "30m")
+     * @param ignoreIfExists if true, ignore if tag already exists
+     * @throws TableNotExistException if the table does not exist
+     * @throws SnapshotNotExistException if the snapshot does not exist
+     * @throws TagAlreadyExistException if the tag already exists and ignoreIfExists is false
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    void createTag(
+            Identifier identifier,
+            String tagName,
+            @Nullable Long snapshotId,
+            @Nullable String timeRetained,
+            boolean ignoreIfExists)
+            throws TableNotExistException, SnapshotNotExistException, TagAlreadyExistException;
+
+    /**
+     * Get paged list names of tags under this table. An empty list is returned if none tag exists.
+     *
+     * @param identifier path of the table, cannot be system name.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @param tagNamePrefix A prefix for tag names. All tags will be returned if not set or empty.
+     * @return a list of the names of tags with provided page size in this table and next page
+     *     token, or a list of the names of all tags in this table if the catalog does not {@link
+     *     #supportsListObjectsPaged()}.
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()} or it does not {@link #supportsListByPattern()}
+     */
+    PagedList<String> listTagsPaged(
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix)
+            throws TableNotExistException;
+
+    /**
+     * Delete tag for table.
+     *
+     * @param identifier path of the table, cannot be system name.
+     * @param tagName tag name
+     * @throws TableNotExistException if the table does not exist
+     * @throws TagNotExistException if the tag does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    void deleteTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException;
 
     // ==================== Partition Modifications ==========================
 
@@ -1335,6 +1431,33 @@ public interface Catalog extends AutoCloseable {
         }
 
         public TagNotExistException(Identifier identifier, String tag, Throwable cause) {
+            super(String.format(MSG, tag, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.tag = tag;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String tag() {
+            return tag;
+        }
+    }
+
+    /** Exception for trying to create a tag that already exists. */
+    class TagAlreadyExistException extends Exception {
+
+        private static final String MSG = "Tag %s in table %s already exists.";
+
+        private final Identifier identifier;
+        private final String tag;
+
+        public TagAlreadyExistException(Identifier identifier, String tag) {
+            this(identifier, tag, null);
+        }
+
+        public TagAlreadyExistException(Identifier identifier, String tag, Throwable cause) {
             super(String.format(MSG, tag, identifier.getFullName()), cause);
             this.identifier = identifier;
             this.tag = tag;

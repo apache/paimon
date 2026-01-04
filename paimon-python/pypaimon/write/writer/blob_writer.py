@@ -21,7 +21,8 @@ import uuid
 import pyarrow as pa
 from typing import Optional, Tuple, Dict
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.data.timestamp import Timestamp
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.blob_file_writer import BlobFileWriter
 
@@ -159,7 +160,6 @@ class BlobWriter(AppendOnlyDataWriter):
     def _add_file_metadata(self, file_name: str, file_path: str, data_or_row_count, file_size: int,
                            external_path: Optional[str] = None):
         """Add file metadata to committed_files."""
-        from datetime import datetime
         from pypaimon.manifest.schema.data_file_meta import DataFileMeta
         from pypaimon.manifest.schema.simple_stats import SimpleStats
         from pypaimon.table.row.generic_row import GenericRow
@@ -191,7 +191,7 @@ class BlobWriter(AppendOnlyDataWriter):
         max_seq = self.sequence_generator.current - 1
         self.sequence_generator.start = self.sequence_generator.current
 
-        self.committed_files.append(DataFileMeta(
+        self.committed_files.append(DataFileMeta.create(
             file_name=file_name,
             file_size=file_size,
             row_count=row_count,
@@ -207,7 +207,7 @@ class BlobWriter(AppendOnlyDataWriter):
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],
-            creation_time=datetime.now(),
+            creation_time=Timestamp.now(),
             delete_row_count=0,
             file_source=0,  # FileSource.APPEND = 0
             value_stats_cols=None,

@@ -129,20 +129,8 @@ public class StoreMultiCommitter
             ManifestCommittable manifestCommittable =
                     wrappedManifestCommittable.computeCommittableIfAbsent(
                             identifier, checkpointId, watermark);
-
-            switch (committable.kind()) {
-                case FILE:
-                    CommitMessage file = (CommitMessage) committable.wrappedCommittable();
-                    manifestCommittable.addFileCommittable(file);
-                    break;
-                case LOG_OFFSET:
-                    LogOffsetCommittable offset =
-                            (LogOffsetCommittable) committable.wrappedCommittable();
-                    StoreCommitter committer = tableCommitters.get(identifier);
-                    manifestCommittable.addLogOffset(
-                            offset.bucket(), offset.offset(), committer.allowLogOffsetDuplicate());
-                    break;
-            }
+            CommitMessage file = committable.commitMessage();
+            manifestCommittable.addFileCommittable(file);
         }
         return wrappedManifestCommittable;
     }

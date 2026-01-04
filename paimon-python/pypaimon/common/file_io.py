@@ -25,7 +25,9 @@ from urllib.parse import splitport, urlparse
 import pyarrow
 from packaging.version import parse
 from pyarrow._fs import FileSystem
-from pypaimon.common.config import OssOptions, S3Options
+
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
 from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
@@ -35,7 +37,7 @@ from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 class FileIO:
-    def __init__(self, path: str, catalog_options: dict):
+    def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
         scheme, netloc, _ = self.parse_location(path)
@@ -60,6 +62,31 @@ class FileIO:
             return uri.scheme, uri.netloc, uri.path
         else:
             return uri.scheme, uri.netloc, f"{uri.netloc}{uri.path}"
+
+    @staticmethod
+    def _create_s3_retry_config(
+            max_attempts: int = 10,
+            request_timeout: int = 60,
+            connect_timeout: int = 60
+    ) -> Dict[str, Any]:
+        """
+        AwsStandardS3RetryStrategy and timeout parameters are only available
+        in PyArrow >= 8.0.0.
+        """
+        if parse(pyarrow.__version__) >= parse("8.0.0"):
+            config = {
+                'request_timeout': request_timeout,
+                'connect_timeout': connect_timeout
+            }
+            try:
+                from pyarrow.fs import AwsStandardS3RetryStrategy
+                retry_strategy = AwsStandardS3RetryStrategy(max_attempts=max_attempts)
+                config['retry_strategy'] = retry_strategy
+            except ImportError:
+                pass
+            return config
+        else:
+            return {}
 
     def _extract_oss_bucket(self, location) -> str:
         uri = urlparse(location)
@@ -102,6 +129,9 @@ class FileIO:
             client_kwargs['endpoint_override'] = (oss_bucket + "." +
                                                   self.properties.get(OssOptions.OSS_ENDPOINT))
 
+        retry_config = self._create_s3_retry_config()
+        client_kwargs.update(retry_config)
+
         return S3FileSystem(**client_kwargs)
 
     def _initialize_s3_fs(self) -> FileSystem:
@@ -115,6 +145,9 @@ class FileIO:
             "region": self.properties.get(S3Options.S3_REGION),
             "force_virtual_addressing": True,
         }
+
+        retry_config = self._create_s3_retry_config()
+        client_kwargs.update(retry_config)
 
         return S3FileSystem(**client_kwargs)
 
@@ -281,6 +314,9 @@ class FileIO:
             return success
 
     def write_file(self, path: str, content: str, overwrite: bool = False):
+        if not overwrite and self.exists(path):
+            raise FileExistsError(f"File {path} already exists and overwrite=False")
+
         with self.new_output_stream(path) as output_stream:
             output_stream.write(content.encode('utf-8'))
 

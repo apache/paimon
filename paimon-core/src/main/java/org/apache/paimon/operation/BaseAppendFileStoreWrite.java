@@ -151,9 +151,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         List<String> fullNames = rowType.getFieldNames();
         this.writeCols = writeType.getFieldNames();
         // optimize writeCols to null in following cases:
-        // 1. writeType contains all columns
-        // 2. writeType contains all columns and append _ROW_ID cols
-        if (writeCols.size() >= fullCount && writeCols.subList(0, fullCount).equals(fullNames)) {
+        // writeType contains all columns (without _ROW_ID and _SEQUENCE_NUMBER)
+        if (writeCols.equals(fullNames)) {
             writeCols = null;
         }
     }

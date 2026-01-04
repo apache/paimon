@@ -18,19 +18,26 @@
 
 package org.apache.paimon.spark.write
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.connector.write.{SupportsDynamicOverwrite, SupportsOverwrite, WriteBuilder}
-import org.apache.spark.sql.sources.{And, Filter}
 import org.apache.spark.sql.types.StructType
+
+import scala.collection.JavaConverters._
 
 class PaimonV2WriteBuilder(table: FileStoreTable, dataSchema: StructType, options: Options)
   extends BaseV2WriteBuilder(table) {
 
-  override def build =
-    new PaimonV2Write(table, overwriteDynamic, overwritePartitions, dataSchema, options)
+  override def build: PaimonV2Write = {
+    val finalTable = overwriteDynamic match {
+      case Some(o) =>
+        table.copy(Map(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key -> o.toString).asJava)
+      case _ => table
+    }
+    new PaimonV2Write(finalTable, overwritePartitions, copyOnWriteScan, dataSchema, options)
+  }
 
   override def partitionRowType(): RowType = table.schema().logicalPartitionType()
 }

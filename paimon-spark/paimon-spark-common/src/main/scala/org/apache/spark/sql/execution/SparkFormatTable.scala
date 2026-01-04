@@ -31,6 +31,7 @@ import org.apache.spark.sql.execution.datasources.v2.csv.{CSVScanBuilder, CSVTab
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable
+import org.apache.spark.sql.execution.datasources.v2.text.{TextScanBuilder, TextTable}
 import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
@@ -190,10 +191,37 @@ class PartitionedCSVTable(
       userSpecifiedSchema,
       partitionSchema())
   }
+}
 
-  override def newWriteBuilder(info: _root_.org.apache.spark.sql.connector.write.LogicalWriteInfo)
-      : _root_.org.apache.spark.sql.connector.write.WriteBuilder = {
-    super.newWriteBuilder(info)
+class PartitionedTextTable(
+    name: String,
+    sparkSession: SparkSession,
+    options: CaseInsensitiveStringMap,
+    paths: Seq[String],
+    userSpecifiedSchema: Option[StructType],
+    fallbackFileFormat: Class[_ <: FileFormat],
+    override val partitionSchema_ : StructType)
+  extends TextTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
+  with PartitionedFormatTable {
+
+  override def newScanBuilder(options: CaseInsensitiveStringMap): TextScanBuilder = {
+    val mergedOptions =
+      this.options.asCaseSensitiveMap().asScala ++ options.asCaseSensitiveMap().asScala
+    TextScanBuilder(
+      sparkSession,
+      fileIndex,
+      schema,
+      dataSchema,
+      new CaseInsensitiveStringMap(mergedOptions.asJava))
+  }
+
+  override lazy val fileIndex: PartitioningAwareFileIndex = {
+    SparkFormatTable.createFileIndex(
+      options,
+      sparkSession,
+      paths,
+      userSpecifiedSchema,
+      partitionSchema())
   }
 }
 

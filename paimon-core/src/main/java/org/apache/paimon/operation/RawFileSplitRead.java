@@ -52,7 +52,6 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
 import org.apache.paimon.utils.IOExceptionSupplier;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.slf4j.Logger;
@@ -87,7 +86,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
     @Nullable private Integer limit;
-    @Nullable private List<Range> rowRanges;
     @Nullable private VariantAccessInfo[] variantAccess;
 
     public RawFileSplitRead(
@@ -153,12 +151,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withRowRanges(@Nullable List<Range> rowRanges) {
-        this.rowRanges = rowRanges;
-        return this;
-    }
-
-    @Override
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
         DataSplit split = (DataSplit) s;
         if (!split.beforeFiles().isEmpty()) {
@@ -191,7 +183,9 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         readRowType.getFields(),
                         schema -> {
                             if (rowTrackingEnabled) {
-                                return rowTypeWithRowTracking(schema.logicalRowType(), true)
+                                // maybe file has no row id and sequence number, but in manifest
+                                // entry
+                                return rowTypeWithRowTracking(schema.logicalRowType(), true, true)
                                         .getFields();
                             }
                             return schema.fields();
@@ -269,14 +263,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         RoaringBitmap32 selection = null;
         if (fileIndexResult instanceof BitmapIndexResult) {
             selection = ((BitmapIndexResult) fileIndexResult).get();
-        }
-        if (rowRanges != null) {
-            RoaringBitmap32 selectionRowIds = file.toFileSelection(rowRanges);
-            if (selection == null) {
-                selection = selectionRowIds;
-            } else {
-                selection.and(selectionRowIds);
-            }
         }
 
         FormatReaderContext formatReaderContext =

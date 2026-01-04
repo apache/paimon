@@ -20,12 +20,12 @@ from typing import Iterator, List, Optional
 import pandas
 import pyarrow
 
-from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
-from pypaimon.read.split_read import (MergeFileSplitRead, RawFileSplitRead,
-                                      SplitRead, DataEvolutionSplitRead)
+from pypaimon.read.split_read import (DataEvolutionSplitRead,
+                                      MergeFileSplitRead, RawFileSplitRead,
+                                      SplitRead)
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
 
@@ -144,14 +144,9 @@ class TableRead:
         if parallelism < 1:
             raise ValueError(f"parallelism must be at least 1, got {parallelism}")
 
-        if parallelism == 1:
-            # Single-task read (simple mode)
-            return ray.data.from_arrow(self.to_arrow(splits))
-        else:
-            # Distributed read with specified parallelism
-            from pypaimon.read.ray_datasource import PaimonDatasource
-            datasource = PaimonDatasource(self, splits)
-            return ray.data.read_datasource(datasource, parallelism=parallelism)
+        from pypaimon.read.ray_datasource import PaimonDatasource
+        datasource = PaimonDatasource(self, splits)
+        return ray.data.read_datasource(datasource, parallelism=parallelism)
 
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
@@ -159,21 +154,24 @@ class TableRead:
                 table=self.table,
                 predicate=self.predicate,
                 read_type=self.read_type,
-                split=split
+                split=split,
+                row_tracking_enabled=False
             )
-        elif self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true':
+        elif self.table.options.data_evolution_enabled():
             return DataEvolutionSplitRead(
                 table=self.table,
                 predicate=self.predicate,
                 read_type=self.read_type,
-                split=split
+                split=split,
+                row_tracking_enabled=True
             )
         else:
             return RawFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,
                 read_type=self.read_type,
-                split=split
+                split=split,
+                row_tracking_enabled=self.table.options.row_tracking_enabled()
             )
 
     @staticmethod

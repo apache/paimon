@@ -36,7 +36,6 @@ import org.apache.paimon.table.source.splitread.MergeFileSplitReadProvider;
 import org.apache.paimon.table.source.splitread.PrimaryKeyTableRawFileSplitReadProvider;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -117,11 +116,6 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    public void applyRowRanges(List<Range> rowRanges) {
-        throw new UnsupportedOperationException("Does not support row ranges.");
-    }
-
-    @Override
     public InnerTableRead forceKeepDelete() {
         initialized().forEach(SplitRead::forceKeepDelete);
         this.forceKeepDelete = true;
@@ -158,10 +152,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
 
     @Override
     public RecordReader<InternalRow> reader(Split split) throws IOException {
-        DataSplit dataSplit = (DataSplit) split;
         for (SplitReadProvider readProvider : readProviders) {
-            if (readProvider.match(dataSplit, new SplitReadProvider.Context(forceKeepDelete))) {
-                return readProvider.get().get().createReader(dataSplit);
+            if (readProvider.match(split, new SplitReadProvider.Context(forceKeepDelete))) {
+                return readProvider.get().get().createReader(split);
             }
         }
 

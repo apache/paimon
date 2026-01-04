@@ -75,7 +75,7 @@ For HDFS, the most important thing is to be able to read your HDFS configuration
 
 {{< tab "Flink" >}}
 
-You may not have to do anything, if you are in a hadoop environment. Otherwise pick one of the following ways to
+You may not have to do anything, if you are in a hadoop environment. Otherwise, pick one of the following ways to
 configure your HDFS:
 
 1. Set environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR`.
@@ -289,7 +289,7 @@ Please note that:
 {{< /tab >}}
 {{< /tabs >}}
 
-If you environment has jindo sdk dependencies, you can use Jindo Fs to connect OSS. Jindo has better read and write efficiency.
+If your environment has jindo sdk dependencies, you can use Jindo Fs to connect OSS. Jindo has better read and write efficiency.
 
 {{< stable >}}
 Download [paimon-jindo-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-jindo/{{< version >}}/paimon-jindo-{{< version >}}.jar).

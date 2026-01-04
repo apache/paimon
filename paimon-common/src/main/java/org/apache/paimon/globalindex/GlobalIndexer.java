@@ -21,7 +21,7 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 
 import java.io.IOException;
 import java.util.List;
@@ -34,8 +34,8 @@ public interface GlobalIndexer {
     GlobalIndexReader createReader(GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files)
             throws IOException;
 
-    static GlobalIndexer create(String type, DataType dataType, Options options) {
+    static GlobalIndexer create(String type, DataField dataField, Options options) {
         GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
-        return globalIndexerFactory.create(dataType, options);
+        return globalIndexerFactory.create(dataField, options);
     }
 }

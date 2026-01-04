@@ -18,8 +18,9 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSplitScan}
 import org.apache.paimon.spark.PaimonMetrics.{RESULTED_TABLE_FILES, SCANNED_SNAPSHOT_ID, SKIPPED_TABLE_FILES}
+import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.scan.PaimonSplitScan
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.source.DataSplit
 
@@ -52,7 +53,7 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
           resultedTableFiles: Long): Unit = {
         val scan = getPaimonScan(s)
         // call getInputPartitions to trigger scan
-        scan.lazyInputPartitions
+        scan.inputPartitions
         val metrics = scan.reportDriverMetrics()
         Assertions.assertEquals(scannedSnapshotId, metric(metrics, SCANNED_SNAPSHOT_ID))
         Assertions.assertEquals(skippedTableFiles, metric(metrics, SKIPPED_TABLE_FILES))
@@ -78,7 +79,7 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
       sql(s"INSERT INTO T VALUES (1, 'a'), (2, 'b')")
       sql(s"INSERT INTO T VALUES (3, 'c')")
 
-      val splits = getPaimonScan("SELECT * FROM T").getOriginSplits.map(_.asInstanceOf[DataSplit])
+      val splits = getPaimonScan("SELECT * FROM T").inputSplits.map(_.asInstanceOf[DataSplit])
       val df = createDataset(spark, createNewScanPlan(splits, createRelationV2("T")))
       val scan = df.queryExecution.optimizedPlan
         .collectFirst { case relation: DataSourceV2ScanRelation => relation }
@@ -92,28 +93,34 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
   }
 
   test("Paimon Metric: report output metric") {
-    sql(s"CREATE TABLE T (id int)")
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("T") {
+          sql(s"CREATE TABLE T (id int)")
 
-    var recordsWritten = 0L
-    var bytesWritten = 0L
+          var recordsWritten = 0L
+          var bytesWritten = 0L
 
-    val listener = new SparkListener() {
-      override def onTaskEnd(taskEnd: SparkListenerTaskEnd): Unit = {
-        val outputMetrics = taskEnd.taskMetrics.outputMetrics
-        recordsWritten += outputMetrics.recordsWritten
-        bytesWritten += outputMetrics.bytesWritten
+          val listener = new SparkListener() {
+            override def onTaskEnd(taskEnd: SparkListenerTaskEnd): Unit = {
+              val outputMetrics = taskEnd.taskMetrics.outputMetrics
+              recordsWritten += outputMetrics.recordsWritten
+              bytesWritten += outputMetrics.bytesWritten
+            }
+          }
+
+          try {
+            spark.sparkContext.addSparkListener(listener)
+            sql(s"INSERT INTO T VALUES 1, 2, 3")
+          } finally {
+            spark.sparkContext.removeSparkListener(listener)
+          }
+
+          Assertions.assertEquals(3, recordsWritten)
+          Assertions.assertTrue(bytesWritten > 0)
+        }
       }
     }
-
-    try {
-      spark.sparkContext.addSparkListener(listener)
-      sql(s"INSERT INTO T VALUES 1, 2, 3")
-    } finally {
-      spark.sparkContext.removeSparkListener(listener)
-    }
-
-    Assertions.assertEquals(3, recordsWritten)
-    Assertions.assertTrue(bytesWritten > 0)
   }
 
   test(s"Paimon Metric: v2 write metric") {
@@ -131,6 +138,23 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
       assert(executionMetrics(metrics("appendedChangelogFiles").id) == "0")
       assert(executionMetrics(metrics("partitionsWritten").id) == "2")
       assert(executionMetrics(metrics("bucketsWritten").id) == "2")
+    }
+  }
+
+  test(s"Paimon Metric: v2 write metric with adaptive plan") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+      sql("CREATE TABLE T (id INT, pt INT) PARTITIONED BY (pt)")
+      val df = sql(s"INSERT INTO T SELECT /*+ REPARTITION(1) */ id, id FROM range(1, 10)")
+      val metrics =
+        df.queryExecution.executedPlan.asInstanceOf[CommandResultExec].commandPhysicalPlan.metrics
+      val statusStore = spark.sharedState.statusStore
+      val lastExecId = statusStore.executionsList().last.executionId
+      val executionMetrics = statusStore.executionMetrics(lastExecId)
+
+      assert(executionMetrics(metrics("appendedTableFiles").id) == "9")
+      assert(executionMetrics(metrics("appendedRecords").id) == "9")
+      assert(executionMetrics(metrics("partitionsWritten").id) == "9")
+      assert(executionMetrics(metrics("bucketsWritten").id) == "9")
     }
   }
 

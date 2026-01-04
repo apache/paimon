@@ -37,7 +37,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.options.MemorySize;
@@ -103,6 +105,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_APPEND_ORDERED;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.DATA_FILE_PATH_DIRECTORY;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -120,6 +123,56 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for {@link AppendOnlyFileStoreTable}. */
 public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
+
+    @Test
+    public void testBucketedAppendTableWriteWithInit() throws Exception {
+        innerTestBucketedAppendTableWriteInit(true);
+    }
+
+    @Test
+    public void testBucketedAppendTableWriteNoInit() throws Exception {
+        innerTestBucketedAppendTableWriteInit(false);
+    }
+
+    public void innerTestBucketedAppendTableWriteInit(boolean ordered) throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(BUCKET, 2);
+                            options.set(BUCKET_KEY, "a");
+                            options.set(WRITE_ONLY, true);
+                            options.set(BUCKET_APPEND_ORDERED, ordered);
+                        });
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+
+        // 1. first write
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(write.prepareCommit());
+        }
+
+        // 2. delete all manifests
+        ManifestList manifestList = table.store().manifestListFactory().create();
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+        List<ManifestFileMeta> manifests =
+                manifestList.readAllManifests(table.latestSnapshot().get());
+        for (ManifestFileMeta manifest : manifests) {
+            manifestFile.delete(manifest.fileName());
+        }
+
+        // 3. check new write
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            if (ordered) {
+                assertThatThrownBy(() -> write.write(rowData(1, 10, 100L)))
+                        .hasMessageContaining("FileNotFoundException");
+            } else {
+                // no exception
+                write.write(rowData(1, 10, 100L));
+            }
+        }
+    }
 
     @Test
     public void testOverwriteNeverFail() throws Exception {
@@ -1173,6 +1226,9 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             assertThat(cnt.get()).isEqualTo(limit);
             reader.close();
         }
+
+        // avoid unstable failure from `SimpleTableTestBase.after`.
+        Thread.sleep(1_000);
     }
 
     @Test

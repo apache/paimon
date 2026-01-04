@@ -44,10 +44,10 @@ cd ${PROJECT_ROOT}
 
 echo "Building flink2 and iceberg modules"
 ${MVN} clean install -Pdocs-and-source,flink2 -DskipTests \
--pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-iceberg -am $CUSTOM_OPTIONS
+-pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-iceberg -am $CUSTOM_OPTIONS
 
 echo "Deploying flink2 and iceberg modules to repository.apache.org"
 ${MVN} deploy -Papache-release,docs-and-source,flink2 -DskipTests -DretryFailedDeploymentCount=10 \
--pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg $CUSTOM_OPTIONS
+-pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg $CUSTOM_OPTIONS
 
 cd ${CURR_DIR}

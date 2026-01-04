@@ -45,10 +45,12 @@ import org.apache.paimon.rest.auth.DLFToken;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
@@ -64,6 +66,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 
@@ -1749,24 +1752,32 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             GenericRow record = GenericRow.of(i);
             write.write(record);
             commit.commit(i, write.prepareCommit(false, i));
-            table.createTag("tag-" + i);
+            table.createTag("tag-" + (i + 1));
         }
         write.close();
         commit.close();
+
+        // rollback to snapshot 4
         long rollbackToSnapshotId = 4;
         table.rollbackTo(rollbackToSnapshotId);
         assertThat(table.snapshotManager().snapshot(rollbackToSnapshotId))
                 .isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
         assertThat(table.tagManager().tagExists("tag-" + (rollbackToSnapshotId + 2))).isFalse();
         assertThat(table.snapshotManager().snapshotExists(rollbackToSnapshotId + 1)).isFalse();
-
         assertThrows(
                 IllegalArgumentException.class, () -> table.rollbackTo(rollbackToSnapshotId + 1));
 
+        // rollback to snapshot 3
         String rollbackToTagName = "tag-" + (rollbackToSnapshotId - 1);
         table.rollbackTo(rollbackToTagName);
         Snapshot tagSnapshot = table.tagManager().getOrThrow(rollbackToTagName).trimToSnapshot();
         assertThat(tagSnapshot).isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
+
+        // rollback to snapshot 2 from snapshot
+        assertThatThrownBy(() -> catalog.rollbackTo(identifier, Instant.snapshot(2L), 4L))
+                .hasMessageContaining("Latest snapshot 3 is not 4");
+        catalog.rollbackTo(identifier, Instant.snapshot(2L), 3L);
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(2);
     }
 
     @Test
@@ -1886,6 +1897,104 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 Catalog.BranchNotExistException.class,
                 () -> restCatalog.fastForward(identifier, "no_exist_branch"));
         assertThat(restCatalog.listBranches(identifier)).isEmpty();
+    }
+
+    @Test
+    void testTags() throws Exception {
+        String databaseName = "testTagTable";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        // Test table not exist
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> restCatalog.createTag(identifier, "my_tag", null, null, false));
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> restCatalog.getTag(identifier, "my_tag"));
+
+        // Create table
+        catalog.createTable(
+                identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
+
+        // Test tag not exist
+        assertThrows(
+                Catalog.TagNotExistException.class,
+                () -> restCatalog.getTag(identifier, "non_exist_tag"));
+
+        // Create snapshot by writing data
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        batchWrite(table, Lists.newArrayList(1, 2, 3));
+
+        // Get latest snapshot
+        SnapshotManager snapshotManager = table.snapshotManager();
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        assertThat(latestSnapshot).isNotNull();
+
+        // Create tag from latest snapshot
+        restCatalog.createTag(identifier, "my_tag", null, null, false);
+
+        // Get tag and verify
+        GetTagResponse tagResponse = restCatalog.getTag(identifier, "my_tag");
+        assertThat(tagResponse.tagName()).isEqualTo("my_tag");
+        assertThat(tagResponse.snapshot().id()).isEqualTo(latestSnapshot.id());
+        assertThat(tagResponse.snapshot()).isEqualTo(latestSnapshot);
+
+        // Create another snapshot
+        batchWrite(table, Lists.newArrayList(4, 5, 6));
+        Snapshot newSnapshot = snapshotManager.latestSnapshot();
+        // Create tag from specific snapshot
+        restCatalog.createTag(identifier, "my_tag_v2", newSnapshot.id(), null, false);
+
+        // Get tag and verify
+        GetTagResponse tagResponse2 = restCatalog.getTag(identifier, "my_tag_v2");
+        assertThat(tagResponse2.tagName()).isEqualTo("my_tag_v2");
+        assertThat(tagResponse2.snapshot().id()).isEqualTo(newSnapshot.id());
+        assertThat(tagResponse2.snapshot()).isEqualTo(newSnapshot);
+
+        // Test tag already exists
+        assertThrows(
+                Catalog.TagAlreadyExistException.class,
+                () -> restCatalog.createTag(identifier, "my_tag", null, null, false));
+
+        // Test create tag with ignoreIfExists = true
+        assertDoesNotThrow(() -> restCatalog.createTag(identifier, "my_tag", null, null, true));
+
+        // Test snapshot not exist
+        assertThrows(
+                SnapshotNotExistException.class,
+                () -> restCatalog.createTag(identifier, "my_tag_v3", 99999L, null, false));
+
+        // Test listTags for pageToken
+        PagedList<String> tags = restCatalog.listTagsPaged(identifier, 1, null, null);
+        tags = restCatalog.listTagsPaged(identifier, 1, tags.getNextPageToken(), null);
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
+        tags = restCatalog.listTagsPaged(identifier, null, null, null);
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag", "my_tag_v2");
+
+        // Test listTags for tagNamePrefix
+        tags = restCatalog.listTagsPaged(identifier, 1, null, "my_tag_v2");
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
+
+        // Test deleteTag
+        restCatalog.deleteTag(identifier, "my_tag");
+        tags = restCatalog.listTagsPaged(identifier, null, null, null);
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
+
+        // Test deleteTag with non-existent tag
+        assertThrows(
+                Catalog.TagNotExistException.class,
+                () -> restCatalog.deleteTag(identifier, "non_exist_tag"));
+
+        // Verify tag is deleted
+        assertThrows(
+                Catalog.TagNotExistException.class, () -> restCatalog.getTag(identifier, "my_tag"));
+
+        // Delete remaining tag
+        restCatalog.deleteTag(identifier, "my_tag_v2");
+        tags = restCatalog.listTagsPaged(identifier, null, null, null);
+        assertThat(tags.getElements()).isEmpty();
     }
 
     @Test
@@ -2528,6 +2637,61 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         // check types
         partitionsCheck.accept(
                 new InternalRowSerializer(partitions.rowType()).toBinaryRow(result.get(0)));
+    }
+
+    @Test
+    void testReadPartitionsTable() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "partitions_audit_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("f1", DataTypes.INT())
+                        .primaryKey("pk")
+                        .partitionKeys("f1")
+                        .option("bucket", "1")
+                        .option("metastore.partitioned-table", "true")
+                        .build(),
+                true);
+
+        Table table = catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 1));
+            commit.commit(write.prepareCommit());
+        }
+
+        Table partitionsTable =
+                catalog.getTable(
+                        Identifier.create(
+                                identifier.getDatabaseName(),
+                                identifier.getObjectName() + "$partitions"));
+        ReadBuilder readBuilder = partitionsTable.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        List<InternalRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = read.createReader(splits)) {
+            reader.forEachRemaining(result::add);
+        }
+
+        assertThat(result).isNotEmpty();
+        for (InternalRow row : result) {
+            if (!row.isNullAt(5)) { // created_at
+                assertThat(row.getTimestamp(5, 3)).isNotNull();
+            }
+            assertThat(row.isNullAt(6)).isFalse(); // created_by
+            assertThat(row.getString(6).toString()).isEqualTo("created");
+
+            assertThat(row.isNullAt(7)).isFalse(); // updated_by
+            assertThat(row.getString(7).toString()).isEqualTo("updated");
+
+            if (!row.isNullAt(8)) {
+                String optionsJson = row.getString(8).toString();
+                assertThat(optionsJson).isNotEmpty();
+            }
+        }
     }
 
     private TestPagedResponse generateTestPagedResponse(

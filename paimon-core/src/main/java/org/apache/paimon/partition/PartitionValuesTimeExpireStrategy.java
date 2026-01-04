@@ -33,6 +33,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -116,6 +117,21 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
                 InternalRow maxValues,
                 InternalArray nullCounts) {
             return true;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            PartitionValuesTimePredicate that = (PartitionValuesTimePredicate) o;
+            return Objects.equals(expireDateTime, that.expireDateTime);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(expireDateTime);
         }
     }
 }

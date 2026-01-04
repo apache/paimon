@@ -25,7 +25,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.DataEvolutionArray;
 import org.apache.paimon.reader.DataEvolutionRow;
@@ -50,6 +49,7 @@ import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
@@ -64,7 +64,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             SchemaManager schemaManager,
             TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
-            Integer scanManifestParallelism) {
+            Integer scanManifestParallelism,
+            boolean deletionVectorsEnabled) {
         super(
                 manifestsReader,
                 bucketSelectConverter,
@@ -73,7 +74,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 schema,
                 manifestFileFactory,
                 scanManifestParallelism,
-                false);
+                false,
+                deletionVectorsEnabled);
     }
 
     @Override
@@ -101,36 +103,6 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     }
 
     @Override
-    protected List<ManifestFileMeta> postFilterManifests(List<ManifestFileMeta> manifests) {
-        if (rowRanges == null || rowRanges.isEmpty()) {
-            return manifests;
-        }
-        return manifests.stream().filter(this::filterManifestByRowIds).collect(Collectors.toList());
-    }
-
-    private boolean filterManifestByRowIds(ManifestFileMeta manifest) {
-        if (rowRanges == null || rowRanges.isEmpty()) {
-            return true;
-        }
-
-        Long min = manifest.minRowId();
-        Long max = manifest.maxRowId();
-        if (min == null || max == null) {
-            return true;
-        }
-
-        Range manifestRowRange = new Range(min, max);
-
-        for (Range expected : rowRanges) {
-            if (Range.intersection(manifestRowRange, expected) != null) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    @Override
     public FileStoreScan withReadType(RowType readType) {
         if (readType != null) {
             List<DataField> nonSystemFields =
@@ -145,10 +117,18 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     }
 
     @Override
+    public boolean supportsLimitPushManifestEntries() {
+        return false;
+    }
+
+    @Override
+    protected boolean postFilterManifestEntriesEnabled() {
+        return inputFilter != null;
+    }
+
+    @Override
     protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
-        if (inputFilter == null) {
-            return entries;
-        }
+        checkNotNull(inputFilter);
 
         // group by row id range
         RangeHelper<ManifestEntry> rangeHelper =

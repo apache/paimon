@@ -18,45 +18,10 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.utils.Range;
-
-import javax.annotation.Nullable;
-
 import java.util.List;
 
-/** Index writer for global index. */
+/** Parallel Index writer for global index with relative row id (from 0 to rowCnt - 1). */
 public interface GlobalIndexWriter {
 
-    void write(@Nullable Object key);
-
     List<ResultEntry> finish();
-
-    /** Write result meta. */
-    class ResultEntry {
-        private final String fileName;
-        private final Range rowRange;
-        @Nullable private final byte[] meta;
-
-        public ResultEntry(String fileName, @Nullable byte[] meta, Range rowRange) {
-            this.fileName = fileName;
-            this.meta = meta;
-            this.rowRange = rowRange;
-        }
-
-        public String fileName() {
-            return fileName;
-        }
-
-        public Range rowRange() {
-            return rowRange;
-        }
-
-        public byte[] meta() {
-            return meta;
-        }
-
-        public static ResultEntry of(String fileName, byte[] meta, Range rowRange) {
-            return new ResultEntry(fileName, meta, rowRange);
-        }
-    }
 }

@@ -61,7 +61,7 @@ public class PostponeBatchWriteOperator extends StatelessRowDataStoreWriteOperat
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser,
             Map<BinaryRow, Integer> knownNumBuckets) {
-        super(parameters, table, null, storeSinkWriteProvider, initialCommitUser);
+        super(parameters, table, storeSinkWriteProvider, initialCommitUser);
         this.knownNumBuckets = new HashMap<>(knownNumBuckets);
         this.bucketFunction =
                 BucketFunction.create(
@@ -96,21 +96,16 @@ public class PostponeBatchWriteOperator extends StatelessRowDataStoreWriteOperat
             throws IOException {
         List<Committable> committables = new ArrayList<>();
         for (Committable committable : super.prepareCommit(waitCompaction, checkpointId)) {
-            if (committable.kind() == Committable.Kind.FILE) {
-                CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
-                committables.add(
-                        new Committable(
-                                committable.checkpointId(),
-                                committable.kind(),
-                                new CommitMessageImpl(
-                                        message.partition(),
-                                        message.bucket(),
-                                        checkNotNull(knownNumBuckets.get(message.partition())),
-                                        message.newFilesIncrement(),
-                                        message.compactIncrement())));
-            } else {
-                committables.add(committable);
-            }
+            CommitMessageImpl message = (CommitMessageImpl) committable.commitMessage();
+            committables.add(
+                    new Committable(
+                            committable.checkpointId(),
+                            new CommitMessageImpl(
+                                    message.partition(),
+                                    message.bucket(),
+                                    checkNotNull(knownNumBuckets.get(message.partition())),
+                                    message.newFilesIncrement(),
+                                    message.compactIncrement())));
         }
 
         return committables;

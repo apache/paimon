@@ -22,11 +22,13 @@ import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.catalyst.optimizer.MergePaimonScalarSubqueries
+import org.apache.paimon.spark.execution.TruncatePaimonTableWithFilterExec
 
-import org.apache.spark.sql.{PaimonUtils, Row}
+import org.apache.spark.sql.{DataFrame, PaimonUtils, Row}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, CreateNamedStruct, Literal, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{CTERelationDef, LogicalPlan, OneRowRelation, WithCTE}
 import org.apache.spark.sql.catalyst.rules.RuleExecutor
+import org.apache.spark.sql.execution.CommandResultExec
 import org.apache.spark.sql.functions._
 import org.junit.jupiter.api.Assertions
 
@@ -102,8 +104,30 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
       spark.sql(s"CREATE TABLE T (id INT, name STRING, pt STRING) PARTITIONED BY (pt)")
       spark.sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p1'), (3, 'c', 'p2')")
 
+      // data filter and partition filter
       val sqlText = "SELECT * FROM T WHERE id = 1 AND pt = 'p1' LIMIT 1"
       Assertions.assertEquals(getPaimonScan(sqlText), getPaimonScan(sqlText))
+
+      // topN
+      val sqlText2 = "SELECT id FROM T ORDER BY id ASC NULLS LAST LIMIT 5"
+      Assertions.assertEquals(getPaimonScan(sqlText2), getPaimonScan(sqlText2))
+    }
+  }
+
+  test(s"Paimon Optimization: optimize metadata only delete") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("t") {
+          sql(s"""
+                 |CREATE TABLE t (id INT, name STRING, pt INT)
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
+          sql("INSERT INTO t VALUES (1, 'a', 1), (2, 'b', 2)")
+          val df = sql("DELETE FROM t WHERE pt = 1")
+          checkTruncatePaimonTable(df)
+          checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(2, "b", 2)))
+        }
+      }
     }
   }
 
@@ -127,14 +151,16 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
           spark.sql(s"CREATE TABLE t2 (id INT, n INT)")
           spark.sql("INSERT INTO t2 VALUES (1, 1), (2, 2), (3, 3), (4, 4)")
 
-          spark.sql(s"""DELETE FROM t1 WHERE
-                       |pt >= (SELECT min(id) FROM t2 WHERE n BETWEEN 2 AND 3)
-                       |AND
-                       |pt <= (SELECT max(id) FROM t2 WHERE n BETWEEN 2 AND 3)""".stripMargin)
+          val df =
+            spark.sql(s"""DELETE FROM t1 WHERE
+                         |pt >= (SELECT min(id) FROM t2 WHERE n BETWEEN 2 AND 3)
+                         |AND
+                         |pt <= (SELECT max(id) FROM t2 WHERE n BETWEEN 2 AND 3)""".stripMargin)
           // For partition-only predicates, drop partition is called internally.
           Assertions.assertEquals(
             CommitKind.OVERWRITE,
             loadTable("t1").store().snapshotManager().latestSnapshot().commitKind())
+          checkTruncatePaimonTable(df)
 
           checkAnswer(
             spark.sql("SELECT * FROM t1 ORDER BY id"),
@@ -171,14 +197,16 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
           spark.sql(s"CREATE TABLE t2 (id INT, n INT)")
           spark.sql("INSERT INTO t2 VALUES (1, 1), (2, 2), (3, 3), (4, 4)")
 
-          spark.sql(s"""DELETE FROM t1 WHERE
-                       |pt in (SELECT id FROM t2 WHERE n BETWEEN 2 AND 3)
-                       |OR
-                       |pt in (SELECT max(id) FROM t2 WHERE n BETWEEN 2 AND 3)""".stripMargin)
+          val df =
+            spark.sql(s"""DELETE FROM t1 WHERE
+                         |pt in (SELECT id FROM t2 WHERE n BETWEEN 2 AND 3)
+                         |OR
+                         |pt in (SELECT max(id) FROM t2 WHERE n BETWEEN 2 AND 3)""".stripMargin)
           // For partition-only predicates, drop partition is called internally.
           Assertions.assertEquals(
             CommitKind.OVERWRITE,
             loadTable("t1").store().snapshotManager().latestSnapshot().commitKind())
+          checkTruncatePaimonTable(df)
 
           checkAnswer(
             spark.sql("SELECT * FROM t1 ORDER BY id"),
@@ -201,4 +229,8 @@ abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase with Expre
 
   def extractorExpression(cteIndex: Int, output: Seq[Attribute], fieldIndex: Int): NamedExpression
 
+  def checkTruncatePaimonTable(df: DataFrame): Unit = {
+    val plan = df.queryExecution.executedPlan.asInstanceOf[CommandResultExec].commandPhysicalPlan
+    assert(plan.isInstanceOf[TruncatePaimonTableWithFilterExec])
+  }
 }

@@ -25,6 +25,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
+import org.apache.paimon.globalindex.GlobalIndexScanBuilderImpl;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.index.IndexFileHandler;
@@ -42,6 +44,7 @@ import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.operation.commit.ConflictDetection;
+import org.apache.paimon.operation.commit.StrictModeChecker;
 import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -133,6 +136,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.fileCompression(),
                 options.dataFilePathDirectory(),
                 createExternalPaths(),
+                options.externalPathStrategy(),
                 options.indexFileInDataFileDir());
     }
 
@@ -166,7 +170,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 paths.add(path);
             }
         }
-
         checkArgument(!paths.isEmpty(), "External paths should not be empty");
         return paths;
     }
@@ -277,8 +280,13 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                         newKeyComparator(),
                         bucketMode(),
                         options.deletionVectorsEnabled(),
-                        newIndexFileHandler(),
-                        newScan());
+                        newIndexFileHandler());
+        StrictModeChecker strictModeChecker =
+                StrictModeChecker.create(
+                        snapshotManager,
+                        commitUser,
+                        this::newScan,
+                        options.commitStrictModeLastSafeSnapshot().orElse(null));
         return new FileStoreCommitImpl(
                 snapshotCommit,
                 fileIO,
@@ -308,10 +316,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.commitTimeout(),
                 options.commitMinRetryWait(),
                 options.commitMaxRetryWait(),
-                options.commitStrictModeLastSafeSnapshot().orElse(null),
                 options.rowTrackingEnabled(),
                 options.commitDiscardDuplicateFiles(),
-                conflictDetection);
+                conflictDetection,
+                strictModeChecker);
     }
 
     @Override
@@ -493,5 +501,16 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public void setSnapshotCache(Cache<Path, Snapshot> cache) {
         this.snapshotCache = cache;
+    }
+
+    @Override
+    public GlobalIndexScanBuilder newGlobalIndexScanBuilder() {
+        return new GlobalIndexScanBuilderImpl(
+                options.toConfiguration(),
+                schema.logicalRowType(),
+                fileIO,
+                pathFactory().globalIndexFileFactory(),
+                snapshotManager(),
+                newIndexFileHandler());
     }
 }

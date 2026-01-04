@@ -25,6 +25,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -65,6 +66,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     private @Nullable RowType readType;
     private @Nullable VariantAccessInfo[] variantAccessInfo;
     private @Nullable List<Range> rowRanges;
+    private @Nullable VectorSearch vectorSearch;
 
     private boolean dropStats = false;
 
@@ -164,6 +166,12 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withVectorSearch(VectorSearch vectorSearch) {
+        this.vectorSearch = vectorSearch;
+        return this;
+    }
+
+    @Override
     public ReadBuilder withBucket(int bucket) {
         this.specifiedBucket = bucket;
         return this;
@@ -205,7 +213,9 @@ public class ReadBuilderImpl implements ReadBuilder {
         scan.withFilter(filter)
                 .withReadType(readType)
                 .withPartitionFilter(partitionFilter)
-                .withRowRanges(rowRanges);
+                .withRowRanges(rowRanges)
+                .withVectorSearch(vectorSearch);
+
         checkState(
                 bucketFilter == null || shardIndexOfThisSubtask == null,
                 "Bucket filter and shard configuration cannot be used together. "
@@ -242,9 +252,6 @@ public class ReadBuilderImpl implements ReadBuilder {
         }
         if (limit != null) {
             read.withLimit(limit);
-        }
-        if (rowRanges != null) {
-            read.withRowRanges(rowRanges);
         }
         if (variantAccessInfo != null) {
             read.withVariantAccess(variantAccessInfo);
