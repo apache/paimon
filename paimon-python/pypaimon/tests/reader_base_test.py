@@ -546,6 +546,84 @@ class ReaderBasicTest(unittest.TestCase):
                 self.assertFalse(is_system_field,
                                  f"value_stats_cols should not contain system field: {field_name}")
 
+    def test_value_stats_empty_when_stats_disabled(self):
+        catalog = CatalogFactory.create({
+            "warehouse": self.warehouse
+        })
+        catalog.create_database("test_db_stats_disabled", True)
+
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={'metadata.stats-mode': 'none', 'bucket': '2'}  # Stats disabled
+        )
+        catalog.create_table("test_db_stats_disabled.test_stats_disabled", schema, False)
+        table = catalog.get_table("test_db_stats_disabled.test_stats_disabled")
+
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'price': [10.5, 20.3, 30.7],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        latest_snapshot = SnapshotManager(table).get_latest_snapshot()
+        manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
+            manifest_files[0].file_name,
+            lambda row: table_scan.starting_scanner._filter_manifest_entry(row),
+            False
+        )
+
+        self.assertGreater(len(manifest_entries), 0, "Should have at least one manifest entry")
+        file_meta = manifest_entries[0].file
+
+        self.assertEqual(
+            file_meta.value_stats_cols, [],
+            "value_stats_cols should be empty list [] when stats are disabled"
+        )
+
+        self.assertEqual(
+            file_meta.value_stats.min_values.arity, 0,
+            "value_stats.min_values should be empty (arity=0) when stats are disabled"
+        )
+        self.assertEqual(
+            file_meta.value_stats.max_values.arity, 0,
+            "value_stats.max_values should be empty (arity=0) when stats are disabled"
+        )
+        self.assertEqual(
+            len(file_meta.value_stats.null_counts), 0,
+            "value_stats.null_counts should be empty when stats are disabled"
+        )
+
+        empty_stats = SimpleStats.empty_stats()
+        self.assertEqual(
+            file_meta.value_stats.min_values.arity, len(empty_stats.min_values),
+            "value_stats.min_values should be empty (same as SimpleStats.empty_stats()) when stats are disabled"
+        )
+        self.assertEqual(
+            file_meta.value_stats.max_values.arity, len(empty_stats.max_values),
+            "value_stats.max_values should be empty (same as SimpleStats.empty_stats()) when stats are disabled"
+        )
+        self.assertEqual(
+            len(file_meta.value_stats.null_counts), len(empty_stats.null_counts),
+            "value_stats.null_counts should be empty (same as SimpleStats.empty_stats()) when stats are disabled"
+        )
+
     def test_types(self):
         data_fields = [
             DataField(0, "f0", AtomicType('TINYINT'), 'desc'),
@@ -776,12 +854,8 @@ class ReaderBasicTest(unittest.TestCase):
         self.assertEqual(read_entry.file.value_stats.null_counts, null_counts)
 
     def _test_append_only_schema_match_case(self, table, pa_schema):
-        """Test that for append-only tables, data.schema matches table.fields.
+        from pypaimon.schema.data_types import PyarrowFieldParser
 
-        This verifies the assumption in data_writer.py that for append-only tables,
-        PyarrowFieldParser.to_paimon_schema(data.schema) should have the same fields
-        as self.table.fields (same count and same field names).
-        """
         self.assertFalse(table.is_primary_key_table,
                          "Table should be append-only (no primary keys)")
 
@@ -789,7 +863,46 @@ class ReaderBasicTest(unittest.TestCase):
             'id': [1, 2, 3],
             'name': ['Alice', 'Bob', 'Charlie'],
             'price': [10.5, 20.3, 30.7],
-            'category': ['A', 'B', 'C'],
+            'category': ['A', 'B', 'C']
+        }, schema=pa_schema)
+
+        data_fields_from_schema = PyarrowFieldParser.to_paimon_schema(test_data.schema)
+        table_fields = table.fields
+
+        self.assertEqual(
+            len(data_fields_from_schema), len(table_fields),
+            f"Field count mismatch: data.schema has {len(data_fields_from_schema)} fields, "
+            f"but table.fields has {len(table_fields)} fields"
+        )
+
+        data_field_names = {field.name for field in data_fields_from_schema}
+        table_field_names = {field.name for field in table_fields}
+        self.assertEqual(
+            data_field_names, table_field_names,
+            f"Field names mismatch: data.schema has {data_field_names}, "
+            f"but table.fields has {table_field_names}"
+        )
+
+    def test_primary_key_value_stats(self):
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+            ('category', pa.string())
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={'metadata.stats-mode': 'full', 'bucket': '2'}
+        )
+        self.catalog.create_table('default.test_pk_value_stats', schema, False)
+        table = self.catalog.get_table('default.test_pk_value_stats')
+
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            'price': [10.5, 20.3, 30.7, 40.1, 50.9],
+            'category': ['A', 'B', 'C', 'D', 'E']
         }, schema=pa_schema)
 
         write_builder = table.new_batch_write_builder()
@@ -831,6 +944,71 @@ class ReaderBasicTest(unittest.TestCase):
             file_meta = manifest_entries[0].file
             self.assertIsNone(file_meta.value_stats_cols,
                               "value_stats_cols should be None when all table fields are included")
+        self.assertGreater(len(manifest_entries), 0, "Should have at least one manifest entry")
+        file_meta = manifest_entries[0].file
+
+        key_stats = file_meta.key_stats
+        self.assertIsNotNone(key_stats, "key_stats should not be None")
+        self.assertGreater(key_stats.min_values.arity, 0, "key_stats should contain key fields")
+        self.assertEqual(key_stats.min_values.arity, 1, "key_stats should contain exactly 1 key field (id)")
+
+        value_stats = file_meta.value_stats
+        self.assertIsNotNone(value_stats, "value_stats should not be None")
+        
+        if file_meta.value_stats_cols is None:
+            expected_value_fields = ['name', 'price', 'category']
+            self.assertGreaterEqual(value_stats.min_values.arity, len(expected_value_fields),
+                                    f"value_stats should contain at least {len(expected_value_fields)} value fields")
+        else:
+            self.assertNotIn('id', file_meta.value_stats_cols,
+                             "Key field 'id' should NOT be in value_stats_cols")
+            
+            expected_value_fields = ['name', 'price', 'category']
+            self.assertTrue(set(expected_value_fields).issubset(set(file_meta.value_stats_cols)),
+                            f"value_stats_cols should contain value fields: {expected_value_fields}, "
+                            f"but got: {file_meta.value_stats_cols}")
+            
+            expected_arity = len(file_meta.value_stats_cols)
+            self.assertEqual(value_stats.min_values.arity, expected_arity,
+                             f"value_stats should contain {expected_arity} fields (matching value_stats_cols), "
+                             f"but got {value_stats.min_values.arity}")
+            self.assertEqual(value_stats.max_values.arity, expected_arity,
+                             f"value_stats should contain {expected_arity} fields (matching value_stats_cols), "
+                             f"but got {value_stats.max_values.arity}")
+            self.assertEqual(len(value_stats.null_counts), expected_arity,
+                             f"value_stats null_counts should have {expected_arity} elements, "
+                             f"but got {len(value_stats.null_counts)}")
+            
+            self.assertEqual(value_stats.min_values.arity, len(file_meta.value_stats_cols),
+                             f"value_stats.min_values.arity ({value_stats.min_values.arity}) must match "
+                             f"value_stats_cols length ({len(file_meta.value_stats_cols)})")
+            
+            for field_name in file_meta.value_stats_cols:
+                is_system_field = (field_name.startswith('_KEY_') or
+                                   field_name in ['_SEQUENCE_NUMBER', '_VALUE_KIND', '_ROW_ID'])
+                self.assertFalse(is_system_field,
+                                 f"value_stats_cols should not contain system field: {field_name}")
+            
+            value_stats_fields = table_scan.starting_scanner.manifest_file_manager._get_value_stats_fields(
+                {'_VALUE_STATS_COLS': file_meta.value_stats_cols},
+                table.fields
+            )
+            min_value_stats = GenericRowDeserializer.from_bytes(
+                value_stats.min_values.data,
+                value_stats_fields
+            ).values
+            max_value_stats = GenericRowDeserializer.from_bytes(
+                value_stats.max_values.data,
+                value_stats_fields
+            ).values
+
+            self.assertEqual(len(min_value_stats), 3, "min_value_stats should have 3 values")
+            self.assertEqual(len(max_value_stats), 3, "max_value_stats should have 3 values")
+        
+        actual_data = read_builder.new_read().to_arrow(table_scan.plan().splits())
+        self.assertEqual(actual_data.num_rows, 5, "Should have 5 rows")
+        actual_ids = sorted(actual_data.column('id').to_pylist())
+        self.assertEqual(actual_ids, [1, 2, 3, 4, 5], "All IDs should be present")
 
     def test_split_target_size(self):
         """Test source.split.target-size configuration effect on split generation."""

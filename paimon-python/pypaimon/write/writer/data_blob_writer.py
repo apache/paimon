@@ -276,14 +276,7 @@ class DataBlobWriter(DataWriter):
         # Column stats (only for normal columns)
         metadata_stats_enabled = self.options.metadata_stats_enabled()
         stats_columns = self.normal_columns if metadata_stats_enabled else []
-        column_stats = {
-            field.name: self._get_column_stats(data, field.name)
-            for field in stats_columns
-        }
-
-        min_value_stats = [column_stats[field.name]['min_values'] for field in stats_columns]
-        max_value_stats = [column_stats[field.name]['max_values'] for field in stats_columns]
-        value_null_counts = [column_stats[field.name]['null_counts'] for field in stats_columns]
+        value_stats = self._collect_value_stats(data, stats_columns)
 
         self.sequence_generator.start = self.sequence_generator.current
 
@@ -293,14 +286,8 @@ class DataBlobWriter(DataWriter):
             row_count=data.num_rows,
             min_key=GenericRow([], []),
             max_key=GenericRow([], []),
-            key_stats=SimpleStats(
-                GenericRow([], []),
-                GenericRow([], []),
-                []),
-            value_stats=SimpleStats(
-                GenericRow(min_value_stats, stats_columns),
-                GenericRow(max_value_stats, stats_columns),
-                value_null_counts),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=value_stats,
             min_sequence_number=-1,
             max_sequence_number=-1,
             schema_id=self.table.table_schema.id,
