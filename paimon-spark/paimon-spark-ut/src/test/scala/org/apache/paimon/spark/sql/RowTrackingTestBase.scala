@@ -23,9 +23,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan}
-import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
-import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
-import org.apache.spark.sql.execution.joins.BaseJoinExec
+import org.apache.spark.sql.execution.QueryExecution
 import org.apache.spark.sql.util.QueryExecutionListener
 
 import scala.collection.mutable
@@ -552,6 +550,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
         }.getMessage
           .contains("Update operation is not supported when data evolution is enabled yet."))
     }
+  }
+
   Seq(false, true).foreach {
     bucketEnable =>
       {
