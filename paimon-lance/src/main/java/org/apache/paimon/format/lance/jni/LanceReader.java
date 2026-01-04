@@ -33,8 +33,13 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /** Wrapper for Native Lance Reader. */
 public class LanceReader {
+
+    private static final Logger LOG = LoggerFactory.getLogger(LanceReader.class);
 
     private RootAllocator rootAllocator;
     private LanceFileReader reader;
@@ -50,7 +55,9 @@ public class LanceReader {
         try {
             this.reader = LanceFileReader.open(path, storageOptions, rootAllocator);
             this.arrowReader = reader.readAll(projectedRowType.getFieldNames(), ranges, batchSize);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // 异常时清理已分配的资源，防止内存泄漏
+            closeQuietly();
             throw new RuntimeException("Failed to open Lance file: " + path, e);
         }
     }
@@ -64,8 +71,20 @@ public class LanceReader {
     }
 
     public void close() throws IOException {
+        closeQuietly();
+    }
+
+    /**
+     * 安全关闭所有资源，忽略关闭过程中的异常。
+     * 用于构造函数异常时的资源清理，以及正常关闭流程。
+     */
+    private void closeQuietly() {
         if (arrowReader != null) {
-            arrowReader.close();
+            try {
+                arrowReader.close();
+            } catch (Exception e) {
+                LOG.warn("Failed to close arrowReader", e);
+            }
             this.arrowReader = null;
         }
 
@@ -73,13 +92,17 @@ public class LanceReader {
             try {
                 reader.close();
             } catch (Exception e) {
-                throw new IOException(e);
+                LOG.warn("Failed to close reader", e);
             }
             this.reader = null;
         }
 
         if (rootAllocator != null) {
-            rootAllocator.close();
+            try {
+                rootAllocator.close();
+            } catch (Exception e) {
+                LOG.warn("Failed to close rootAllocator", e);
+            }
             this.rootAllocator = null;
         }
     }

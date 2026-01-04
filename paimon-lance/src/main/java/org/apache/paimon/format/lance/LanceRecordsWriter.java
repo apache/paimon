@@ -41,7 +41,12 @@ public class LanceRecordsWriter implements BundleFormatWriter {
 
     private final ArrowFormatWriter arrowFormatWriter;
 
-    private long jniCost = 0;
+    /** JNI 调用耗时（纳秒） */
+    private long jniCostNanos = 0;
+    /** Arrow 转换耗时（纳秒） */
+    private long arrowConvertCostNanos = 0;
+    /** flush 操作次数 */
+    private long flushCount = 0;
 
     public LanceRecordsWriter(
             WrittenPosition writtenPosition,
@@ -54,11 +59,17 @@ public class LanceRecordsWriter implements BundleFormatWriter {
 
     @Override
     public void addElement(InternalRow internalRow) throws IOException {
-        if (!arrowFormatWriter.write(internalRow)) {
+        long t1 = System.nanoTime();
+        boolean written = arrowFormatWriter.write(internalRow);
+        arrowConvertCostNanos += (System.nanoTime() - t1);
+        
+        if (!written) {
             flush();
+            t1 = System.nanoTime();
             if (!arrowFormatWriter.write(internalRow)) {
                 throw new RuntimeException("Exception happens while write to lance file");
             }
+            arrowConvertCostNanos += (System.nanoTime() - t1);
         }
     }
 
@@ -74,9 +85,9 @@ public class LanceRecordsWriter implements BundleFormatWriter {
     }
 
     public void add(VectorSchemaRoot vsr) throws IOException {
-        long t1 = System.currentTimeMillis();
+        long t1 = System.nanoTime();
         nativeWriter.writeVsr(vsr);
-        jniCost += (System.currentTimeMillis() - t1);
+        jniCostNanos += (System.nanoTime() - t1);
     }
 
     @Override
@@ -87,25 +98,43 @@ public class LanceRecordsWriter implements BundleFormatWriter {
     @Override
     public void close() throws IOException {
         flush();
-        LOG.info("Jni cost: " + jniCost + "ms for file: " + nativeWriter.path());
+        logPerformanceMetrics();
         closeImpl();
     }
 
+    /**
+     * 输出性能统计日志。
+     */
+    private void logPerformanceMetrics() {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Performance metrics for file: {}", nativeWriter.path());
+            LOG.debug("  JNI cost: {} ms", jniCostNanos / 1_000_000);
+            LOG.debug("  Arrow convert cost: {} ms", arrowConvertCostNanos / 1_000_000);
+            LOG.debug("  Flush count: {}", flushCount);
+        }
+    }
+
     private void flush() throws IOException {
+        long t1 = System.nanoTime();
         arrowFormatWriter.flush();
-        long t1 = System.currentTimeMillis();
+        arrowConvertCostNanos += (System.nanoTime() - t1);
+        
+        t1 = System.nanoTime();
         if (!arrowFormatWriter.empty()) {
             nativeWriter.writeVsr(arrowFormatWriter.getVectorSchemaRoot());
+            flushCount++;
         }
-        jniCost += (System.currentTimeMillis() - t1);
+        jniCostNanos += (System.nanoTime() - t1);
         arrowFormatWriter.reset();
     }
 
     private void closeImpl() throws IOException {
-        long t1 = System.currentTimeMillis();
+        long t1 = System.nanoTime();
         this.nativeWriter.close();
         this.arrowFormatWriter.close();
-        long closeCost = (System.currentTimeMillis() - t1);
-        LOG.info("Close cost: " + closeCost + "ms for file: " + nativeWriter.path());
+        long closeCostMs = (System.nanoTime() - t1) / 1_000_000;
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Close cost: {} ms for file: {}", closeCostMs, nativeWriter.path());
+        }
     }
 }
