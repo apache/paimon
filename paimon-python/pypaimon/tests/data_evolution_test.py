@@ -22,6 +22,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.common.range import Range
 
 
 class DataEvolutionTest(unittest.TestCase):
@@ -556,3 +557,120 @@ class DataEvolutionTest(unittest.TestCase):
             ('_SEQUENCE_NUMBER', pa.int64()),
         ]))
         self.assertEqual(actual_data, expect_data)
+
+    def test_filter_row_ranges(self):
+        simple_pa_schema = pa.schema([
+            ('f0', pa.int8()),
+            ('f1', pa.int16()),
+        ])
+        schema = Schema.from_pyarrow_schema(simple_pa_schema,
+                                            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'})
+        self.catalog.create_table('default.test_filter_row_ranges', schema, False)
+        table = self.catalog.get_table('default.test_filter_row_ranges')
+
+        # write 1
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        expect_data = pa.Table.from_pydict({
+            'f0': [1, 2],
+            'f1': [1001, 1002],
+        }, schema=simple_pa_schema)
+        table_write.write_arrow(expect_data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # write 2
+        table_write = write_builder.new_write().with_write_type(['f0'])
+        table_commit = write_builder.new_commit()
+        data2 = pa.Table.from_pydict({
+            'f0': [3, 4],
+        }, schema=pa.schema([
+            ('f0', pa.int8()),
+        ]))
+        table_write.write_arrow(data2)
+        cmts = table_write.prepare_commit()
+        cmts[0].new_files[0].first_row_id = 2
+        table_commit.commit(cmts)
+        table_write.close()
+        table_commit.close()
+        # write 3
+        table_write = write_builder.new_write().with_write_type(['f0'])
+        table_commit = write_builder.new_commit()
+        data2 = pa.Table.from_pydict({
+            'f0': [5, 6],
+        }, schema=pa.schema([
+            ('f0', pa.int8()),
+        ]))
+        table_write.write_arrow(data2)
+        cmts = table_write.prepare_commit()
+        cmts[0].new_files[0].first_row_id = 4
+        table_commit.commit(cmts)
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+
+        # Test 1: Single range that covers first two rows
+        splits = table_scan.with_row_ranges([Range(0, 2)]).plan().splits()
+        self.assertEqual(1, len(splits))
+        self.assertEqual(2, len(splits[0].files))
+
+        # Test 2: Multiple ranges
+        splits = table_scan.with_row_ranges([Range(0, 1), Range(3, 4)]).plan().splits()
+        self.assertEqual(1, len(splits))
+        self.assertEqual(3, len(splits[0].files))
+
+        # Test 3: Range that doesn't exist (beyond data range)
+        splits = table_scan.with_row_ranges([Range(100, 200)]).plan().splits()
+        self.assertEqual(0, len(splits))
+
+        # Test 4: Range that partially overlaps
+        splits = table_scan.with_row_ranges([Range(1, 3)]).plan().splits()
+        self.assertEqual(1, len(splits))
+        self.assertEqual(2, len(splits[0].files))
+
+        # Test 5: Range covering all data
+        splits = table_scan.with_row_ranges([Range(0, 10)]).plan().splits()
+        self.assertEqual(1, len(splits))
+        self.assertEqual(3, len(splits[0].files))
+
+    def test_min_max_row_id_none(self):
+        simple_pa_schema = pa.schema([
+            ('f0', pa.int8()),
+            ('f1', pa.int16()),
+        ])
+        schema = Schema.from_pyarrow_schema(simple_pa_schema,
+                                            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'})
+        self.catalog.create_table('default.test_min_max_row_id_none', schema, False)
+        table = self.catalog.get_table('default.test_min_max_row_id_none')
+
+        # write 1
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        expect_data = pa.Table.from_pydict({
+            'f0': [1, 2],
+            'f1': [1001, 1002],
+        }, schema=simple_pa_schema)
+        table_write.write_arrow(expect_data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # write 2
+        table_write = write_builder.new_write().with_write_type(['f0'])
+        table_commit = write_builder.new_commit()
+        data2 = pa.Table.from_pydict({
+            'f0': [3, 4],
+        }, schema=pa.schema([
+            ('f0', pa.int8()),
+        ]))
+        table_write.write_arrow(data2)
+        cmts = table_write.prepare_commit()
+        cmts[0].new_files[0].first_row_id = 2
+        table_commit.commit(cmts)
+        table_write.close()
+        table_commit.close()

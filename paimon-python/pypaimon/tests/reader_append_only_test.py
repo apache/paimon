@@ -373,6 +373,20 @@ class AoReaderTest(unittest.TestCase):
         }, schema=self.pa_schema).sort_by('user_id')
         self.assertEqual(expected, actual)
 
+    def test_min_max_row_id_none(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('default.test_min_max_row_id_none', schema, False)
+        table = self.catalog.get_table('default.test_min_max_row_id_none')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder()
+        scan = read_builder.new_scan()
+        snapshot = scan.starting_scanner.snapshot_manager.get_latest_snapshot()
+        manifest_files = scan.starting_scanner.manifest_list_manager.read_all(snapshot)
+        for manifest_file in manifest_files:
+            self.assertEqual(manifest_file.min_row_id, None)
+            self.assertEqual(manifest_file.max_row_id, None)
+
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
 

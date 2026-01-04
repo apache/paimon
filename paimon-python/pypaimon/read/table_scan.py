@@ -72,10 +72,10 @@ class TableScan:
         self.starting_scanner.with_shard(idx_of_this_subtask, number_of_para_subtasks)
         return self
 
-    def with_row_range(self, start_row, end_row) -> 'TableScan':
-        """
-        Filter file entries by row range. The row_id corresponds to the row position of the
-        file in all file entries in table scan's partitioned_files.
-        """
-        self.starting_scanner.with_row_range(start_row, end_row)
+    def with_row_shard(self, start_row, end_row) -> 'TableScan':
+        self.starting_scanner.with_row_shard(start_row, end_row)
+        return self
+
+    def with_row_ranges(self, row_ranges) -> 'TableScan':
+        self.starting_scanner.with_row_ranges(row_ranges)
         return self

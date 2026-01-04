@@ -20,6 +20,7 @@ import time
 import uuid
 from typing import List
 
+from pypaimon.common.options.config import DataTypeOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -162,6 +163,18 @@ class FileStoreCommit:
         partition_null_counts = [sum(value == 0 for value in col) for col in partition_columns]
         if not all(count == 0 for count in partition_null_counts):
             raise RuntimeError("Partition value should not be null")
+        # compute min_row_id and max_row_id
+        min_row_id = DataTypeOptions.LONG_MAX_VALUE
+        max_row_id = DataTypeOptions.LONG_MIN_VALUE
+        for entry in commit_entries:
+            first_row_id = entry.file.first_row_id
+            if first_row_id is None:
+                min_row_id = None
+                max_row_id = None
+                break
+            else:
+                min_row_id = min(min_row_id, first_row_id)
+                max_row_id = max(max_row_id, first_row_id + entry.file.row_count - 1)
         manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
         new_manifest_list = ManifestFileMeta(
             file_name=new_manifest_file,
@@ -180,6 +193,8 @@ class FileStoreCommit:
                 null_counts=partition_null_counts,
             ),
             schema_id=self.table.table_schema.id,
+            min_row_id=min_row_id,
+            max_row_id=max_row_id
         )
         self.manifest_list_manager.write(delta_manifest_list, [new_manifest_list])
 

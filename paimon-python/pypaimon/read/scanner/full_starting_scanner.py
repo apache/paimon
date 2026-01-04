@@ -19,6 +19,7 @@ import os
 from collections import defaultdict
 from typing import Callable, List, Optional, Dict, Set
 
+from pypaimon.common.range import Range
 from pypaimon.common.predicate import Predicate
 from pypaimon.table.source.deletion_file import DeletionFile
 from pypaimon.table.row.generic_row import GenericRow
@@ -65,6 +66,7 @@ class FullStartingScanner(StartingScanner):
         self.number_of_para_subtasks = None
         self.start_row_of_this_subtask = None
         self.end_row_of_this_subtask = None
+        self.row_ranges: List[Range] = None
 
         self.only_read_real_buckets = True if options.bucket() == BucketMode.POSTPONE_BUCKET.value else False
         self.data_evolution = options.data_evolution_enabled()
@@ -129,13 +131,20 @@ class FullStartingScanner(StartingScanner):
         self.number_of_para_subtasks = number_of_para_subtasks
         return self
 
-    def with_row_range(self, start_row, end_row) -> 'FullStartingScanner':
+    def with_row_shard(self, start_row, end_row) -> 'FullStartingScanner':
         if start_row >= end_row:
             raise Exception("start_row must be less than end_row")
         if self.idx_of_this_subtask is not None:
             raise Exception("with_row_range and with_shard cannot be used simultaneously")
         self.start_row_of_this_subtask = start_row
         self.end_row_of_this_subtask = end_row
+        return self
+
+    def with_row_ranges(self, row_ranges) -> 'FullStartingScanner':
+        """
+        Filter manifest files by row id ranges.
+        """
+        self.row_ranges = row_ranges
         return self
 
     def _append_only_filter_by_row_range(self, partitioned_files: defaultdict,
@@ -340,10 +349,42 @@ class FullStartingScanner(StartingScanner):
 
     def _filter_manifest_file(self, file: ManifestFileMeta) -> bool:
         if not self.partition_key_predicate:
+            return self._filter_manifest_by_row_ranges(file)
+        if not self.partition_key_predicate.test_by_simple_stats(
+                file.partition_stats,
+                file.num_added_files + file.num_deleted_files):
+            return False
+        else:
+            return self._filter_manifest_by_row_ranges(file)
+
+    def _filter_manifest_by_row_ranges(self, manifest: ManifestFileMeta) -> bool:
+        """
+        Filter manifest file by row ranges.
+
+        Args:
+            manifest: The manifest file metadata to filter
+
+        Returns:
+            True if the manifest should be included, False otherwise
+        """
+        if self.row_ranges is None:
             return True
-        return self.partition_key_predicate.test_by_simple_stats(
-            file.partition_stats,
-            file.num_added_files + file.num_deleted_files)
+
+        min_row_id = manifest.min_row_id
+        max_row_id = manifest.max_row_id
+
+        if min_row_id is None or max_row_id is None:
+            return True
+
+        # Create a Range object for the manifest's row range
+        manifest_row_range = Range(min_row_id, max_row_id)
+
+        # Check if manifest range intersects with any expected range
+        for row_range in self.row_ranges:
+            if Range.intersection(row_range, manifest_row_range) is not None:
+                return True
+
+        return False
 
     def _filter_manifest_entry(self, entry: ManifestEntry) -> bool:
         if self.only_read_real_buckets and entry.bucket < 0:
@@ -539,7 +580,7 @@ class FullStartingScanner(StartingScanner):
             one_level = len(levels) == 1
 
             use_optimized_path = raw_convertible and (
-                self.deletion_vectors_enabled or merge_engine_first_row or one_level)
+                    self.deletion_vectors_enabled or merge_engine_first_row or one_level)
             if use_optimized_path:
                 packed_files: List[List[DataFileMeta]] = self._pack_for_ordered(
                     data_files, single_weight_func, self.target_split_size

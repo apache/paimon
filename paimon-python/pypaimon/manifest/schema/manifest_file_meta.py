@@ -30,6 +30,8 @@ class ManifestFileMeta:
     num_deleted_files: int
     partition_stats: SimpleStats
     schema_id: int
+    min_row_id: int = None
+    max_row_id: int = None
 
 
 MANIFEST_FILE_META_SCHEMA = {
@@ -43,5 +45,7 @@ MANIFEST_FILE_META_SCHEMA = {
         {"name": "_NUM_DELETED_FILES", "type": "long"},
         {"name": "_PARTITION_STATS", "type": PARTITION_STATS_SCHEMA},
         {"name": "_SCHEMA_ID", "type": "long"},
+        {"name": "_MIN_ROW_ID", "type": ["null", "long"]},
+        {"name": "_MAX_ROW_ID", "type": ["null", "long"]},
     ]
 }

@@ -26,3 +26,19 @@ class StartingScanner(ABC):
     @abstractmethod
     def scan(self) -> Plan:
         """Plan the files to read."""
+
+    def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
+        """
+        Filter file entries according to the id of the task
+        """
+
+    def with_row_shard(self, start_row, end_row) -> 'TableScan':
+        """
+        Filter file entries by row idx range. The row idx corresponds to the row position of the
+        file in all file entries in table scan's partitioned_files.
+        """
+
+    def with_row_ranges(self, row_ranges) -> 'TableScan':
+        """
+        Filter manifest files by row id ranges.
+        """

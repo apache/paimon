@@ -78,3 +78,8 @@ class CatalogOptions:
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
         "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
     BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
+
+
+class DataTypeOptions:
+    LONG_MIN_VALUE = -(1 << 63)
+    LONG_MAX_VALUE = (1 << 63) - 1
