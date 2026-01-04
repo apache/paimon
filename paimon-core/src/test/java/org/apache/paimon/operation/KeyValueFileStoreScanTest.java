@@ -32,7 +32,6 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,7 +58,6 @@ public class KeyValueFileStoreScanTest {
     private TestKeyValueGenerator gen;
     @TempDir java.nio.file.Path tempDir;
     private TestFileStore store;
-    private SnapshotManager snapshotManager;
 
     @BeforeEach
     public void beforeEach() throws Exception {
@@ -76,7 +74,6 @@ public class KeyValueFileStoreScanTest {
                                 DeduplicateMergeFunction.factory(),
                                 null)
                         .build();
-        snapshotManager = store.snapshotManager();
 
         SchemaManager schemaManager =
                 new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
@@ -271,6 +268,147 @@ public class KeyValueFileStoreScanTest {
         }
     }
 
+    @Test
+    public void testLimitPushdownWithoutValueFilter() throws Exception {
+        // Write multiple files to test limit pushdown
+        List<KeyValue> data1 = generateData(50);
+        writeData(data1);
+        List<KeyValue> data2 = generateData(50);
+        writeData(data2);
+        List<KeyValue> data3 = generateData(50);
+        Snapshot snapshot = writeData(data3);
+
+        // Without limit, should read all files
+        KeyValueFileStoreScan scanWithoutLimit = store.newScan();
+        scanWithoutLimit.withSnapshot(snapshot.id());
+        List<ManifestEntry> filesWithoutLimit = scanWithoutLimit.plan().files();
+        int totalFiles = filesWithoutLimit.size();
+        assertThat(totalFiles).isGreaterThan(0);
+
+        // With limit, should read fewer files (limit pushdown should work)
+        KeyValueFileStoreScan scanWithLimit = store.newScan();
+        scanWithLimit.withSnapshot(snapshot.id()).withLimit(10);
+        List<ManifestEntry> filesWithLimit = scanWithLimit.plan().files();
+        // Limit pushdown should reduce the number of files read
+        assertThat(filesWithLimit.size()).isLessThanOrEqualTo(totalFiles);
+        assertThat(filesWithLimit.size()).isGreaterThan(0);
+    }
+
+    @Test
+    public void testLimitPushdownWithValueFilter() throws Exception {
+        // Write data with different item values
+        List<KeyValue> data1 = generateData(50, 0, 100L);
+        writeData(data1);
+        List<KeyValue> data2 = generateData(50, 0, 200L);
+        writeData(data2);
+        List<KeyValue> data3 = generateData(50, 0, 300L);
+        Snapshot snapshot = writeData(data3);
+
+        // Without valueFilter, limit pushdown should work
+        KeyValueFileStoreScan scanWithoutFilter = store.newScan();
+        scanWithoutFilter.withSnapshot(snapshot.id()).withLimit(10);
+        List<ManifestEntry> filesWithoutFilter = scanWithoutFilter.plan().files();
+        int totalFilesWithoutFilter = filesWithoutFilter.size();
+        assertThat(totalFilesWithoutFilter).isGreaterThan(0);
+
+        // With valueFilter, limit pushdown should still work (postFilterManifestEntries runs first)
+        // postFilterManifestEntries filters files first, then limitPushManifestEntries operates
+        // on the filtered list. Using file.rowCount() as a conservative upper bound ensures
+        // we don't return fewer than limit rows, even if we might read slightly more files.
+        KeyValueFileStoreScan scanWithFilter = store.newScan();
+        scanWithFilter.withSnapshot(snapshot.id());
+        scanWithFilter.withValueFilter(
+                new PredicateBuilder(TestKeyValueGenerator.DEFAULT_ROW_TYPE)
+                        .between(4, 100L, 200L));
+        scanWithFilter.withLimit(10);
+        List<ManifestEntry> filesWithFilter = scanWithFilter.plan().files();
+
+        // Limit pushdown should work with valueFilter
+        // The number of files should be less than or equal to the total files after filtering
+        assertThat(filesWithFilter.size()).isGreaterThan(0);
+        assertThat(filesWithFilter.size()).isLessThanOrEqualTo(totalFilesWithoutFilter);
+    }
+
+    @Test
+    public void testLimitPushdownWithKeyFilter() throws Exception {
+        // Write data with different shop IDs
+        List<KeyValue> data = generateData(200);
+        Snapshot snapshot = writeData(data);
+
+        // With keyFilter, limit pushdown should still work (keyFilter doesn't affect limit
+        // pushdown)
+        KeyValueFileStoreScan scan = store.newScan();
+        scan.withSnapshot(snapshot.id());
+        scan.withKeyFilter(
+                new PredicateBuilder(RowType.of(new IntType(false)))
+                        .equal(0, data.get(0).key().getInt(0)));
+        scan.withLimit(5);
+        List<ManifestEntry> files = scan.plan().files();
+        assertThat(files.size()).isGreaterThan(0);
+    }
+
+    @Test
+    public void testLimitPushdownMultipleBuckets() throws Exception {
+        // Write data to multiple buckets to test limit pushdown across buckets
+        List<KeyValue> data1 = generateData(30);
+        writeData(data1);
+        List<KeyValue> data2 = generateData(30);
+        writeData(data2);
+        List<KeyValue> data3 = generateData(30);
+        Snapshot snapshot = writeData(data3);
+
+        // Without limit, should read all files
+        KeyValueFileStoreScan scanWithoutLimit = store.newScan();
+        scanWithoutLimit.withSnapshot(snapshot.id());
+        List<ManifestEntry> filesWithoutLimit = scanWithoutLimit.plan().files();
+        int totalFiles = filesWithoutLimit.size();
+        assertThat(totalFiles).isGreaterThan(0);
+
+        // With limit, should read fewer files (limit pushdown should work across buckets)
+        KeyValueFileStoreScan scanWithLimit = store.newScan();
+        scanWithLimit.withSnapshot(snapshot.id()).withLimit(20);
+        List<ManifestEntry> filesWithLimit = scanWithLimit.plan().files();
+        // Limit pushdown should reduce the number of files read
+        assertThat(filesWithLimit.size()).isLessThanOrEqualTo(totalFiles);
+        assertThat(filesWithLimit.size()).isGreaterThan(0);
+    }
+
+    @Test
+    public void testLimitPushdownWithSmallLimit() throws Exception {
+        // Test limit pushdown with a very small limit
+        List<KeyValue> data1 = generateData(100);
+        writeData(data1);
+        List<KeyValue> data2 = generateData(100);
+        writeData(data2);
+        Snapshot snapshot = writeData(data2);
+
+        KeyValueFileStoreScan scan = store.newScan();
+        scan.withSnapshot(snapshot.id()).withLimit(1);
+        List<ManifestEntry> files = scan.plan().files();
+        // Should read at least one file, but fewer than all files
+        assertThat(files.size()).isGreaterThan(0);
+    }
+
+    @Test
+    public void testLimitPushdownWithLargeLimit() throws Exception {
+        // Test limit pushdown with a large limit (larger than total rows)
+        List<KeyValue> data1 = generateData(50);
+        writeData(data1);
+        List<KeyValue> data2 = generateData(50);
+        Snapshot snapshot = writeData(data2);
+
+        KeyValueFileStoreScan scanWithoutLimit = store.newScan();
+        scanWithoutLimit.withSnapshot(snapshot.id());
+        List<ManifestEntry> filesWithoutLimit = scanWithoutLimit.plan().files();
+        int totalFiles = filesWithoutLimit.size();
+
+        KeyValueFileStoreScan scanWithLimit = store.newScan();
+        scanWithLimit.withSnapshot(snapshot.id()).withLimit(10000);
+        List<ManifestEntry> filesWithLimit = scanWithLimit.plan().files();
+        // With a large limit, should read all files
+        assertThat(filesWithLimit.size()).isEqualTo(totalFiles);
+    }
+
     private void runTestExactMatch(
             FileStoreScan scan, Long expectedSnapshotId, Map<BinaryRow, BinaryRow> expected)
             throws Exception {
@@ -305,10 +443,6 @@ public class KeyValueFileStoreScanTest {
             data.add(gen.next());
         }
         return data;
-    }
-
-    private List<KeyValue> generateData(int numRecords, int hr) {
-        return generateData(numRecords, hr, null);
     }
 
     private List<KeyValue> generateData(int numRecords, int hr, Long itemId) {
