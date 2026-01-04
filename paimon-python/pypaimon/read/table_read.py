@@ -176,7 +176,6 @@ class TableRead:
 
         ctx = DataContext.get_current()
         current_size = ctx.target_max_block_size
-        current_new_size = None
 
         if auto_adjust_ray_block_size:
             max_split_size = max(
@@ -186,8 +185,8 @@ class TableRead:
             )
 
             if max_split_size > current_size:
-                new_size = min(int(max_split_size * 1.2), 512 * 1024 * 1024)
-                new_size = ((new_size + 1024 * 1024 - 1) // (1024 * 1024)) * 1024 * 1024
+                new_size = ((max_split_size + 1024 * 1024 - 1) // (1024 * 1024)) * 1024 * 1024
+                new_size = min(new_size, 512 * 1024 * 1024)
 
                 logger.info(
                     f"Auto-adjusting target_max_block_size from "
@@ -196,21 +195,16 @@ class TableRead:
                 )
 
                 ctx.target_max_block_size = new_size
-                current_new_size = new_size
 
-        try:
-            from pypaimon.read.ray_datasource import PaimonDatasource
-            datasource = PaimonDatasource(self, splits)
-            return ray.data.read_datasource(
-                datasource,
-                ray_remote_args=ray_remote_args,
-                concurrency=concurrency,
-                override_num_blocks=override_num_blocks,
-                **read_args
-            )
-        finally:
-            if current_new_size is not None and ctx.target_max_block_size == current_new_size:
-                ctx.target_max_block_size = current_size
+        from pypaimon.read.ray_datasource import PaimonDatasource
+        datasource = PaimonDatasource(self, splits)
+        return ray.data.read_datasource(
+            datasource,
+            ray_remote_args=ray_remote_args,
+            concurrency=concurrency,
+            override_num_blocks=override_num_blocks,
+            **read_args
+        )
 
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
