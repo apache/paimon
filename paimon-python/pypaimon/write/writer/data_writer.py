@@ -197,8 +197,6 @@ class DataWriter(ABC):
                 else PyarrowFieldParser.to_paimon_schema(data.schema)
         else:
             stats_fields = self.table.trimmed_primary_keys_fields
-        stats_fields = self.table.fields if self.table.is_primary_key_table \
-            else PyarrowFieldParser.to_paimon_schema(data.schema)
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
             for field in stats_fields
@@ -209,7 +207,11 @@ class DataWriter(ABC):
             raise RuntimeError("Primary key should not be null")
         
         value_fields = stats_fields if value_stats_enabled else []
-        value_stats = self._collect_value_stats(data, value_fields, column_stats) if value_stats_enabled else SimpleStats.empty_stats()
+        value_stats = (
+            self._collect_value_stats(data, value_fields, column_stats)
+            if value_stats_enabled
+            else SimpleStats.empty_stats()
+        )
 
         min_seq = self.sequence_generator.start
         max_seq = self.sequence_generator.current

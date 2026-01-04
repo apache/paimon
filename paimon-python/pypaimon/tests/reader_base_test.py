@@ -775,7 +775,6 @@ class ReaderBasicTest(unittest.TestCase):
 
         self.assertEqual(read_entry.file.value_stats.null_counts, null_counts)
 
-<<<<<<< HEAD
     def _test_append_only_schema_match_case(self, table, pa_schema):
         """Test that for append-only tables, data.schema matches table.fields.
 
@@ -790,8 +789,7 @@ class ReaderBasicTest(unittest.TestCase):
             'id': [1, 2, 3],
             'name': ['Alice', 'Bob', 'Charlie'],
             'price': [10.5, 20.3, 30.7],
-            'category': ['A', 'B', 'C'],
-=======
+            'category': ['A', 'B', 'C']})
     def test_primary_key_value_stats(self):
         pa_schema = pa.schema([
             ('id', pa.int64()),
@@ -812,7 +810,6 @@ class ReaderBasicTest(unittest.TestCase):
             'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
             'price': [10.5, 20.3, 30.7, 40.1, 50.9],
             'category': ['A', 'B', 'C', 'D', 'E']
->>>>>>> 3a303bec2 ([python] light refactor for stats collect)
         }, schema=pa_schema)
 
         write_builder = table.new_batch_write_builder()
@@ -823,7 +820,6 @@ class ReaderBasicTest(unittest.TestCase):
         commit.commit(commit_messages)
         writer.close()
 
-<<<<<<< HEAD
         # Verify that data.schema (converted to paimon schema) matches table.fields
         data_fields_from_schema = PyarrowFieldParser.to_paimon_schema(test_data.schema)
         table_fields = table.fields
@@ -841,8 +837,6 @@ class ReaderBasicTest(unittest.TestCase):
                          f"but table.fields has {table_field_names}")
 
         # Read manifest to verify value_stats_cols is None (all fields included)
-=======
->>>>>>> 3a303bec2 ([python] light refactor for stats collect)
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         latest_snapshot = SnapshotManager(table).get_latest_snapshot()
@@ -853,12 +847,10 @@ class ReaderBasicTest(unittest.TestCase):
             False
         )
 
-<<<<<<< HEAD
         if len(manifest_entries) > 0:
             file_meta = manifest_entries[0].file
             self.assertIsNone(file_meta.value_stats_cols,
                               "value_stats_cols should be None when all table fields are included")
-=======
         self.assertGreater(len(manifest_entries), 0, "Should have at least one manifest entry")
         file_meta = manifest_entries[0].file
 
@@ -924,7 +916,6 @@ class ReaderBasicTest(unittest.TestCase):
         self.assertEqual(actual_data.num_rows, 5, "Should have 5 rows")
         actual_ids = sorted(actual_data.column('id').to_pylist())
         self.assertEqual(actual_ids, [1, 2, 3, 4, 5], "All IDs should be present")
->>>>>>> 3a303bec2 ([python] light refactor for stats collect)
 
     def test_split_target_size(self):
         """Test source.split.target-size configuration effect on split generation."""
