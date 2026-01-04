@@ -128,31 +128,22 @@ jobs:
 
       - name: Build paimon-faiss-jni
         run: |
-          mvn -B clean install -pl paimon-faiss-jni -am -DskipTests -Ppaimon-faiss
+          mvn -B clean install -pl paimon-faiss-jni -am -DskipTests -Ppaimon-faiss-vector
 
       - name: Test paimon-faiss-jni
         timeout-minutes: 10
         run: |
-          mvn -B test -pl paimon-faiss-jni -DskipFaissTests=false -Ppaimon-faiss
+          mvn -B test -pl paimon-faiss-jni -DskipFaissTests=false -Ppaimon-faiss-vector
         env:
           MAVEN_OPTS: -Xmx2048m
 
       - name: Build paimon-faiss
         run: |
-          mvn -B clean install -pl paimon-faiss -am -DskipTests -Ppaimon-faiss
+          mvn -B clean install -pl paimon-faiss -am -DskipTests -Ppaimon-faiss-vector
 
       - name: Test paimon-faiss
         timeout-minutes: 30
         run: |
-          mvn -B test -pl paimon-faiss -Ppaimon-faiss
+          mvn -B test -pl paimon-faiss -Ppaimon-faiss-vector
         env:
           MAVEN_OPTS: -Xmx4096m
-
-      - name: Upload native library artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: native-libraries-linux-amd64
-          path: paimon-faiss-jni/src/main/resources/linux/amd64/
-          retention-days: 7
-

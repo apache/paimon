@@ -312,33 +312,6 @@ under the License.
                 <native.platform>osx-aarch64</native.platform>
             </properties>
         </profile>
-
     </profiles>
-
-    <distributionManagement>
-        <snapshotRepository>
-            <id>ossrh</id>
-            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
-        </snapshotRepository>
-        <repository>
-            <id>ossrh</id>
-            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
-        </repository>
-    </distributionManagement>
-
-    <scm>
-        <connection>scm:git:git://github.com/apache/paimon.git</connection>
-        <developerConnection>scm:git:ssh://github.com:apache/paimon.git</developerConnection>
-        <url>https://github.com/apache/paimon/tree/master</url>
-    </scm>
-
-    <developers>
-        <developer>
-            <name>Apache Paimon Team</name>
-            <email>dev@paimon.apache.org</email>
-            <organization>Apache Paimon</organization>
-            <organizationUrl>https://paimon.apache.org/</organizationUrl>
-        </developer>
-    </developers>
 </project>
 

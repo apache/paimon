@@ -54,8 +54,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Build Spark 3 with ${{ matrix.scala_version }}
-        run: mvn -T 2C -B clean install -DskipTests -Pspark3,flink1,scala-${{ matrix.scala_version }}
-
+        run:  mvn -T 2C -B clean install -DskipTests -Pspark3,flink1,scala-${{ matrix.scala_version }}
 
       - name: Test Spark 3 with ${{ matrix.scala_version }}
         timeout-minutes: 60
