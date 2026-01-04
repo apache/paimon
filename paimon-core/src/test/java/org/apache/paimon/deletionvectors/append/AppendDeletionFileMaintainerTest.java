@@ -21,6 +21,8 @@ package org.apache.paimon.deletionvectors.append;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -58,10 +60,17 @@ class AppendDeletionFileMaintainerTest {
         Map<String, List<Integer>> dvs = new HashMap<>();
         dvs.put("f1", Arrays.asList(1, 3, 5));
         dvs.put("f2", Arrays.asList(2, 4, 6));
-        CommitMessageImpl commitMessage1 = store.writeDVIndexFiles(BinaryRow.EMPTY_ROW, 0, dvs);
+        BinaryRow partitions = new BinaryRow(store.schema().partitionKeys().size());
+        BinaryRowWriter  writer = new BinaryRowWriter(partitions);
+        writer.reset();
+        for (int i = 0; i < store.schema().partitionKeys().size(); i++) {
+            writer.writeString(i,  BinaryString.fromString(store.schema().partitionKeys().get(i)));
+        }
+        writer.complete();
+        CommitMessageImpl commitMessage1 = store.writeDVIndexFiles(partitions, 0, dvs);
         CommitMessageImpl commitMessage2 =
                 store.writeDVIndexFiles(
-                        BinaryRow.EMPTY_ROW,
+                        partitions,
                         1,
                         Collections.singletonMap("f3", Arrays.asList(1, 2, 3)));
         store.commit(commitMessage1, commitMessage2);
