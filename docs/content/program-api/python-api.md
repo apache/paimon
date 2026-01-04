@@ -426,20 +426,52 @@ print(ray_dataset.to_pandas())
 # ...
 ```
 
-The `to_ray()` method supports a `parallelism` parameter to control distributed reading. Use `parallelism=1` for single-task read (default) or `parallelism > 1` for distributed read with multiple Ray workers:
+The `to_ray()` method supports Ray Data API parameters for distributed processing:
 
 ```python
-# Simple mode (single task)
-ray_dataset = table_read.to_ray(splits, parallelism=1)
+# Basic usage
+ray_dataset = table_read.to_ray(splits)
 
-# Distributed mode with 4 parallel tasks
-ray_dataset = table_read.to_ray(splits, parallelism=4)
+# Specify number of output blocks
+ray_dataset = table_read.to_ray(splits, override_num_blocks=4)
+
+# Configure Ray remote arguments
+ray_dataset = table_read.to_ray(
+    splits,
+    override_num_blocks=4,
+    ray_remote_args={"num_cpus": 2, "max_retries": 3}
+)
 
 # Use Ray Data operations
 mapped_dataset = ray_dataset.map(lambda row: {'value': row['value'] * 2})
 filtered_dataset = ray_dataset.filter(lambda row: row['score'] > 80)
 df = ray_dataset.to_pandas()
 ```
+
+**Parameters:**
+- `override_num_blocks`: Optional override for the number of output blocks. By default,
+  Ray automatically determines the optimal number.
+- `ray_remote_args`: Optional kwargs passed to `ray.remote()` in read tasks
+  (e.g., `{"num_cpus": 2, "max_retries": 3}`).
+- `concurrency`: Optional max number of Ray tasks to run concurrently. By default,
+  dynamically decided based on available resources.
+- `**read_args`: Additional kwargs passed to the datasource (e.g., `per_task_row_limit`
+  in Ray 2.52.0+).
+
+**Ray Block Size Configuration:**
+
+If you need to configure Ray's block size (e.g., when Paimon splits exceed Ray's default
+128MB block size), set it before calling `to_ray()`:
+
+```python
+from ray.data import DataContext
+
+ctx = DataContext.get_current()
+ctx.target_max_block_size = 256 * 1024 * 1024  # 256MB (default is 128MB)
+ray_dataset = table_read.to_ray(splits)
+```
+
+See [Ray Data API Documentation](https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html) for more details.
 
 ### Incremental Read
 
