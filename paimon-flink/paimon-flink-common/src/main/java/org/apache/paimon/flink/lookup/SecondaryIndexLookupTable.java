@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.lookup.SetState;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.TypeUtils;
@@ -94,7 +95,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
                 indexState.retract(secKeyRow.replaceRow(previous), primaryKeyRow);
             }
 
-            if (predicate == null || predicate.test(row)) {
+            if (predicate == null || PredicateEvaluator.test(predicate, row)) {
                 tableState.put(primaryKeyRow, row);
                 indexState.add(secKeyRow.replaceRow(row), primaryKeyRow);
             } else {

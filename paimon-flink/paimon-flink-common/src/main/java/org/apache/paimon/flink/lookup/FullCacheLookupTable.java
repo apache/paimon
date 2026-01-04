@@ -32,6 +32,7 @@ import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
@@ -197,7 +198,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                 new RecordReaderIterator<>(reader.toRecordReader(reader.nextSplits(), true))) {
             while (batch.hasNext()) {
                 InternalRow row = batch.next();
-                if (predicate == null || predicate.test(row)) {
+                if (predicate == null || PredicateEvaluator.test(predicate, row)) {
                     bulkLoadSorter.write(GenericRow.of(toKeyBytes(row), toValueBytes(row)));
                 }
             }

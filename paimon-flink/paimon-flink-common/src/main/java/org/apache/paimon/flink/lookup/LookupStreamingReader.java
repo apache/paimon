@@ -25,6 +25,7 @@ import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
@@ -140,7 +141,7 @@ public class LookupStreamingReader {
         }
 
         if (projectedPredicate != null) {
-            reader = reader.filter(projectedPredicate::test);
+            reader = reader.filter(row -> PredicateEvaluator.test(projectedPredicate, row));
         }
 
         if (cacheRowFilter != null) {

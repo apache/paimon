@@ -24,6 +24,7 @@ import org.apache.paimon.lookup.ListBulkLoader;
 import org.apache.paimon.lookup.ListState;
 import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.TypeUtils;
@@ -82,7 +83,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
     protected void refreshRow(InternalRow row, Predicate predicate) throws IOException {
         joinKeyRow.replaceRow(row);
         if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-            if (predicate == null || predicate.test(row)) {
+            if (predicate == null || PredicateEvaluator.test(predicate, row)) {
                 state.add(joinKeyRow, row);
             }
         } else {

@@ -28,6 +28,7 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.statistics.FullSimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -169,7 +170,7 @@ public interface PartitionPredicate extends Serializable {
 
         @Override
         public boolean test(BinaryRow part) {
-            return predicate.test(part);
+            return PredicateEvaluator.test(predicate, part);
         }
 
         @Override
@@ -178,7 +179,7 @@ public interface PartitionPredicate extends Serializable {
                 InternalRow minValues,
                 InternalRow maxValues,
                 InternalArray nullCounts) {
-            return predicate.test(rowCount, minValues, maxValues, nullCounts);
+            return PredicateEvaluator.test(predicate, rowCount, minValues, maxValues, nullCounts);
         }
 
         public Predicate predicate() {
@@ -274,8 +275,9 @@ public interface PartitionPredicate extends Serializable {
             }
 
             for (int i = 0; i < fieldNum; i++) {
-                if (!min[i].test(rowCount, minValues, maxValues, nullCounts)
-                        || !max[i].test(rowCount, minValues, maxValues, nullCounts)) {
+                if (!PredicateEvaluator.test(min[i], rowCount, minValues, maxValues, nullCounts)
+                        || !PredicateEvaluator.test(
+                                max[i], rowCount, minValues, maxValues, nullCounts)) {
                     return false;
                 }
             }

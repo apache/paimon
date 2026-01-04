@@ -37,7 +37,7 @@ class ConcatTransformTest {
         inputs.add(BinaryString.fromString("ha"));
         inputs.add(BinaryString.fromString("-he"));
         ConcatTransform transform = new ConcatTransform(inputs);
-        Object result = transform.transform(GenericRow.of());
+        Object result = PredicateEvaluator.evalTransform(transform, GenericRow.of());
         assertThat(result).isEqualTo(BinaryString.fromString("ha-he"));
     }
 
@@ -48,7 +48,8 @@ class ConcatTransformTest {
         inputs.add(new FieldRef(3, "f3", DataTypes.STRING()));
         ConcatTransform transform = new ConcatTransform(inputs);
         Object result =
-                transform.transform(
+                PredicateEvaluator.evalTransform(
+                        transform,
                         GenericRow.of(
                                 BinaryString.fromString(""),
                                 BinaryString.fromString("ha"),
@@ -64,7 +65,8 @@ class ConcatTransformTest {
         inputs.add(new FieldRef(3, "f3", DataTypes.STRING()));
         ConcatTransform transform = new ConcatTransform(inputs);
         Object result =
-                transform.transform(
+                PredicateEvaluator.evalTransform(
+                        transform,
                         GenericRow.of(
                                 BinaryString.fromString(""),
                                 BinaryString.fromString(""),

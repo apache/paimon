@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -115,6 +116,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         }
 
         Predicate finalFilter = predicate;
-        return reader.filter(finalFilter::test);
+        return reader.filter(row -> PredicateEvaluator.test(finalFilter, row));
     }
 }

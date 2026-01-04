@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -120,7 +121,7 @@ public class ChainTableUtilsTest {
                         partitionConverter,
                         (Integer i, Object j) -> builder.equal(i, j),
                         (Integer i, Object j) -> builder.lessThan(i, j));
-        Assertions.assertTrue(!predicate.test(partitionValue));
+        Assertions.assertTrue(!PredicateEvaluator.test(predicate, partitionValue));
         List<Predicate> predicates = new ArrayList<>();
         predicates.add(builder.lessThan(0, partitionValue.getString(0)));
         List<Predicate> subPredicates = new ArrayList<>();
@@ -150,7 +151,7 @@ public class ChainTableUtilsTest {
                         partitionValue,
                         partitionConverter,
                         (Integer i, Object j) -> builder.equal(i, j));
-        Assertions.assertTrue(predicate.test(partitionValue));
+        Assertions.assertTrue(PredicateEvaluator.test(predicate, partitionValue));
         List<Predicate> predicates = new ArrayList<>();
         predicates.add(builder.equal(0, partitionValue.getString(0)));
         predicates.add(builder.equal(1, partitionValue.getString(1)));

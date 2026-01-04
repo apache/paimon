@@ -36,7 +36,7 @@ class UpperTransformTest {
         List<Object> inputs = new ArrayList<>();
         inputs.add(null);
         UpperTransform transform = new UpperTransform(inputs);
-        Object result = transform.transform(GenericRow.of());
+        Object result = PredicateEvaluator.evalTransform(transform, GenericRow.of());
         assertThat(result).isNull();
     }
 
@@ -45,7 +45,7 @@ class UpperTransformTest {
         List<Object> inputs = new ArrayList<>();
         inputs.add(BinaryString.fromString("hello"));
         UpperTransform transform = new UpperTransform(inputs);
-        Object result = transform.transform(GenericRow.of());
+        Object result = PredicateEvaluator.evalTransform(transform, GenericRow.of());
         assertThat(result).isEqualTo(BinaryString.fromString("HELLO"));
     }
 

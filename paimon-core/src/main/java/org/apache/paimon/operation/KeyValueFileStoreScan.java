@@ -27,6 +27,7 @@ import org.apache.paimon.manifest.FilteredManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -153,8 +154,12 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 fieldKeyStatsConverters
                         .getOrCreate(file.schemaId())
                         .evolution(file.keyStats(), file.rowCount(), null);
-        return notEvolvedFilter.test(
-                file.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
+        return PredicateEvaluator.test(
+                notEvolvedFilter,
+                file.rowCount(),
+                stats.minValues(),
+                stats.maxValues(),
+                stats.nullCounts());
     }
 
     @Override
@@ -282,7 +287,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 fieldValueStatsConverters
                         .getOrCreate(file.schemaId())
                         .evolution(file.valueStats(), file.rowCount(), file.valueStatsCols());
-        return notEvolvedFilter.test(
+        return PredicateEvaluator.test(
+                        notEvolvedFilter,
                         file.rowCount(),
                         result.minValues(),
                         result.maxValues(),

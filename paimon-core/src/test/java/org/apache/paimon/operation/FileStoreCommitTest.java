@@ -40,6 +40,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -637,7 +638,7 @@ public class FileStoreCommitTest {
 
         List<KeyValue> expectedKvs = new ArrayList<>();
         for (Map.Entry<BinaryRow, List<KeyValue>> entry : data.entrySet()) {
-            if (partitionFilter.test(entry.getKey())) {
+            if (PredicateEvaluator.test(partitionFilter, entry.getKey())) {
                 continue;
             }
             expectedKvs.addAll(entry.getValue());

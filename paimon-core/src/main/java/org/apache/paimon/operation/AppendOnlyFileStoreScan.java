@@ -23,6 +23,7 @@ import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateEvaluator;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStatsEvolution;
@@ -121,7 +122,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
         // filter by min max
         boolean result =
-                notEvolvedFilter.test(
+                PredicateEvaluator.test(
+                        notEvolvedFilter,
                         entry.file().rowCount(),
                         stats.minValues(),
                         stats.maxValues(),
