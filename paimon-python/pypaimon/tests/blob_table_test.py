@@ -2373,7 +2373,7 @@ class DataBlobWriterTest(unittest.TestCase):
         actual = pa.concat_tables([actual1, actual2, actual3]).sort_by('id')
         self.assertEqual(actual, expected)
 
-    def test_data_blob_writer_with_row_range(self):
+    def test_data_blob_writer_with_slice(self):
         """Test DataBlobWriter with mixed data types in blob column."""
 
         # Create schema with blob column
@@ -2390,8 +2390,8 @@ class DataBlobWriterTest(unittest.TestCase):
                 'data-evolution.enabled': 'true'
             }
         )
-        self.catalog.create_table('test_db.with_row_range_test', schema, False)
-        table = self.catalog.get_table('test_db.with_row_range_test')
+        self.catalog.create_table('test_db.with_slice_test', schema, False)
+        table = self.catalog.get_table('test_db.with_slice_test')
 
         # Use proper table API to create writer
         write_builder = table.new_batch_write_builder()
@@ -2425,7 +2425,7 @@ class DataBlobWriterTest(unittest.TestCase):
 
         # Read data back using table API
         read_builder = table.new_read_builder()
-        table_scan = read_builder.new_scan().with_row_range(2, 4)
+        table_scan = read_builder.new_scan().with_slice(2, 4)
         table_read = read_builder.new_read()
         splits = table_scan.plan().splits()
         result = table_read.to_arrow(splits)
