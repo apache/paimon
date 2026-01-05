@@ -105,7 +105,7 @@ public class RESTCatalogOptions {
                     .withDescription("REST Catalog DLF OSS endpoint.");
 
     public static final ConfigOption<Boolean> DLF_FILE_IO_CACHE_ENABLED =
-            ConfigOptions.key("dlf.file-io.cache.enabled")
+            ConfigOptions.key("dlf.io-cache-enabled")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(

@@ -67,7 +67,7 @@ public class RESTTokenFileIO implements FileIO {
                     .withDescription("Whether to support data token provided by the REST server.");
 
     public static final ConfigOption<String> FILE_IO_CACHE_POLICY =
-            ConfigOptions.key("dlf.file-io.cache.policy")
+            ConfigOptions.key("dlf.io-cache.policy")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(

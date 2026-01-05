@@ -2713,18 +2713,19 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 "akId",
                                 "akSecret",
                                 UUID.randomUUID().toString(),
-                                "dlf.file-io.cache.policy",
+                                RESTTokenFileIO.FILE_IO_CACHE_POLICY.key(),
                                 cachePolicy),
                         System.currentTimeMillis() + 3600_000L);
         setDataTokenToRestServerForMock(identifier, token);
         createTable(
                 identifier,
-                ImmutableMap.of("dlf.file-io.cache.policy", cachePolicy),
+                ImmutableMap.of(RESTTokenFileIO.FILE_IO_CACHE_POLICY.key(), cachePolicy),
                 Lists.newArrayList("col1"));
         FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
         RESTToken fileDataToken = fileIO.validToken();
-        assertEquals(cachePolicy, fileDataToken.token().get("dlf.file-io.cache.policy"));
+        assertEquals(
+                cachePolicy, fileDataToken.token().get(RESTTokenFileIO.FILE_IO_CACHE_POLICY.key()));
     }
 
     @Test
@@ -2742,18 +2743,18 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 "akId",
                                 "akSecret",
                                 UUID.randomUUID().toString(),
-                                "dlf.file-io.cache.policy",
+                                RESTTokenFileIO.FILE_IO_CACHE_POLICY.key(),
                                 cachePolicy),
                         System.currentTimeMillis() + 3600_000L);
         setDataTokenToRestServerForMock(identifier, token);
         createTable(
                 identifier,
-                ImmutableMap.of("dlf.file-io.cache.policy", cachePolicy),
+                ImmutableMap.of(RESTTokenFileIO.FILE_IO_CACHE_POLICY.key(), cachePolicy),
                 Lists.newArrayList("col1"));
         FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
         RESTToken fileDataToken = fileIO.validToken();
-        assertNull(fileDataToken.token().get("dlf.file-io.cache.policy"));
+        assertNull(fileDataToken.token().get(RESTTokenFileIO.FILE_IO_CACHE_POLICY.key()));
     }
 
     private TestPagedResponse generateTestPagedResponse(
