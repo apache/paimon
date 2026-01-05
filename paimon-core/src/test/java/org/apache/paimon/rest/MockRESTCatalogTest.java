@@ -33,7 +33,7 @@ import org.apache.paimon.predicate.ConcatTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.GreaterThan;
-import org.apache.paimon.predicate.IsNotNull;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.AuthProvider;
@@ -325,14 +325,9 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         write.close();
         commit.close();
 
-        TransformPredicate maskPredicate =
-                TransformPredicate.of(
-                        new ConcatTransform(
-                                Collections.singletonList(BinaryString.fromString("****"))),
-                        IsNotNull.INSTANCE,
-                        Collections.emptyList());
-        String maskJson = PredicateJsonSerde.toJsonString(maskPredicate);
-        restCatalogServer.addTableColumnMasking(identifier, ImmutableMap.of("col1", maskJson));
+        Transform maskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
+        restCatalogServer.addTableColumnMasking(identifier, ImmutableMap.of("col1", maskTransform));
 
         ReadBuilder readBuilder = table.newReadBuilder();
         List<Split> splits = readBuilder.newScan().plan().splits();
@@ -342,6 +337,68 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         List<String> actual = new ArrayList<>();
         reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
         assertThat(actual).containsExactly("****", "****");
+    }
+
+    @Test
+    void testRowFilterWithColumnMasking() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_filter_masking");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "col1", DataTypes.INT()),
+                                new DataField(1, "col2", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // write four rows: (1, "a"), (2, "b"), (3, "c"), (4, "d")
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(GenericRow.of(1, BinaryString.fromString("a")));
+        write.write(GenericRow.of(2, BinaryString.fromString("b")));
+        write.write(GenericRow.of(3, BinaryString.fromString("c")));
+        write.write(GenericRow.of(4, BinaryString.fromString("d")));
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        // Only allow rows with col1 > 2
+        TransformPredicate rowFilterPredicate =
+                TransformPredicate.of(
+                        new FieldTransform(new FieldRef(0, "col1", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(2));
+        restCatalogServer.addTableFilter(
+                identifier, PredicateJsonSerde.toJsonString(rowFilterPredicate));
+
+        // Mask col2 as "****"
+        Transform maskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
+        restCatalogServer.addTableColumnMasking(identifier, ImmutableMap.of("col2", maskTransform));
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<org.apache.paimon.data.InternalRow> reader = read.createReader(splits);
+
+        List<String> actual = new ArrayList<>();
+        reader.forEachRemaining(
+                row ->
+                        actual.add(
+                                String.format(
+                                        "%s[%d, %s]",
+                                        row.getRowKind().shortString(),
+                                        row.getInt(0),
+                                        row.getString(1).toString())));
+        assertThat(actual).containsExactly("+I[3, ****]", "+I[4, ****]");
     }
 
     private void checkHeader(String headerName, String headerValue) {

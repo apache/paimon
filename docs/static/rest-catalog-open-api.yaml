@@ -2921,12 +2921,12 @@ components:
       properties:
         filter:
           type: array
-          description: Additional row-level filter as JSON strings. Each element should be a JSON object containing a 'filter' field.
+          description: Additional row-level filter as Predicate entry strings.
           items:
             type: string
         columnMasking:
           type: object
-          description: Column masking rules as a map from column name to predicate entry JSON string (TransformPredicate).
+          description: Column masking rules as a map from column name to Transform entry JSON string.
           additionalProperties:
             type: string
     AlterDatabaseRequest:

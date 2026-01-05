@@ -23,7 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -45,11 +45,11 @@ public class MaskingTableRead implements TableRead {
 
     private final TableRead wrapped;
     private final RowType outputRowType;
-    private final Map<String, TransformPredicate> masking;
+    private final Map<String, Transform> masking;
     private final MaskingApplier applier;
 
     public MaskingTableRead(
-            TableRead wrapped, RowType outputRowType, Map<String, TransformPredicate> masking) {
+            TableRead wrapped, RowType outputRowType, Map<String, Transform> masking) {
         this.wrapped = wrapped;
         this.outputRowType = outputRowType;
         this.masking = masking;
@@ -105,9 +105,9 @@ public class MaskingTableRead implements TableRead {
     private static class MaskingApplier {
 
         private final RowType outputRowType;
-        private final Map<Integer, TransformPredicate> remapped;
+        private final Map<Integer, Transform> remapped;
 
-        private MaskingApplier(RowType outputRowType, Map<String, TransformPredicate> masking) {
+        private MaskingApplier(RowType outputRowType, Map<String, Transform> masking) {
             this.outputRowType = outputRowType;
             this.remapped = remapToOutputRow(outputRowType, masking);
         }
@@ -122,26 +122,26 @@ public class MaskingTableRead implements TableRead {
                 DataType type = outputRowType.getTypeAt(i);
                 out.setField(i, get(row, i, type));
             }
-            for (Map.Entry<Integer, TransformPredicate> e : remapped.entrySet()) {
+            for (Map.Entry<Integer, Transform> e : remapped.entrySet()) {
                 int targetIndex = e.getKey();
-                TransformPredicate predicate = e.getValue();
-                Object masked = predicate.transform().transform(row);
+                Transform transform = e.getValue();
+                Object masked = transform.transform(row);
                 out.setField(targetIndex, masked);
             }
             return out;
         }
 
-        private static Map<Integer, TransformPredicate> remapToOutputRow(
-                RowType outputRowType, Map<String, TransformPredicate> masking) {
-            Map<Integer, TransformPredicate> out = new HashMap<>();
+        private static Map<Integer, Transform> remapToOutputRow(
+                RowType outputRowType, Map<String, Transform> masking) {
+            Map<Integer, Transform> out = new HashMap<>();
             if (masking == null || masking.isEmpty()) {
                 return out;
             }
 
-            for (Map.Entry<String, TransformPredicate> e : masking.entrySet()) {
+            for (Map.Entry<String, Transform> e : masking.entrySet()) {
                 String targetColumn = e.getKey();
-                TransformPredicate predicate = e.getValue();
-                if (targetColumn == null || predicate == null) {
+                Transform transform = e.getValue();
+                if (targetColumn == null || transform == null) {
                     continue;
                 }
 
@@ -151,7 +151,7 @@ public class MaskingTableRead implements TableRead {
                 }
 
                 List<Object> newInputs = new ArrayList<>();
-                for (Object input : predicate.transform().inputs()) {
+                for (Object input : transform.inputs()) {
                     if (input instanceof FieldRef) {
                         FieldRef ref = (FieldRef) input;
                         int newIndex = outputRowType.getFieldIndex(ref.name());
@@ -168,7 +168,7 @@ public class MaskingTableRead implements TableRead {
                         newInputs.add(input);
                     }
                 }
-                out.put(targetIndex, predicate.copyWithNewInputs(newInputs));
+                out.put(targetIndex, transform.copyWithNewInputs(newInputs));
             }
             return out;
         }

@@ -18,12 +18,8 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.And;
-import org.apache.paimon.predicate.CastTransform;
 import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.ConcatTransform;
-import org.apache.paimon.predicate.ConcatWsTransform;
 import org.apache.paimon.predicate.Contains;
 import org.apache.paimon.predicate.EndsWith;
 import org.apache.paimon.predicate.Equal;
@@ -47,7 +43,6 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.StartsWith;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.TransformPredicate;
-import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.types.DataType;
 
@@ -64,12 +59,12 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-/** SerDe for predicate JSON entries. */
+/** SerDe for {@link Predicate} JSON entries. */
 public class PredicateJsonSerde {
 
     private static final ObjectMapper MAPPER = RESTApi.OBJECT_MAPPER;
 
-    private static final String FIELD_FILTER = "filter";
+    private static final String FIELD_PREDICATE = "predicate";
 
     private static final String FIELD_TYPE = "type";
     private static final String TYPE_COMPOUND = "compound";
@@ -81,21 +76,6 @@ public class PredicateJsonSerde {
     private static final String FIELD_TRANSFORM = "transform";
     private static final String FIELD_LITERALS = "literals";
 
-    private static final String TRANSFORM_TYPE_FIELD = "field";
-    private static final String TRANSFORM_TYPE_UPPER = "upper";
-    private static final String TRANSFORM_TYPE_CONCAT = "concat";
-    private static final String TRANSFORM_TYPE_CONCAT_WS = "concat_ws";
-    private static final String TRANSFORM_TYPE_CAST = "cast";
-    private static final String TRANSFORM_TYPE_LITERAL = "literal";
-
-    private static final String FIELD_INPUTS = "inputs";
-    private static final String FIELD_VALUE = "value";
-    private static final String FIELD_TO_DATA_TYPE = "toDataType";
-    private static final String FIELD_FIELD = "field";
-    private static final String FIELD_INDEX = "index";
-    private static final String FIELD_NAME = "name";
-    private static final String FIELD_DATA_TYPE = "dataType";
-
     private PredicateJsonSerde() {}
 
     @Nullable
@@ -105,7 +85,7 @@ public class PredicateJsonSerde {
         }
 
         JsonNode root = MAPPER.readTree(json);
-        JsonNode predicateNode = root.get(FIELD_FILTER);
+        JsonNode predicateNode = root.get(FIELD_PREDICATE);
         if (predicateNode == null || predicateNode.isNull()) {
             return null;
         }
@@ -118,40 +98,12 @@ public class PredicateJsonSerde {
 
     private static String toJsonString(JsonNode predicateObject) {
         ObjectNode root = MAPPER.createObjectNode();
-        root.set(FIELD_FILTER, predicateObject);
+        root.set(FIELD_PREDICATE, predicateObject);
         try {
             return MAPPER.writeValueAsString(root);
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Failed to serialize predicate entry json.", e);
         }
-    }
-
-    private static ObjectNode transformPredicateNode(
-            int index,
-            String name,
-            DataType dataType,
-            String function,
-            @Nullable List<Object> literals) {
-        ObjectNode predicate = MAPPER.createObjectNode();
-        predicate.put(FIELD_TYPE, TYPE_TRANSFORM);
-
-        ObjectNode transform = MAPPER.createObjectNode();
-        transform.put(FIELD_TYPE, TRANSFORM_TYPE_FIELD);
-        transform.put(FIELD_INDEX, index);
-        transform.put(FIELD_NAME, name);
-        transform.set(FIELD_DATA_TYPE, MAPPER.valueToTree(dataType));
-        predicate.set(FIELD_TRANSFORM, transform);
-
-        predicate.put(FIELD_FUNCTION, function);
-
-        ArrayNode lits = MAPPER.createArrayNode();
-        if (literals != null) {
-            for (Object lit : literals) {
-                lits.add(MAPPER.valueToTree(lit));
-            }
-        }
-        predicate.set(FIELD_LITERALS, lits);
-        return predicate;
     }
 
     public static ObjectNode compoundPredicateNode(
@@ -172,12 +124,10 @@ public class PredicateJsonSerde {
     private static JsonNode toJsonNode(Predicate predicate) {
         if (predicate instanceof LeafPredicate) {
             LeafPredicate leaf = (LeafPredicate) predicate;
-            return transformPredicateNode(
-                    leaf.index(),
-                    leaf.fieldName(),
-                    leaf.type(),
-                    leafFunctionName(leaf.function()),
-                    leaf.literals());
+            Transform transform =
+                    new FieldTransform(new FieldRef(leaf.index(), leaf.fieldName(), leaf.type()));
+            return transformPredicateJsonNode(
+                    transform, leafFunctionName(leaf.function()), leaf.literals());
         }
 
         if (predicate instanceof CompoundPredicate) {
@@ -206,7 +156,7 @@ public class PredicateJsonSerde {
             Transform transform, String function, @Nullable List<Object> literals) {
         ObjectNode predicate = MAPPER.createObjectNode();
         predicate.put(FIELD_TYPE, TYPE_TRANSFORM);
-        predicate.set(FIELD_TRANSFORM, transformToJsonNode(transform));
+        predicate.set(FIELD_TRANSFORM, TransformJsonSerde.toJsonNode(transform));
         predicate.put(FIELD_FUNCTION, function);
 
         ArrayNode lits = MAPPER.createArrayNode();
@@ -217,66 +167,6 @@ public class PredicateJsonSerde {
         }
         predicate.set(FIELD_LITERALS, lits);
         return predicate;
-    }
-
-    private static ObjectNode transformToJsonNode(Transform transform) {
-        if (transform instanceof FieldTransform) {
-            return fieldRefToJsonNode(((FieldTransform) transform).fieldRef());
-        }
-
-        if (transform instanceof UpperTransform) {
-            return stringTransformToJsonNode(TRANSFORM_TYPE_UPPER, transform.inputs());
-        }
-        if (transform instanceof ConcatTransform) {
-            return stringTransformToJsonNode(TRANSFORM_TYPE_CONCAT, transform.inputs());
-        }
-        if (transform instanceof ConcatWsTransform) {
-            return stringTransformToJsonNode(TRANSFORM_TYPE_CONCAT_WS, transform.inputs());
-        }
-
-        if (transform instanceof CastTransform) {
-            ObjectNode node = MAPPER.createObjectNode();
-            node.put(FIELD_TYPE, TRANSFORM_TYPE_CAST);
-            FieldRef fieldRef = (FieldRef) transform.inputs().get(0);
-            node.set(FIELD_FIELD, fieldRefToJsonNode(fieldRef));
-            node.set(FIELD_TO_DATA_TYPE, MAPPER.valueToTree(transform.outputType()));
-            return node;
-        }
-
-        throw new IllegalArgumentException(
-                "Unsupported transform type: " + transform.getClass().getName());
-    }
-
-    private static ObjectNode fieldRefToJsonNode(FieldRef fieldRef) {
-        ObjectNode node = MAPPER.createObjectNode();
-        node.put(FIELD_TYPE, TRANSFORM_TYPE_FIELD);
-        node.put(FIELD_INDEX, fieldRef.index());
-        node.put(FIELD_NAME, fieldRef.name());
-        node.set(FIELD_DATA_TYPE, MAPPER.valueToTree(fieldRef.type()));
-        return node;
-    }
-
-    private static ObjectNode stringTransformToJsonNode(String type, List<Object> inputs) {
-        ObjectNode node = MAPPER.createObjectNode();
-        node.put(FIELD_TYPE, type);
-        ArrayNode inputNodes = MAPPER.createArrayNode();
-        for (Object input : inputs) {
-            if (input == null) {
-                inputNodes.addNull();
-            } else if (input instanceof FieldRef) {
-                inputNodes.add(fieldRefToJsonNode((FieldRef) input));
-            } else if (input instanceof BinaryString) {
-                ObjectNode literal = MAPPER.createObjectNode();
-                literal.put(FIELD_TYPE, TRANSFORM_TYPE_LITERAL);
-                literal.put(FIELD_VALUE, ((BinaryString) input).toString());
-                inputNodes.add(literal);
-            } else {
-                throw new IllegalArgumentException(
-                        "Unsupported transform input type: " + input.getClass().getName());
-            }
-        }
-        node.set(FIELD_INPUTS, inputNodes);
-        return node;
     }
 
     private static String leafFunctionName(LeafFunction function) {
@@ -332,7 +222,8 @@ public class PredicateJsonSerde {
         }
 
         if (TYPE_TRANSFORM.equals(type)) {
-            Transform transform = parseTransform(required(node, FIELD_TRANSFORM));
+            Transform transform =
+                    TransformJsonSerde.parseTransformNode(required(node, FIELD_TRANSFORM));
             LeafFunction fn = parseLeafFunction(requiredText(node, FIELD_FUNCTION));
 
             List<Object> literals = new ArrayList<>();
@@ -349,76 +240,6 @@ public class PredicateJsonSerde {
         }
 
         throw new IllegalArgumentException("Unsupported predicate type: " + type);
-    }
-
-    private static Transform parseTransform(JsonNode node) {
-        String type = requiredText(node, FIELD_TYPE);
-        if (TRANSFORM_TYPE_FIELD.equals(type)) {
-            int index = required(node, FIELD_INDEX).asInt();
-            String name = requiredText(node, FIELD_NAME);
-            DataType dataType =
-                    MAPPER.convertValue(required(node, FIELD_DATA_TYPE), DataType.class);
-            return new FieldTransform(new FieldRef(index, name, dataType));
-        }
-        if (TRANSFORM_TYPE_UPPER.equals(type)
-                || TRANSFORM_TYPE_CONCAT.equals(type)
-                || TRANSFORM_TYPE_CONCAT_WS.equals(type)) {
-            List<Object> inputs = parseTransformInputs(required(node, FIELD_INPUTS));
-            if (TRANSFORM_TYPE_UPPER.equals(type)) {
-                return new UpperTransform(inputs);
-            } else if (TRANSFORM_TYPE_CONCAT_WS.equals(type)) {
-                return new ConcatWsTransform(inputs);
-            } else {
-                return new ConcatTransform(inputs);
-            }
-        }
-        if (TRANSFORM_TYPE_CAST.equals(type)) {
-            FieldRef fieldRef = parseFieldRef(required(node, FIELD_FIELD));
-            DataType toType =
-                    MAPPER.convertValue(required(node, FIELD_TO_DATA_TYPE), DataType.class);
-            return CastTransform.tryCreate(fieldRef, toType)
-                    .orElseThrow(
-                            () ->
-                                    new IllegalArgumentException(
-                                            "Unsupported CAST transform from "
-                                                    + fieldRef.type()
-                                                    + " to "
-                                                    + toType));
-        }
-        throw new IllegalArgumentException("Unsupported transform type: " + type);
-    }
-
-    private static List<Object> parseTransformInputs(JsonNode node) {
-        List<Object> inputs = new ArrayList<>();
-        if (!(node instanceof ArrayNode)) {
-            throw new IllegalArgumentException("Transform inputs must be an array.");
-        }
-        for (JsonNode inputNode : (ArrayNode) node) {
-            if (inputNode == null || inputNode.isNull()) {
-                inputs.add(null);
-                continue;
-            }
-            if (inputNode.isTextual()) {
-                inputs.add(BinaryString.fromString(inputNode.asText()));
-                continue;
-            }
-            String type = requiredText(inputNode, FIELD_TYPE);
-            if (TRANSFORM_TYPE_FIELD.equals(type)) {
-                inputs.add(parseFieldRef(inputNode));
-            } else if (TRANSFORM_TYPE_LITERAL.equals(type)) {
-                inputs.add(BinaryString.fromString(requiredText(inputNode, FIELD_VALUE)));
-            } else {
-                throw new IllegalArgumentException("Unsupported transform input type: " + type);
-            }
-        }
-        return inputs;
-    }
-
-    private static FieldRef parseFieldRef(JsonNode node) {
-        int index = required(node, FIELD_INDEX).asInt();
-        String name = requiredText(node, FIELD_NAME);
-        DataType dataType = MAPPER.convertValue(required(node, FIELD_DATA_TYPE), DataType.class);
-        return new FieldRef(index, name, dataType);
     }
 
     private static LeafFunction parseLeafFunction(String function) {

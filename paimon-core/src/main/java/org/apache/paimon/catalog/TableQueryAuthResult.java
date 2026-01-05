@@ -19,7 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.predicate.Transform;
 
 import javax.annotation.Nullable;
 
@@ -30,10 +30,10 @@ import java.util.Map;
 public class TableQueryAuthResult {
 
     @Nullable private final Predicate rowFilter;
-    private final Map<String, TransformPredicate> columnMasking;
+    private final Map<String, Transform> columnMasking;
 
     public TableQueryAuthResult(
-            @Nullable Predicate rowFilter, Map<String, TransformPredicate> columnMasking) {
+            @Nullable Predicate rowFilter, Map<String, Transform> columnMasking) {
         this.rowFilter = rowFilter;
         this.columnMasking = columnMasking == null ? Collections.emptyMap() : columnMasking;
     }
@@ -47,7 +47,7 @@ public class TableQueryAuthResult {
         return rowFilter;
     }
 
-    public Map<String, TransformPredicate> columnMasking() {
+    public Map<String, Transform> columnMasking() {
         return columnMasking;
     }
 }

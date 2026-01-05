@@ -41,7 +41,7 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -66,6 +66,7 @@ import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PredicateJsonSerde;
 import org.apache.paimon.utils.SnapshotNotExistException;
+import org.apache.paimon.utils.TransformJsonSerde;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
@@ -559,7 +560,7 @@ public class RESTCatalog implements Catalog {
                 }
             }
 
-            Map<String, TransformPredicate> columnMasking = new TreeMap<>();
+            Map<String, Transform> columnMasking = new TreeMap<>();
             Map<String, String> maskingJsons = response == null ? null : response.columnMasking();
             if (maskingJsons != null && !maskingJsons.isEmpty()) {
                 for (Map.Entry<String, String> e : maskingJsons.entrySet()) {
@@ -571,18 +572,10 @@ public class RESTCatalog implements Catalog {
                             || json.trim().isEmpty()) {
                         continue;
                     }
-                    Predicate predicate = PredicateJsonSerde.parse(json);
-                    if (predicate == null) {
-                        continue;
+                    Transform transform = TransformJsonSerde.parse(json);
+                    if (transform != null) {
+                        columnMasking.put(column, transform);
                     }
-                    if (!(predicate instanceof TransformPredicate)) {
-                        throw new IllegalArgumentException(
-                                "Column masking must be a TransformPredicate, but got "
-                                        + predicate.getClass().getName()
-                                        + " for column "
-                                        + column);
-                    }
-                    columnMasking.put(column, (TransformPredicate) predicate);
                 }
             }
 

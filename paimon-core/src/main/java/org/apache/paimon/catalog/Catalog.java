@@ -1032,12 +1032,12 @@ public interface Catalog extends AutoCloseable {
     // ==================== Table Auth ==========================
 
     /**
-     * Auth table query select and get the row-level filter and column masking rules.
+     * Auth table query select and get the filter for row level access control and column masking
+     * rules.
      *
      * @param identifier path of the table to alter partitions
      * @param select selected fields, null if select all
-     * @return auth result including additional filter for row level access control and column
-     *     masking
+     * @return additional filter for row level access control and column masking
      * @throws TableNotExistException if the table does not exist
      */
     TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)

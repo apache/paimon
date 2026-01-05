@@ -41,6 +41,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.partition.PartitionUtils;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
@@ -102,6 +103,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TimeUtils;
+import org.apache.paimon.utils.TransformJsonSerde;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
@@ -272,8 +274,19 @@ public class RESTCatalogServer {
         rowFilterAuthHandler.put(identifier.getFullName(), Collections.singletonList(filter));
     }
 
-    public void addTableColumnMasking(Identifier identifier, Map<String, String> columnMasking) {
-        columnMaskingAuthHandler.put(identifier.getFullName(), columnMasking);
+    public void addTableColumnMasking(Identifier identifier, Map<String, Transform> columnMasking) {
+        Map<String, String> serialized = new HashMap<>();
+        if (columnMasking != null) {
+            for (Map.Entry<String, Transform> e : columnMasking.entrySet()) {
+                String column = e.getKey();
+                Transform transform = e.getValue();
+                if (column == null || transform == null) {
+                    continue;
+                }
+                serialized.put(column, TransformJsonSerde.toJsonString(transform));
+            }
+        }
+        columnMaskingAuthHandler.put(identifier.getFullName(), serialized);
     }
 
     public RESTToken getDataToken(Identifier identifier) {

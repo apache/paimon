@@ -672,7 +672,7 @@ public class RESTApi {
      *
      * @param identifier database name and table name.
      * @param select select columns, null if select all
-     * @return auth result including additional row-level filter and optional column masking
+     * @return additional row-level filter and column masking
      * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
