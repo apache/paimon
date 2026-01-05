@@ -106,8 +106,6 @@ def _handle_drop_column(change: DropColumn, new_fields: List[DataField]):
 
 def _assert_not_updating_partition_keys(
         schema: 'TableSchema', field_names: List[str], operation: str):
-    """Assert that the operation is not updating partition keys."""
-    # partition keys can't be nested columns
     if len(field_names) > 1:
         return
     field_name = field_names[0]
