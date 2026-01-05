@@ -56,10 +56,6 @@ public class LeafPredicate extends TransformPredicate {
         super(fieldTransform, function, literals);
     }
 
-    public LeafFunction function() {
-        return function;
-    }
-
     public DataType type() {
         return fieldRef().type();
     }
@@ -78,10 +74,6 @@ public class LeafPredicate extends TransformPredicate {
 
     public FieldRef fieldRef() {
         return ((FieldTransform) transform).fieldRef();
-    }
-
-    public List<Object> literals() {
-        return literals;
     }
 
     public LeafPredicate copyWithNewIndex(int fieldIndex) {
