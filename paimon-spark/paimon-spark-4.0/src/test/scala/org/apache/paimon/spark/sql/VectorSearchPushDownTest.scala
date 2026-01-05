@@ -18,13 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase}
-
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
-import org.apache.spark.sql.streaming.StreamTest
-
-import scala.collection.JavaConverters._
+import org.apache.paimon.spark.PaimonScan
 
 /** Tests for vector search push down to Paimon's global vector index. */
 class VectorSearchPushDownTest extends BaseVectorSearchPushDownTest {
@@ -58,7 +52,7 @@ class VectorSearchPushDownTest extends BaseVectorSearchPushDownTest {
         .sql("""
                |SELECT id
                |FROM T
-               |ORDER BY sys.cosine_similarity(v, array(50.0, 51.0, 52.0)) DESC
+               |ORDER BY sys.cosine_similarity(v, array(50.0f, 51.0f, 52.0f)) DESC
                |LIMIT 5
                |""".stripMargin)
         .collect()
@@ -82,30 +76,38 @@ class VectorSearchPushDownTest extends BaseVectorSearchPushDownTest {
                   |  'data-evolution.enabled' = 'true')
                   |""".stripMargin)
 
-      val values = (0 until 100)
+      val values = (0 until 10)
         .map(
           i => s"($i, array(cast($i as float), cast(${i + 1} as float), cast(${i + 2} as float)))")
         .mkString(",")
       spark.sql(s"INSERT INTO T VALUES $values")
 
       // Create vector index
-      spark.sql(
-        "CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => 'lucene-vector-knn', options => 'vector.dim=3')")
+      val indexResult = spark
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => 'lucene-vector-knn', options => 'vector.dim=3')")
+        .collect()
+      println(s"Index creation result: ${indexResult.mkString(", ")}")
+
+      // Refresh table metadata to ensure index is visible
+      spark.sql("REFRESH TABLE T")
 
       // Check that vector search is pushed down in the optimized plan
       val df = spark.sql("""
                            |SELECT id
                            |FROM T
-                           |ORDER BY sys.cosine_similarity(v, array(50.0, 51.0, 52.0)) DESC
+                           |ORDER BY sys.cosine_similarity(v, array(50.0f, 51.0f, 52.0f)) DESC
                            |LIMIT 5
                            |""".stripMargin)
 
-      val optimizedPlan = df.queryExecution.optimizedPlan
-      val scanRelations = optimizedPlan.collect { case r: DataSourceV2ScanRelation => r }
+      // Get the scan from the executed plan (physical plan)
+      val executedPlan = df.queryExecution.executedPlan
+      val batchScans = executedPlan.collect {
+        case scan: org.apache.spark.sql.execution.datasources.v2.BatchScanExec => scan
+      }
 
-      assert(scanRelations.nonEmpty, "Should have a DataSourceV2ScanRelation")
-      val paimonScans = scanRelations.filter(_.scan.isInstanceOf[PaimonScan])
-      assert(paimonScans.nonEmpty, "Should have a PaimonScan")
+      assert(batchScans.nonEmpty, "Should have a BatchScanExec in executed plan")
+      val paimonScans = batchScans.filter(_.scan.isInstanceOf[PaimonScan])
+      assert(paimonScans.nonEmpty, "Should have a PaimonScan in executed plan")
 
       val paimonScan = paimonScans.head.scan.asInstanceOf[PaimonScan]
       assert(paimonScan.pushedVectorSearch.isDefined, "Vector search should be pushed down")
@@ -145,9 +147,9 @@ class VectorSearchPushDownTest extends BaseVectorSearchPushDownTest {
       // Since all vectors point in the same direction (1,1,1), they should all have similarity ~1.0
       val result = spark
         .sql("""
-               |SELECT id, sys.cosine_similarity(v, array(0.577, 0.577, 0.577)) as sim
+               |SELECT id, sys.cosine_similarity(v, array(0.577f, 0.577f, 0.577f)) as sim
                |FROM T
-               |ORDER BY sys.cosine_similarity(v, array(0.577, 0.577, 0.577)) DESC
+               |ORDER BY sys.cosine_similarity(v, array(0.577f, 0.577f, 0.577f)) DESC
                |LIMIT 10
                |""".stripMargin)
         .collect()

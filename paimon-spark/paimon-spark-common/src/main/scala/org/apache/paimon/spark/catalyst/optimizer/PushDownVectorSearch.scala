@@ -20,14 +20,14 @@ package org.apache.paimon.spark.catalyst.optimizer
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate.VectorSearch
-import org.apache.paimon.spark.PaimonScan
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.{FileStoreTable, InnerTable, VectorSearchTable}
 
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.{ArrayType, FloatType}
 
 /**
@@ -44,36 +44,70 @@ object PushDownVectorSearch extends Rule[LogicalPlan] {
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.transformDown {
-      // Pattern: GlobalLimit -> LocalLimit -> Sort -> Project -> DataSourceV2ScanRelation
+      // Pattern: GlobalLimit -> LocalLimit -> Project -> Sort -> DataSourceV2Relation
+      case globalLimit @ GlobalLimit(limitExpr, LocalLimit(_, project: Project))
+          if isProjectWithSortAndPaimonRelation(project) =>
+        handleProjectWithSort(globalLimit, limitExpr, project)
+
+      // Pattern: GlobalLimit -> LocalLimit -> Sort -> Project -> DataSourceV2Relation
       case globalLimit @ GlobalLimit(limitExpr, LocalLimit(_, sort: Sort))
-          if isSortWithProjectAndPaimonScan(sort) =>
+          if isSortWithProjectAndPaimonRelation(sort) =>
         handleSortWithProject(globalLimit, limitExpr, sort)
 
-      // Pattern: GlobalLimit -> LocalLimit -> Sort -> DataSourceV2ScanRelation (no project)
+      // Pattern: GlobalLimit -> LocalLimit -> Sort -> DataSourceV2Relation (no project)
       case globalLimit @ GlobalLimit(limitExpr, LocalLimit(_, sort: Sort))
-          if isSortWithPaimonScan(sort) =>
+          if isSortWithPaimonRelation(sort) =>
         handleSortWithoutProject(globalLimit, limitExpr, sort)
     }
   }
 
-  private def isSortWithProjectAndPaimonScan(sort: Sort): Boolean = {
-    if (!sort.global) return false
-    sort.child match {
-      case Project(_, relation) =>
-        isPaimonScanRelation(relation) &&
-        canPushVectorSearch(getPaimonScan(relation)) &&
+  private def isProjectWithSortAndPaimonRelation(project: Project): Boolean = {
+    project.child match {
+      case sort: Sort if sort.global =>
+        isPaimonRelation(sort.child) &&
+        canPushVectorSearch(sort.child) &&
         isVectorSearchPattern(sort.order)
       case _ => false
     }
   }
 
-  private def isSortWithPaimonScan(sort: Sort): Boolean = {
+  private def isSortWithProjectAndPaimonRelation(sort: Sort): Boolean = {
     if (!sort.global) return false
     sort.child match {
-      case _: Project => false // handled by isSortWithProjectAndPaimonScan
-      case relation if isPaimonScanRelation(relation) =>
-        canPushVectorSearch(getPaimonScan(relation)) && isVectorSearchPattern(sort.order)
+      case Project(_, relation) =>
+        isPaimonRelation(relation) &&
+        canPushVectorSearch(relation) &&
+        isVectorSearchPattern(sort.order)
       case _ => false
+    }
+  }
+
+  private def isSortWithPaimonRelation(sort: Sort): Boolean = {
+    if (!sort.global) return false
+    sort.child match {
+      case _: Project => false // handled by isSortWithProjectAndPaimonRelation
+      case relation if isPaimonRelation(relation) =>
+        canPushVectorSearch(relation) && isVectorSearchPattern(sort.order)
+      case _ => false
+    }
+  }
+
+  private def handleProjectWithSort(
+      globalLimit: GlobalLimit,
+      limitExpr: Expression,
+      project: Project): LogicalPlan = {
+    val sort = project.child.asInstanceOf[Sort]
+    val relation = sort.child.asInstanceOf[DataSourceV2Relation]
+    val limit = extractLimit(limitExpr)
+
+    extractVectorSearchInfo(sort.order, project.projectList, relation) match {
+      case Some((fieldName, queryVector)) if limit.isDefined =>
+        val vectorSearch = new VectorSearch(queryVector, limit.get, fieldName)
+        val newRelation = wrapWithVectorSearchTable(relation, vectorSearch)
+        val newSort = sort.copy(child = newRelation)
+        val newProject = project.copy(child = newSort)
+        globalLimit.copy(child = LocalLimit(limitExpr, newProject))
+      case _ => globalLimit
     }
   }
 
@@ -82,15 +116,13 @@ object PushDownVectorSearch extends Rule[LogicalPlan] {
       limitExpr: Expression,
       sort: Sort): LogicalPlan = {
     val project = sort.child.asInstanceOf[Project]
-    val relation = project.child.asInstanceOf[DataSourceV2ScanRelation]
-    val scan = relation.scan.asInstanceOf[PaimonScan]
+    val relation = project.child.asInstanceOf[DataSourceV2Relation]
     val limit = extractLimit(limitExpr)
 
     extractVectorSearchInfo(sort.order, project.projectList, relation) match {
       case Some((fieldName, queryVector)) if limit.isDefined =>
         val vectorSearch = new VectorSearch(queryVector, limit.get, fieldName)
-        val newScan = scan.copy(pushedVectorSearch = Some(vectorSearch))
-        val newRelation = copyRelationWithNewScan(relation, newScan)
+        val newRelation = wrapWithVectorSearchTable(relation, vectorSearch)
         val newProject = project.copy(child = newRelation)
         val newSort = sort.copy(child = newProject)
         globalLimit.copy(child = LocalLimit(limitExpr, newSort))
@@ -102,49 +134,53 @@ object PushDownVectorSearch extends Rule[LogicalPlan] {
       globalLimit: GlobalLimit,
       limitExpr: Expression,
       sort: Sort): LogicalPlan = {
-    val relation = sort.child.asInstanceOf[DataSourceV2ScanRelation]
-    val scan = relation.scan.asInstanceOf[PaimonScan]
+    val relation = sort.child.asInstanceOf[DataSourceV2Relation]
     val limit = extractLimit(limitExpr)
 
     extractVectorSearchInfoDirect(sort.order, relation) match {
       case Some((fieldName, queryVector)) if limit.isDefined =>
         val vectorSearch = new VectorSearch(queryVector, limit.get, fieldName)
-        val newScan = scan.copy(pushedVectorSearch = Some(vectorSearch))
-        val newRelation = copyRelationWithNewScan(relation, newScan)
+        val newRelation = wrapWithVectorSearchTable(relation, vectorSearch)
         val newSort = sort.copy(child = newRelation)
         globalLimit.copy(child = LocalLimit(limitExpr, newSort))
       case _ => globalLimit
     }
   }
 
-  private def isPaimonScanRelation(plan: LogicalPlan): Boolean = {
+  private def isPaimonRelation(plan: LogicalPlan): Boolean = {
     plan match {
-      case r: DataSourceV2ScanRelation => r.scan.isInstanceOf[PaimonScan]
+      case r: DataSourceV2Relation => r.table.isInstanceOf[SparkTable]
       case _ => false
     }
   }
 
-  private def getPaimonScan(plan: LogicalPlan): PaimonScan = {
-    plan.asInstanceOf[DataSourceV2ScanRelation].scan.asInstanceOf[PaimonScan]
-  }
-
-  private def copyRelationWithNewScan(
-      relation: DataSourceV2ScanRelation,
-      newScan: PaimonScan): DataSourceV2ScanRelation = {
-    relation.copy(scan = newScan)
-  }
-
-  private def canPushVectorSearch(scan: PaimonScan): Boolean = {
-    // Already has vector search pushed, don't do it again
-    if (scan.pushedVectorSearch.isDefined) {
-      return false
+  private def wrapWithVectorSearchTable(
+      relation: DataSourceV2Relation,
+      vectorSearch: VectorSearch): DataSourceV2Relation = {
+    relation.table match {
+      case sparkTable @ SparkTable(table: InnerTable) =>
+        val vectorSearchTable = VectorSearchTable.create(table, vectorSearch)
+        relation.copy(table = sparkTable.copy(table = vectorSearchTable))
+      case _ => relation
     }
+  }
 
-    scan.table match {
-      case fileStoreTable: FileStoreTable =>
-        val options = CoreOptions.fromMap(fileStoreTable.options())
-        options.dataEvolutionEnabled() && options.rowTrackingEnabled() && options
-          .globalIndexEnabled()
+  private def canPushVectorSearch(plan: LogicalPlan): Boolean = {
+    plan match {
+      case relation: DataSourceV2Relation =>
+        relation.table match {
+          case SparkTable(table: InnerTable) =>
+            // Check if table is already wrapped with VectorSearchTable
+            table match {
+              case _: VectorSearchTable => false // Already wrapped
+              case fileStoreTable: FileStoreTable =>
+                val options = CoreOptions.fromMap(fileStoreTable.options())
+                options.dataEvolutionEnabled() && options.rowTrackingEnabled() && options
+                  .globalIndexEnabled()
+              case _ => false
+            }
+          case _ => false
+        }
       case _ => false
     }
   }
@@ -179,7 +215,7 @@ object PushDownVectorSearch extends Rule[LogicalPlan] {
   private def extractVectorSearchInfo(
       sortOrders: Seq[SortOrder],
       projectList: Seq[NamedExpression],
-      relation: DataSourceV2ScanRelation): Option[(String, Array[Float])] = {
+      relation: DataSourceV2Relation): Option[(String, Array[Float])] = {
     sortOrders.headOption.flatMap {
       sortOrder => extractFromExpression(sortOrder.child, projectList, relation)
     }
@@ -187,7 +223,7 @@ object PushDownVectorSearch extends Rule[LogicalPlan] {
 
   private def extractVectorSearchInfoDirect(
       sortOrders: Seq[SortOrder],
-      relation: DataSourceV2ScanRelation): Option[(String, Array[Float])] = {
+      relation: DataSourceV2Relation): Option[(String, Array[Float])] = {
     sortOrders.headOption.flatMap {
       sortOrder => extractFromExpression(sortOrder.child, Seq.empty, relation)
     }
@@ -196,7 +232,7 @@ object PushDownVectorSearch extends Rule[LogicalPlan] {
   private def extractFromExpression(
       expr: Expression,
       projectList: Seq[NamedExpression],
-      relation: DataSourceV2ScanRelation): Option[(String, Array[Float])] = {
+      relation: DataSourceV2Relation): Option[(String, Array[Float])] = {
     expr match {
       case ApplyFunctionExpression(func, args)
           if func.name() == PaimonFunctions.COSINE_SIMILARITY &&
@@ -210,7 +246,7 @@ object PushDownVectorSearch extends Rule[LogicalPlan] {
   private def extractFromArgs(
       args: Seq[Expression],
       projectList: Seq[NamedExpression],
-      relation: DataSourceV2ScanRelation): Option[(String, Array[Float])] = {
+      relation: DataSourceV2Relation): Option[(String, Array[Float])] = {
     if (args.size != 2) {
       return None
     }
@@ -233,7 +269,7 @@ object PushDownVectorSearch extends Rule[LogicalPlan] {
   private def extractFieldName(
       expr: Expression,
       projectList: Seq[NamedExpression],
-      relation: DataSourceV2ScanRelation): Option[String] = {
+      relation: DataSourceV2Relation): Option[String] = {
     expr match {
       case attr: AttributeReference =>
         // Try to find in project list first

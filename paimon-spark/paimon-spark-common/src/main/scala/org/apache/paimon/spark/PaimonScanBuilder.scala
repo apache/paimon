@@ -128,14 +128,20 @@ class PaimonScanBuilder(val table: InnerTable)
     localScan match {
       case Some(scan) => scan
       case None =>
+        val (actualTable, vectorSearch) = table match {
+          case vst: org.apache.paimon.table.VectorSearchTable =>
+            (vst.origin(), Some(vst.vectorSearch()))
+          case _ => (table, pushedVectorSearch)
+        }
+
         PaimonScan(
-          table,
+          actualTable,
           requiredSchema,
           pushedPartitionFilters,
           pushedDataFilters,
           pushedLimit,
           pushedTopN,
-          pushedVectorSearch)
+          vectorSearch)
     }
   }
 }
