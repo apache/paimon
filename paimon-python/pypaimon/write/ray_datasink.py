@@ -34,11 +34,14 @@ class PaimonDatasink(Datasink):
         self.table = table
         self.overwrite = overwrite
 
-    def on_write_start(self) -> None:
+    def on_write_start(self, schema=None) -> None:
         """Callback for when a write job starts.
 
         Use this method to perform setup for write tasks. For example, creating a
         staging bucket in S3.
+
+        Args:
+            schema: Optional schema information passed by Ray Data.
         """
         self.writer_builder: WriteBuilder = self.table.new_batch_write_builder()
         if self.overwrite:
@@ -86,4 +89,3 @@ class PaimonDatasink(Datasink):
             for commit_message in commit_messages
         ])
         table_commit.close()
-    
