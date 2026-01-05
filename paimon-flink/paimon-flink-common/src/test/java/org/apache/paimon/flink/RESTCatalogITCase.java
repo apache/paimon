@@ -19,9 +19,12 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.predicate.ConcatTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.rest.RESTToken;
 import org.apache.paimon.types.DataTypes;
@@ -112,6 +115,30 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
 
         assertThat(batchSql(String.format("SELECT col1 FROM %s.%s", DATABASE_NAME, rowFilterTable)))
                 .containsExactlyInAnyOrder(Row.of(3), Row.of(4));
+    }
+
+    @Test
+    public void testColumnMasking() {
+        String maskingTable = "column_masking_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (id INT, secret STRING) WITH ('query-auth.enabled' = 'true')",
+                        DATABASE_NAME, maskingTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1, 's1'), (2, 's2')",
+                        DATABASE_NAME, maskingTable));
+
+        Transform maskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
+        restCatalogServer.addTableColumnMasking(
+                Identifier.create(DATABASE_NAME, maskingTable),
+                ImmutableMap.of("secret", maskTransform));
+
+        assertThat(batchSql(String.format("SELECT secret FROM %s.%s", DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("****"), Row.of("****"));
+        assertThat(batchSql(String.format("SELECT id FROM %s.%s", DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of(1), Row.of(2));
     }
 
     @Test

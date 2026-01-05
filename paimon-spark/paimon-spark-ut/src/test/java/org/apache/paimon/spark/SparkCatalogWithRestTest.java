@@ -20,14 +20,17 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.predicate.ConcatTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogServer;
@@ -262,6 +265,25 @@ public class SparkCatalogWithRestTest {
 
         assertThat(spark.sql("SELECT col1 FROM t_row_filter").collectAsList().toString())
                 .isEqualTo("[[3], [4]]");
+    }
+
+    @Test
+    public void testColumnMasking() {
+        spark.sql(
+                "CREATE TABLE t_column_masking (id INT, secret STRING) TBLPROPERTIES"
+                        + " ('bucket'='1', 'bucket-key'='id', 'file.format'='avro', 'query-auth.enabled'='true')");
+        spark.sql("INSERT INTO t_column_masking VALUES (1, 's1'), (2, 's2')");
+
+        Transform maskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
+        restCatalogServer.addTableColumnMasking(
+                Identifier.create("db2", "t_column_masking"),
+                ImmutableMap.of("secret", maskTransform));
+
+        assertThat(spark.sql("SELECT secret FROM t_column_masking").collectAsList().toString())
+                .isEqualTo("[[****], [****]]");
+        assertThat(spark.sql("SELECT id FROM t_column_masking").collectAsList().toString())
+                .isEqualTo("[[1], [2]]");
     }
 
     private Catalog getPaimonCatalog() {
