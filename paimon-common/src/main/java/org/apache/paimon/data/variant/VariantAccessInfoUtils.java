@@ -113,7 +113,9 @@ public class VariantAccessInfoUtils {
         if (!fieldsToRead.isEmpty()) {
             shreddingSchemaFields.add(shreddingSchema.getField(VARIANT_VALUE_FIELD_NAME));
         }
-        shreddingSchemaFields.add(typedValue.newType(new RowType(typedFieldsToRead)));
+        if (!typedFieldsToRead.isEmpty()) {
+            shreddingSchemaFields.add(typedValue.newType(new RowType(typedFieldsToRead)));
+        }
         return new RowType(shreddingSchemaFields);
     }
 }
