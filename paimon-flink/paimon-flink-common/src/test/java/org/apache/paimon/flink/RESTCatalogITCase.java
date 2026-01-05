@@ -19,6 +19,10 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.rest.RESTToken;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.PredicateJsonSerde;
@@ -97,10 +101,14 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         DATABASE_NAME, rowFilterTable));
 
         // Only allow rows with col1 > 2
+        TransformPredicate rowFilterPredicate =
+                TransformPredicate.of(
+                        new FieldTransform(new FieldRef(0, "col1", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(2));
         restCatalogServer.addTableFilter(
                 Identifier.create(DATABASE_NAME, rowFilterTable),
-                PredicateJsonSerde.transformPredicateEntryJson(
-                        0, "col1", DataTypes.INT(), "GREATER_THAN", Collections.singletonList(2)));
+                PredicateJsonSerde.toJsonString(rowFilterPredicate));
 
         assertThat(batchSql(String.format("SELECT col1 FROM %s.%s", DATABASE_NAME, rowFilterTable)))
                 .containsExactlyInAnyOrder(Row.of(3), Row.of(4));

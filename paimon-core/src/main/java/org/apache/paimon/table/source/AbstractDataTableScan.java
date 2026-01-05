@@ -169,7 +169,9 @@ abstract class AbstractDataTableScan implements DataTableScan {
         if (!options.queryAuthEnabled()) {
             return;
         }
-        Predicate rowFilter = queryAuth.auth(readType == null ? null : readType.getFieldNames());
+        org.apache.paimon.catalog.TableQueryAuthResult authResult =
+                queryAuth.auth(readType == null ? null : readType.getFieldNames());
+        Predicate rowFilter = authResult == null ? null : authResult.rowFilter();
         if (rowFilter != null) {
             snapshotReader.withFilter(rowFilter);
         }

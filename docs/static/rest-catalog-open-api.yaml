@@ -2924,6 +2924,11 @@ components:
           description: Additional row-level filter as JSON strings. Each element should be a JSON object containing a 'filter' field.
           items:
             type: string
+        columnMasking:
+          type: object
+          description: Column masking rules as a map from column name to predicate entry JSON string (TransformPredicate).
+          additionalProperties:
+            type: string
     AlterDatabaseRequest:
       type: object
       properties:

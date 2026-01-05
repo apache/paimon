@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.CatalogSnapshotCommit;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.tag.SnapshotLoaderImpl;
@@ -155,7 +156,7 @@ public class CatalogEnvironment implements Serializable {
 
     public TableQueryAuth tableQueryAuth(CoreOptions options) {
         if (!options.queryAuthEnabled() || catalogLoader == null) {
-            return select -> null;
+            return select -> TableQueryAuthResult.empty();
         }
         final CatalogLoader loader = checkNotNull(catalogLoader);
         return select -> {

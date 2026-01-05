@@ -186,6 +186,7 @@ public class RESTCatalogServer {
     private final Map<String, Function> functionStore = new HashMap<>();
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
     private final Map<String, List<String>> rowFilterAuthHandler = new HashMap<>();
+    private final Map<String, Map<String, String>> columnMaskingAuthHandler = new HashMap<>();
     public final ConfigResponse configResponse;
     public final String warehouse;
 
@@ -269,6 +270,10 @@ public class RESTCatalogServer {
 
     public void addTableFilter(Identifier identifier, String filter) {
         rowFilterAuthHandler.put(identifier.getFullName(), Collections.singletonList(filter));
+    }
+
+    public void addTableColumnMasking(Identifier identifier, Map<String, String> columnMasking) {
+        columnMaskingAuthHandler.put(identifier.getFullName(), columnMasking);
     }
 
     public RESTToken getDataToken(Identifier identifier) {
@@ -835,7 +840,22 @@ public class RESTCatalogServer {
                     });
         }
         List<String> predicates = rowFilterAuthHandler.get(identifier.getFullName());
-        AuthTableQueryResponse response = new AuthTableQueryResponse(predicates);
+        Map<String, String> columnMasking = columnMaskingAuthHandler.get(identifier.getFullName());
+        if (columnMasking != null) {
+            List<String> select = requestBody.select();
+            if (select == null) {
+                select = metadata.schema().fieldNames();
+            }
+            Map<String, String> filtered = new HashMap<>();
+            for (String column : select) {
+                String mask = columnMasking.get(column);
+                if (mask != null) {
+                    filtered.put(column, mask);
+                }
+            }
+            columnMasking = filtered;
+        }
+        AuthTableQueryResponse response = new AuthTableQueryResponse(predicates, columnMasking);
         return mockResponse(response, 200);
     }
 

@@ -25,6 +25,10 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogServer;
 import org.apache.paimon.rest.auth.AuthProvider;
@@ -247,10 +251,14 @@ public class SparkCatalogWithRestTest {
         spark.sql("INSERT INTO t_row_filter VALUES (1), (2), (3), (4)");
 
         // Only allow rows with col1 > 2
+        TransformPredicate rowFilterPredicate =
+                TransformPredicate.of(
+                        new FieldTransform(new FieldRef(0, "col1", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(2));
         restCatalogServer.addTableFilter(
                 Identifier.create("db2", "t_row_filter"),
-                PredicateJsonSerde.transformPredicateEntryJson(
-                        0, "col1", DataTypes.INT(), "GREATER_THAN", Collections.singletonList(2)));
+                PredicateJsonSerde.toJsonString(rowFilterPredicate));
 
         assertThat(spark.sql("SELECT col1 FROM t_row_filter").collectAsList().toString())
                 .isEqualTo("[[3], [4]]");

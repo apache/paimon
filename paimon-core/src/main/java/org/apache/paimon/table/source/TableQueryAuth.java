@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 
 import javax.annotation.Nullable;
 
@@ -28,5 +28,5 @@ import java.util.List;
 public interface TableQueryAuth {
 
     @Nullable
-    Predicate auth(@Nullable List<String> select);
+    TableQueryAuthResult auth(@Nullable List<String> select);
 }

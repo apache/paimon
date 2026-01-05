@@ -30,6 +30,7 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.Function;
@@ -40,6 +41,7 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -84,6 +86,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BRANCH;
@@ -529,33 +532,61 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public Predicate authTableQuery(Identifier identifier, @Nullable List<String> select)
+    public TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "authTable");
         try {
-            List<String> predicateJsons = api.authTableQuery(identifier, select);
-            if (predicateJsons == null || predicateJsons.isEmpty()) {
-                return null;
+            org.apache.paimon.rest.responses.AuthTableQueryResponse response =
+                    api.authTableQuery(identifier, select);
+
+            List<String> predicateJsons = response == null ? null : response.filter();
+            Predicate rowFilter = null;
+            if (predicateJsons != null && !predicateJsons.isEmpty()) {
+                List<Predicate> predicates = new ArrayList<>();
+                for (String json : predicateJsons) {
+                    if (json == null || json.trim().isEmpty()) {
+                        continue;
+                    }
+                    Predicate predicate = PredicateJsonSerde.parse(json);
+                    if (predicate != null) {
+                        predicates.add(predicate);
+                    }
+                }
+                if (predicates.size() == 1) {
+                    rowFilter = predicates.get(0);
+                } else if (!predicates.isEmpty()) {
+                    rowFilter = new CompoundPredicate(And.INSTANCE, predicates);
+                }
             }
 
-            List<Predicate> predicates = new ArrayList<>();
-            for (String json : predicateJsons) {
-                if (json == null || json.trim().isEmpty()) {
-                    continue;
-                }
-                Predicate predicate = PredicateJsonSerde.parse(json);
-                if (predicate != null) {
-                    predicates.add(predicate);
+            Map<String, TransformPredicate> columnMasking = new TreeMap<>();
+            Map<String, String> maskingJsons = response == null ? null : response.columnMasking();
+            if (maskingJsons != null && !maskingJsons.isEmpty()) {
+                for (Map.Entry<String, String> e : maskingJsons.entrySet()) {
+                    String column = e.getKey();
+                    String json = e.getValue();
+                    if (column == null
+                            || column.trim().isEmpty()
+                            || json == null
+                            || json.trim().isEmpty()) {
+                        continue;
+                    }
+                    Predicate predicate = PredicateJsonSerde.parse(json);
+                    if (predicate == null) {
+                        continue;
+                    }
+                    if (!(predicate instanceof TransformPredicate)) {
+                        throw new IllegalArgumentException(
+                                "Column masking must be a TransformPredicate, but got "
+                                        + predicate.getClass().getName()
+                                        + " for column "
+                                        + column);
+                    }
+                    columnMasking.put(column, (TransformPredicate) predicate);
                 }
             }
 
-            if (predicates.isEmpty()) {
-                return null;
-            }
-            if (predicates.size() == 1) {
-                return predicates.get(0);
-            }
-            return new CompoundPredicate(And.INSTANCE, predicates);
+            return new TableQueryAuthResult(rowFilter, columnMasking);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {

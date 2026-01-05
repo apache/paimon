@@ -25,8 +25,17 @@ import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.ConcatTransform;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.IsNotNull;
+import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
@@ -38,6 +47,13 @@ import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.PredicateJsonSerde;
@@ -50,6 +66,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -270,12 +287,61 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         batchWrite(table, Arrays.asList(1, 2, 3, 4));
 
         // Only allow rows with col1 > 2
+        TransformPredicate rowFilterPredicate =
+                TransformPredicate.of(
+                        new FieldTransform(new FieldRef(0, "col1", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(2));
         restCatalogServer.addTableFilter(
-                identifier,
-                PredicateJsonSerde.transformPredicateEntryJson(
-                        0, "col1", DataTypes.INT(), "GREATER_THAN", Collections.singletonList(2)));
+                identifier, PredicateJsonSerde.toJsonString(rowFilterPredicate));
 
         assertThat(batchRead(table)).containsExactly("+I[3]", "+I[4]");
+    }
+
+    @Test
+    void testColumnMaskingApplyOnRead() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_masking_apply");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Collections.singletonList(new DataField(0, "col1", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // write two rows: "a", "b"
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(GenericRow.of(BinaryString.fromString("a")));
+        write.write(GenericRow.of(BinaryString.fromString("b")));
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        TransformPredicate maskPredicate =
+                TransformPredicate.of(
+                        new ConcatTransform(
+                                Collections.singletonList(BinaryString.fromString("****"))),
+                        IsNotNull.INSTANCE,
+                        Collections.emptyList());
+        String maskJson = PredicateJsonSerde.toJsonString(maskPredicate);
+        restCatalogServer.addTableColumnMasking(identifier, ImmutableMap.of("col1", maskJson));
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<org.apache.paimon.data.InternalRow> reader = read.createReader(splits);
+
+        List<String> actual = new ArrayList<>();
+        reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
+        assertThat(actual).containsExactly("****", "****");
     }
 
     private void checkHeader(String headerName, String headerValue) {
