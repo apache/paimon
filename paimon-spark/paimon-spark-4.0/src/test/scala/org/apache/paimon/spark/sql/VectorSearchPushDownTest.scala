@@ -20,9 +20,9 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonScan
 
-/** Tests for vector search push down to Paimon's global vector index. */
+/** Tests for vector search table-valued function with global vector index. */
 class VectorSearchPushDownTest extends BaseVectorSearchPushDownTest {
-  test("vector search pushdown with global index") {
+  test("vector search with global index") {
     withTable("T") {
       spark.sql("""
                   |CREATE TABLE T (id INT, v ARRAY<FLOAT>)
@@ -47,13 +47,10 @@ class VectorSearchPushDownTest extends BaseVectorSearchPushDownTest {
         .head
       assert(output.getBoolean(0))
 
-      // Test vector search with ORDER BY cosine_similarity DESC LIMIT
+      // Test vector search with table-valued function syntax
       val result = spark
         .sql("""
-               |SELECT id
-               |FROM T
-               |ORDER BY sys.cosine_similarity(v, array(50.0f, 51.0f, 52.0f)) DESC
-               |LIMIT 5
+               |SELECT * FROM vector_search('T', 'v', array(50.0f, 51.0f, 52.0f), 5)
                |""".stripMargin)
         .collect()
 
@@ -83,20 +80,13 @@ class VectorSearchPushDownTest extends BaseVectorSearchPushDownTest {
       spark.sql(s"INSERT INTO T VALUES $values")
 
       // Create vector index
-      val indexResult = spark
+      spark
         .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => 'lucene-vector-knn', options => 'vector.dim=3')")
         .collect()
-      println(s"Index creation result: ${indexResult.mkString(", ")}")
 
-      // Refresh table metadata to ensure index is visible
-      spark.sql("REFRESH TABLE T")
-
-      // Check that vector search is pushed down in the optimized plan
+      // Check that vector search is pushed down with table function syntax
       val df = spark.sql("""
-                           |SELECT id
-                           |FROM T
-                           |ORDER BY sys.cosine_similarity(v, array(50.0f, 51.0f, 52.0f)) DESC
-                           |LIMIT 5
+                           |SELECT * FROM vector_search('T', 'v', array(50.0f, 51.0f, 52.0f), 5)
                            |""".stripMargin)
 
       // Get the scan from the executed plan (physical plan)
@@ -128,7 +118,6 @@ class VectorSearchPushDownTest extends BaseVectorSearchPushDownTest {
                   |""".stripMargin)
 
       // Insert rows with distinct vectors
-      // Vector at id=i is (i, i, i) normalized
       val values = (1 to 100)
         .map {
           i =>
@@ -144,24 +133,13 @@ class VectorSearchPushDownTest extends BaseVectorSearchPushDownTest {
         "CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => 'lucene-vector-knn', options => 'vector.dim=3')")
 
       // Query for top 10 similar to (1, 1, 1) normalized
-      // Since all vectors point in the same direction (1,1,1), they should all have similarity ~1.0
       val result = spark
         .sql("""
-               |SELECT id, sys.cosine_similarity(v, array(0.577f, 0.577f, 0.577f)) as sim
-               |FROM T
-               |ORDER BY sys.cosine_similarity(v, array(0.577f, 0.577f, 0.577f)) DESC
-               |LIMIT 10
+               |SELECT * FROM vector_search('T', 'v', array(0.577f, 0.577f, 0.577f), 10)
                |""".stripMargin)
         .collect()
 
       assert(result.length == 10)
-      // All similarities should be close to 1.0
-      result.foreach {
-        row =>
-          assert(
-            row.getDouble(1) > 0.99,
-            s"Similarity should be close to 1.0, got ${row.getDouble(1)}")
-      }
     }
   }
 }

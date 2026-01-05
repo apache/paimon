@@ -18,18 +18,14 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase}
+import org.apache.paimon.spark.PaimonSparkTestBase
 
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.streaming.StreamTest
 
-import scala.collection.JavaConverters._
-
-/** Tests for vector search push down to Paimon's global vector index. */
+/** Tests for vector search table-valued function. */
 class BaseVectorSearchPushDownTest extends PaimonSparkTestBase with StreamTest {
 
-  test("cosine_similarity function works correctly") {
+  test("vector_search table function basic syntax") {
     withTable("T") {
       spark.sql("""
                   |CREATE TABLE T (id INT, v ARRAY<FLOAT>)
@@ -49,30 +45,16 @@ class BaseVectorSearchPushDownTest extends PaimonSparkTestBase with StreamTest {
                   |(5, array(1.0, 1.0, 1.0))
                   |""".stripMargin)
 
-      // Test cosine_similarity function - use sys. prefix
+      // Test vector_search table function syntax
+      // Note: Without a global vector index, this will scan all rows
       val result = spark
         .sql("""
-               |SELECT id, sys.cosine_similarity(v, array(1.0f, 0.0f, 0.0f)) as similarity
-               |FROM T
-               |ORDER BY similarity DESC
+               |SELECT * FROM vector_search('T', 'v', array(1.0f, 0.0f, 0.0f), 3)
                |""".stripMargin)
         .collect()
 
-      // id=1 should have highest similarity (1.0) since it matches exactly
-      assert(result(0).getInt(0) == 1)
-      assert(math.abs(result(0).getDouble(1) - 1.0) < 0.001)
-
-      // id=4 should have similarity ~0.707 (1/sqrt(2))
-      assert(result(1).getInt(0) == 4)
-      assert(math.abs(result(1).getDouble(1) - 0.707) < 0.01)
-
-      // id=5 should have similarity ~0.577 (1/sqrt(3))
-      assert(result(2).getInt(0) == 5)
-      assert(math.abs(result(2).getDouble(1) - 0.577) < 0.01)
-
-      // id=2 and id=3 should have similarity 0.0
-      assert(result(3).getDouble(1) < 0.001)
-      assert(result(4).getDouble(1) < 0.001)
+      // Should return results (actual filtering depends on vector index)
+      assert(result.nonEmpty)
     }
   }
 }

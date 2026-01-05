@@ -19,9 +19,10 @@
 package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.predicate.VectorSearch
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions._
-import org.apache.paimon.table.DataTable
+import org.apache.paimon.table.{DataTable, InnerTable, VectorSearchTable}
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil.InconsistentTagBucketException
 
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -29,7 +30,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase
 import org.apache.spark.sql.catalyst.analysis.TableFunctionRegistry.TableFunctionBuilder
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, ExpressionInfo}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, CreateArray, Expression, ExpressionInfo, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan}
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
@@ -42,9 +43,10 @@ object PaimonTableValuedFunctions {
   val INCREMENTAL_QUERY = "paimon_incremental_query"
   val INCREMENTAL_BETWEEN_TIMESTAMP = "paimon_incremental_between_timestamp"
   val INCREMENTAL_TO_AUTO_TAG = "paimon_incremental_to_auto_tag"
+  val VECTOR_SEARCH = "vector_search"
 
   val supportedFnNames: Seq[String] =
-    Seq(INCREMENTAL_QUERY, INCREMENTAL_BETWEEN_TIMESTAMP, INCREMENTAL_TO_AUTO_TAG)
+    Seq(INCREMENTAL_QUERY, INCREMENTAL_BETWEEN_TIMESTAMP, INCREMENTAL_TO_AUTO_TAG, VECTOR_SEARCH)
 
   private type TableFunctionDescription = (FunctionIdentifier, ExpressionInfo, TableFunctionBuilder)
 
@@ -56,6 +58,8 @@ object PaimonTableValuedFunctions {
         FunctionRegistryBase.build[IncrementalBetweenTimestamp](fnName, since = None)
       case INCREMENTAL_TO_AUTO_TAG =>
         FunctionRegistryBase.build[IncrementalToAutoTag](fnName, since = None)
+      case VECTOR_SEARCH =>
+        FunctionRegistryBase.build[VectorSearchQuery](fnName, since = None)
       case _ =>
         throw new Exception(s"Function $fnName isn't a supported table valued function.")
     }
@@ -85,17 +89,44 @@ object PaimonTableValuedFunctions {
     val sparkCatalog = catalogManager.catalog(catalogName).asInstanceOf[TableCatalog]
     val ident: Identifier = Identifier.of(Array(dbName), tableName)
     val sparkTable = sparkCatalog.loadTable(ident)
-    val options = tvf.parseArgs(args.tail)
 
-    usingSparkIncrementQuery(tvf, sparkTable, options) match {
-      case Some(snapshotIdPair: (Long, Long)) =>
-        sparkIncrementQuery(spark, sparkTable, sparkCatalog, ident, options, snapshotIdPair)
+    // Handle vector_search specially
+    tvf match {
+      case vsq: VectorSearchQuery =>
+        resolveVectorSearchQuery(sparkTable, sparkCatalog, ident, vsq, args.tail)
       case _ =>
+        val options = tvf.parseArgs(args.tail)
+        usingSparkIncrementQuery(tvf, sparkTable, options) match {
+          case Some(snapshotIdPair: (Long, Long)) =>
+            sparkIncrementQuery(spark, sparkTable, sparkCatalog, ident, options, snapshotIdPair)
+          case _ =>
+            DataSourceV2Relation.create(
+              sparkTable,
+              Some(sparkCatalog),
+              Some(ident),
+              new CaseInsensitiveStringMap(options.asJava))
+        }
+    }
+  }
+
+  private def resolveVectorSearchQuery(
+      sparkTable: Table,
+      sparkCatalog: TableCatalog,
+      ident: Identifier,
+      vsq: VectorSearchQuery,
+      argsWithoutTable: Seq[Expression]): LogicalPlan = {
+    sparkTable match {
+      case st @ SparkTable(innerTable: InnerTable) =>
+        val vectorSearch = vsq.createVectorSearch(argsWithoutTable)
+        val vectorSearchTable = VectorSearchTable.create(innerTable, vectorSearch)
         DataSourceV2Relation.create(
-          sparkTable,
+          st.copy(table = vectorSearchTable),
           Some(sparkCatalog),
           Some(ident),
-          new CaseInsensitiveStringMap(options.asJava))
+          CaseInsensitiveStringMap.empty())
+      case _ =>
+        throw new RuntimeException(
+          s"vector_search only supports Paimon tables, got ${sparkTable.getClass.getName}")
     }
   }
 
@@ -205,5 +236,61 @@ case class IncrementalToAutoTag(override val args: Seq[Expression])
 
     val endTagName = args.head.eval().toString
     Map(CoreOptions.INCREMENTAL_TO_AUTO_TAG.key -> endTagName)
+  }
+}
+
+/**
+ * Plan for the [[VECTOR_SEARCH]] table-valued function.
+ *
+ * Usage: vector_search(table_name, column_name, query_vector, limit)
+ *   - table_name: the Paimon table to search
+ *   - column_name: the vector column name
+ *   - query_vector: array of floats representing the query vector
+ *   - limit: the number of top results to return
+ *
+ * Example: SELECT * FROM vector_search('T', 'v', array(50.0f, 51.0f, 52.0f), 5)
+ */
+case class VectorSearchQuery(override val args: Seq[Expression])
+  extends PaimonTableValueFunction(VECTOR_SEARCH) {
+
+  override def parseArgs(args: Seq[Expression]): Map[String, String] = {
+    // This method is not used for VectorSearchQuery as we handle it specially
+    Map.empty
+  }
+
+  def createVectorSearch(argsWithoutTable: Seq[Expression]): VectorSearch = {
+    assert(
+      argsWithoutTable.size == 3,
+      s"$VECTOR_SEARCH needs four parameters: table_name, column_name, query_vector, limit. " +
+        s"Got ${argsWithoutTable.size + 1} parameters."
+    )
+
+    val columnName = argsWithoutTable.head.eval().toString
+    val queryVector = extractQueryVector(argsWithoutTable(1))
+    val limit = argsWithoutTable(2).eval() match {
+      case i: Int => i
+      case l: Long => l.toInt
+      case other => throw new RuntimeException(s"Invalid limit type: ${other.getClass.getName}")
+    }
+
+    new VectorSearch(queryVector, limit, columnName)
+  }
+
+  private def extractQueryVector(expr: Expression): Array[Float] = {
+    expr match {
+      case Literal(arrayData, _) if arrayData != null =>
+        val arr = arrayData.asInstanceOf[org.apache.spark.sql.catalyst.util.ArrayData]
+        arr.toFloatArray()
+      case CreateArray(elements, _) =>
+        elements.map {
+          case Literal(v: Float, _) => v
+          case Literal(v: Double, _) => v.toFloat
+          case Literal(v: java.lang.Float, _) if v != null => v.floatValue()
+          case Literal(v: java.lang.Double, _) if v != null => v.floatValue()
+          case other => throw new RuntimeException(s"Cannot extract float from: $other")
+        }.toArray
+      case _ =>
+        throw new RuntimeException(s"Cannot extract query vector from expression: $expr")
+    }
   }
 }
