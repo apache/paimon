@@ -94,6 +94,16 @@ def _handle_update_column_type(
     )
 
 
+def _drop_column_validation(schema: 'TableSchema', change: DropColumn):
+    if len(change.field_names) > 1:
+        return
+    column_to_drop = change.field_names[0]
+    if column_to_drop in schema.partition_keys or column_to_drop in schema.primary_keys:
+        raise ValueError(
+            f"Cannot drop partition key or primary key: [{column_to_drop}]"
+        )
+
+
 def _handle_drop_column(change: DropColumn, new_fields: List[DataField]):
     field_name = change.field_names[-1]
     field_index = _find_field_index(new_fields, field_name)
@@ -311,6 +321,7 @@ class SchemaManager:
                 )
                 _handle_rename_column(change, new_fields)
             elif isinstance(change, DropColumn):
+                _drop_column_validation(old_table_schema, change)
                 _handle_drop_column(change, new_fields)
             elif isinstance(change, UpdateColumnType):
                 _assert_not_updating_partition_keys(
