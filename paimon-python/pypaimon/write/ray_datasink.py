@@ -42,8 +42,8 @@ class PaimonDatasink(Datasink):
         """
         self.writer_builder: WriteBuilder = self.table.new_batch_write_builder()
         if self.overwrite:
-            self.writer_builder = self.writer_builder.overwrite()    
-        
+            self.writer_builder = self.writer_builder.overwrite()
+
     def write(
         self,
         blocks: Iterable[Block],

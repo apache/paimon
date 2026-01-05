@@ -130,7 +130,7 @@ class RayDataTest(unittest.TestCase):
             ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
             "Name column should match"
         )
-        
+
     def test_basic_ray_data_write(self):
         """Test basic Ray Data write from PyPaimon table."""
         # Create schema
@@ -141,8 +141,8 @@ class RayDataTest(unittest.TestCase):
         ])
 
         schema = Schema.from_pyarrow_schema(pa_schema)
-        self.catalog.create_table('default.test_ray_basic', schema, False)
-        table = self.catalog.get_table('default.test_ray_basic')
+        self.catalog.create_table('default.test_ray_write', schema, False)
+        table = self.catalog.get_table('default.test_ray_write')
 
         # Write test data
         test_data = pa.Table.from_pydict({
@@ -164,13 +164,13 @@ class RayDataTest(unittest.TestCase):
 
         arrow_result = table_read.to_arrow(splits)
 
-        # Verify Ray dataset
-        self.assertIsNotNone(arrow_result, "Ray dataset should not be None")
-        self.assertEqual(arrow_result.count(), 5, "Should have 5 rows")
+        # Verify PyArrow table
+        self.assertIsNotNone(arrow_result, "Arrow table should not be None")
+        self.assertEqual(arrow_result.num_rows, 5, "Should have 5 rows")
 
-        # Test basic operations
-        sample_data = arrow_result.take(3)
-        self.assertEqual(len(sample_data), 3, "Should have 3 sample rows")
+        # Test basic operations - get first 3 rows
+        sample_table = arrow_result.slice(0, 3)
+        self.assertEqual(sample_table.num_rows, 3, "Should have 3 sample rows")
 
         # Convert to pandas for verification
         df = arrow_result.to_pandas()
