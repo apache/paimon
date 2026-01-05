@@ -34,6 +34,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
@@ -173,6 +174,20 @@ class RESTCatalog(Catalog):
             identifier = Identifier.from_string(identifier)
         try:
             self.rest_api.drop_table(identifier)
+        except NoSuchResourceException as e:
+            if not ignore_if_not_exists:
+                raise TableNotExistException(identifier) from e
+
+    def alter_table(
+        self,
+        identifier: Union[str, Identifier],
+        changes: List[SchemaChange],
+        ignore_if_not_exists: bool = False
+    ):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.alter_table(identifier, changes)
         except NoSuchResourceException as e:
             if not ignore_if_not_exists:
                 raise TableNotExistException(identifier) from e
