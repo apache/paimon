@@ -24,12 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.And;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateVisitor;
-import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
@@ -48,10 +43,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
@@ -81,12 +73,11 @@ public class LookupStreamingReader {
         this.table = table;
         this.projection = projection;
         this.cacheRowFilter = cacheRowFilter;
-        Predicate scanPredicate = toSafeScanPredicate(table, predicate);
         this.readBuilder =
                 this.table
                         .newReadBuilder()
                         .withProjection(projection)
-                        .withFilter(scanPredicate)
+                        .withFilter(predicate)
                         .withBucketFilter(
                                 requireCachedBucketIds == null
                                         ? null
@@ -95,11 +86,6 @@ public class LookupStreamingReader {
         scan.setScanPartitions(scanPartitions);
 
         if (predicate != null) {
-            if (!table.primaryKeys().isEmpty()) {
-                this.projectedPredicate = null;
-                return;
-            }
-
             List<String> fieldNames = table.rowType().getFieldNames();
             List<String> primaryKeys = table.primaryKeys();
 
@@ -120,63 +106,6 @@ public class LookupStreamingReader {
                     transformFieldMapping(predicate, fieldIdxToProjectionIdx).orElse(null);
         } else {
             this.projectedPredicate = null;
-        }
-    }
-
-    @Nullable
-    private static Predicate toSafeScanPredicate(
-            LookupFileStoreTable table, @Nullable Predicate p) {
-        if (p == null) {
-            return null;
-        }
-        if (table.primaryKeys().isEmpty()) {
-            return p;
-        }
-
-        Set<String> safeFields = new HashSet<>(table.primaryKeys());
-        safeFields.addAll(table.partitionKeys());
-        Optional<Predicate> safe = p.visit(new SafeFieldPredicateExtractor(safeFields));
-        return safe.orElse(null);
-    }
-
-    private static class SafeFieldPredicateExtractor
-            implements PredicateVisitor<Optional<Predicate>> {
-
-        private final Set<String> safeFields;
-
-        private SafeFieldPredicateExtractor(Set<String> safeFields) {
-            this.safeFields = safeFields == null ? Collections.emptySet() : safeFields;
-        }
-
-        @Override
-        public Optional<Predicate> visit(CompoundPredicate predicate) {
-            boolean isAnd = predicate.function() instanceof And;
-            List<Predicate> converted = new ArrayList<>();
-            for (Predicate child : predicate.children()) {
-                Optional<Predicate> optional = child.visit(this);
-                if (optional.isPresent()) {
-                    converted.add(optional.get());
-                } else if (!isAnd) {
-                    return Optional.empty();
-                }
-            }
-            return converted.isEmpty()
-                    ? Optional.empty()
-                    : Optional.of(new CompoundPredicate(predicate.function(), converted));
-        }
-
-        @Override
-        public Optional<Predicate> visit(LeafPredicate predicate) {
-            return safeFields.contains(predicate.fieldName())
-                    ? Optional.of(predicate)
-                    : Optional.empty();
-        }
-
-        @Override
-        public Optional<Predicate> visit(TransformPredicate predicate) {
-            return safeFields.containsAll(predicate.fieldNames())
-                    ? Optional.of(predicate)
-                    : Optional.empty();
         }
     }
 
