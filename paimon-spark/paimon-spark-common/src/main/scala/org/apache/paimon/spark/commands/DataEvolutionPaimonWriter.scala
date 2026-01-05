@@ -52,9 +52,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteH
       .forEachRemaining(
         k =>
           firstRowIdToPartitionMap
-            .put(
-              k.file().firstRowId(),
-              (k.partition(), k.bucket(), k.file().rowCount())))
+            .put(k.file().firstRowId(), (k.partition(), k.bucket(), k.file().rowCount())))
     firstRowIdToPartitionMap
   }
 

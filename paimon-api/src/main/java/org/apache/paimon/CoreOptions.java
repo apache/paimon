@@ -2132,10 +2132,6 @@ public class CoreOptions implements Serializable {
         return options.get(BUCKET_FUNCTION_TYPE);
     }
 
-    public boolean bucketAppendOrdered() {
-        return options.get(BUCKET_APPEND_ORDERED);
-    }
-
     public Path path() {
         return path(options.toMap());
     }

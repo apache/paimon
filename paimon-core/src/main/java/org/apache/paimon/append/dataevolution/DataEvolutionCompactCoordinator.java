@@ -143,98 +143,115 @@ public class DataEvolutionCompactCoordinator {
 
         List<DataEvolutionCompactTask> compactPlan(List<ManifestEntry> input) {
             List<DataEvolutionCompactTask> tasks = new ArrayList<>();
-            Map<BinaryRow, List<DataFileMeta>> partitionedFiles = new LinkedHashMap<>();
+            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> partitionedFiles =
+                    new LinkedHashMap<>();
             for (ManifestEntry entry : input) {
                 partitionedFiles
-                        .computeIfAbsent(entry.partition(), k -> new ArrayList<>())
+                        .computeIfAbsent(entry.partition(), k -> new LinkedHashMap<>())
+                        .computeIfAbsent(entry.bucket(), k -> new ArrayList<>())
                         .add(entry.file());
             }
 
-            for (Map.Entry<BinaryRow, List<DataFileMeta>> partitionFiles :
+            for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> partitionFiles :
                     partitionedFiles.entrySet()) {
-                BinaryRow partition = partitionFiles.getKey();
-                List<DataFileMeta> files = partitionFiles.getValue();
-                RangeHelper<DataFileMeta> rangeHelper =
-                        new RangeHelper<>(
-                                DataFileMeta::nonNullFirstRowId,
-                                // merge adjacent files
-                                f -> f.nonNullFirstRowId() + f.rowCount());
+                for (Map.Entry<Integer, List<DataFileMeta>> bucketFiles :
+                        partitionFiles.getValue().entrySet()) {
+                    BinaryRow partition = partitionFiles.getKey();
+                    int bucket = bucketFiles.getKey();
+                    List<DataFileMeta> files = bucketFiles.getValue();
+                    RangeHelper<DataFileMeta> rangeHelper =
+                            new RangeHelper<>(
+                                    DataFileMeta::nonNullFirstRowId,
+                                    // merge adjacent files
+                                    f -> f.nonNullFirstRowId() + f.rowCount());
 
-                List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(files);
+                    List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(files);
 
-                for (List<DataFileMeta> group : ranges) {
-                    List<DataFileMeta> dataFiles = new ArrayList<>();
-                    List<DataFileMeta> blobFiles = new ArrayList<>();
-                    TreeMap<Long, DataFileMeta> treeMap = new TreeMap<>();
-                    Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles = new HashMap<>();
-                    for (DataFileMeta f : group) {
-                        if (!isBlobFile(f.fileName())) {
-                            treeMap.put(f.nonNullFirstRowId(), f);
-                            dataFiles.add(f);
-                        } else {
-                            blobFiles.add(f);
+                    for (List<DataFileMeta> group : ranges) {
+                        List<DataFileMeta> dataFiles = new ArrayList<>();
+                        List<DataFileMeta> blobFiles = new ArrayList<>();
+                        TreeMap<Long, DataFileMeta> treeMap = new TreeMap<>();
+                        Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles = new HashMap<>();
+                        for (DataFileMeta f : group) {
+                            if (!isBlobFile(f.fileName())) {
+                                treeMap.put(f.nonNullFirstRowId(), f);
+                                dataFiles.add(f);
+                            } else {
+                                blobFiles.add(f);
+                            }
                         }
-                    }
 
-                    if (compactBlob) {
-                        // associate blob files to data files
-                        for (DataFileMeta blobFile : blobFiles) {
-                            Long key = treeMap.floorKey(blobFile.nonNullFirstRowId());
-                            if (key != null) {
-                                DataFileMeta dataFile = treeMap.get(key);
-                                if (blobFile.nonNullFirstRowId() >= dataFile.nonNullFirstRowId()
-                                        && blobFile.nonNullFirstRowId()
-                                                <= dataFile.nonNullFirstRowId()
-                                                        + dataFile.rowCount()
-                                                        - 1) {
-                                    dataFileToBlobFiles
-                                            .computeIfAbsent(dataFile, k -> new ArrayList<>())
-                                            .add(blobFile);
+                        if (compactBlob) {
+                            // associate blob files to data files
+                            for (DataFileMeta blobFile : blobFiles) {
+                                Long key = treeMap.floorKey(blobFile.nonNullFirstRowId());
+                                if (key != null) {
+                                    DataFileMeta dataFile = treeMap.get(key);
+                                    if (blobFile.nonNullFirstRowId() >= dataFile.nonNullFirstRowId()
+                                            && blobFile.nonNullFirstRowId()
+                                                    <= dataFile.nonNullFirstRowId()
+                                                            + dataFile.rowCount()
+                                                            - 1) {
+                                        dataFileToBlobFiles
+                                                .computeIfAbsent(dataFile, k -> new ArrayList<>())
+                                                .add(blobFile);
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    RangeHelper<DataFileMeta> rangeHelper2 =
-                            new RangeHelper<>(
-                                    DataFileMeta::nonNullFirstRowId,
-                                    // files group
-                                    f -> f.nonNullFirstRowId() + f.rowCount() - 1);
-                    List<List<DataFileMeta>> groupedFiles =
-                            rangeHelper2.mergeOverlappingRanges(dataFiles);
-                    List<DataFileMeta> waitCompactFiles = new ArrayList<>();
+                        RangeHelper<DataFileMeta> rangeHelper2 =
+                                new RangeHelper<>(
+                                        DataFileMeta::nonNullFirstRowId,
+                                        // files group
+                                        f -> f.nonNullFirstRowId() + f.rowCount() - 1);
+                        List<List<DataFileMeta>> groupedFiles =
+                                rangeHelper2.mergeOverlappingRanges(dataFiles);
+                        List<DataFileMeta> waitCompactFiles = new ArrayList<>();
 
-                    long weightSum = 0L;
-                    for (List<DataFileMeta> fileGroup : groupedFiles) {
-                        checkArgument(
-                                rangeHelper.areAllRangesSame(fileGroup),
-                                "Data files %s should be all row id ranges same.",
-                                dataFiles);
-                        long currentGroupWeight =
-                                fileGroup.stream()
-                                        .mapToLong(d -> Math.max(d.fileSize(), openFileCost))
-                                        .sum();
-                        if (currentGroupWeight > targetFileSize) {
-                            // compact current file group to merge field files
-                            tasks.addAll(triggerTask(fileGroup, partition, dataFileToBlobFiles));
-                            // compact wait compact files
-                            tasks.addAll(
-                                    triggerTask(waitCompactFiles, partition, dataFileToBlobFiles));
-                            waitCompactFiles = new ArrayList<>();
-                            weightSum = 0;
-                        } else {
-                            weightSum += currentGroupWeight;
-                            waitCompactFiles.addAll(fileGroup);
-                            if (weightSum > targetFileSize) {
+                        long weightSum = 0L;
+                        for (List<DataFileMeta> fileGroup : groupedFiles) {
+                            checkArgument(
+                                    rangeHelper.areAllRangesSame(fileGroup),
+                                    "Data files %s should be all row id ranges same.",
+                                    dataFiles);
+                            long currentGroupWeight =
+                                    fileGroup.stream()
+                                            .mapToLong(d -> Math.max(d.fileSize(), openFileCost))
+                                            .sum();
+                            if (currentGroupWeight > targetFileSize) {
+                                // compact current file group to merge field files
                                 tasks.addAll(
                                         triggerTask(
-                                                waitCompactFiles, partition, dataFileToBlobFiles));
+                                                fileGroup, partition, bucket, dataFileToBlobFiles));
+                                // compact wait compact files
+                                tasks.addAll(
+                                        triggerTask(
+                                                waitCompactFiles,
+                                                partition,
+                                                bucket,
+                                                dataFileToBlobFiles));
                                 waitCompactFiles = new ArrayList<>();
-                                weightSum = 0L;
+                                weightSum = 0;
+                            } else {
+                                weightSum += currentGroupWeight;
+                                waitCompactFiles.addAll(fileGroup);
+                                if (weightSum > targetFileSize) {
+                                    tasks.addAll(
+                                            triggerTask(
+                                                    waitCompactFiles,
+                                                    partition,
+                                                    bucket,
+                                                    dataFileToBlobFiles));
+                                    waitCompactFiles = new ArrayList<>();
+                                    weightSum = 0L;
+                                }
                             }
                         }
+                        tasks.addAll(
+                                triggerTask(
+                                        waitCompactFiles, partition, bucket, dataFileToBlobFiles));
                     }
-                    tasks.addAll(triggerTask(waitCompactFiles, partition, dataFileToBlobFiles));
                 }
             }
             return tasks;
@@ -243,10 +260,11 @@ public class DataEvolutionCompactCoordinator {
         private List<DataEvolutionCompactTask> triggerTask(
                 List<DataFileMeta> dataFiles,
                 BinaryRow partition,
+                int bucket,
                 Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles) {
             List<DataEvolutionCompactTask> tasks = new ArrayList<>();
             if (dataFiles.size() >= compactMinFileNum) {
-                tasks.add(new DataEvolutionCompactTask(partition, dataFiles, false));
+                tasks.add(new DataEvolutionCompactTask(partition, bucket, dataFiles, false));
             }
 
             if (compactBlob) {
@@ -256,7 +274,7 @@ public class DataEvolutionCompactCoordinator {
                             dataFileToBlobFiles.getOrDefault(dataFile, Collections.emptyList()));
                 }
                 if (blobFiles.size() >= compactMinFileNum) {
-                    tasks.add(new DataEvolutionCompactTask(partition, blobFiles, true));
+                    tasks.add(new DataEvolutionCompactTask(partition, bucket, blobFiles, true));
                 }
             }
             return tasks;

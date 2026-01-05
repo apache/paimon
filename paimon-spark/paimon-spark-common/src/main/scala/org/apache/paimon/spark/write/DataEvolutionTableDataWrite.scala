@@ -39,7 +39,7 @@ import scala.collection.mutable.ListBuffer
 case class DataEvolutionTableDataWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
-    firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Long)],
+    firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Int, Long)],
     blobAsDescriptor: Boolean,
     catalogContext: CatalogContext)
   extends InnerTableV1DataWrite {

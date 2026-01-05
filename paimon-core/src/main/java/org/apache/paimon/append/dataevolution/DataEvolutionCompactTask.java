@@ -52,13 +52,15 @@ public class DataEvolutionCompactTask {
             Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G");
 
     private final BinaryRow partition;
+    private final int bucket;
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
     private final boolean blobTask;
 
     public DataEvolutionCompactTask(
-            BinaryRow partition, List<DataFileMeta> files, boolean blobTask) {
+            BinaryRow partition, int bucket, List<DataFileMeta> files, boolean blobTask) {
         this.partition = partition;
+        this.bucket = bucket;
         this.compactBefore = new ArrayList<>(files);
         this.compactAfter = new ArrayList<>();
         this.blobTask = blobTask;
@@ -66,6 +68,10 @@ public class DataEvolutionCompactTask {
 
     public BinaryRow partition() {
         return partition;
+    }
+
+    public int getBucket() {
+        return bucket;
     }
 
     public List<DataFileMeta> compactBefore() {
@@ -100,7 +106,7 @@ public class DataEvolutionCompactTask {
         DataSplit dataSplit =
                 DataSplit.builder()
                         .withPartition(partition)
-                        .withBucket(0)
+                        .withBucket(bucket)
                         .withDataFiles(compactBefore)
                         .withBucketPath(pathFactory.bucketPath(partition, 0).toString())
                         .rawConvertible(false)

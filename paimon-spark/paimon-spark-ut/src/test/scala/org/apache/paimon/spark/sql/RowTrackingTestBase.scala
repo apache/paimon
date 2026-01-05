@@ -82,43 +82,43 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       batchInsert(Seq((1, 1), (2, 2), (3, 3)), "t")
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-        Seq(Row(1, 1, 3, 3), Row(2, 2, 4, 3), Row(3, 3, 5, 4))
+        Seq(Row(1, 1, 0, 1), Row(2, 2, 1, 2), Row(3, 3, 2, 3))
       )
     }
   }
 
   Seq(false, true).foreach {
     bucketEnable =>
-    {
-      test(s"Row Tracking: delete table, bucket: $bucketEnable") {
-        withTable("t") {
-          // only enable row tracking
-          sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
-          runAndCheckAnswer()
-          sql("DROP TABLE t")
+      {
+        test(s"Row Tracking: delete table, bucket: $bucketEnable") {
+          withTable("t") {
+            // only enable row tracking
+            sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+            runAndCheckAnswer()
+            sql("DROP TABLE t")
 
-          // enable row tracking and deletion vectors
-          sql(
-            "CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'deletion-vectors.enabled' = 'true')")
-          runAndCheckAnswer()
+            // enable row tracking and deletion vectors
+            sql(
+              "CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'deletion-vectors.enabled' = 'true')")
+            runAndCheckAnswer()
 
-          def runAndCheckAnswer(): Unit = {
-            batchInsert(Seq((1, 1), (2, 2), (3, 3)), "t")
+            def runAndCheckAnswer(): Unit = {
+              batchInsert(Seq((1, 1), (2, 2), (3, 3)), "t")
 
-            sql("DELETE FROM t WHERE id = 2")
-            checkAnswer(
-              sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-              Seq(Row(1, 1, 0, 1), Row(3, 3, 2, 3))
-            )
-            sql("DELETE FROM t WHERE _ROW_ID = 2")
-            checkAnswer(
-              sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-              Seq(Row(1, 1, 0, 1))
-            )
+              sql("DELETE FROM t WHERE id = 2")
+              checkAnswer(
+                sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+                Seq(Row(1, 1, 0, 1), Row(3, 3, 2, 3))
+              )
+              sql("DELETE FROM t WHERE _ROW_ID = 2")
+              checkAnswer(
+                sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+                Seq(Row(1, 1, 0, 1))
+              )
+            }
           }
         }
       }
-    }
   }
 
   Seq(false, true).foreach {
@@ -158,6 +158,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
           }
         }
       }
+  }
 
   Seq(false, true).foreach {
     bucketEnable =>
@@ -334,7 +335,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
             checkAnswer(
               sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-              Seq(Row(1, 11, 11, 2, 3), Row(2, 2, 2, 0, 1), Row(4, 4, 4, 1, 2))
+              Seq(Row(1, 11, 11, 2, 2), Row(2, 2, 2, 0, 1), Row(4, 4, 4, 1, 1))
             )
           }
         }
@@ -399,7 +400,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
             sql(
               s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true' ${bucketProperties(bucketEnable)})")
-            sql("INSERT INTO t VALUES (2, 2, 2),(4, 4, 4)")
+            sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ * FROM VALUES (2, 2, 2),(4, 4, 4)")
 
             sql("""
                   |MERGE INTO t
@@ -453,9 +454,9 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
               sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM target ORDER BY id"),
               Seq(
                 Row(1, 10, "c1", 0, 6),
-                Row(2, 20, "c2", 1, 6),
+                Row(2, 20, "c2", 1, 2),
                 Row(3, 300, "c33", 2, 6),
-                Row(4, 40, "c4", 3, 6),
+                Row(4, 40, "c4", 3, 4),
                 Row(5, 550, "c5", 4, 6),
                 Row(7, 700, "c77", 5, 6),
                 Row(9, 990, "c99", 6, 6))
@@ -472,11 +473,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       sql("INSERT INTO s VALUES (1, 11), (2, 22)")
 
       sql(
-        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES (" +
-          "'row-tracking.enabled' = 'true', " +
-          "'data-evolution.enabled' = 'true', " +
-          "'bucket'='2', " +
-          "'bucket-key'='id')")
+        s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true' ${bucketProperties(true)})")
 
       assertThrows[RuntimeException] {
         sql("""
@@ -543,6 +540,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
             findSplitsPlan = qe.analyzed
           }
         }
+
         override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
           if (qe.analyzed.collectFirst { case _: Deduplicate => true }.nonEmpty) {
             latch.countDown()
@@ -596,6 +594,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
             updatePlan = qe.analyzed
           }
         }
+
         override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
           if (qe.analyzed.collectFirst { case _: MergeRows => true }.nonEmpty) {
             latch.countDown()
@@ -638,42 +637,41 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
-      Seq(false, true).foreach {
-        bucketEnable =>
-        {
-          test(s"Data Evolution: update table throws exception, bucket: $bucketEnable") {
-            withTable("t") {
-              sql(
-                s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true'  ${bucketProperties(bucketEnable)})")
-              sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
-              assert(
-                intercept[RuntimeException] {
-                  sql("UPDATE t SET b = 22")
-                }.getMessage
-                  .contains("Update operation is not supported when data evolution is enabled yet."))
-            }
+  Seq(false, true).foreach {
+    bucketEnable =>
+      {
+        test(s"Data Evolution: update table throws exception, bucket: $bucketEnable") {
+          withTable("t") {
+            sql(
+              s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true'  ${bucketProperties(bucketEnable)})")
+            sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+            assert(
+              intercept[RuntimeException] {
+                sql("UPDATE t SET b = 22")
+              }.getMessage
+                .contains("Update operation is not supported when data evolution is enabled yet."))
           }
         }
       }
+  }
 
-
-      Seq(false, true).foreach {
-        bucketEnable =>
-        {
-          test(s"Data Evolution: delete table throws exception, bucket: $bucketEnable") {
-            withTable("t") {
-              sql(
-                s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true' ${bucketProperties(bucketEnable)})")
-              sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
-              assert(
-                intercept[RuntimeException] {
-                  sql("DELETE FROM t WHERE id = 2")
-                }.getMessage
-                  .contains("Delete operation is not supported when data evolution is enabled yet."))
-            }
+  Seq(false, true).foreach {
+    bucketEnable =>
+      {
+        test(s"Data Evolution: delete table throws exception, bucket: $bucketEnable") {
+          withTable("t") {
+            sql(
+              s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true' ${bucketProperties(bucketEnable)})")
+            sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+            assert(
+              intercept[RuntimeException] {
+                sql("DELETE FROM t WHERE id = 2")
+              }.getMessage
+                .contains("Delete operation is not supported when data evolution is enabled yet."))
           }
         }
       }
+  }
 
   Seq(false, true).foreach {
     bucketEnable =>
@@ -765,7 +763,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
   def bucketProperties(enableBucket: Boolean): String = {
     if (enableBucket) {
-      ",'bucket'='2','bucket-key'='id'"
+      ",'bucket'='2','bucket-key'='id', 'bucket-append-ordered'='false'"
     } else {
       ""
     }
@@ -806,5 +804,4 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
   }
 
   private def escapeSingleQuotes(s: String): String = s.replace("'", "''")
-
 }

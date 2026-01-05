@@ -68,6 +68,7 @@ public class DataEvolutionCompactTaskSerializer
 
     private void serialize(DataEvolutionCompactTask task, DataOutputView view) throws IOException {
         serializeBinaryRow(task.partition(), view);
+        view.writeInt(task.getBucket());
         dataFileSerializer.serializeList(task.compactBefore(), view);
         view.writeBoolean(task.isBlobTask());
     }
@@ -105,6 +106,7 @@ public class DataEvolutionCompactTaskSerializer
     private DataEvolutionCompactTask deserialize(DataInputView view) throws IOException {
         return new DataEvolutionCompactTask(
                 deserializeBinaryRow(view),
+                view.readInt(),
                 dataFileSerializer.deserializeList(view),
                 view.readBoolean());
     }
