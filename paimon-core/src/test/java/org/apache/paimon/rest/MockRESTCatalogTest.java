@@ -27,12 +27,15 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.ConcatTransform;
+import org.apache.paimon.predicate.ConcatWsTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.PartialMaskTransform;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.reader.RecordReader;
@@ -314,29 +317,97 @@ class MockRESTCatalogTest extends RESTCatalogTest {
 
         Table table = catalog.getTable(identifier);
 
-        // write two rows: "a", "b"
+        // write two rows: "abcdef", "ghijkl"
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
-        write.write(GenericRow.of(BinaryString.fromString("a")));
-        write.write(GenericRow.of(BinaryString.fromString("b")));
+        write.write(GenericRow.of(BinaryString.fromString("abcdef")));
+        write.write(GenericRow.of(BinaryString.fromString("ghijkl")));
         List<CommitMessage> messages = write.prepareCommit();
         BatchTableCommit commit = writeBuilder.newCommit();
         commit.commit(messages);
         write.close();
         commit.close();
 
-        Transform maskTransform =
-                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
-        restCatalogServer.addTableColumnMasking(identifier, ImmutableMap.of("col1", maskTransform));
+        {
+            // Mask col1 as constant "****"
+            Transform constantMaskTransform =
+                    new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
+            restCatalogServer.addTableColumnMasking(
+                    identifier, ImmutableMap.of("col1", constantMaskTransform));
 
-        ReadBuilder readBuilder = table.newReadBuilder();
-        List<Split> splits = readBuilder.newScan().plan().splits();
-        TableRead read = readBuilder.newRead();
-        RecordReader<org.apache.paimon.data.InternalRow> reader = read.createReader(splits);
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            TableRead read = readBuilder.newRead();
+            RecordReader<InternalRow> reader = read.createReader(splits);
 
-        List<String> actual = new ArrayList<>();
-        reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
-        assertThat(actual).containsExactly("****", "****");
+            List<String> actual = new ArrayList<>();
+            reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
+            assertThat(actual).containsExactly("****", "****");
+        }
+
+        {
+            // Mask col1 by keeping prefix/suffix and masking middle: ab**ef, gh**kl
+            Transform partialMaskTransform =
+                    new PartialMaskTransform(
+                            new FieldRef(0, "col1", DataTypes.STRING()),
+                            2,
+                            2,
+                            BinaryString.fromString("*"));
+            restCatalogServer.addTableColumnMasking(
+                    identifier, ImmutableMap.of("col1", partialMaskTransform));
+
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            TableRead read = readBuilder.newRead();
+            RecordReader<InternalRow> reader = read.createReader(splits);
+
+            List<String> actual = new ArrayList<>();
+            reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
+            assertThat(actual).containsExactly("ab**ef", "gh**kl");
+        }
+
+        {
+            // Mask col1 as "MASK_" + col1 + "_END" (ConcatTransform with FieldRef)
+            Transform concatMaskTransform =
+                    new ConcatTransform(
+                            Arrays.asList(
+                                    BinaryString.fromString("MASK_"),
+                                    new FieldRef(0, "col1", DataTypes.STRING()),
+                                    BinaryString.fromString("_END")));
+            restCatalogServer.addTableColumnMasking(
+                    identifier, ImmutableMap.of("col1", concatMaskTransform));
+
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            TableRead read = readBuilder.newRead();
+            RecordReader<InternalRow> reader = read.createReader(splits);
+
+            List<String> actual = new ArrayList<>();
+            reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
+            assertThat(actual).containsExactly("MASK_abcdef_END", "MASK_ghijkl_END");
+        }
+
+        {
+            // Mask col1 as "PFX" + sep + col1 + sep + "SFX" (ConcatWsTransform with FieldRef)
+            Transform concatWsMaskTransform =
+                    new ConcatWsTransform(
+                            Arrays.asList(
+                                    BinaryString.fromString("_"),
+                                    BinaryString.fromString("PFX"),
+                                    new FieldRef(0, "col1", DataTypes.STRING()),
+                                    BinaryString.fromString("SFX")));
+            restCatalogServer.addTableColumnMasking(
+                    identifier, ImmutableMap.of("col1", concatWsMaskTransform));
+
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            TableRead read = readBuilder.newRead();
+            RecordReader<InternalRow> reader = read.createReader(splits);
+
+            List<String> actual = new ArrayList<>();
+            reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
+            assertThat(actual).containsExactly("PFX_abcdef_SFX", "PFX_ghijkl_SFX");
+        }
     }
 
     @Test
@@ -387,7 +458,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         ReadBuilder readBuilder = table.newReadBuilder();
         List<Split> splits = readBuilder.newScan().plan().splits();
         TableRead read = readBuilder.newRead();
-        RecordReader<org.apache.paimon.data.InternalRow> reader = read.createReader(splits);
+        RecordReader<InternalRow> reader = read.createReader(splits);
 
         List<String> actual = new ArrayList<>();
         reader.forEachRemaining(

@@ -22,14 +22,12 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.ConcatTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.IsNotNull;
+import org.apache.paimon.predicate.PartialMaskTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.predicate.UpperTransform;
-import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.types.DataTypes;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.junit.jupiter.api.Test;
 
@@ -39,8 +37,6 @@ import java.util.Collections;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PredicateJsonSerdeTest {
-
-    private static final ObjectMapper MAPPER = RESTApi.OBJECT_MAPPER;
 
     @Test
     void testTransformToJsonAndParseTransform() throws Exception {
@@ -52,6 +48,23 @@ class PredicateJsonSerdeTest {
         Transform parsed = TransformJsonSerde.parse(json);
 
         assertThat(parsed).isNotNull();
+        assertThat(TransformJsonSerde.toJsonString(parsed)).isEqualTo(json);
+    }
+
+    @Test
+    void testMaskTransformToJsonAndParseTransform() throws Exception {
+        Transform transform =
+                new PartialMaskTransform(
+                        new FieldRef(0, "col1", DataTypes.STRING()),
+                        2,
+                        2,
+                        BinaryString.fromString("*"));
+
+        String json = TransformJsonSerde.toJsonString(transform);
+        Transform parsed = TransformJsonSerde.parse(json);
+
+        assertThat(parsed).isNotNull();
+        assertThat(parsed).isInstanceOf(PartialMaskTransform.class);
         assertThat(TransformJsonSerde.toJsonString(parsed)).isEqualTo(json);
     }
 

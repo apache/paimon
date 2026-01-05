@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
@@ -169,7 +170,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
         if (!options.queryAuthEnabled()) {
             return;
         }
-        org.apache.paimon.catalog.TableQueryAuthResult authResult =
+        TableQueryAuthResult authResult =
                 queryAuth.auth(readType == null ? null : readType.getFieldNames());
         Predicate rowFilter = authResult == null ? null : authResult.rowFilter();
         if (rowFilter != null) {
