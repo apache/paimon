@@ -46,7 +46,7 @@ public class LanceUtils {
     public static final String FS_OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
     public static final String FS_OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     public static final String FS_OSS_SECURITY_TOKEN = "fs.oss.securityToken";
-    private static final String FS_OSS_PREFIX = "fs.oss.";
+    private static final String FS_PREFIX = "fs.";
 
     // Storage options keys for Lance
     public static final String STORAGE_OPTION_ENDPOINT = "endpoint";
@@ -130,7 +130,7 @@ public class LanceUtils {
             assert originOptions.containsKey(FS_OSS_ACCESS_KEY_SECRET);
 
             for (String key : originOptions.keySet()) {
-                if (key.startsWith(FS_OSS_PREFIX)) {
+                if (key.startsWith(FS_PREFIX)) {
                     storageOptions.put(key, originOptions.get(key));
                 }
             }

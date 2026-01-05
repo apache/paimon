@@ -40,7 +40,7 @@ def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[D
         storage_options = {}
         if hasattr(file_io, 'properties'):
             for key, value in file_io.properties.data.items():
-                if str(key).startswith('fs.oss.'):
+                if str(key).startswith('fs.'):
                     storage_options[key] = value
 
             parsed = urlparse(file_path)
