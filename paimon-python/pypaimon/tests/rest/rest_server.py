@@ -152,7 +152,7 @@ def _dict_to_schema_change(change_dict: dict) -> SchemaChange:
         return UpdateColumnType(
             field_names=change_dict["fieldNames"],
             new_data_type=new_type,
-            keep_nullability=change_dict.get("keepNullability", True)
+            keep_nullability=change_dict.get("keepNullability", False)
         )
     elif action == Actions.UPDATE_COLUMN_NULLABILITY_ACTION:
         return UpdateColumnNullability(
