@@ -109,11 +109,9 @@ def _dict_to_schema_change(change_dict: dict) -> SchemaChange:
         return UpdateComment(comment=change_dict.get("comment"))
     elif action == Actions.ADD_COLUMN_ACTION:
         from pypaimon.schema.data_types import DataTypeParser
-        # JSON field name is "dataType" (from FIELD_DATA_TYPE)
         data_type_value = change_dict.get("dataType") or change_dict.get(AddColumn.FIELD_DATA_TYPE)
         if data_type_value is None:
             raise ValueError(f"Missing dataType field in AddColumn change: {change_dict}")
-        # dataType might be a dict (if DataType.to_dict() was called) or a string
         data_type = DataTypeParser.parse_data_type(data_type_value)
         move = None
         if "move" in change_dict and change_dict["move"] is not None:
